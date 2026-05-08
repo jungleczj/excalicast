@@ -184,11 +184,11 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
       <div className="border-t border-border-default" />
 
       <div>
-        <h3 className="mb-2 text-[13px] font-semibold text-text-primary">AI 资产</h3>
+        <h3 className="mb-2 text-[13px] font-semibold text-text-primary">进阶服务</h3>
         <p className="mb-3 text-[11px] leading-relaxed text-text-secondary">把这次录制变成可复用的知识。</p>
         <div className="space-y-2">
-          <FeatureRow icon={<I.Subtitles size={16} />} title="字幕（SRT + 嵌入）" desc="Whisper-1 · ~30s · 准确率 90%+" tier="Pro" />
-          <FeatureRow icon={<I.Sparkles size={16} />} title="AI 讲义" desc="结构化 Markdown · 关键帧 + 文稿" tier="Max" highlight />
+          <FeatureRow icon={<I.Subtitles size={16} />} title="字幕（SRT + 嵌入）" desc="音频转写 · ~30s · 准确率 90%+" tier="Pro" />
+          <FeatureRow icon={<I.Sparkles size={16} />} title="结构化讲义" desc="结构化 Markdown · 关键帧 + 文稿" tier="Max" highlight />
           <FeatureRow icon={<I.Share size={16} />} title="分享链接" desc="网页回放 · 30 天 TTL" tier="Max" highlight />
         </div>
       </div>
