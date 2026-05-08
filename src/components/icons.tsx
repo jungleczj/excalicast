@@ -123,4 +123,22 @@ export const I = {
       <circle cx="15" cy="18" r="1.5" fill="currentColor" stroke="none" />
     </Base>
   ),
+  Edit: (p: IconProps) => (
+    <Base {...p}>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+    </Base>
+  ),
+  Crop: (p: IconProps) => (
+    <Base {...p}>
+      <path d="M6 2v14a2 2 0 0 0 2 2h14" />
+      <path d="M18 22V8a2 2 0 0 0-2-2H2" />
+    </Base>
+  ),
+  Mail: (p: IconProps) => (
+    <Base {...p}>
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <polyline points="22,6 12,13 2,6" />
+    </Base>
+  ),
 };
