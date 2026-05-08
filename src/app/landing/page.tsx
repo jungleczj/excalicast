@@ -9,9 +9,9 @@ export const metadata = {
 
 export default function LandingPage(): JSX.Element {
   return (
-    <div className="min-h-screen bg-bg-primary">
-      {/* Top nav */}
-      <header className="border-b border-border-default bg-bg-primary">
+    <div className="flex h-full flex-col bg-bg-primary">
+      {/* Top nav (sticky inside the scroll area) */}
+      <header className="flex-shrink-0 border-b border-border-default bg-bg-primary">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
           <Brand />
           <nav className="flex items-center gap-6 text-[13px] font-medium text-text-secondary">
@@ -24,25 +24,67 @@ export default function LandingPage(): JSX.Element {
         </div>
       </header>
 
+      {/* Scrollable content area (body has overflow:hidden so we scroll inside main) */}
+      <main className="flex-1 overflow-auto">
+
       {/* Hero */}
-      <section className="border-b border-border-default bg-bg-secondary">
-        <div className="mx-auto max-w-6xl px-6 py-20 text-center">
-          <h1 className="text-[42px] font-bold leading-tight text-text-primary md:text-[52px]">
-            录一次白板，<br />导出多个比例的视频
+      <section
+        className="relative overflow-hidden border-b border-border-default"
+        style={{
+          background: 'radial-gradient(ellipse at top, rgba(37,99,235,0.06), transparent 60%), var(--bg-secondary)',
+        }}
+      >
+        {/* Decorative blurry blobs */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -left-20 top-10 h-72 w-72 rounded-full opacity-30 blur-3xl"
+          style={{ background: 'radial-gradient(circle, var(--primary-300), transparent 70%)' }}
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-24 top-32 h-80 w-80 rounded-full opacity-30 blur-3xl"
+          style={{ background: 'radial-gradient(circle, var(--secondary-500), transparent 70%)' }}
+        />
+
+        <div className="relative mx-auto max-w-6xl px-6 pt-24 pb-20 text-center">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-border-default bg-bg-primary px-3 py-1 text-[12px] font-medium text-text-secondary shadow-sm">
+            <span className="h-1.5 w-1.5 rounded-full bg-success-500" />
+            浏览器内运行 · 无需注册
+          </span>
+          <h1 className="mt-5 text-[44px] font-bold leading-[1.1] tracking-tight text-text-primary md:text-[60px]">
+            录一次白板，<br />
+            <span
+              style={{
+                backgroundImage: 'linear-gradient(135deg, var(--primary-600) 0%, var(--secondary-600) 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+                color: 'transparent',
+              }}
+            >
+              导出多个比例的视频
+            </span>
           </h1>
-          <p className="mx-auto mt-5 max-w-2xl text-[16px] leading-relaxed text-text-secondary">
+          <p className="mx-auto mt-6 max-w-2xl text-[16.5px] leading-relaxed text-text-secondary">
             Excalicast 是一款基于浏览器的白板录制工具。用 Excalidraw 作画，同步采集语音和操作，
             最终导出 16:9 / 9:16 / 1:1 / 4:5 等多个比例的 MP4，覆盖 YouTube、抖音、Instagram 等平台。
           </p>
-          <div className="mt-8 flex justify-center gap-3">
-            <Link href="/" className="rounded-md bg-primary-600 px-7 py-3 text-[15px] font-semibold text-white shadow-md hover:bg-primary-700">
+          <div className="mt-9 flex flex-wrap justify-center gap-3">
+            <Link
+              href="/"
+              className="rounded-lg bg-primary-600 px-7 py-3 text-[15px] font-semibold text-white shadow-lg transition hover:bg-primary-700 hover:shadow-xl"
+              style={{ boxShadow: '0 10px 25px -5px rgba(37,99,235,0.3)' }}
+            >
               立即开始（免费）
             </Link>
-            <a href="#pricing" className="rounded-md border border-border-strong bg-bg-primary px-7 py-3 text-[15px] font-semibold text-text-primary hover:bg-bg-tertiary">
+            <a
+              href="#pricing"
+              className="rounded-lg border border-border-strong bg-bg-primary px-7 py-3 text-[15px] font-semibold text-text-primary transition hover:bg-bg-tertiary"
+            >
               查看价格
             </a>
           </div>
-          <p className="mt-4 text-[12px] text-text-tertiary">
+          <p className="mt-5 text-[12.5px] text-text-tertiary">
             录制免费 · 导出含水印 MP4 免费 · 单条 $9.99 解锁无水印导出
           </p>
         </div>
@@ -209,14 +251,19 @@ export default function LandingPage(): JSX.Element {
           </nav>
         </div>
       </footer>
+
+      </main>
     </div>
   );
 }
 
 function Feature({ icon, title, desc }: { icon: React.ReactNode; title: string; desc: string }) {
   return (
-    <div className="rounded-xl border border-border-default bg-bg-primary p-6">
-      <div className="grid h-10 w-10 place-items-center rounded-lg bg-primary-100 text-primary-700">
+    <div className="group rounded-xl border border-border-default bg-bg-primary p-6 transition hover:-translate-y-0.5 hover:border-primary-300 hover:shadow-md">
+      <div
+        className="grid h-10 w-10 place-items-center rounded-lg text-primary-700 transition group-hover:scale-105"
+        style={{ background: 'linear-gradient(135deg, var(--primary-100), var(--primary-50))' }}
+      >
         {icon}
       </div>
       <h3 className="mt-4 text-[16px] font-semibold text-text-primary">{title}</h3>
