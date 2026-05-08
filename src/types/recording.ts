@@ -3,7 +3,7 @@ export interface PaidRecordingRow {
   paid_at: number;
   amount_cents: number;
   currency: string;
-  creem_session_id: string;
+  paddle_transaction_id: string;
   raw_payload: string;
 }
 
@@ -13,16 +13,6 @@ export interface IsPaidRequest {
 
 export interface IsPaidResponse {
   paid: boolean;
-}
-
-export interface CheckoutRequest {
-  recordingId: string;
-  returnPath?: string;
-}
-
-export interface CheckoutResponse {
-  checkoutUrl: string;
-  sessionId: string;
 }
 
 export interface WhiteboardSnapshot {

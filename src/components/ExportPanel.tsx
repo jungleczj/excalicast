@@ -26,6 +26,10 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string>('');
   const [paywallOpen, setPaywallOpen] = useState<boolean>(false);
+  // 用户点过 "渲染并下载（无水印）" 但因未付款被拦截。state（不是 ref）以便 effect 响应它。
+  const [pendingExport, setPendingExport] = useState<boolean>(false);
+  // 后台轮询是否正在跑，用来在 UI 上展示状态
+  const [bgPolling, setBgPolling] = useState<boolean>(false);
 
   const refreshPaid = useCallback(async () => {
     try {
@@ -39,19 +43,9 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
 
   useEffect(() => { void refreshPaid(); }, [refreshPaid]);
 
-  // Creem 支付返回后自动刷新付费状态
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('paid') === '1') {
-      setStatusMsg('支付完成，已自动切换到无水印模式。');
-      window.history.replaceState({}, '', window.location.pathname);
-      void refreshPaid();
-    }
-  }, [refreshPaid]);
-
   const handleExport = useCallback(async () => {
     if (!config.withWatermark && !paid) {
+      setPendingExport(true);
       setPaywallOpen(true);
       return;
     }
@@ -91,6 +85,42 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
       onProgress?.(null);
     }
   }, [config, recordingId, paid, onProgress]);
+
+  // 付费成功后自动重启导出：上一次 handleExport 因 !paid 被拦截，pendingExport=true。
+  // paid 翻 true 时（来自 PaywallModal 轮询、ExportPanel 后台轮询、或 dev mock），触发一次。
+  useEffect(() => {
+    if (paid && pendingExport) {
+      setPendingExport(false);
+      void handleExport();
+    }
+  }, [paid, pendingExport, handleExport]);
+
+  // 后台轮询：modal 关闭后如果 pendingExport=true 且仍未 paid，继续每 3s 检查 /api/is-paid
+  // 最多轮询 5 分钟，期间在 UI 上显示提示，paid 翻 true 后由上面的 effect 自动触发下载
+  useEffect(() => {
+    if (paid || !pendingExport || paywallOpen) {
+      setBgPolling(false);
+      return;
+    }
+    setBgPolling(true);
+    const startedAt = Date.now();
+    const intervalMs = 3000;
+    const timeoutMs = 5 * 60 * 1000;
+    const id = setInterval(() => {
+      if (Date.now() - startedAt > timeoutMs) {
+        clearInterval(id);
+        setBgPolling(false);
+        setPendingExport(false);
+        setStatusMsg('支付确认超时（5 分钟未收到 webhook），请刷新页面重试。');
+        return;
+      }
+      void refreshPaid();
+    }, intervalMs);
+    return () => {
+      clearInterval(id);
+      setBgPolling(false);
+    };
+  }, [paid, pendingExport, paywallOpen, refreshPaid]);
 
   const isCleanLocked = !config.withWatermark && !paid;
 
@@ -163,9 +193,18 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
         </div>
       </div>
 
-      {(statusMsg || error) && (
+      {(statusMsg || error || bgPolling) && (
         <div className="rounded-md border border-border-default bg-bg-secondary p-3 text-[12px]">
-          {statusMsg && <div className="text-text-primary">{statusMsg}</div>}
+          {bgPolling && (
+            <div className="flex items-center gap-2 text-primary-700">
+              <span
+                className="inline-block h-3 w-3 flex-shrink-0 animate-spin rounded-full border-2 border-primary-300 border-t-primary-700"
+                aria-hidden
+              />
+              <span>支付确认中…收到 webhook 后将自动开始下载，可关闭此页（最多等待 5 分钟）</span>
+            </div>
+          )}
+          {statusMsg && !bgPolling && <div className="text-text-primary">{statusMsg}</div>}
           {error && <div className="mt-1 text-recording-strong">错误：{error}</div>}
         </div>
       )}
@@ -174,6 +213,10 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
         open={paywallOpen}
         recordingId={recordingId}
         onClose={() => setPaywallOpen(false)}
+        onPaid={() => {
+          setStatusMsg('已解锁，无水印模式已开启。');
+          void refreshPaid();
+        }}
       />
     </div>
   );

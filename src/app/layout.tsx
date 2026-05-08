@@ -1,6 +1,7 @@
 import './globals.css';
 import type { ReactNode } from 'react';
 import { SessionProvider } from '@/components/providers/SessionProvider';
+import { PaddleProvider } from '@/components/providers/PaddleProvider';
 
 export const metadata = {
   title: 'Excalicast',
@@ -11,7 +12,9 @@ export default function RootLayout({ children }: { children: ReactNode }): JSX.E
   return (
     <html lang="zh-CN">
       <body className="h-screen antialiased">
-        <SessionProvider>{children}</SessionProvider>
+        <SessionProvider>
+          <PaddleProvider>{children}</PaddleProvider>
+        </SessionProvider>
       </body>
     </html>
   );

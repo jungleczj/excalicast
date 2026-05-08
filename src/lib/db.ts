@@ -23,10 +23,9 @@ function getDb(): Database.Database {
       paid_at INTEGER NOT NULL,
       amount_cents INTEGER NOT NULL,
       currency TEXT NOT NULL,
-      creem_session_id TEXT NOT NULL,
+      paddle_transaction_id TEXT NOT NULL,
       raw_payload TEXT NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_paid_recordings_session ON paid_recordings(creem_session_id);
 
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,6 +43,16 @@ function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
   `);
+
+  const cols = db.prepare("PRAGMA table_info(paid_recordings)").all() as { name: string }[];
+  const hasOld = cols.some((c) => c.name === 'creem_session_id');
+  const hasNew = cols.some((c) => c.name === 'paddle_transaction_id');
+  if (hasOld && !hasNew) {
+    db.exec('ALTER TABLE paid_recordings RENAME COLUMN creem_session_id TO paddle_transaction_id');
+  }
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_paid_recordings_paddle ON paid_recordings(paddle_transaction_id);');
+
   _db = db;
   return db;
 }
@@ -97,12 +106,12 @@ export function markRecordingPaid(params: {
   recordingId: string;
   amountCents: number;
   currency: string;
-  creemSessionId: string;
+  paddleTransactionId: string;
   rawPayload: string;
 }): void {
   getDb()
     .prepare(
-      `INSERT INTO paid_recordings (recording_id, paid_at, amount_cents, currency, creem_session_id, raw_payload)
+      `INSERT INTO paid_recordings (recording_id, paid_at, amount_cents, currency, paddle_transaction_id, raw_payload)
        VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(recording_id) DO NOTHING`,
     )
@@ -111,7 +120,7 @@ export function markRecordingPaid(params: {
       Date.now(),
       params.amountCents,
       params.currency,
-      params.creemSessionId,
+      params.paddleTransactionId,
       params.rawPayload,
     );
 }
