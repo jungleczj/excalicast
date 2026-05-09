@@ -11,3 +11,4 @@ data/
 client_secret*.json
 .vercel
 *.tsbuildinfo
+.worktrees/
