@@ -33,6 +33,7 @@ export interface RecordingMetadata {
   hasCamera: boolean;
   status: 'recording' | 'done' | 'error';
   lastFrameThumbnail?: string;
+  title?: string;
 }
 
 export interface AudioChunk {

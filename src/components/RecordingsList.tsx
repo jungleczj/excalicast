@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { listRecordings, deleteRecording } from '@/lib/db-client';
+import { listRecordings, deleteRecording, updateRecordingTitle } from '@/lib/db-client';
 import { I } from '@/components/icons';
 import type { RecordingMetadata } from '@/types/recording';
 
@@ -27,6 +27,10 @@ function fmtDate(ts: number): string {
   return `${d.getMonth() + 1} 月 ${d.getDate()} 日`;
 }
 
+function defaultTitle(m: RecordingMetadata): string {
+  return m.title?.trim() || `录制 ${m.id.slice(0, 8)}`;
+}
+
 const TINTS = [
   'linear-gradient(135deg, #fef3c7, #fde68a)',
   'linear-gradient(135deg, #dbeafe, #bfdbfe)',
@@ -37,6 +41,9 @@ const TINTS = [
 export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
   const [items, setItems] = useState<RecordingMetadata[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState<string>('');
+  const editInputRef = useRef<HTMLInputElement | null>(null);
 
   const refresh = useCallback(async () => {
     const list = await listRecordings();
@@ -46,11 +53,36 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
 
   useEffect(() => { void refresh(); }, [refresh, refreshKey]);
 
+  useEffect(() => {
+    if (editingId && editInputRef.current) {
+      editInputRef.current.focus();
+      editInputRef.current.select();
+    }
+  }, [editingId]);
+
   const handleDelete = useCallback(async (id: string) => {
     if (!confirm('删除这条录制？此操作不可恢复。')) return;
     await deleteRecording(id);
     await refresh();
   }, [refresh]);
+
+  const startEdit = useCallback((m: RecordingMetadata) => {
+    setEditingId(m.id);
+    setEditValue(defaultTitle(m));
+  }, []);
+
+  const cancelEdit = useCallback(() => {
+    setEditingId(null);
+    setEditValue('');
+  }, []);
+
+  const commitEdit = useCallback(async (id: string) => {
+    const next = editValue;
+    setEditingId(null);
+    setEditValue('');
+    await updateRecordingTitle(id, next);
+    await refresh();
+  }, [editValue, refresh]);
 
   if (!loaded) {
     return <div className="py-12 text-center text-sm text-text-tertiary">加载中…</div>;
@@ -68,7 +100,7 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
         <h2 className="text-[18px] font-bold text-text-primary">还没有录制</h2>
         <p className="mt-1.5 text-[13px] text-text-secondary">点开始按钮，第一段讲解就会出现在这里。</p>
         <Link
-          href="/"
+          href="/app"
           className="mt-5 inline-flex items-center gap-2 rounded-md px-5 py-2.5 text-[13px] font-semibold text-white"
           style={{ background: 'var(--recording-strong)', boxShadow: '0 4px 12px rgba(220,38,38,0.25)' }}
         >
@@ -83,13 +115,14 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
     <div className="grid gap-3.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
       {items.map((m, i) => {
         const tint = TINTS[(m.id.charCodeAt(0) + i) % 4];
+        const isEditing = editingId === m.id;
         return (
           <div
             key={m.id}
             className="group relative overflow-hidden rounded-xl border border-border-default bg-bg-primary transition-all duration-150 hover:-translate-y-0.5"
             style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
           >
-            <Link href={`/export/${m.id}`} className="block">
+            <Link href={`/play/${m.id}`} className="block">
               <div
                 className="relative overflow-hidden"
                 style={{ aspectRatio: '16/9', background: tint }}
@@ -130,9 +163,38 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
                 </div>
               </div>
               <div className="px-3.5 pb-3 pt-3">
-                <div className="truncate text-[13.5px] font-semibold text-text-primary">
-                  录制 {m.id.slice(0, 8)}
-                </div>
+                {isEditing ? (
+                  <input
+                    ref={editInputRef}
+                    type="text"
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === 'Enter') { e.preventDefault(); void commitEdit(m.id); }
+                      else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+                    }}
+                    onBlur={() => { void commitEdit(m.id); }}
+                    maxLength={80}
+                    className="w-full rounded border border-primary-600 bg-bg-primary px-1.5 py-0.5 text-[13.5px] font-semibold text-text-primary outline-none"
+                  />
+                ) : (
+                  <div className="flex items-center gap-1">
+                    <div className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-text-primary">
+                      {defaultTitle(m)}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); startEdit(m); }}
+                      className="flex-shrink-0 rounded p-0.5 text-text-tertiary opacity-0 transition hover:bg-bg-tertiary hover:text-text-primary group-hover:opacity-100"
+                      title="重命名"
+                      aria-label="重命名"
+                    >
+                      <I.Edit size={12} />
+                    </button>
+                  </div>
+                )}
                 <div className="mt-1.5 flex items-center gap-2 text-[11px] text-text-tertiary">
                   <span>{fmtDate(m.startedAt)}</span>
                   <span
@@ -145,15 +207,27 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
                 </div>
               </div>
             </Link>
-            <button
-              type="button"
-              onClick={(e) => { e.preventDefault(); void handleDelete(m.id); }}
-              className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-md text-white opacity-0 transition group-hover:opacity-100"
-              style={{ background: 'rgba(0,0,0,0.7)' }}
-              title="删除"
-            >
-              <I.Trash size={13} />
-            </button>
+            <div className="absolute right-2 top-2 flex gap-1.5 opacity-0 transition group-hover:opacity-100">
+              <Link
+                href={`/export/${m.id}`}
+                onClick={(e) => e.stopPropagation()}
+                className="grid h-7 w-7 place-items-center rounded-md text-white transition hover:bg-primary-600"
+                style={{ background: 'rgba(0,0,0,0.7)' }}
+                title="下载（前往导出页）"
+                aria-label="下载"
+              >
+                <I.Download size={13} />
+              </Link>
+              <button
+                type="button"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); void handleDelete(m.id); }}
+                className="grid h-7 w-7 place-items-center rounded-md text-white transition"
+                style={{ background: 'rgba(0,0,0,0.7)' }}
+                title="删除"
+              >
+                <I.Trash size={13} />
+              </button>
+            </div>
           </div>
         );
       })}

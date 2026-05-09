@@ -34,7 +34,7 @@ export default function LibraryPage(): JSX.Element {
             </div>
             <div className="flex gap-2">
               <Link
-                href="/"
+                href="/app"
                 className="flex items-center gap-1.5 rounded-md px-4 py-2 text-[13px] font-semibold text-white"
                 style={{ background: 'var(--recording-strong)', boxShadow: '0 4px 12px rgba(220,38,38,0.25)' }}
               >

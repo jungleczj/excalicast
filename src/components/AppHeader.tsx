@@ -20,7 +20,7 @@ const TIER_BADGE: Record<NonNullable<Props['tier']>, { label: string; bg: string
 
 export function Brand(): JSX.Element {
   return (
-    <Link href="/" className="flex items-center gap-2">
+    <Link href="/app" className="flex items-center gap-2">
       <div
         className="grid h-[26px] w-[26px] place-items-center rounded-[7px] text-white"
         style={{ background: 'linear-gradient(135deg, var(--primary-600) 0%, var(--secondary-600) 100%)' }}
@@ -35,7 +35,7 @@ export function Brand(): JSX.Element {
 export function AppHeader({ tier = 'free' }: Props): JSX.Element {
   const pathname = usePathname();
   const onLib = pathname?.startsWith('/library');
-  const onRecord = pathname === '/' || pathname?.startsWith('/export');
+  const onRecord = pathname === '/app' || pathname?.startsWith('/export');
   const badge = TIER_BADGE[tier];
 
   const { user, logout, loading } = useAuth();
@@ -61,7 +61,7 @@ export function AppHeader({ tier = 'free' }: Props): JSX.Element {
           <Brand />
           <nav className="flex gap-1">
             <NavItem href="/library" active={onLib}>录制库</NavItem>
-            <NavItem href="/" active={onRecord}>录制</NavItem>
+            <NavItem href="/app" active={onRecord}>录制</NavItem>
           </nav>
         </div>
         <div className="flex items-center gap-2.5">

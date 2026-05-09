@@ -106,9 +106,14 @@ function buildGhostRect(crop: SceneRect): Record<string, unknown> {
 
 export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   opts.onPhase?.('loading');
+  // 立即上报 1%，让用户看到进度条「在动」，避免 ffmpeg.load() 期间卡 0% 的体感
+  opts.onProgress?.(0.01);
   const ffmpeg = await getFfmpeg(opts.onLog);
+  opts.onProgress?.(0.05);
   const { exportToCanvas } = await import('@excalidraw/excalidraw');
+  opts.onProgress?.(0.07);
   const { metadata, snapshots, audioBlob, cameraBlob, binaryFiles } = await loadFullRecording(opts.recordingId);
+  opts.onProgress?.(0.08);
 
   const preset = ASPECT_PRESETS[opts.aspectRatio];
   const fps = opts.fps;
@@ -213,7 +218,8 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     const name = `f_${String(i).padStart(6, '0')}.png`;
     await ffmpeg.writeFile(name, buf);
 
-    opts.onProgress?.(((i + 1) / totalFrames) * 0.7);
+    // 帧渲染占 8% → 72% 区间（0.64 宽）
+    opts.onProgress?.(0.08 + ((i + 1) / totalFrames) * 0.64);
   }
 
   let audioFile: string | null = null;
@@ -234,9 +240,9 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   }
 
   opts.onPhase?.('encoding');
-  opts.onProgress?.(0.7);
+  opts.onProgress?.(0.72);
   ffmpeg.on('progress', ({ progress }) => {
-    opts.onProgress?.(0.7 + Math.min(1, Math.max(0, progress)) * 0.3);
+    opts.onProgress?.(0.72 + Math.min(1, Math.max(0, progress)) * 0.28);
   });
 
   // 输入顺序：[0] 帧序列 [1] 音频?  [2] 摄像头?  [last] 水印?
@@ -254,16 +260,21 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   let curLabel = '[0:v]';
   const camSize = Math.round(preset.height * 0.22); // 摄像头气泡 ≈ 视频高 22%
   if (cameraIdx !== null) {
-    // v0.1: 方形 bubble（圆形 mask 留 v0.2）。crop 到正方形 + 镜像水平翻转匹配预览
+    // 圆形 bubble：scale + crop + hflip 后转 rgba，用 geq 在 alpha 通道里画圆
+    // 公式：到中心距离 > (W/2 - 1) 的像素 alpha=0，圆内 alpha=255
     filterParts.push(
-      `[${cameraIdx}:v]scale=${camSize}:${camSize}:force_original_aspect_ratio=increase,crop=${camSize}:${camSize},hflip[cam]`,
+      `[${cameraIdx}:v]scale=${camSize}:${camSize}:force_original_aspect_ratio=increase,crop=${camSize}:${camSize},hflip,format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(pow(X-W/2,2)+pow(Y-H/2,2),pow(W/2-1,2)),0,255)'[cam]`,
     );
     filterParts.push(`${curLabel}[cam]overlay=W-w-${Math.round(preset.width * 0.025)}:H-h-${Math.round(preset.height * 0.04)}[v_with_cam]`);
     curLabel = '[v_with_cam]';
   }
   if (watermarkIdx !== null) {
+    // 水印默认右下角；当摄像头开启时改放左下角，避免与人脸气泡视觉打架
+    const wmSideMargin = Math.round(preset.width * 0.02);
+    const wmBottomMargin = Math.round(preset.height * 0.04);
+    const wmX = cameraIdx !== null ? `${wmSideMargin}` : `W-w-${wmSideMargin}`;
     filterParts.push(`[${watermarkIdx}:v]format=rgba,colorchannelmixer=aa=0.85[wm]`);
-    filterParts.push(`${curLabel}[wm]overlay=W-w-${Math.round(preset.width * 0.02)}:H-h-${Math.round(preset.height * 0.04)}[v_final]`);
+    filterParts.push(`${curLabel}[wm]overlay=${wmX}:H-h-${wmBottomMargin}[v_final]`);
     curLabel = '[v_final]';
   }
 

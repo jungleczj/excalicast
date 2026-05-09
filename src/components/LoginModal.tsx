@@ -31,9 +31,12 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sentTo, setSentTo] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    setSentTo(null);
+    setError(null);
     fetch('/api/auth/providers-info', { credentials: 'same-origin' })
       .then((r) => r.json())
       .then((data: ProvidersInfo) => setProviders(data))
@@ -56,27 +59,29 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
 
   const handleEmail = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.includes('@')) {
+    const normalized = email.trim().toLowerCase();
+    if (!normalized.includes('@')) {
       setError('请输入合法邮箱');
       return;
     }
     if (!providers?.email) {
-      setError('邮箱登录暂未启用');
+      setError('邮箱登录暂未启用：服务端缺少 Upstash Redis 或 Resend 配置');
       return;
     }
     setBusy('email');
     setError(null);
-    const res = await signIn('email', {
-      email: email.trim().toLowerCase(),
+    // NextAuth Resend provider 的 id = 'resend'。redirect:false 拿到结果后我们自己显示「请查收邮箱」
+    const res = await signIn('resend', {
+      email: normalized,
       redirect: false,
       callbackUrl: window.location.pathname,
     });
     setBusy(null);
     if (res?.error) {
-      setError(`登录失败：${res.error}`);
+      setError(`发送登录邮件失败：${res.error}`);
       return;
     }
-    onClose();
+    setSentTo(normalized);
   };
 
   const noneEnabled = providers && !providers.google && !providers.email;
@@ -133,35 +138,52 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
                 <div className="h-px flex-1 bg-[#e0ddd6]" />
               </div>
 
-              <form onSubmit={handleEmail} className="space-y-3">
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Enter your email"
-                  className="w-full rounded-[10px] border bg-white px-4 py-3 text-[14px] text-[#181818] outline-none transition placeholder:text-[#aaa] focus:border-[#181818]"
-                  style={{ borderColor: '#e0ddd6' }}
-                  disabled={busy !== null || !providers.email}
-                />
-                <button
-                  type="submit"
-                  disabled={busy !== null || !email || !providers.email}
-                  className="flex w-full items-center justify-center gap-2 rounded-[10px] px-4 py-3 text-[14px] font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-                  style={{ background: '#181818' }}
-                  title={providers.email ? '' : '邮箱登录未启用：设 DEV_MODE=true 或 EMAIL_PASSWORDLESS=true'}
-                >
-                  ▣ Continue with email
-                </button>
-              </form>
+              {sentTo ? (
+                <div className="rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-4 text-center">
+                  <div className="text-[14px] font-semibold text-emerald-900">登录邮件已发送</div>
+                  <div className="mt-1 text-[12.5px] text-emerald-800">
+                    请查收 <span className="font-mono">{sentTo}</span> 的收件箱（10 分钟内有效）
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSentTo(null)}
+                    className="mt-3 text-[11.5px] text-emerald-900 underline"
+                  >
+                    换一个邮箱
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleEmail} className="space-y-3">
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="Enter your email"
+                    className="w-full rounded-[10px] border bg-white px-4 py-3 text-[14px] text-[#181818] outline-none transition placeholder:text-[#aaa] focus:border-[#181818]"
+                    style={{ borderColor: '#e0ddd6' }}
+                    disabled={busy !== null}
+                  />
+                  <button
+                    type="submit"
+                    disabled={busy !== null || !email}
+                    className="flex w-full items-center justify-center gap-2 rounded-[10px] px-4 py-3 text-[14px] font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                    style={{ background: '#181818' }}
+                  >
+                    {busy === 'email' ? '发送中…' : '发送登录链接到邮箱'}
+                  </button>
+                </form>
+              )}
+
+              {!providers.email && !sentTo && (
+                <div className="mt-3 rounded-[8px] bg-amber-50 px-3 py-2 text-[11.5px] leading-relaxed text-amber-900" style={{ border: '1px solid #fde68a' }}>
+                  邮箱登录暂不可用：服务端需要 <code className="font-mono">KV_REST_API_URL/TOKEN</code>（Upstash Redis）+ <code className="font-mono">AUTH_RESEND_KEY</code>。本地开发可只设 <code className="font-mono">DEV_MODE=true</code> + Upstash，链接会打到控制台。
+                </div>
+              )}
 
               {noneEnabled && (
-                <div className="mt-4 rounded-[8px] bg-amber-50 p-3 text-[11.5px] leading-relaxed text-amber-900" style={{ border: '1px solid #fde68a' }}>
-                  还没有配置任何登录方式。在 <code className="font-mono text-[10.5px]">.env.local</code> 至少设一项：
-                  <ul className="mt-1 ml-4 list-disc">
-                    <li><code className="font-mono">AUTH_GOOGLE_ID</code> + <code className="font-mono">AUTH_GOOGLE_SECRET</code></li>
-                    <li>或 <code className="font-mono">DEV_MODE=true</code> 启用邮箱直接登录</li>
-                  </ul>
+                <div className="mt-3 rounded-[8px] bg-amber-50 p-3 text-[11.5px] leading-relaxed text-amber-900" style={{ border: '1px solid #fde68a' }}>
+                  还没有配置任何登录方式。
                 </div>
               )}
 

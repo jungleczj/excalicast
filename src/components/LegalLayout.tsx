@@ -21,10 +21,10 @@ export function LegalLayout({ title, lastUpdated, children }: Props): JSX.Elemen
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
           <Brand />
           <nav className="flex items-center gap-6 text-[13px] font-medium text-text-secondary">
-            <Link href="/landing" className="hover:text-text-primary">主页</Link>
-            <Link href="/landing#pricing" className="hover:text-text-primary">价格</Link>
-            <Link href="/landing#contact" className="hover:text-text-primary">联系我们</Link>
-            <Link href="/" className="rounded-md bg-primary-600 px-4 py-1.5 text-[13px] font-semibold text-white shadow-sm hover:bg-primary-700">
+            <Link href="/" className="hover:text-text-primary">主页</Link>
+            <Link href="/#pricing" className="hover:text-text-primary">价格</Link>
+            <Link href="/#contact" className="hover:text-text-primary">联系我们</Link>
+            <Link href="/app" className="rounded-md bg-primary-600 px-4 py-1.5 text-[13px] font-semibold text-white shadow-sm hover:bg-primary-700">
               开始录制
             </Link>
           </nav>
@@ -75,7 +75,7 @@ export function LegalLayout({ title, lastUpdated, children }: Props): JSX.Elemen
               <span>© 2026 Excalicast</span>
             </div>
             <nav className="flex flex-wrap gap-5 text-[12px] text-text-tertiary">
-              <Link href="/landing" className="hover:text-text-primary">主页</Link>
+              <Link href="/" className="hover:text-text-primary">主页</Link>
               <Link href="/privacy" className="hover:text-text-primary">隐私政策</Link>
               <Link href="/terms" className="hover:text-text-primary">服务条款</Link>
               <Link href="/refund" className="hover:text-text-primary">退款政策</Link>

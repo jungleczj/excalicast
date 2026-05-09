@@ -82,6 +82,13 @@ export async function getRecording(recordingId: string): Promise<RecordingMetada
   return getClientDb().recordings.get(recordingId);
 }
 
+export async function updateRecordingTitle(recordingId: string, title: string): Promise<void> {
+  const trimmed = title.trim();
+  await getClientDb().recordings.update(recordingId, {
+    title: trimmed.length > 0 ? trimmed : undefined,
+  });
+}
+
 export async function deleteRecording(recordingId: string): Promise<void> {
   const db = getClientDb();
   await db.transaction(
