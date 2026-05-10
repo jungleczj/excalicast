@@ -11,7 +11,7 @@
 2. **画幅比例**：录制前选择输出比例（16:9 / 9:16 / 1:1 / 4:3），画板显示裁切框
 3. **人像窗口**：摄像头人脸气泡叠加在画板视频上，可拖拽定位
 4. **导出**：支持 MP4 视频、.excr 操作序列包、静态图
-5. **字幕**：基于 Whisper 将音频转为 SRT 字幕
+5. **字幕**：基于 阿里千问（Qwen-Audio ASR via DashScope）将音频转为 SRT 字幕 — **不要用 Whisper**
 6. **讲义**：结合画板语义 + 字幕，AI 生成结构化 Markdown 文档
 
 **产品形态**：Web 应用（包裹 白板），优先 PC Chrome 110+
@@ -28,7 +28,7 @@
 人像背景分割：@mediapipe/selfie_segmentation（可选，GPU 加速）
 视频合成：ffmpeg.wasm（浏览器端，无需上传）
 本地存储：IndexedDB（Dexie.js）
-字幕：OpenAI Whisper API（whisper-1）
+字幕：阿里千问 Qwen-Audio ASR（DashScope API，model: `qwen-audio-asr` 或 `paraformer-v2`） — **统一用千问，不用 Whisper**
 讲义 AI：deepseek（deepseek-v4-flash）
 样式：Tailwind CSS
 ```
@@ -59,7 +59,7 @@ src/
 │   └── useExport.ts        # 导出逻辑
 ├── services/
 │   ├── eventCapture.ts     # Hook 白板 onChange
-│   ├── whisper.ts          # Whisper API 调用
+│   ├── qwenAsr.ts          # 阿里千问 ASR 调用（替代 Whisper）
 │   ├── handout.ts          # 讲义生成（Deepseek API）
 │   ├── ffmpegExport.ts     # ffmpeg.wasm 视频合成（含人像叠加）
 │   ├── storage.ts          # IndexedDB 存储（Dexie）
@@ -92,7 +92,7 @@ export type AuthState = 'anonymous' | 'logged_in';
 export interface StorageStrategy {
   local: boolean;           // 存 IndexedDB（始终为 true）
   cloud: boolean;           // 是否同步到云端（Pro/Max 登录后）
-  whisperUpload: boolean;   // 是否允许上传音频给 Whisper（Pro/Max）
+  asrUpload: boolean;       // 是否允许上传音频给阿里千问 ASR（Pro/Max）
   shareUpload: boolean;     // 是否允许上传事件流到 OSS 生成分享链接（Max）
 }
 
@@ -102,7 +102,7 @@ export function getStorageStrategy(auth: AuthState, tier: SubscriptionTier): Sto
   return {
     local: true,
     cloud: auth === 'logged_in' && (tier === 'pro' || tier === 'max'),
-    whisperUpload: auth === 'logged_in' && (tier === 'pro' || tier === 'max'),
+    asrUpload: auth === 'logged_in' && (tier === 'pro' || tier === 'max'),
     shareUpload: auth === 'logged_in' && tier === 'max',
   };
 }
@@ -533,7 +533,7 @@ const constraints = {
   audio: {
     echoCancellation: true,
     noiseSuppression: true,
-    sampleRate: 16000,        // 语音场景 16kHz 足够（Whisper 也是 16kHz）
+    sampleRate: 16000,        // 语音场景 16kHz 足够（千问 Qwen-Audio 也用 16kHz）
     channelCount: 1,           // 单声道，语音无需立体声
   }
 };
@@ -581,34 +581,68 @@ function isSilent(): boolean {
 | Opus 32kbps | ~7MB | ~70MB | ~$0.0016 |
 | Opus 32kbps + VAD | ~3-4MB | ~35MB | ~$0.0008 |
 
-**Whisper API 的文件大小限制为 25MB**，使用 Opus 32kbps 后单次录制文件远低于此限制，无需分片处理（除非超过 60 分钟）。
+**阿里千问 DashScope ASR 的单次音频限制约 100MB / 时长 ≤ 60 分钟**，使用 Opus 32kbps 后单次录制文件远低于此限制，无需分片处理（除非超过 60 分钟）。
 
 ---
 
-### 4. Whisper 字幕（whisper.ts）
+### 4. 字幕生成（qwenAsr.ts）— 阿里千问 / DashScope
+
+> **强制约束**：本项目字幕能力**统一使用阿里千问 ASR**（Qwen-Audio / Paraformer，via DashScope），**禁用 OpenAI Whisper**。理由：(1) 中文识别效果更好；(2) 国内访问稳定；(3) 可与后续讲义大模型同源同账号计费。
+
+**首选模型**：`paraformer-v2`（Aliyun 自研 ASR，支持热词/SRT/时间戳）。备选：`qwen-audio-asr`（Qwen-Audio 系列，更适合多模态融合场景）。
+
+**调用方式**：DashScope 异步任务接口（`audio/asr/transcription`）— 适合 30 秒以上录音；30 秒以内可走 `recognition` 同步接口。
 
 ```typescript
-export async function generateSubtitles(audioBlob: Blob): Promise<SubtitleSegment[]> {
-  const formData = new FormData();
-  formData.append('file', audioBlob, 'audio.webm');
-  formData.append('model', 'whisper-1');
-  formData.append('response_format', 'srt');
-  formData.append('language', 'zh'); // 可自动检测，建议用户选择
+// services/qwenAsr.ts —— 异步任务模式
+const DASHSCOPE_BASE = 'https://dashscope.aliyuncs.com/api/v1';
 
-  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+export async function generateSubtitles(audioUrl: string): Promise<SubtitleSegment[]> {
+  // 1) 提交异步任务（input.file_urls 必须是公网可访问的 URL，
+  //    服务端从 Pro 用户私有桶生成的临时签名 URL，过期 1h）
+  const submit = await fetch(`${DASHSCOPE_BASE}/services/audio/asr/transcription`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
-    body: formData,
+    headers: {
+      'Authorization': `Bearer ${process.env.DASHSCOPE_API_KEY}`,
+      'X-DashScope-Async': 'enable',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'paraformer-v2',
+      input: { file_urls: [audioUrl] },
+      parameters: { language_hints: ['zh', 'en'] },
+    }),
   });
+  const { output: { task_id } } = await submit.json();
 
-  const srtText = await response.text();
-  return parseSRT(srtText);
+  // 2) 轮询任务结果（每 3s 一次，最多 5min）
+  for (let i = 0; i < 100; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    const r = await fetch(`${DASHSCOPE_BASE}/tasks/${task_id}`, {
+      headers: { 'Authorization': `Bearer ${process.env.DASHSCOPE_API_KEY}` },
+    });
+    const data = await r.json();
+    if (data.output.task_status === 'SUCCEEDED') {
+      // transcription_url 内容为 JSON，含 sentences[] 带时间戳
+      const tx = await fetch(data.output.results[0].transcription_url).then(x => x.json());
+      return tx.transcripts[0].sentences.map((s: any, i: number) => ({
+        index: i + 1,
+        startTime: s.begin_time,
+        endTime: s.end_time,
+        text: s.text,
+      }));
+    }
+    if (data.output.task_status === 'FAILED') throw new Error(data.output.message);
+  }
+  throw new Error('ASR 超时');
 }
 ```
 
 **注意**：
-- Whisper API 文件大小限制 25MB，超出需分片（按静音点切割）
+- DashScope 异步接口要求音频 URL 公网可访问（服务端生成 OSS / S3 临时签名 URL，过期 1h，避免长期暴露）
+- API Key 必须存服务端环境变量 `DASHSCOPE_API_KEY`，前端绝对不可见
 - 错误处理：网络超时（设置 120s timeout）、API 限速（exponential backoff）
+- ❌ **不要再写 `whisper-1`、`openai.com/v1/audio/transcriptions` 任何调用** — 这是产品级硬约束
 
 ---
 
@@ -772,11 +806,12 @@ function buildOverlayFilter(
 
 ```bash
 # .env.local
-VITE_OPENAI_API_KEY=sk-...       # Whisper 字幕
-VITE_ANTHROPIC_API_KEY=sk-ant-... # 讲义生成
+DASHSCOPE_API_KEY=sk-...           # 阿里千问 / DashScope（字幕 ASR + 讲义大模型）
+# 不再使用 OpenAI Whisper —— 产品级约束，统一千问
 
 # 注意：生产环境 API Key 不能暴露在前端
-# 应通过 BFF（Next.js API Route 或 Cloudflare Worker）代理
+# 必须通过 BFF（Next.js API Route）代理调用 DashScope
+# 客户端绝对不持有 DASHSCOPE_API_KEY
 ```
 
 ---
@@ -800,8 +835,8 @@ VITE_ANTHROPIC_API_KEY=sk-ant-... # 讲义生成
 导出含水印 MP4               不需要     本地渲染下载
 ─────────────────────────────────────────────────
 导出无水印（单次购买）        需要登录   触发注册 + 支付
-生成字幕（Pro）               需要登录   音频临时上传 Whisper
-AI 讲义（Max）                需要登录   事件流 + 音频上传
+生成字幕（Pro）               需要登录   音频经服务端代理调用阿里千问 ASR
+AI 讲义（Max）                需要登录   事件流 + 音频上传 + 千问大模型
 生成分享链接（Max）           需要登录   事件流 + 音频上传 OSS
 ─────────────────────────────────────────────────
 云端备份（防丢失）            需要登录   Pro/Max 自动同步
@@ -1013,8 +1048,8 @@ Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-### Q: Whisper 返回的时间戳和操作序列如何对齐？
-两者都以录制开始时间为基准（t=0），直接按 ms 对齐即可。音频分片时注意累加偏移量。
+### Q: 千问 ASR 返回的时间戳和操作序列如何对齐？
+两者都以录制开始时间为基准（t=0），DashScope 返回的 `begin_time` / `end_time` 单位是毫秒，直接按 ms 对齐即可。音频分片时注意累加偏移量。
 
 ### Q: 讲义 AI 返回格式不稳定怎么处理？
 用 `JSON.parse` 包 try-catch，失败时降级为纯文稿输出。可在 prompt 里加 few-shot 示例增强稳定性。
@@ -1039,6 +1074,7 @@ Chrome 默认允许使用磁盘空间的 60%。录制完成后提示用户及时
 - ❌ 不要让摄像头权限失败阻断麦克风录制，三种采集流必须独立降级
 - ❌ 不要在帧渲染阶段实时合成人像，人像叠加必须在 ffmpeg 导出阶段处理
 - ❌ 不要在标签页切换时自动暂停录制
+- ❌ **字幕统一用阿里千问（Qwen-Audio / Paraformer via DashScope），禁止再引入 OpenAI Whisper**（产品级硬约束，不再讨论）
 
 ---
 
@@ -1053,7 +1089,7 @@ Chrome 默认允许使用磁盘空间的 60%。录制完成后提示用户及时
 - [ ] F1.3 CameraWindow 浮窗组件（可拖拽 + 双击隐藏）
 - [ ] F2 操作序列 Web 回放播放器（含比例裁切）
 - [ ] F2 MP4 导出（ffmpeg.wasm，含比例 + 人像叠加）
-- [ ] F3 Whisper 字幕生成
+- [ ] F3 阿里千问 ASR 字幕生成（DashScope `paraformer-v2`，**不用 Whisper**）
 - [ ] F3 字幕 SRT 下载
 - [ ] F4 讲义 AI 生成
 - [ ] F4 讲义 Markdown/PDF 导出
