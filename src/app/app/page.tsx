@@ -10,7 +10,6 @@ import { ProUpgradeModal } from '@/components/ProUpgradeModal';
 import { useSubscription } from '@/hooks/useSubscription';
 import { startRecording, type SessionHandle } from '@/services/recordingSession';
 import type { WhiteboardChangeFn } from '@/components/Whiteboard';
-import { FREE_DURATION_LIMIT_MS, FREE_DURATION_WARN_MS } from '@/types/user';
 
 const Whiteboard = dynamic(() => import('@/components/Whiteboard'), {
   ssr: false,
@@ -28,8 +27,6 @@ export default function HomePage(): JSX.Element {
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [cameraPos, setCameraPos] = useState({ x: 0, y: 0 });
   const [proUpgradeOpen, setProUpgradeOpen] = useState(false);
-  const [showDurationWarn, setShowDurationWarn] = useState(false);
-  const autoStoppedRef = useRef(false);
 
   // 录制条位置：默认放在 Excalidraw toolbar 之下、右上角，避开顶部菜单
   const [barPos, setBarPos] = useState<{ x: number; y: number } | null>(null);
@@ -113,26 +110,9 @@ export default function HomePage(): JSX.Element {
     }
     if (state === 'idle') {
       setElapsed(0);
-      setShowDurationWarn(false);
-      autoStoppedRef.current = false;
     }
   }, [state]);
-
-  // 时长限制：免费版到 25min 警告，到 30min 自动停止并弹 Pro 升级
-  // Pro/Max 不受限
-  useEffect(() => {
-    if (subscription.permissions.unlimitedDuration) return;
-    if (state !== 'recording' && state !== 'paused') return;
-    if (elapsed >= FREE_DURATION_WARN_MS && !showDurationWarn) {
-      setShowDurationWarn(true);
-    }
-    if (elapsed >= FREE_DURATION_LIMIT_MS && !autoStoppedRef.current) {
-      autoStoppedRef.current = true;
-      setProUpgradeOpen(true);
-      // 自动停止：保存完整数据，之后用户可决定升级 Pro 继续录新的
-      void handleStopRef.current?.();
-    }
-  }, [elapsed, state, subscription.permissions.unlimitedDuration, showDurationWarn]);
+  // ⚠️ 录制时长不做任何 cap（产品级约束，见 CLAUDE.md）。不要在此添加 elapsed 检查。
 
   const handleToggleCamera = useCallback(async () => {
     if (state !== 'idle') return;
@@ -204,8 +184,6 @@ export default function HomePage(): JSX.Element {
       setState('idle');
     }
   }, [router]);
-  const handleStopRef = useRef<typeof handleStop | null>(null);
-  useEffect(() => { handleStopRef.current = handleStop; }, [handleStop]);
 
   const handleDiscard = useCallback(async () => {
     const s = sessionRef.current;
@@ -244,36 +222,6 @@ export default function HomePage(): JSX.Element {
             position={cameraPos}
             onPositionChange={setCameraPos}
           />
-        )}
-
-        {/* 时长警告 banner（免费版接近 30min 上限） */}
-        {showDurationWarn && isRecording && !subscription.permissions.unlimitedDuration && (
-          <div
-            className="fixed left-1/2 top-4 z-40 flex items-center gap-3 rounded-full px-4 py-2 text-[12px] text-white"
-            style={{
-              transform: 'translateX(-50%)',
-              background: 'linear-gradient(90deg, #f59e0b, #ea580c)',
-              boxShadow: '0 8px 24px rgba(234,88,12,0.4)',
-            }}
-          >
-            <span>
-              免费版剩余 {Math.max(0, Math.ceil((FREE_DURATION_LIMIT_MS - elapsed) / 60000))} 分钟，到时自动停止
-            </span>
-            <button
-              type="button"
-              onClick={() => setProUpgradeOpen(true)}
-              className="rounded-full bg-white/20 px-3 py-1 font-semibold hover:bg-white/30"
-            >
-              升级 Pro 解除限制
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowDurationWarn(false)}
-              className="grid h-5 w-5 place-items-center rounded-full bg-white/15 hover:bg-white/25"
-            >
-              ✕
-            </button>
-          </div>
         )}
 
         {/* 浮动录制条：position: fixed + 可拖拽，wrapper 不阻挡 Excalidraw 工具区点击 */}

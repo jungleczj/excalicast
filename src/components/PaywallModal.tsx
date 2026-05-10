@@ -186,7 +186,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
             disabled={busy}
             className="mt-3 w-full rounded-md border border-primary-600 bg-primary-50 px-4 py-2 text-[12px] font-semibold text-primary-700 hover:bg-primary-100 disabled:opacity-40"
           >
-            或升级 Pro · $9/月 · 所有录制无限次无水印 + AI 字幕
+            或升级 Pro · $9/月 · 所有录制无水印 + AI 字幕 + 云备份
           </button>
         )}
 

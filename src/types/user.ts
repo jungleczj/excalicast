@@ -2,8 +2,8 @@ export type SubscriptionTier = 'free' | 'pro' | 'max';
 
 export type SubscriptionStatus = 'inactive' | 'active' | 'past_due' | 'paused' | 'cancelled';
 
-export const FREE_DURATION_LIMIT_MS = 30 * 60 * 1000;
-export const FREE_DURATION_WARN_MS = 25 * 60 * 1000;
+// ⚠️ 录制时长无任何上限（不分 tier）。不要再引入 FREE_DURATION_LIMIT_MS / 自动停止 / 警告 banner。
+// 见 CLAUDE.md 禁止事项。
 
 export interface UserSubscription {
   userId: string;
@@ -17,7 +17,6 @@ export interface UserSubscription {
 
 export interface TierPermissions {
   exportWithoutWatermark: boolean;
-  unlimitedDuration: boolean;
   subtitle: boolean;
   cloudBackup: boolean;
   shareLink: boolean;
@@ -27,7 +26,6 @@ export interface TierPermissions {
 export const TIER_PERMISSIONS: Record<SubscriptionTier, TierPermissions> = {
   free: {
     exportWithoutWatermark: false,
-    unlimitedDuration: false,
     subtitle: false,
     cloudBackup: false,
     shareLink: false,
@@ -35,7 +33,6 @@ export const TIER_PERMISSIONS: Record<SubscriptionTier, TierPermissions> = {
   },
   pro: {
     exportWithoutWatermark: true,
-    unlimitedDuration: true,
     subtitle: true,
     cloudBackup: true,
     shareLink: false,
@@ -43,7 +40,6 @@ export const TIER_PERMISSIONS: Record<SubscriptionTier, TierPermissions> = {
   },
   max: {
     exportWithoutWatermark: true,
-    unlimitedDuration: true,
     subtitle: true,
     cloudBackup: true,
     shareLink: true,

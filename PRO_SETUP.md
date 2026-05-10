@@ -68,12 +68,10 @@ ngrok http 3001
 6. 支付成功 → Paddle 推送 `subscription.activated` → /api/paddle-webhook → upsertSubscription
 7. 客户端 ProUpgradeModal 轮询 `/api/me/tier` → 检测到 `tier=pro` → 关闭 Modal，UI 显示 Pro 标签
 
-### 4.3 时长解锁（30min → unlimited）
+### 4.3 录制时长
 
-1. 用 free 账号开始录制 → 录制条计时
-2. 25min 时顶部出现警告 banner（不打断录制）
-3. 30min 时自动停止 + 弹 Pro 升级 Modal
-4. 升级 Pro 后再次录制，无 25/30min 警告
+⚠️ **录制时长无任何上限**（不分 tier）。这是产品级硬约束（见 CLAUDE.md 禁止事项）。
+不要再添加 25min 警告 / 30min 自动停止之类的逻辑。
 
 ### 4.4 无水印导出
 
