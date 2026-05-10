@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { PaidRecordingRow } from '@/types/recording';
 import type {
   SubscriptionStatus,
@@ -8,9 +9,43 @@ import type {
   UserSubscription,
 } from '@/types/user';
 
-// Vercel 的应用文件系统只读，写入必须落到 /tmp（每个实例独立、冷启动丢失）。
-// 本地开发仍写到项目内 data/ 目录方便排查。
-// 生产环境若要持久化付费记录，请把这里换成 Vercel Postgres / KV / Turso。
+// ============================================================================
+// Backend selection
+// ----------------------------------------------------------------------------
+// Pro 相关三张表（paid_recordings / user_subscriptions / subtitle_jobs）
+// 当 SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY 都设置时，走 Supabase Postgres；
+// 否则回退到本地 SQLite（开发模式）。
+//
+// users / auth_sessions 两张表只用于 legacy password login（实际未启用），
+// 始终保留 SQLite 路径，避免引入更多迁移工作。
+// ============================================================================
+
+function isSupabase(): boolean {
+  return !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+let _sb: SupabaseClient | null = null;
+function sb(): SupabaseClient {
+  if (_sb) return _sb;
+  _sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { 'x-application-name': 'excalicast' } },
+  });
+  return _sb;
+}
+
+let _backendLogged = false;
+function logBackendOnce(): void {
+  if (_backendLogged) return;
+  _backendLogged = true;
+  // eslint-disable-next-line no-console
+  console.info(`[db] Pro tables backend = ${isSupabase() ? 'Supabase Postgres' : 'SQLite (local fallback)'}`);
+}
+
+// ============================================================================
+// SQLite (legacy + Pro fallback)
+// ============================================================================
+
 const isServerless = process.env.VERCEL === '1' || process.env.AWS_LAMBDA_FUNCTION_NAME;
 const DB_DIR = isServerless ? '/tmp' : path.join(process.cwd(), 'data');
 const DB_PATH = path.join(DB_DIR, 'excalicast.db');
@@ -48,7 +83,6 @@ function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
 
-    -- Pro/Max 订阅状态：以 NextAuth user.id（即 token.sub，TEXT）为主键
     CREATE TABLE IF NOT EXISTS user_subscriptions (
       user_id TEXT PRIMARY KEY,
       tier TEXT NOT NULL DEFAULT 'free',
@@ -61,15 +95,14 @@ function getDb(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_user_subscriptions_paddle ON user_subscriptions(paddle_subscription_id);
 
-    -- ASR 任务（千问 DashScope）异步状态
     CREATE TABLE IF NOT EXISTS subtitle_jobs (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       recording_id TEXT NOT NULL,
-      status TEXT NOT NULL,                -- pending | running | done | failed
-      task_id TEXT,                        -- DashScope task_id
-      audio_token TEXT,                    -- 临时签名 token（暴露音频给 DashScope）
-      srt TEXT,                            -- 完成后的 SRT 文本
+      status TEXT NOT NULL,
+      task_id TEXT,
+      audio_token TEXT,
+      srt TEXT,
       error TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
@@ -90,6 +123,10 @@ function getDb(): Database.Database {
   _db = db;
   return db;
 }
+
+// ============================================================================
+// users / auth_sessions  (SQLite only — legacy password login)
+// ============================================================================
 
 export interface UserRow {
   id: number;
@@ -129,20 +166,51 @@ export function deleteAuthSession(sessionId: string): void {
   getDb().prepare('DELETE FROM auth_sessions WHERE id = ?').run(sessionId);
 }
 
-export function isRecordingPaid(recordingId: string): boolean {
-  const row = getDb()
+// ============================================================================
+// paid_recordings  (Supabase | SQLite)
+// ============================================================================
+
+export async function isRecordingPaid(recordingId: string): Promise<boolean> {
+  logBackendOnce();
+  if (isSupabase()) {
+    const { data, error } = await sb()
+      .from('paid_recordings')
+      .select('recording_id')
+      .eq('recording_id', recordingId)
+      .maybeSingle();
+    if (error) throw new Error(`isRecordingPaid: ${error.message}`);
+    return !!data;
+  }
+  return getDb()
     .prepare('SELECT 1 FROM paid_recordings WHERE recording_id = ?')
-    .get(recordingId);
-  return row !== undefined;
+    .get(recordingId) !== undefined;
 }
 
-export function markRecordingPaid(params: {
+export async function markRecordingPaid(params: {
   recordingId: string;
   amountCents: number;
   currency: string;
   paddleTransactionId: string;
   rawPayload: string;
-}): void {
+}): Promise<void> {
+  logBackendOnce();
+  if (isSupabase()) {
+    const { error } = await sb()
+      .from('paid_recordings')
+      .upsert(
+        {
+          recording_id: params.recordingId,
+          paid_at: new Date().toISOString(),
+          amount_cents: params.amountCents,
+          currency: params.currency,
+          paddle_transaction_id: params.paddleTransactionId,
+          raw_payload: params.rawPayload,
+        },
+        { onConflict: 'recording_id', ignoreDuplicates: true },
+      );
+    if (error) throw new Error(`markRecordingPaid: ${error.message}`);
+    return;
+  }
   getDb()
     .prepare(
       `INSERT INTO paid_recordings (recording_id, paid_at, amount_cents, currency, paddle_transaction_id, raw_payload)
@@ -159,15 +227,35 @@ export function markRecordingPaid(params: {
     );
 }
 
-export function getPaidRecording(recordingId: string): PaidRecordingRow | undefined {
+export async function getPaidRecording(recordingId: string): Promise<PaidRecordingRow | undefined> {
+  logBackendOnce();
+  if (isSupabase()) {
+    const { data, error } = await sb()
+      .from('paid_recordings')
+      .select('*')
+      .eq('recording_id', recordingId)
+      .maybeSingle();
+    if (error) throw new Error(`getPaidRecording: ${error.message}`);
+    if (!data) return undefined;
+    return {
+      recording_id: data.recording_id,
+      paid_at: new Date(data.paid_at as string).getTime(),
+      amount_cents: data.amount_cents,
+      currency: data.currency,
+      paddle_transaction_id: data.paddle_transaction_id,
+      raw_payload: data.raw_payload,
+    };
+  }
   return getDb()
     .prepare('SELECT * FROM paid_recordings WHERE recording_id = ?')
     .get(recordingId) as PaidRecordingRow | undefined;
 }
 
-// ========== Pro 会员订阅 ==========
+// ============================================================================
+// user_subscriptions  (Supabase | SQLite)
+// ============================================================================
 
-interface SubscriptionRow {
+interface SqliteSubscriptionRow {
   user_id: string;
   tier: SubscriptionTier;
   status: SubscriptionStatus;
@@ -178,7 +266,18 @@ interface SubscriptionRow {
   raw_payload: string | null;
 }
 
-function rowToSubscription(row: SubscriptionRow | undefined): UserSubscription | null {
+interface SupabaseSubscriptionRow {
+  user_id: string;
+  tier: SubscriptionTier;
+  status: SubscriptionStatus;
+  paddle_subscription_id: string | null;
+  paddle_customer_id: string | null;
+  current_period_end: string | null; // timestamptz ISO
+  updated_at: string;
+  raw_payload: string | null;
+}
+
+function rowToSubscriptionFromSqlite(row: SqliteSubscriptionRow | undefined): UserSubscription | null {
   if (!row) return null;
   return {
     userId: row.user_id,
@@ -191,21 +290,54 @@ function rowToSubscription(row: SubscriptionRow | undefined): UserSubscription |
   };
 }
 
-export function getUserSubscription(userId: string): UserSubscription | null {
+function rowToSubscriptionFromSupabase(row: SupabaseSubscriptionRow | null): UserSubscription | null {
+  if (!row) return null;
+  return {
+    userId: row.user_id,
+    tier: row.tier,
+    status: row.status,
+    paddleSubscriptionId: row.paddle_subscription_id,
+    paddleCustomerId: row.paddle_customer_id,
+    currentPeriodEnd: row.current_period_end ? new Date(row.current_period_end).getTime() : null,
+    updatedAt: new Date(row.updated_at).getTime(),
+  };
+}
+
+export async function getUserSubscription(userId: string): Promise<UserSubscription | null> {
+  logBackendOnce();
+  if (isSupabase()) {
+    const { data, error } = await sb()
+      .from('user_subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) throw new Error(`getUserSubscription: ${error.message}`);
+    return rowToSubscriptionFromSupabase(data as SupabaseSubscriptionRow | null);
+  }
   const row = getDb()
     .prepare('SELECT * FROM user_subscriptions WHERE user_id = ?')
-    .get(userId) as SubscriptionRow | undefined;
-  return rowToSubscription(row);
+    .get(userId) as SqliteSubscriptionRow | undefined;
+  return rowToSubscriptionFromSqlite(row);
 }
 
-export function findSubscriptionByPaddleId(paddleSubscriptionId: string): UserSubscription | null {
+export async function findSubscriptionByPaddleId(paddleSubscriptionId: string): Promise<UserSubscription | null> {
+  logBackendOnce();
+  if (isSupabase()) {
+    const { data, error } = await sb()
+      .from('user_subscriptions')
+      .select('*')
+      .eq('paddle_subscription_id', paddleSubscriptionId)
+      .maybeSingle();
+    if (error) throw new Error(`findSubscriptionByPaddleId: ${error.message}`);
+    return rowToSubscriptionFromSupabase(data as SupabaseSubscriptionRow | null);
+  }
   const row = getDb()
     .prepare('SELECT * FROM user_subscriptions WHERE paddle_subscription_id = ?')
-    .get(paddleSubscriptionId) as SubscriptionRow | undefined;
-  return rowToSubscription(row);
+    .get(paddleSubscriptionId) as SqliteSubscriptionRow | undefined;
+  return rowToSubscriptionFromSqlite(row);
 }
 
-export function upsertSubscription(params: {
+export async function upsertSubscription(params: {
   userId: string;
   tier: SubscriptionTier;
   status: SubscriptionStatus;
@@ -213,7 +345,30 @@ export function upsertSubscription(params: {
   paddleCustomerId: string | null;
   currentPeriodEnd: number | null;
   rawPayload: string | null;
-}): void {
+}): Promise<void> {
+  logBackendOnce();
+  if (isSupabase()) {
+    const { error } = await sb()
+      .from('user_subscriptions')
+      .upsert(
+        {
+          user_id: params.userId,
+          tier: params.tier,
+          status: params.status,
+          paddle_subscription_id: params.paddleSubscriptionId,
+          paddle_customer_id: params.paddleCustomerId,
+          current_period_end: params.currentPeriodEnd
+            ? new Date(params.currentPeriodEnd).toISOString()
+            : null,
+          // updated_at is maintained by trigger touch_updated_at;
+          // skip sending it to let the DB authoritative.
+          raw_payload: params.rawPayload,
+        },
+        { onConflict: 'user_id' },
+      );
+    if (error) throw new Error(`upsertSubscription: ${error.message}`);
+    return;
+  }
   getDb()
     .prepare(
       `INSERT INTO user_subscriptions (user_id, tier, status, paddle_subscription_id, paddle_customer_id, current_period_end, updated_at, raw_payload)
@@ -239,7 +394,9 @@ export function upsertSubscription(params: {
     });
 }
 
-// ========== ASR / 字幕任务 ==========
+// ============================================================================
+// subtitle_jobs  (Supabase | SQLite)
+// ============================================================================
 
 export interface SubtitleJobRow {
   id: string;
@@ -250,16 +407,61 @@ export interface SubtitleJobRow {
   audio_token: string | null;
   srt: string | null;
   error: string | null;
-  created_at: number;
+  created_at: number; // ms epoch (normalized at boundary)
   updated_at: number;
 }
 
-export function createSubtitleJob(params: {
+interface SupabaseSubtitleJobRaw {
+  id: string;
+  user_id: string;
+  recording_id: string;
+  status: SubtitleJobRow['status'];
+  task_id: string | null;
+  audio_token: string | null;
+  srt: string | null;
+  error: string | null;
+  created_at: string; // ISO
+  updated_at: string;
+}
+
+function jobFromSupabase(row: SupabaseSubtitleJobRaw | null): SubtitleJobRow | undefined {
+  if (!row) return undefined;
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    recording_id: row.recording_id,
+    status: row.status,
+    task_id: row.task_id,
+    audio_token: row.audio_token,
+    srt: row.srt,
+    error: row.error,
+    created_at: new Date(row.created_at).getTime(),
+    updated_at: new Date(row.updated_at).getTime(),
+  };
+}
+
+export async function createSubtitleJob(params: {
   id: string;
   userId: string;
   recordingId: string;
   audioToken: string;
-}): SubtitleJobRow {
+}): Promise<SubtitleJobRow> {
+  logBackendOnce();
+  if (isSupabase()) {
+    const { error } = await sb()
+      .from('subtitle_jobs')
+      .insert({
+        id: params.id,
+        user_id: params.userId,
+        recording_id: params.recordingId,
+        status: 'pending',
+        audio_token: params.audioToken,
+      });
+    if (error) throw new Error(`createSubtitleJob: ${error.message}`);
+    const job = await getSubtitleJob(params.id);
+    if (!job) throw new Error('createSubtitleJob: row not visible after insert');
+    return job;
+  }
   const now = Date.now();
   getDb()
     .prepare(
@@ -267,25 +469,57 @@ export function createSubtitleJob(params: {
        VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
     )
     .run(params.id, params.userId, params.recordingId, params.audioToken, now, now);
-  return getSubtitleJob(params.id)!;
+  const got = await getSubtitleJob(params.id);
+  if (!got) throw new Error('createSubtitleJob: sqlite row not visible after insert');
+  return got;
 }
 
-export function getSubtitleJob(id: string): SubtitleJobRow | undefined {
+export async function getSubtitleJob(id: string): Promise<SubtitleJobRow | undefined> {
+  logBackendOnce();
+  if (isSupabase()) {
+    const { data, error } = await sb()
+      .from('subtitle_jobs')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw new Error(`getSubtitleJob: ${error.message}`);
+    return jobFromSupabase(data as SupabaseSubtitleJobRaw | null);
+  }
   return getDb()
     .prepare('SELECT * FROM subtitle_jobs WHERE id = ?')
     .get(id) as SubtitleJobRow | undefined;
 }
 
-export function getSubtitleJobByAudioToken(audioToken: string): SubtitleJobRow | undefined {
+export async function getSubtitleJobByAudioToken(audioToken: string): Promise<SubtitleJobRow | undefined> {
+  logBackendOnce();
+  if (isSupabase()) {
+    const { data, error } = await sb()
+      .from('subtitle_jobs')
+      .select('*')
+      .eq('audio_token', audioToken)
+      .maybeSingle();
+    if (error) throw new Error(`getSubtitleJobByAudioToken: ${error.message}`);
+    return jobFromSupabase(data as SupabaseSubtitleJobRaw | null);
+  }
   return getDb()
     .prepare('SELECT * FROM subtitle_jobs WHERE audio_token = ?')
     .get(audioToken) as SubtitleJobRow | undefined;
 }
 
-export function updateSubtitleJob(
+export async function updateSubtitleJob(
   id: string,
   patch: Partial<Pick<SubtitleJobRow, 'status' | 'task_id' | 'srt' | 'error'>>,
-): void {
+): Promise<void> {
+  logBackendOnce();
+  if (isSupabase()) {
+    // updated_at is touched by the SQL trigger, no need to send it.
+    const { error } = await sb()
+      .from('subtitle_jobs')
+      .update(patch)
+      .eq('id', id);
+    if (error) throw new Error(`updateSubtitleJob: ${error.message}`);
+    return;
+  }
   const fields: string[] = [];
   const values: unknown[] = [];
   for (const [k, v] of Object.entries(patch)) {

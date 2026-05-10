@@ -16,7 +16,7 @@ export async function GET(): Promise<NextResponse<TierResponse>> {
       loggedIn: false,
     });
   }
-  const sub = getUserSubscription(userId);
+  const sub = await getUserSubscription(userId);
   if (!sub) {
     return NextResponse.json({
       tier: 'free',

@@ -18,7 +18,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!userId) {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
   }
-  const sub = getUserSubscription(userId);
+  const sub = await getUserSubscription(userId);
   const tier = sub?.tier ?? 'free';
   const status = sub?.status ?? 'inactive';
   const entitled =
@@ -59,7 +59,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   const jobId = randomUUID();
   const audioToken = randomUUID().replace(/-/g, '');
   await saveAudio(audioToken, audioBytes);
-  createSubtitleJob({ id: jobId, userId, recordingId, audioToken });
+  await createSubtitleJob({ id: jobId, userId, recordingId, audioToken });
 
   // 4) Dev / no-API-key fallback：直接给 mock SRT，方便本地 E2E
   const hasApiKey = !!process.env.DASHSCOPE_API_KEY;
@@ -70,7 +70,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     const reason = !hasApiKey
       ? '(语音服务未配置，使用示例字幕)'
       : '(本地环境无法被语音服务回调，使用示例字幕；部署到公网后自动启用)';
-    updateSubtitleJob(jobId, {
+    await updateSubtitleJob(jobId, {
       status: 'done',
       srt: `# ${reason}\n${mockSrt()}`,
     });
@@ -79,6 +79,6 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   // 5) Real path：异步提交 DashScope（client polls /api/asr/status）
   // 这里只标记为 running，提交动作放在 status 路由的第一次轮询时做（避免 submit 路由被长任务阻塞）
-  updateSubtitleJob(jobId, { status: 'pending' });
+  await updateSubtitleJob(jobId, { status: 'pending' });
   return NextResponse.json({ jobId, mock: false });
 }

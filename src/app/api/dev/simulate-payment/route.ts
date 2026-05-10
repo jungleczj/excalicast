@@ -23,7 +23,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   const amountCents = Number(process.env.SINGLE_PURCHASE_PRICE_CENTS ?? 300);
   const currency = String(process.env.SINGLE_PURCHASE_CURRENCY ?? 'usd');
-  markRecordingPaid({
+  await markRecordingPaid({
     recordingId,
     amountCents,
     currency,

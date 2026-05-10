@@ -22,7 +22,7 @@ export async function GET(_req: Request, { params }: Ctx): Promise<Response> {
     return NextResponse.json({ error: 'invalid_token' }, { status: 400 });
   }
   // Reject tokens not matching any active job (defence-in-depth)
-  const job = getSubtitleJobByAudioToken(token);
+  const job = await getSubtitleJobByAudioToken(token);
   if (!job || job.status === 'done' || job.status === 'failed') {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
   }

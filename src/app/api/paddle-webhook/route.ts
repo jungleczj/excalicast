@@ -26,7 +26,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   // 1) 一次性购买（去水印 / 单次解锁）
   const txEvent = parseTransactionCompleted(payload);
   if (txEvent) {
-    markRecordingPaid({
+    await markRecordingPaid({
       recordingId: txEvent.recordingId,
       amountCents: txEvent.amountCents,
       currency: txEvent.currency,
@@ -39,7 +39,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   // 2) 订阅生命周期（Pro / Max）
   const subEvent = parseSubscriptionEvent(payload);
   if (subEvent) {
-    upsertSubscription({
+    await upsertSubscription({
       userId: subEvent.userId,
       tier: subEvent.tier,
       status: subEvent.status,

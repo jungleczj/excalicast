@@ -27,7 +27,7 @@ export async function GET(req: Request): Promise<NextResponse<StatusResponse>> {
   const jobId = url.searchParams.get('jobId');
   if (!jobId) return NextResponse.json({ status: 'failed', error: 'missing_job_id' }, { status: 400 });
 
-  const job = getSubtitleJob(jobId);
+  const job = await getSubtitleJob(jobId);
   if (!job) return NextResponse.json({ status: 'failed', error: 'job_not_found' }, { status: 404 });
   if (job.user_id !== userId) {
     return NextResponse.json({ status: 'failed', error: 'forbidden' }, { status: 403 });
@@ -44,31 +44,31 @@ export async function GET(req: Request): Promise<NextResponse<StatusResponse>> {
       const audioToken = job.audio_token!;
       const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '');
       if (!appUrl) {
-        updateSubtitleJob(jobId, { status: 'failed', error: 'NEXT_PUBLIC_APP_URL not set' });
+        await updateSubtitleJob(jobId, { status: 'failed', error: 'NEXT_PUBLIC_APP_URL not set' });
         return NextResponse.json({ status: 'failed', error: 'NEXT_PUBLIC_APP_URL not set' });
       }
       const fileUrl = `${appUrl}/api/asr/audio/${audioToken}`;
       const submit = await submitTranscriptionTask({ fileUrl });
-      updateSubtitleJob(jobId, { status: 'running', task_id: submit.taskId });
+      await updateSubtitleJob(jobId, { status: 'running', task_id: submit.taskId });
       return NextResponse.json({ status: 'running' });
     }
 
     // running → poll once
     if (!job.task_id) {
-      updateSubtitleJob(jobId, { status: 'failed', error: 'missing_task_id' });
+      await updateSubtitleJob(jobId, { status: 'failed', error: 'missing_task_id' });
       return NextResponse.json({ status: 'failed', error: 'missing_task_id' });
     }
     const poll = await pollTranscriptionTaskOnce(job.task_id);
     if (poll.status === 'SUCCEEDED' && poll.transcriptionUrl) {
       const sentences = await fetchTranscriptionResult(poll.transcriptionUrl);
       const srt = sentencesToSrt(sentences);
-      updateSubtitleJob(jobId, { status: 'done', srt });
+      await updateSubtitleJob(jobId, { status: 'done', srt });
       if (job.audio_token) await deleteAudio(job.audio_token);
       return NextResponse.json({ status: 'done', srt });
     }
     if (poll.status === 'FAILED' || poll.status === 'CANCELED') {
       const err = poll.errorMessage ?? poll.status;
-      updateSubtitleJob(jobId, { status: 'failed', error: err });
+      await updateSubtitleJob(jobId, { status: 'failed', error: err });
       if (job.audio_token) await deleteAudio(job.audio_token);
       return NextResponse.json({ status: 'failed', error: err });
     }
@@ -76,7 +76,7 @@ export async function GET(req: Request): Promise<NextResponse<StatusResponse>> {
     return NextResponse.json({ status: 'running' });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'unknown';
-    updateSubtitleJob(jobId, { status: 'failed', error: msg });
+    await updateSubtitleJob(jobId, { status: 'failed', error: msg });
     return NextResponse.json({ status: 'failed', error: msg });
   }
 }

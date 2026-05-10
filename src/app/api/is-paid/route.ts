@@ -16,7 +16,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!recordingId || typeof recordingId !== 'string') {
     return NextResponse.json({ error: 'missing_recording_id' }, { status: 400 });
   }
-  const paid = isRecordingPaid(recordingId);
+  const paid = await isRecordingPaid(recordingId);
   const resp: IsPaidResponse = { paid };
   return NextResponse.json(resp);
 }
