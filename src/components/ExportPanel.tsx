@@ -236,7 +236,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
         <div className="space-y-2">
           <FeatureRow
             icon={<I.Subtitles size={16} />}
-            title="AI 字幕（千问 ASR）"
+            title="语音字幕"
             desc="音频转写 · 中英自动 · 内嵌 SRT"
             tier="Pro"
             unlocked={subscription.permissions.subtitle}

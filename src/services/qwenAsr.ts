@@ -151,13 +151,13 @@ export function sentencesToSrt(sentences: QwenAsrSentence[]): string {
 }
 
 /**
- * Mock SRT for dev/E2E when DASHSCOPE_API_KEY is unavailable.
+ * Mock SRT for dev/E2E when no transcription service key is configured.
  * Returns a tiny valid SRT so UI flow can be verified end-to-end without external deps.
  */
 export function mockSrt(): string {
   return sentencesToSrt([
-    { begin_time: 0, end_time: 3000, text: '[Mock 字幕] 这是一段示例字幕，用于本地开发联调。' },
-    { begin_time: 3000, end_time: 7000, text: '设置 DASHSCOPE_API_KEY 后将切换到真实千问 ASR。' },
-    { begin_time: 7000, end_time: 12000, text: '阿里千问 Paraformer-v2 模型，支持中英自动识别。' },
+    { begin_time: 0, end_time: 3000, text: '[示例字幕] 这是一段占位字幕，用于本地联调。' },
+    { begin_time: 3000, end_time: 7000, text: '配置好语音服务密钥后将自动切换到真实转写。' },
+    { begin_time: 7000, end_time: 12000, text: '支持中英文自动识别，输出 SRT 时间轴文件。' },
   ]);
 }

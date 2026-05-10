@@ -25,7 +25,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     (status === 'active' || status === 'paused') && TIER_PERMISSIONS[tier].subtitle;
   if (!entitled) {
     return NextResponse.json(
-      { error: 'tier_required', message: 'AI 字幕需要 Pro 订阅' },
+      { error: 'tier_required', message: '字幕功能需要 Pro 订阅' },
       { status: 403 },
     );
   }
@@ -68,8 +68,8 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   if (!hasApiKey || isLocalhost) {
     const reason = !hasApiKey
-      ? '(无 DASHSCOPE_API_KEY，使用 mock SRT)'
-      : '(本地环境 DashScope 无法回调 localhost，使用 mock SRT；部署到公网后自动启用真实千问)';
+      ? '(语音服务未配置，使用示例字幕)'
+      : '(本地环境无法被语音服务回调，使用示例字幕；部署到公网后自动启用)';
     updateSubtitleJob(jobId, {
       status: 'done',
       srt: `# ${reason}\n${mockSrt()}`,

@@ -14,7 +14,7 @@ interface ProvidersInfo {
 }
 
 /**
- * 登录卡片（参考 Anthropic claude.ai 登录样式）：
+ * 登录卡片：
  *   ┌──────────────────────────────────┐
  *   │  G  Continue with Google         │
  *   ├────────── OR ────────────────────│

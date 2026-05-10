@@ -114,9 +114,9 @@ export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Elemen
             <I.Subtitles size={22} />
           </div>
           <div>
-            <h2 className="text-[20px] font-bold leading-tight text-text-primary">AI 字幕（千问 ASR）</h2>
+            <h2 className="text-[20px] font-bold leading-tight text-text-primary">语音字幕</h2>
             <p className="text-[12px] text-text-secondary">
-              使用阿里千问 Paraformer-v2 模型，自动识别中英文，输出 SRT 时间轴
+              自动识别中英文，输出 SRT 时间轴文件
             </p>
           </div>
         </div>
@@ -140,8 +140,8 @@ export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Elemen
             />
             <span className="text-[12px] text-text-primary">
               {phase === 'uploading' && '正在上传音频…'}
-              {phase === 'pending' && '已提交到千问，等待开始转写…'}
-              {phase === 'running' && '千问 ASR 正在转写中（按音频时长 30-60 秒）…'}
+              {phase === 'pending' && '已提交转写任务，等待开始…'}
+              {phase === 'running' && '正在转写中（按音频时长 30-60 秒）…'}
             </span>
           </div>
         )}

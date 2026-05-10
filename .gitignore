@@ -12,3 +12,5 @@ client_secret*.json
 .vercel
 *.tsbuildinfo
 .worktrees/
+supabase/.temp/
+supabase/.branches/
