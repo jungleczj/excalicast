@@ -1,10 +1,29 @@
 import crypto from 'node:crypto';
+import type { SubscriptionStatus, SubscriptionTier } from '@/types/user';
 
 export interface PaddleTransactionCompleted {
   transactionId: string;
   recordingId: string;
   amountCents: number;
   currency: string;
+}
+
+export interface PaddleSubscriptionEvent {
+  eventType:
+    | 'subscription.activated'
+    | 'subscription.created'
+    | 'subscription.updated'
+    | 'subscription.cancelled'
+    | 'subscription.paused'
+    | 'subscription.resumed'
+    | 'subscription.past_due'
+    | 'subscription.trialing';
+  subscriptionId: string;
+  customerId: string | null;
+  userId: string;             // 来自 custom_data.userId（前端打开 checkout 时塞进去）
+  tier: SubscriptionTier;     // 来自 custom_data.tier（默认 pro）
+  status: SubscriptionStatus;
+  currentPeriodEnd: number | null;
 }
 
 /**
@@ -76,5 +95,77 @@ export function parseTransactionCompleted(payload: unknown): PaddleTransactionCo
     recordingId,
     amountCents: Number.isFinite(amountCents) ? amountCents : 0,
     currency,
+  };
+}
+
+const SUB_EVENT_TYPES = new Set([
+  'subscription.activated',
+  'subscription.created',
+  'subscription.updated',
+  'subscription.cancelled',
+  'subscription.paused',
+  'subscription.resumed',
+  'subscription.past_due',
+  'subscription.trialing',
+]);
+
+/**
+ * Map Paddle subscription event_type + status fields to our internal SubscriptionStatus.
+ */
+function mapPaddleStatus(eventType: string, paddleStatus: string | undefined): SubscriptionStatus {
+  if (eventType === 'subscription.cancelled') return 'cancelled';
+  if (eventType === 'subscription.paused') return 'paused';
+  if (eventType === 'subscription.past_due') return 'past_due';
+  if (paddleStatus === 'active' || paddleStatus === 'trialing') return 'active';
+  if (paddleStatus === 'paused') return 'paused';
+  if (paddleStatus === 'past_due') return 'past_due';
+  if (paddleStatus === 'canceled' || paddleStatus === 'cancelled') return 'cancelled';
+  return 'active';
+}
+
+/**
+ * Parse any subscription.* Paddle webhook event.
+ * Requires custom_data.userId (set when client opens checkout).
+ * Optional custom_data.tier defaults to 'pro'.
+ *
+ * Returns null if not a subscription event or userId missing.
+ */
+export function parseSubscriptionEvent(payload: unknown): PaddleSubscriptionEvent | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const p = payload as Record<string, unknown>;
+  const eventType = typeof p.event_type === 'string' ? p.event_type : '';
+  if (!SUB_EVENT_TYPES.has(eventType)) return null;
+
+  const data = p.data as Record<string, unknown> | undefined;
+  if (!data) return null;
+
+  const subscriptionId = typeof data.id === 'string' ? data.id : '';
+  if (!subscriptionId) return null;
+
+  const customerId = typeof data.customer_id === 'string' ? data.customer_id : null;
+  const customData = data.custom_data as Record<string, unknown> | undefined;
+  const userId = customData && typeof customData.userId === 'string' ? customData.userId : '';
+  if (!userId) return null;
+
+  const tierRaw = customData && typeof customData.tier === 'string' ? customData.tier : 'pro';
+  const tier: SubscriptionTier =
+    tierRaw === 'pro' || tierRaw === 'max' ? (tierRaw as SubscriptionTier) : 'pro';
+
+  const paddleStatus = typeof data.status === 'string' ? data.status : undefined;
+  const status = mapPaddleStatus(eventType, paddleStatus);
+
+  // Paddle billing periods live at data.current_billing_period.{starts_at, ends_at} (ISO strings)
+  const cbp = data.current_billing_period as Record<string, unknown> | undefined;
+  const endsAt = cbp && typeof cbp.ends_at === 'string' ? cbp.ends_at : undefined;
+  const currentPeriodEnd = endsAt ? Date.parse(endsAt) : null;
+
+  return {
+    eventType: eventType as PaddleSubscriptionEvent['eventType'],
+    subscriptionId,
+    customerId,
+    userId,
+    tier,
+    status,
+    currentPeriodEnd: Number.isFinite(currentPeriodEnd ?? NaN) ? currentPeriodEnd : null,
   };
 }

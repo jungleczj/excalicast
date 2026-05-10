@@ -8,12 +8,12 @@ import { useAuth } from '@/hooks/useAuth';
 import { LoginModal } from '@/components/LoginModal';
 
 interface Props {
-  tier?: 'free' | 'one_time' | 'pro' | 'max';
+  tier?: 'free' | 'pro' | 'max';
+  onUpgradePro?: () => void;
 }
 
 const TIER_BADGE: Record<NonNullable<Props['tier']>, { label: string; bg: string; color: string }> = {
   free:     { label: 'Free',     bg: 'bg-bg-tertiary',         color: 'text-text-secondary' },
-  one_time: { label: '1× Token', bg: 'bg-accent-100',          color: 'text-accent-600' },
   pro:      { label: 'Pro',      bg: 'bg-primary-100',         color: 'text-primary-700' },
   max:      { label: 'Max',      bg: '',                       color: 'text-white' },
 };
@@ -32,7 +32,7 @@ export function Brand(): JSX.Element {
   );
 }
 
-export function AppHeader({ tier = 'free' }: Props): JSX.Element {
+export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
   const pathname = usePathname();
   const onLib = pathname?.startsWith('/library');
   const onRecord = pathname === '/app' || pathname?.startsWith('/export');
@@ -65,6 +65,16 @@ export function AppHeader({ tier = 'free' }: Props): JSX.Element {
           </nav>
         </div>
         <div className="flex items-center gap-2.5">
+          {tier === 'free' && onUpgradePro && (
+            <button
+              type="button"
+              onClick={onUpgradePro}
+              className="rounded-full px-3 py-[5px] text-[11px] font-bold text-white"
+              style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)', boxShadow: '0 2px 6px rgba(59,130,246,0.4)' }}
+            >
+              升级 Pro
+            </button>
+          )}
           <span
             className={`rounded-full px-2.5 py-[3px] text-[11px] font-semibold ${badge.bg} ${badge.color}`}
             style={tier === 'max' ? { background: 'linear-gradient(90deg, #9333ea, #db2777)' } : undefined}

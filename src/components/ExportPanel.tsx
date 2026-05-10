@@ -5,6 +5,10 @@ import { exportRecording, downloadBlob } from '@/services/exportPipeline';
 import { isPaid } from '@/services/paymentClient';
 import { I } from '@/components/icons';
 import { PaywallModal } from '@/components/PaywallModal';
+import { ProUpgradeModal } from '@/components/ProUpgradeModal';
+import { SubtitlePanel } from '@/components/SubtitlePanel';
+import { useSubscription } from '@/hooks/useSubscription';
+import { ProBadge } from '@/components/ProBadge';
 import type { ExportConfig } from '@/types/recording';
 
 export interface ExportProgressState {
@@ -21,15 +25,22 @@ interface Props {
 }
 
 export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateChange, onProgress }: Props): JSX.Element {
+  const subscription = useSubscription();
   const [paid, setPaid] = useState<boolean>(false);
   const [busy, setBusy] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string>('');
   const [paywallOpen, setPaywallOpen] = useState<boolean>(false);
+  const [proUpgradeOpen, setProUpgradeOpen] = useState<boolean>(false);
+  const [subtitlePanelOpen, setSubtitlePanelOpen] = useState<boolean>(false);
   // 用户点过 "渲染并下载（无水印）" 但因未付款被拦截。state（不是 ref）以便 effect 响应它。
   const [pendingExport, setPendingExport] = useState<boolean>(false);
   // 后台轮询是否正在跑，用来在 UI 上展示状态
   const [bgPolling, setBgPolling] = useState<boolean>(false);
+
+  // 解锁条件：(a) 本录制单次购买已支付 OR (b) 用户是 Pro/Max
+  const proUnlocked = subscription.permissions.exportWithoutWatermark;
+  const effectivelyUnlocked = paid || proUnlocked;
 
   const refreshPaid = useCallback(async () => {
     try {
@@ -43,8 +54,13 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
 
   useEffect(() => { void refreshPaid(); }, [refreshPaid]);
 
+  // Pro 解锁了 → 同步通知父级（用于库存当前状态）
+  useEffect(() => {
+    if (proUnlocked) onPaidStateChange?.(true);
+  }, [proUnlocked, onPaidStateChange]);
+
   const handleExport = useCallback(async () => {
-    if (!config.withWatermark && !paid) {
+    if (!config.withWatermark && !effectivelyUnlocked) {
       setPendingExport(true);
       setPaywallOpen(true);
       return;
@@ -84,21 +100,21 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
       setBusy(false);
       onProgress?.(null);
     }
-  }, [config, recordingId, paid, onProgress]);
+  }, [config, recordingId, effectivelyUnlocked, onProgress]);
 
-  // 付费成功后自动重启导出：上一次 handleExport 因 !paid 被拦截，pendingExport=true。
-  // paid 翻 true 时（来自 PaywallModal 轮询、ExportPanel 后台轮询、或 dev mock），触发一次。
+  // 付费成功后自动重启导出：上一次 handleExport 因 !effectivelyUnlocked 被拦截，pendingExport=true。
+  // paid 翻 true 或用户升级 Pro 后，触发一次。
   useEffect(() => {
-    if (paid && pendingExport) {
+    if (effectivelyUnlocked && pendingExport) {
       setPendingExport(false);
       void handleExport();
     }
-  }, [paid, pendingExport, handleExport]);
+  }, [effectivelyUnlocked, pendingExport, handleExport]);
 
-  // 后台轮询：modal 关闭后如果 pendingExport=true 且仍未 paid，继续每 3s 检查 /api/is-paid
-  // 最多轮询 5 分钟，期间在 UI 上显示提示，paid 翻 true 后由上面的 effect 自动触发下载
+  // 后台轮询：modal 关闭后如果 pendingExport=true 且仍未解锁，继续每 3s 检查 /api/is-paid
+  // 最多轮询 5 分钟，期间在 UI 上显示提示，解锁后由上面的 effect 自动触发下载
   useEffect(() => {
-    if (paid || !pendingExport || paywallOpen) {
+    if (effectivelyUnlocked || !pendingExport || paywallOpen) {
       setBgPolling(false);
       return;
     }
@@ -120,9 +136,9 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
       clearInterval(id);
       setBgPolling(false);
     };
-  }, [paid, pendingExport, paywallOpen, refreshPaid]);
+  }, [effectivelyUnlocked, pendingExport, paywallOpen, refreshPaid]);
 
-  const isCleanLocked = !config.withWatermark && !paid;
+  const isCleanLocked = !config.withWatermark && !effectivelyUnlocked;
 
   return (
     <div className="space-y-3">
@@ -144,8 +160,20 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
             selected={!config.withWatermark}
             onClick={() => onConfigChange({ ...config, withWatermark: false })}
             title="无水印导出"
-            meta={paid ? '已购买 · 永久解锁' : '$3 · 单次购买'}
-            hint={paid ? '本录制可任意比例反复导出无水印' : '点导出按钮即触发付费'}
+            meta={
+              proUnlocked
+                ? 'Pro · 全部解锁'
+                : paid
+                  ? '已购买 · 永久解锁'
+                  : '$3 单次 / Pro 订阅'
+            }
+            hint={
+              proUnlocked
+                ? '订阅期内所有录制无限次无水印导出'
+                : paid
+                  ? '本录制可任意比例反复导出无水印'
+                  : '点导出按钮选择单次购买或升级 Pro'
+            }
             accent={!config.withWatermark}
           />
         </div>
@@ -174,9 +202,16 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
           )}
         </button>
 
-        {paid && (
+        {(paid || proUnlocked) && (
           <p className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-success-600">
-            <I.Check size={12} sw={2.5} /> 本录制已解锁，无水印导出不再额外付费
+            <I.Check size={12} sw={2.5} />
+            {proUnlocked ? (
+              <span className="flex items-center gap-1">
+                <ProBadge tier={subscription.tier} /> 已解锁，所有录制都可无水印导出
+              </span>
+            ) : (
+              '本录制已解锁，无水印导出不再额外付费'
+            )}
           </p>
         )}
       </div>
@@ -184,12 +219,35 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
       <div className="border-t border-border-default" />
 
       <div>
-        <h3 className="mb-2 text-[13px] font-semibold text-text-primary">进阶服务</h3>
+        <h3 className="mb-2 flex items-center gap-2 text-[13px] font-semibold text-text-primary">
+          进阶服务
+          {!proUnlocked && (
+            <button
+              type="button"
+              onClick={() => setProUpgradeOpen(true)}
+              className="ml-auto rounded-md px-2 py-1 text-[11px] font-bold text-white"
+              style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }}
+            >
+              升级 Pro
+            </button>
+          )}
+        </h3>
         <p className="mb-3 text-[11px] leading-relaxed text-text-secondary">把这次录制变成可复用的知识。</p>
         <div className="space-y-2">
-          <FeatureRow icon={<I.Subtitles size={16} />} title="字幕（SRT + 嵌入）" desc="音频转写 · ~30s · 准确率 90%+" tier="Pro" />
-          <FeatureRow icon={<I.Sparkles size={16} />} title="结构化讲义" desc="结构化 Markdown · 关键帧 + 文稿" tier="Max" highlight />
-          <FeatureRow icon={<I.Share size={16} />} title="分享链接" desc="网页回放 · 30 天 TTL" tier="Max" highlight />
+          <FeatureRow
+            icon={<I.Subtitles size={16} />}
+            title="AI 字幕（千问 ASR）"
+            desc="音频转写 · 中英自动 · 内嵌 SRT"
+            tier="Pro"
+            unlocked={subscription.permissions.subtitle}
+            actionLabel={subscription.permissions.subtitle ? '生成字幕' : '升级 Pro'}
+            onAction={() => {
+              if (subscription.permissions.subtitle) setSubtitlePanelOpen(true);
+              else setProUpgradeOpen(true);
+            }}
+          />
+          <FeatureRow icon={<I.Sparkles size={16} />} title="结构化讲义" desc="结构化 Markdown · 关键帧 + 文稿" tier="Max" highlight unlocked={false} />
+          <FeatureRow icon={<I.Share size={16} />} title="分享链接" desc="网页回放 · 30 天 TTL" tier="Max" highlight unlocked={false} />
         </div>
       </div>
 
@@ -217,6 +275,23 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
           setStatusMsg('已解锁，无水印模式已开启。');
           void refreshPaid();
         }}
+        onUpgradePro={() => {
+          setPaywallOpen(false);
+          setProUpgradeOpen(true);
+        }}
+      />
+      <ProUpgradeModal
+        open={proUpgradeOpen}
+        onClose={() => setProUpgradeOpen(false)}
+        onUpgraded={() => {
+          setStatusMsg('Pro 已激活，所有录制无水印导出已开启。');
+          void subscription.refresh();
+        }}
+      />
+      <SubtitlePanel
+        open={subtitlePanelOpen}
+        recordingId={recordingId}
+        onClose={() => setSubtitlePanelOpen(false)}
       />
     </div>
   );
@@ -259,9 +334,38 @@ function RadioCard({ selected, onClick, title, meta, hint, accent }: RadioCardPr
   );
 }
 
-function FeatureRow({ icon, title, desc, tier, highlight }: {
-  icon: React.ReactNode; title: string; desc: string; tier: string; highlight?: boolean;
+function FeatureRow({ icon, title, desc, tier, highlight, unlocked, actionLabel, onAction }: {
+  icon: React.ReactNode;
+  title: string;
+  desc: string;
+  tier: string;
+  highlight?: boolean;
+  unlocked: boolean;
+  actionLabel?: string;
+  onAction?: () => void;
 }): JSX.Element {
+  const button = onAction ? (
+    <button
+      type="button"
+      onClick={onAction}
+      className="flex items-center gap-1 rounded border px-2.5 py-1 text-[11px] font-semibold"
+      style={
+        unlocked
+          ? { background: 'var(--primary-600)', color: 'white', borderColor: 'var(--primary-600)' }
+          : { background: 'var(--bg-primary)', color: 'var(--text-primary)', borderColor: 'var(--border-strong)' }
+      }
+    >
+      {!unlocked && <I.Lock size={10} />}
+      {actionLabel ?? (unlocked ? '使用' : '升级')}
+    </button>
+  ) : (
+    <button
+      disabled
+      className="flex items-center gap-1 rounded border border-border-strong bg-bg-primary px-2.5 py-1 text-[11px] font-semibold text-text-primary opacity-60"
+    >
+      <I.Lock size={10} /> 升级
+    </button>
+  );
   return (
     <div className="flex items-center gap-3 rounded-md border border-border-default bg-bg-secondary px-3 py-2.5">
       <div
@@ -285,12 +389,7 @@ function FeatureRow({ icon, title, desc, tier, highlight }: {
         </div>
         <div className="mt-0.5 text-[11px] text-text-secondary">{desc}</div>
       </div>
-      <button
-        disabled
-        className="flex items-center gap-1 rounded border border-border-strong bg-bg-primary px-2.5 py-1 text-[11px] font-semibold text-text-primary opacity-60"
-      >
-        <I.Lock size={10} /> 升级
-      </button>
+      {button}
     </div>
   );
 }

@@ -11,13 +11,14 @@ interface Props {
   recordingId: string;
   onClose: () => void;
   onPaid?: () => void;
+  onUpgradePro?: () => void;
 }
 
 const PRICE_USD = '$3';
 const POLL_INTERVAL_MS = 1000;
 const POLL_MAX_ATTEMPTS = 30; // 30s 内大多数 webhook 都到了；之后由 ExportPanel 接管背景轮询
 
-export function PaywallModal({ open, recordingId, onClose, onPaid }: Props): JSX.Element | null {
+export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro }: Props): JSX.Element | null {
   const { paddle, subscribe } = usePaddle();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -175,6 +176,19 @@ export function PaywallModal({ open, recordingId, onClose, onPaid }: Props): JSX
             {busy ? '正在打开 Paddle…' : `立即解锁 · ${PRICE_USD}`}
           </button>
         </div>
+
+        {onUpgradePro && (
+          <button
+            onClick={() => {
+              onClose();
+              onUpgradePro();
+            }}
+            disabled={busy}
+            className="mt-3 w-full rounded-md border border-primary-600 bg-primary-50 px-4 py-2 text-[12px] font-semibold text-primary-700 hover:bg-primary-100 disabled:opacity-40"
+          >
+            或升级 Pro · $9/月 · 所有录制无限次无水印 + AI 字幕
+          </button>
+        )}
 
         {showDevLink && (
           <button

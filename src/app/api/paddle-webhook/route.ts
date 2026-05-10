@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
-import { verifyWebhookSignature, parseTransactionCompleted } from '@/lib/paddle';
-import { markRecordingPaid } from '@/lib/db';
+import {
+  verifyWebhookSignature,
+  parseTransactionCompleted,
+  parseSubscriptionEvent,
+} from '@/lib/paddle';
+import { markRecordingPaid, upsertSubscription } from '@/lib/db';
 
 export const runtime = 'nodejs';
 
@@ -19,18 +23,33 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
   }
 
-  const event = parseTransactionCompleted(payload);
-  if (!event) {
-    return NextResponse.json({ ok: true, ignored: true });
+  // 1) 一次性购买（去水印 / 单次解锁）
+  const txEvent = parseTransactionCompleted(payload);
+  if (txEvent) {
+    markRecordingPaid({
+      recordingId: txEvent.recordingId,
+      amountCents: txEvent.amountCents,
+      currency: txEvent.currency,
+      paddleTransactionId: txEvent.transactionId,
+      rawPayload: rawBody,
+    });
+    return NextResponse.json({ ok: true, kind: 'transaction.completed' });
   }
 
-  markRecordingPaid({
-    recordingId: event.recordingId,
-    amountCents: event.amountCents,
-    currency: event.currency,
-    paddleTransactionId: event.transactionId,
-    rawPayload: rawBody,
-  });
+  // 2) 订阅生命周期（Pro / Max）
+  const subEvent = parseSubscriptionEvent(payload);
+  if (subEvent) {
+    upsertSubscription({
+      userId: subEvent.userId,
+      tier: subEvent.tier,
+      status: subEvent.status,
+      paddleSubscriptionId: subEvent.subscriptionId,
+      paddleCustomerId: subEvent.customerId,
+      currentPeriodEnd: subEvent.currentPeriodEnd,
+      rawPayload: rawBody,
+    });
+    return NextResponse.json({ ok: true, kind: subEvent.eventType });
+  }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, ignored: true });
 }
