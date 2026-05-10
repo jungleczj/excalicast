@@ -74,7 +74,10 @@ CREATE POLICY user_subscriptions_self_read
   ON public.user_subscriptions
   FOR SELECT
   TO authenticated
-  USING ((auth.jwt() ->> 'sub') = user_id);
+  -- Wrap auth.jwt() in a subquery so Postgres evaluates it once per query
+  -- (initplan) instead of once per row. Required by Supabase advisor
+  -- auth_rls_initplan, see docs/guides/database/postgres/row-level-security.
+  USING ((SELECT auth.jwt() ->> 'sub') = user_id);
 
 COMMENT ON TABLE  public.user_subscriptions                       IS 'Pro/Max subscription state, written by Paddle webhook only.';
 COMMENT ON COLUMN public.user_subscriptions.user_id               IS 'NextAuth token.sub (text). If migrating to Supabase Auth, change to uuid + FK to auth.users.';
@@ -108,7 +111,10 @@ CREATE POLICY subtitle_jobs_self_read
   ON public.subtitle_jobs
   FOR SELECT
   TO authenticated
-  USING ((auth.jwt() ->> 'sub') = user_id);
+  -- Wrap auth.jwt() in a subquery so Postgres evaluates it once per query
+  -- (initplan) instead of once per row. Required by Supabase advisor
+  -- auth_rls_initplan, see docs/guides/database/postgres/row-level-security.
+  USING ((SELECT auth.jwt() ->> 'sub') = user_id);
 
 COMMENT ON TABLE  public.subtitle_jobs              IS 'Qwen ASR transcription jobs (DashScope paraformer-v2). Written by /api/asr/* server routes only.';
 COMMENT ON COLUMN public.subtitle_jobs.audio_token  IS 'Random per-job nonce; combined with /api/asr/audio/[token] gives DashScope a temporary fetchable URL.';
@@ -118,7 +124,13 @@ COMMENT ON COLUMN public.subtitle_jobs.srt          IS 'Final SRT text (timestam
 -- ---------- updated_at touch trigger ---------------------------------------
 
 CREATE OR REPLACE FUNCTION public.touch_updated_at() RETURNS trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''           -- pin to empty to satisfy Supabase advisor
+                                -- (function_search_path_mutable lint).
+                                -- All identifiers here are built-ins (pg_catalog),
+                                -- so an empty search_path is safe.
+AS $$
 BEGIN
   NEW.updated_at := now();
   RETURN NEW;
