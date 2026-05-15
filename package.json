@@ -25,6 +25,7 @@
     "uuid": "^10.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.7.5",
     "@types/react": "^18.3.11",

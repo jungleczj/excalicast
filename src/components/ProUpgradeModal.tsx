@@ -37,19 +37,11 @@ export function ProUpgradeModal({ open, onClose, onUpgraded }: Props): JSX.Eleme
   const [resumeUpgradeAfterLogin, setResumeUpgradeAfterLogin] = useState(false);
   const pollingRef = useRef(false);
 
-  useEffect(() => {
-    if (!open) return;
-    const unsubscribe = subscribe((event) => {
-      if (event.name === 'checkout.completed') {
-        setStatusMsg('支付完成，正在等待订阅生效…');
-        if (paddle) closeCheckout(paddle);
-        void pollUntilPro();
-      } else if (event.name === 'checkout.closed') {
-        if (!pollingRef.current) setBusy(false);
-      }
-    });
-    return unsubscribe;
-  }, [open, paddle, subscribe]); // eslint-disable-line react-hooks/exhaustive-deps
+  // -----------------------------------------------------------------------
+  // ⚠️ 所有 hooks（useEffect / useState / useRef / useXxx）必须出现在任何
+  // 提前 return（如 `if (!open) return null`）**之前**，否则 React 会
+  // 报 "Rendered more hooks than during the previous render"。
+  // -----------------------------------------------------------------------
 
   const pollUntilPro = async () => {
     if (pollingRef.current) return;
@@ -81,10 +73,6 @@ export function ProUpgradeModal({ open, onClose, onUpgraded }: Props): JSX.Eleme
     }
   };
 
-  if (!open) return null;
-
-  const needLogin = !user && !authLoading;
-
   const openPaddleCheckout = (u: { id: string; email: string }) => {
     if (!paddle) {
       setError('Paddle 尚未初始化，请稍后重试或检查网络。');
@@ -99,6 +87,33 @@ export function ProUpgradeModal({ open, onClose, onUpgraded }: Props): JSX.Eleme
     }
   };
 
+  useEffect(() => {
+    if (!open) return;
+    const unsubscribe = subscribe((event) => {
+      if (event.name === 'checkout.completed') {
+        setStatusMsg('支付完成，正在等待订阅生效…');
+        if (paddle) closeCheckout(paddle);
+        void pollUntilPro();
+      } else if (event.name === 'checkout.closed') {
+        if (!pollingRef.current) setBusy(false);
+      }
+    });
+    return unsubscribe;
+  }, [open, paddle, subscribe]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 登录完成（useAuth().user 变成非空）+ 用户之前点过"升级"  → 自动续接
+  useEffect(() => {
+    if (!open) return;
+    if (resumeUpgradeAfterLogin && user && !loginOpen) {
+      setResumeUpgradeAfterLogin(false);
+      openPaddleCheckout(user);
+    }
+  }, [open, resumeUpgradeAfterLogin, user, loginOpen, paddle]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!open) return null;
+
+  const needLogin = !user && !authLoading;
+
   const handleUpgrade = () => {
     setError(null);
     setStatusMsg(null);
@@ -110,15 +125,6 @@ export function ProUpgradeModal({ open, onClose, onUpgraded }: Props): JSX.Eleme
     }
     openPaddleCheckout(user);
   };
-
-  // 登录完成（useAuth().user 变成非空）+ 用户之前点过"升级"  → 自动续接
-  useEffect(() => {
-    if (!open) return;
-    if (resumeUpgradeAfterLogin && user && !loginOpen) {
-      setResumeUpgradeAfterLogin(false);
-      openPaddleCheckout(user);
-    }
-  }, [open, resumeUpgradeAfterLogin, user, loginOpen, paddle]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div
