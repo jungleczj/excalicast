@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { I } from '@/components/icons';
+import { LoginModal } from '@/components/LoginModal';
 import { openProSubscriptionCheckout, closeCheckout } from '@/services/paddleClient';
 import { usePaddle } from '@/components/providers/PaddleProvider';
 import { useAuth } from '@/hooks/useAuth';
@@ -11,7 +12,6 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onUpgraded?: () => void;
-  onLoginRequest?: () => void;
 }
 
 const PRICE_LABEL = '$9 / 月';
@@ -25,13 +25,16 @@ const FEATURES = [
   '✅ 优先客服支持',
 ];
 
-export function ProUpgradeModal({ open, onClose, onUpgraded, onLoginRequest }: Props): JSX.Element | null {
+export function ProUpgradeModal({ open, onClose, onUpgraded }: Props): JSX.Element | null {
   const { paddle, subscribe } = usePaddle();
   const { user, loading: authLoading } = useAuth();
   const { refresh: refreshTier } = useSubscription();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [loginOpen, setLoginOpen] = useState(false);
+  // 当用户因未登录走 login flow，登录后自动续接到升级
+  const [resumeUpgradeAfterLogin, setResumeUpgradeAfterLogin] = useState(false);
   const pollingRef = useRef(false);
 
   useEffect(() => {
@@ -82,25 +85,40 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, onLoginRequest }: P
 
   const needLogin = !user && !authLoading;
 
-  const handleUpgrade = () => {
-    setError(null);
-    setStatusMsg(null);
-    if (!user) {
-      onLoginRequest?.();
-      return;
-    }
+  const openPaddleCheckout = (u: { id: string; email: string }) => {
     if (!paddle) {
       setError('Paddle 尚未初始化，请稍后重试或检查网络。');
       return;
     }
     setBusy(true);
     try {
-      openProSubscriptionCheckout({ paddle, userId: user.id, email: user.email });
+      openProSubscriptionCheckout({ paddle, userId: u.id, email: u.email });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'unknown');
       setBusy(false);
     }
   };
+
+  const handleUpgrade = () => {
+    setError(null);
+    setStatusMsg(null);
+    if (!user) {
+      // 端侧登录：直接弹 LoginModal，登录成功后自动续接到 Paddle Checkout
+      setResumeUpgradeAfterLogin(true);
+      setLoginOpen(true);
+      return;
+    }
+    openPaddleCheckout(user);
+  };
+
+  // 登录完成（useAuth().user 变成非空）+ 用户之前点过"升级"  → 自动续接
+  useEffect(() => {
+    if (!open) return;
+    if (resumeUpgradeAfterLogin && user && !loginOpen) {
+      setResumeUpgradeAfterLogin(false);
+      openPaddleCheckout(user);
+    }
+  }, [open, resumeUpgradeAfterLogin, user, loginOpen, paddle]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div
@@ -175,6 +193,16 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, onLoginRequest }: P
             : 'Paddle 安全支付 · 随时取消'}
         </p>
       </div>
+
+      {/* 端侧登录：未登录用户点"先登录后再升级"时叠在升级 Modal 之上弹出 */}
+      <LoginModal
+        open={loginOpen}
+        onClose={() => {
+          setLoginOpen(false);
+          // 关闭时如果还没登录成功，取消 resume 状态，避免下次打开自动触发
+          if (!user) setResumeUpgradeAfterLogin(false);
+        }}
+      />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import NextAuth from 'next-auth';
 import Google from 'next-auth/providers/google';
 import Resend from 'next-auth/providers/resend';
+import Credentials from 'next-auth/providers/credentials';
 import type { EmailConfig } from 'next-auth/providers/email';
 import { UpstashAdapter } from '@/lib/authAdapter';
 import { isUpstashConfigured } from '@/lib/upstash';
@@ -90,6 +91,28 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           }),
         ]
       : []),
+    // DEV_MODE 端侧快速登录：不需要 Upstash / Resend / Google 任何外部依赖。
+    // 输入任意邮箱即建一个稳定 user（id = `dev-${email}`），JWT session 持有。
+    // 严禁在生产启用：仅当 DEV_MODE === 'true' 时挂载。
+    ...(isDevMode
+      ? [
+          Credentials({
+            id: 'dev-credentials',
+            name: 'Dev Login',
+            credentials: { email: { label: 'Email', type: 'email' } },
+            async authorize(credentials) {
+              const raw = (credentials as { email?: unknown } | null)?.email;
+              const email = String(raw ?? '').trim().toLowerCase();
+              if (!email.includes('@')) return null;
+              return {
+                id: `dev-${email}`,
+                email,
+                name: email.split('@')[0] ?? email,
+              };
+            },
+          }),
+        ]
+      : []),
   ],
   pages: {},
   callbacks: {
@@ -106,4 +129,5 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 export const enabledProviders = {
   google: isGoogleConfigured,
   email: isEmailLoginEnabled,
+  devCredentials: isDevMode,
 };
