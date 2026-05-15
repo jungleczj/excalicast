@@ -11,7 +11,6 @@ interface Props {
 interface ProvidersInfo {
   google: boolean;
   email: boolean;
-  devCredentials?: boolean;
 }
 
 /**
@@ -65,43 +64,32 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
       setError('请输入合法邮箱');
       return;
     }
-    // 优先走真实邮箱登录；否则在 dev 下走 Credentials 即时登录
-    if (providers?.email) {
-      setBusy('email');
-      setError(null);
-      const res = await signIn('resend', {
-        email: normalized,
-        redirect: false,
-        callbackUrl: window.location.pathname,
+    if (!providers?.email) {
+      setError('邮箱登录暂未启用：服务端缺少 AUTH_RESEND_KEY');
+      return;
+    }
+    setBusy('email');
+    setError(null);
+    try {
+      const res = await fetch('/api/auth/email-link/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: normalized, callbackUrl: window.location.pathname }),
       });
-      setBusy(null);
-      if (res?.error) {
-        setError(`发送登录邮件失败：${res.error}`);
+      const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+      if (!res.ok) {
+        setError(data.message ?? data.error ?? '发送登录邮件失败');
         return;
       }
       setSentTo(normalized);
-      return;
-    }
-    if (providers?.devCredentials) {
-      setBusy('email');
-      setError(null);
-      const res = await signIn('dev-credentials', {
-        email: normalized,
-        redirect: false,
-      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '网络错误');
+    } finally {
       setBusy(null);
-      if (res?.error) {
-        setError(`登录失败：${res.error}`);
-        return;
-      }
-      // Credentials 登录成功后 useSession 会自动刷新，触发外层 ProUpgradeModal 续接
-      onClose();
-      return;
     }
-    setError('登录暂未启用：缺少 Upstash + Resend 配置，且 DEV_MODE 未开');
   };
 
-  const noneEnabled = providers && !providers.google && !providers.email && !providers.devCredentials;
+  const noneEnabled = providers && !providers.google && !providers.email;
 
   return (
     <div
@@ -183,26 +171,18 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
                   />
                   <button
                     type="submit"
-                    disabled={busy !== null || !email}
+                    disabled={busy !== null || !email || !providers.email}
                     className="flex w-full items-center justify-center gap-2 rounded-[10px] px-4 py-3 text-[14px] font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
                     style={{ background: '#181818' }}
                   >
-                    {busy === 'email'
-                      ? (providers.email ? '发送中…' : '登录中…')
-                      : (providers.email ? '发送登录链接到邮箱' : '直接登录（开发模式）')}
+                    {busy === 'email' ? '发送中…' : '发送登录链接到邮箱'}
                   </button>
                 </form>
               )}
 
-              {!providers.email && providers.devCredentials && !sentTo && (
-                <div className="mt-3 rounded-[8px] bg-blue-50 px-3 py-2 text-[11.5px] leading-relaxed text-blue-900" style={{ border: '1px solid #bfdbfe' }}>
-                  开发模式：输入任意邮箱可直接创建会话，无需邮件验证。上线前请配置 <code className="font-mono">KV_REST_API_URL/TOKEN</code> + <code className="font-mono">AUTH_RESEND_KEY</code>。
-                </div>
-              )}
-
-              {!providers.email && !providers.devCredentials && !sentTo && (
+              {!providers.email && !sentTo && (
                 <div className="mt-3 rounded-[8px] bg-amber-50 px-3 py-2 text-[11.5px] leading-relaxed text-amber-900" style={{ border: '1px solid #fde68a' }}>
-                  邮箱登录暂不可用：服务端需要 <code className="font-mono">KV_REST_API_URL/TOKEN</code>（Upstash Redis）+ <code className="font-mono">AUTH_RESEND_KEY</code>。本地开发可设 <code className="font-mono">DEV_MODE=true</code>。
+                  邮箱登录暂未启用：服务端需要 <code className="font-mono">AUTH_RESEND_KEY</code>（Resend）。
                 </div>
               )}
 

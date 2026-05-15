@@ -1,26 +1,18 @@
 import { test, expect, type ConsoleMessage, type Page } from '@playwright/test';
 
 /**
- * Regression test for: "Rendered more hooks than during the previous render"
- * triggered when clicking the 升级 Pro button in the AppHeader.
+ * E2E for the upgrade flow.
  *
- * Bug root cause (now fixed): ProUpgradeModal had a useEffect declared AFTER
- * `if (!open) return null`, which caused the hook count to change between
- * renders (1 hook when closed, 2 hooks when open).
- *
- * What we verify:
- *   1. No React error / hook error is logged when opening the modal.
- *   2. ProUpgradeModal opens with the expected "升级到 Pro" title.
- *   3. Clicking "先登录后再升级" opens the LoginModal (no longer a no-op).
- *   4. In DEV_MODE, the LoginModal shows the dev-credentials button
- *      ("直接登录（开发模式）"), confirming /api/auth/providers-info
- *      exposes devCredentials=true.
- *   5. After typing an email and submitting, LoginModal closes and the
- *      session establishes (useAuth().user goes truthy → resume effect
- *      fires; we don't actually trigger Paddle Checkout because Paddle.js
- *      requires a real checkout token, but we assert the upgrade modal
- *      content reflects the logged-in state — the "先登录后再升级"
- *      label flips to "立即升级 · …").
+ * Covered:
+ *   1. Hook ordering regression — opening ProUpgradeModal no longer crashes
+ *      with "Rendered more hooks than during the previous render".
+ *   2. Clicking "先登录后再升级" really opens LoginModal (was a no-op).
+ *   3. LoginModal exposes the production email magic-link path
+ *      (no dev-mode wording, no dev-credentials provider).
+ *   4. /api/auth/providers-info shape — no devCredentials field.
+ *   5. /api/auth/email-link/send rejects without AUTH_RESEND_KEY,
+ *      accepts when configured (skipped unless E2E_RESEND_ON=1 since
+ *      we don't want to actually send mail in CI).
  */
 
 const HOOK_ERROR_PATTERNS = [
@@ -46,7 +38,7 @@ function assertNoHookErrors(errors: string[]): void {
   expect(hookErrors, `unexpected hook errors:\n${hookErrors.join('\n')}`).toHaveLength(0);
 }
 
-test.describe('ProUpgrade flow', () => {
+test.describe('ProUpgrade + LoginModal', () => {
   test('opening the upgrade modal does not crash with hook ordering errors', async ({ page }) => {
     const { errors } = attachConsoleCollector(page);
     await page.goto('/app');
@@ -54,53 +46,67 @@ test.describe('ProUpgrade flow', () => {
 
     await page.getByText('升级 Pro', { exact: true }).first().click();
 
-    // ProUpgradeModal heading
     await expect(page.getByRole('heading', { name: '升级到 Pro' })).toBeVisible({ timeout: 5_000 });
-
-    // Give React a tick to flush any pending render errors
     await page.waitForTimeout(500);
     assertNoHookErrors(errors);
   });
 
-  test('clicking "先登录后再升级" actually opens LoginModal and dev login works', async ({ page }) => {
+  test('clicking "先登录后再升级" opens production LoginModal (no dev-mode wording)', async ({ page }) => {
     const { errors } = attachConsoleCollector(page);
     await page.goto('/app');
     await page.getByText('升级 Pro', { exact: true }).first().click();
     await expect(page.getByRole('heading', { name: '升级到 Pro' })).toBeVisible({ timeout: 5_000 });
 
-    // Free, not logged in → button label should be "先登录后再升级"
     const cta = page.getByRole('button', { name: /先登录后再升级/ });
     await expect(cta).toBeVisible();
-
     await cta.click();
 
-    // LoginModal heading
     await expect(page.getByRole('heading', { name: '登录 Excalicast' })).toBeVisible({ timeout: 5_000 });
 
-    // Dev-credentials submit button (DEV_MODE=true expected)
-    const devLoginBtn = page.getByRole('button', { name: /直接登录（开发模式）/ });
-    await expect(devLoginBtn).toBeVisible({ timeout: 5_000 });
+    // Production submit button — Magic link wording, NOT "直接登录（开发模式）"
+    const submit = page.getByRole('button', { name: '发送登录链接到邮箱' });
+    await expect(submit).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByText(/开发模式/)).toHaveCount(0);
+    await expect(page.getByText(/直接登录/)).toHaveCount(0);
 
-    // Submit with a stable test email
-    const testEmail = `playwright-${Date.now()}@example.com`;
-    await page.getByPlaceholder('Enter your email').fill(testEmail);
-    await devLoginBtn.click();
-
-    // LoginModal should close
-    await expect(page.getByRole('heading', { name: '登录 Excalicast' })).not.toBeVisible({ timeout: 10_000 });
-
-    // After login, ProUpgradeModal CTA should switch off "先登录后再升级".
-    // It will probably read "立即升级 · $9 / 月" OR "正在打开 Paddle…" if the
-    // resume effect already fired. Either way, the old label must be gone.
-    await expect(page.getByRole('button', { name: /先登录后再升级/ })).not.toBeVisible({ timeout: 8_000 });
+    // 邮箱输入框存在且可输
+    const emailInput = page.getByPlaceholder('Enter your email');
+    await emailInput.fill('test@example.com');
 
     assertNoHookErrors(errors);
   });
 
-  test('/api/auth/providers-info exposes devCredentials in DEV_MODE', async ({ request }) => {
+  test('/api/auth/providers-info has no devCredentials field anymore', async ({ request }) => {
     const res = await request.get('/api/auth/providers-info');
     expect(res.status()).toBe(200);
     const body = await res.json();
-    expect(body).toMatchObject({ devCredentials: true });
+    expect(body).toHaveProperty('google');
+    expect(body).toHaveProperty('email');
+    expect(body).not.toHaveProperty('devCredentials');
+  });
+
+  test('/api/auth/email-link/send returns 503 when AUTH_RESEND_KEY missing, 200 when set', async ({ request }) => {
+    const res = await request.post('/api/auth/email-link/send', {
+      data: { email: 'test@example.com', callbackUrl: '/app' },
+    });
+    const hasResend = process.env.E2E_HAS_RESEND === '1';
+    if (hasResend) {
+      expect(res.status()).toBe(200);
+      const j = await res.json();
+      expect(j).toMatchObject({ ok: true });
+    } else {
+      // Without AUTH_RESEND_KEY we expect a clean 503 with our error code
+      expect([503]).toContain(res.status());
+      const j = await res.json();
+      expect(j.error).toBe('resend_not_configured');
+    }
+  });
+
+  test('/api/auth/email-link/send rejects invalid email', async ({ request }) => {
+    const res = await request.post('/api/auth/email-link/send', {
+      data: { email: 'not-an-email' },
+    });
+    // either 400 (invalid_email) when resend IS configured, or 503 (resend missing — checked first)
+    expect([400, 503]).toContain(res.status());
   });
 });
