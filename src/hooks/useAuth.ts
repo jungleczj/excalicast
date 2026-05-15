@@ -1,10 +1,10 @@
 'use client';
 
-import { useSession, signOut } from 'next-auth/react';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { createClient } from '@/lib/supabase/client';
 
 export interface AuthUser {
-  id: string;
+  id: string; // Supabase auth.users.id (UUID)
   email: string;
   name?: string | null;
   image?: string | null;
@@ -16,25 +16,56 @@ export interface UseAuth {
   logout: () => Promise<void>;
 }
 
+/**
+ * Supabase-Auth backed replacement for the prior NextAuth useAuth().
+ * Public shape is unchanged so existing callers don't break.
+ */
 export function useAuth(): UseAuth {
-  const { data, status } = useSession();
-  const user: AuthUser | null = data?.user
-    ? {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        id: ((data.user as any).id as string) ?? data.user.email ?? 'unknown',
-        email: data.user.email ?? '',
-        name: data.user.name,
-        image: data.user.image,
-      }
-    : null;
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const logout = useCallback(async () => {
-    await signOut({ redirect: false });
+  useEffect(() => {
+    const supabase = createClient();
+    let cancelled = false;
+
+    (async () => {
+      const { data } = await supabase.auth.getUser();
+      if (cancelled) return;
+      setUser(data.user ? toAuthUser(data.user) : null);
+      setLoading(false);
+    })();
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (cancelled) return;
+      setUser(session?.user ? toAuthUser(session.user) : null);
+      setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
+  const logout = useCallback(async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    setUser(null);
+  }, []);
+
+  return { user, loading, logout };
+}
+
+function toAuthUser(u: {
+  id: string;
+  email?: string | null;
+  user_metadata?: Record<string, unknown>;
+}): AuthUser {
+  const m = u.user_metadata ?? {};
   return {
-    user,
-    loading: status === 'loading',
-    logout,
+    id: u.id,
+    email: u.email ?? '',
+    name: (m.full_name as string | undefined) ?? (m.name as string | undefined) ?? null,
+    image: (m.avatar_url as string | undefined) ?? (m.picture as string | undefined) ?? null,
   };
 }

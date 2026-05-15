@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
-import { auth } from '@/auth';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getUserSubscription, createSubtitleJob, updateSubtitleJob } from '@/lib/db';
 import { saveAudio } from '@/lib/asrStore';
 import { TIER_PERMISSIONS } from '@/types/user';
@@ -13,8 +13,9 @@ const MAX_AUDIO_BYTES = 100 * 1024 * 1024; // 100MB DashScope limit
 
 export async function POST(req: Request): Promise<NextResponse> {
   // 1) Auth + tier check (Pro 以上)
-  const session = await auth();
-  const userId = (session?.user as { id?: string } | undefined)?.id;
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const userId = user?.id;
   if (!userId) {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
   }

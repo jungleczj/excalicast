@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@/auth';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getSubtitleJob, updateSubtitleJob } from '@/lib/db';
 import { deleteAudio } from '@/lib/asrStore';
 import {
@@ -19,8 +19,9 @@ interface StatusResponse {
 }
 
 export async function GET(req: Request): Promise<NextResponse<StatusResponse>> {
-  const session = await auth();
-  const userId = (session?.user as { id?: string } | undefined)?.id;
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const userId = user?.id;
   if (!userId) return NextResponse.json({ status: 'failed', error: 'unauthenticated' }, { status: 401 });
 
   const url = new URL(req.url);

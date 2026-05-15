@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@/auth';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getUserSubscription } from '@/lib/db';
 import type { TierResponse } from '@/types/user';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(): Promise<NextResponse<TierResponse>> {
-  const session = await auth();
-  const userId = (session?.user as { id?: string } | undefined)?.id;
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const userId = user?.id;
   if (!userId) {
     return NextResponse.json({
       tier: 'free',
