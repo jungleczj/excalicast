@@ -1,0 +1,70 @@
+import { NextResponse } from 'next/server';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { getPaymentConfig } from '@/lib/paymentConfig';
+import { createCreemCheckout } from '@/services/creemServer';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+/**
+ * 创建 Pro 订阅 checkout。
+ *
+ * 出参：
+ *   - Paddle：{ provider:'paddle', priceId, userId } —— 走 Paddle SDK overlay
+ *   - Creem： { provider:'creem',  redirectUrl, checkoutId }
+ *
+ * 必须已登录（Pro 订阅必须能绑定 Supabase userId）。
+ */
+export async function POST(): Promise<NextResponse> {
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
+  }
+
+  const cfg = await getPaymentConfig();
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '') || 'http://localhost:3005';
+
+  if (cfg.provider === 'creem') {
+    const productId = cfg.creemProProductId;
+    if (!productId) {
+      return NextResponse.json(
+        { error: 'creem_pro_product_id_missing' },
+        { status: 500 },
+      );
+    }
+    try {
+      const result = await createCreemCheckout({
+        productId,
+        successUrl: `${appUrl}/app?creem_purchase=pro`,
+        customerEmail: user.email ?? undefined,
+        metadata: {
+          kind: 'pro_subscription',
+          userId: user.id,
+        },
+        requestId: `pro_${user.id}_${Date.now()}`,
+      });
+      return NextResponse.json({
+        provider: 'creem',
+        redirectUrl: result.checkoutUrl,
+        checkoutId: result.id,
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: 'creem_checkout_failed', message: err instanceof Error ? err.message : 'unknown' },
+        { status: 502 },
+      );
+    }
+  }
+
+  const priceId = cfg.paddleProPriceId ?? process.env.NEXT_PUBLIC_PADDLE_PRO_PRICE_ID;
+  if (!priceId) {
+    return NextResponse.json({ error: 'paddle_pro_price_id_missing' }, { status: 500 });
+  }
+  return NextResponse.json({
+    provider: 'paddle',
+    priceId,
+    userId: user.id,
+    email: user.email ?? null,
+  });
+}

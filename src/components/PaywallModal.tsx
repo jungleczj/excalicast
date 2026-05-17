@@ -5,6 +5,7 @@ import { I } from '@/components/icons';
 import { isPaid, simulatePayment } from '@/services/paymentClient';
 import { openCheckout, closeCheckout } from '@/services/paddleClient';
 import { usePaddle } from '@/components/providers/PaddleProvider';
+import { usePaymentConfig, formatPrice } from '@/hooks/usePaymentConfig';
 
 interface Props {
   open: boolean;
@@ -14,16 +15,22 @@ interface Props {
   onUpgradePro?: () => void;
 }
 
-const PRICE_USD = '$3';
+const FALLBACK_PRICE = '$3';
 const POLL_INTERVAL_MS = 1000;
 const POLL_MAX_ATTEMPTS = 30; // 30s 内大多数 webhook 都到了；之后由 ExportPanel 接管背景轮询
 
 export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro }: Props): JSX.Element | null {
   const { paddle, subscribe } = usePaddle();
+  const { config: paymentCfg } = usePaymentConfig();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const pollingRef = useRef(false);
+
+  const provider = paymentCfg?.provider ?? 'paddle';
+  const priceLabel = paymentCfg
+    ? formatPrice(paymentCfg.oneTimePriceCents, paymentCfg.currency)
+    : FALLBACK_PRICE;
 
   useEffect(() => {
     if (!open) return;
@@ -69,15 +76,38 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
 
   if (!open) return null;
 
-  const handleUnlock = () => {
+  const handleUnlock = async () => {
     setError(null);
     setStatusMsg(null);
-    if (!paddle) {
-      setError('Paddle 尚未初始化，请稍后重试或检查网络。');
-      return;
-    }
     setBusy(true);
     try {
+      const res = await fetch('/api/checkout/one-time', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ recordingId }),
+      });
+      const j = (await res.json().catch(() => ({}))) as {
+        provider?: 'paddle' | 'creem';
+        priceId?: string;
+        redirectUrl?: string;
+        error?: string;
+        message?: string;
+      };
+      if (!res.ok) throw new Error(j.message ?? j.error ?? `checkout ${res.status}`);
+
+      if (j.provider === 'creem' && j.redirectUrl) {
+        // Creem 流程：跳到 hosted checkout 页面。新 tab 让用户回来时 modal 还在轮询。
+        window.open(j.redirectUrl, '_blank', 'noopener,noreferrer');
+        setStatusMsg('已在新标签页打开支付页面，完成后会自动解锁…');
+        void pollUntilPaid();
+        return;
+      }
+      // Paddle 流程：保留 SDK overlay
+      if (!paddle) {
+        setError('Paddle 尚未初始化，请稍后重试或检查网络。');
+        setBusy(false);
+        return;
+      }
       openCheckout({ paddle, recordingId });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'unknown');
@@ -133,7 +163,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
         </p>
 
         <div className="mt-5 flex items-end gap-2 rounded-xl border border-border-default bg-bg-secondary p-4">
-          <span className="font-mono text-[36px] font-bold leading-none text-text-primary">{PRICE_USD}</span>
+          <span className="font-mono text-[36px] font-bold leading-none text-text-primary">{priceLabel}</span>
           <span className="pb-1 text-[12px] text-text-tertiary">一次性 · 仅限本录制</span>
         </div>
 
@@ -142,7 +172,9 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
             '导出永久去除水印',
             '可反复导出 16:9 / 9:16 / 1:1 / 4:5 多个比例',
             '录制数据全程留在你浏览器，服务端只存付费状态',
-            'Paddle 安全支付（信用卡 / Apple Pay / Google Pay）',
+            provider === 'creem'
+              ? 'Creem 安全支付（信用卡 / Apple Pay / Google Pay）'
+              : 'Paddle 安全支付（信用卡 / Apple Pay / Google Pay）',
           ].map((line) => (
             <li key={line} className="flex items-start gap-2">
               <I.Check size={14} sw={2.5} className="mt-0.5 flex-shrink-0 text-success-600" />
@@ -167,13 +199,15 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
             暂不需要
           </button>
           <button
-            onClick={handleUnlock}
-            disabled={busy || !paddle}
+            onClick={() => void handleUnlock()}
+            disabled={busy || (provider === 'paddle' && !paddle)}
             className="flex flex-[2] items-center justify-center gap-2 rounded-md px-4 py-2.5 text-[13px] font-semibold text-white shadow-md disabled:opacity-40"
             style={{ background: 'var(--accent-600)', boxShadow: '0 4px 12px rgba(217,119,6,0.3)' }}
           >
             <I.Lock size={14} />
-            {busy ? '正在打开 Paddle…' : `立即解锁 · ${PRICE_USD}`}
+            {busy
+              ? `正在打开 ${provider === 'creem' ? 'Creem' : 'Paddle'}…`
+              : `立即解锁 · ${priceLabel}`}
           </button>
         </div>
 
@@ -186,7 +220,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
             disabled={busy}
             className="mt-3 w-full rounded-md border border-primary-600 bg-primary-50 px-4 py-2 text-[12px] font-semibold text-primary-700 hover:bg-primary-100 disabled:opacity-40"
           >
-            或升级 Pro · $9/月 · 所有录制无水印 + 语音字幕 + 云备份
+            或升级 Pro · {paymentCfg ? formatPrice(paymentCfg.proMonthlyPriceCents, paymentCfg.currency) : '$9'}/月 · 所有录制无水印 + 语音字幕 + 云备份
           </button>
         )}
 
