@@ -3,6 +3,8 @@ import { getPaymentConfig, toPublic, type PublicPaymentConfig } from '@/lib/paym
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
+export const revalidate = 0;
 
 /**
  * 公开只读：返回当前支付提供商 + 价格。
