@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { exportRecording, downloadBlob } from '@/services/exportPipeline';
 import { isPaid } from '@/services/paymentClient';
 import { I } from '@/components/icons';
@@ -25,6 +26,7 @@ interface Props {
 }
 
 export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateChange, onProgress }: Props): JSX.Element {
+  const t = useTranslations('exportPanel');
   const subscription = useSubscription();
   const [paid, setPaid] = useState<boolean>(false);
   const [busy, setBusy] = useState<boolean>(false);
@@ -33,12 +35,9 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
   const [paywallOpen, setPaywallOpen] = useState<boolean>(false);
   const [proUpgradeOpen, setProUpgradeOpen] = useState<boolean>(false);
   const [subtitlePanelOpen, setSubtitlePanelOpen] = useState<boolean>(false);
-  // 用户点过 "渲染并下载（无水印）" 但因未付款被拦截。state（不是 ref）以便 effect 响应它。
   const [pendingExport, setPendingExport] = useState<boolean>(false);
-  // 后台轮询是否正在跑，用来在 UI 上展示状态
   const [bgPolling, setBgPolling] = useState<boolean>(false);
 
-  // 解锁条件：(a) 本录制单次购买已支付 OR (b) 用户是 Pro/Max
   const proUnlocked = subscription.permissions.exportWithoutWatermark;
   const effectivelyUnlocked = paid || proUnlocked;
 
@@ -54,7 +53,6 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
 
   useEffect(() => { void refreshPaid(); }, [refreshPaid]);
 
-  // Pro 解锁了 → 同步通知父级（用于库存当前状态）
   useEffect(() => {
     if (proUnlocked) onPaidStateChange?.(true);
   }, [proUnlocked, onPaidStateChange]);
@@ -67,9 +65,12 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
     }
     setBusy(true);
     setError(null);
-    setStatusMsg(`正在生成 ${config.aspectRatio} ${config.withWatermark ? '含水印' : '无水印'} MP4…`);
+    setStatusMsg(t('exportingStatus', {
+      ratio: config.aspectRatio,
+      wm: config.withWatermark ? t('wmWithLabel') : t('wmCleanLabel'),
+    }));
 
-    let lastPhase = '准备';
+    let lastPhase = 'preparing';
     let lastRatio = 0;
     onProgress?.({ phase: lastPhase, ratio: 0 });
 
@@ -85,7 +86,6 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
           lastRatio = Math.min(1, Math.max(0, r));
           onProgress?.({ phase: lastPhase, ratio: lastRatio });
         },
-        // ffmpeg 日志不再展示在 UI 上，仅在 dev 控制台保留以便排查
         onLog: (m) => {
           if (process.env.NODE_ENV !== 'production') console.debug('[ffmpeg]', m);
         },
@@ -93,17 +93,15 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
       const ratioTag = config.aspectRatio.replace(':', 'x');
       const wmTag = config.withWatermark ? 'wm' : 'clean';
       downloadBlob(blob, `excalicast_${recordingId.slice(0, 8)}_${ratioTag}_${wmTag}.mp4`);
-      setStatusMsg('导出完成，已开始下载。');
+      setStatusMsg(t('doneStatus'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'export_failed');
     } finally {
       setBusy(false);
       onProgress?.(null);
     }
-  }, [config, recordingId, effectivelyUnlocked, onProgress]);
+  }, [config, recordingId, effectivelyUnlocked, onProgress, t]);
 
-  // 付费成功后自动重启导出：上一次 handleExport 因 !effectivelyUnlocked 被拦截，pendingExport=true。
-  // paid 翻 true 或用户升级 Pro 后，触发一次。
   useEffect(() => {
     if (effectivelyUnlocked && pendingExport) {
       setPendingExport(false);
@@ -111,8 +109,6 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
     }
   }, [effectivelyUnlocked, pendingExport, handleExport]);
 
-  // 后台轮询：modal 关闭后如果 pendingExport=true 且仍未解锁，继续每 3s 检查 /api/is-paid
-  // 最多轮询 5 分钟，期间在 UI 上显示提示，解锁后由上面的 effect 自动触发下载
   useEffect(() => {
     if (effectivelyUnlocked || !pendingExport || paywallOpen) {
       setBgPolling(false);
@@ -127,7 +123,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
         clearInterval(id);
         setBgPolling(false);
         setPendingExport(false);
-        setStatusMsg('支付确认超时（5 分钟未收到 webhook），请刷新页面重试。');
+        setStatusMsg(t('bgTimeout'));
         return;
       }
       void refreshPaid();
@@ -136,44 +132,30 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
       clearInterval(id);
       setBgPolling(false);
     };
-  }, [effectivelyUnlocked, pendingExport, paywallOpen, refreshPaid]);
+  }, [effectivelyUnlocked, pendingExport, paywallOpen, refreshPaid, t]);
 
   const isCleanLocked = !config.withWatermark && !effectivelyUnlocked;
 
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="mb-2 text-[13px] font-semibold text-text-primary">导出 MP4</h3>
-        <p className="mb-3 text-[11px] leading-relaxed text-text-secondary">
-          全部本地渲染（ffmpeg.wasm），录制数据从不离开浏览器。
-        </p>
+        <h3 className="mb-2 text-[13px] font-semibold text-text-primary">{t('title')}</h3>
+        <p className="mb-3 text-[11px] leading-relaxed text-text-secondary">{t('lede')}</p>
 
         <RadioCard
           selected={config.withWatermark}
           onClick={() => onConfigChange({ ...config, withWatermark: true })}
-          title="含水印导出"
-          meta="免费 · 任何人"
-          hint="右下角 Excalicast 品牌水印"
+          title={t('withWatermarkTitle')}
+          meta={t('withWatermarkMeta')}
+          hint={t('withWatermarkHint')}
         />
         <div className="mt-2">
           <RadioCard
             selected={!config.withWatermark}
             onClick={() => onConfigChange({ ...config, withWatermark: false })}
-            title="无水印导出"
-            meta={
-              proUnlocked
-                ? 'Pro · 全部解锁'
-                : paid
-                  ? '已购买 · 永久解锁'
-                  : '$3 单次 / Pro 订阅'
-            }
-            hint={
-              proUnlocked
-                ? '订阅期内所有录制无限次无水印导出'
-                : paid
-                  ? '本录制可任意比例反复导出无水印'
-                  : '点导出按钮选择单次购买或升级 Pro'
-            }
+            title={t('cleanTitle')}
+            meta={proUnlocked ? t('cleanMetaPro') : paid ? t('cleanMetaPaid') : t('cleanMetaLocked')}
+            hint={proUnlocked ? t('cleanHintPro') : paid ? t('cleanHintPaid') : t('cleanHintLocked')}
             accent={!config.withWatermark}
           />
         </div>
@@ -192,12 +174,12 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
           {isCleanLocked ? (
             <>
               <I.Lock size={16} />
-              解锁并下载 · $3
+              {t('buttonUnlock')}
             </>
           ) : (
             <>
               <I.Download size={16} />
-              {config.withWatermark ? '渲染并下载（含水印）' : '渲染并下载（无水印）'}
+              {config.withWatermark ? t('buttonWithWatermark') : t('buttonClean')}
             </>
           )}
         </button>
@@ -207,10 +189,10 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
             <I.Check size={12} sw={2.5} />
             {proUnlocked ? (
               <span className="flex items-center gap-1">
-                <ProBadge tier={subscription.tier} /> 已解锁，所有录制都可无水印导出
+                <ProBadge tier={subscription.tier} /> {t('unlockedProNote')}
               </span>
             ) : (
-              '本录制已解锁，无水印导出不再额外付费'
+              t('unlockedPaidNote')
             )}
           </p>
         )}
@@ -220,7 +202,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
 
       <div>
         <h3 className="mb-2 flex items-center gap-2 text-[13px] font-semibold text-text-primary">
-          进阶服务
+          {t('advancedHeading')}
           {!proUnlocked && (
             <button
               type="button"
@@ -228,26 +210,46 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
               className="ml-auto rounded-md px-2 py-1 text-[11px] font-bold text-white"
               style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }}
             >
-              升级 Pro
+              {t('upgradePro')}
             </button>
           )}
         </h3>
-        <p className="mb-3 text-[11px] leading-relaxed text-text-secondary">把这次录制变成可复用的知识。</p>
+        <p className="mb-3 text-[11px] leading-relaxed text-text-secondary">{t('advancedLede')}</p>
         <div className="space-y-2">
           <FeatureRow
             icon={<I.Subtitles size={16} />}
-            title="语音字幕"
-            desc="音频转写 · 中英自动 · 内嵌 SRT"
+            title={t('subtitleTitle')}
+            desc={t('subtitleDesc')}
             tier="Pro"
             unlocked={subscription.permissions.subtitle}
-            actionLabel={subscription.permissions.subtitle ? '生成字幕' : '升级 Pro'}
+            actionLabel={subscription.permissions.subtitle ? t('subtitleAction') : t('subtitleActionLocked')}
             onAction={() => {
               if (subscription.permissions.subtitle) setSubtitlePanelOpen(true);
               else setProUpgradeOpen(true);
             }}
+            useLabel={t('use')}
+            upgradeLabel={t('upgrade')}
           />
-          <FeatureRow icon={<I.Sparkles size={16} />} title="结构化讲义" desc="结构化 Markdown · 关键帧 + 文稿" tier="Max" highlight unlocked={false} />
-          <FeatureRow icon={<I.Share size={16} />} title="分享链接" desc="网页回放 · 30 天 TTL" tier="Max" highlight unlocked={false} />
+          <FeatureRow
+            icon={<I.Sparkles size={16} />}
+            title={t('handoutTitle')}
+            desc={t('handoutDesc')}
+            tier="Max"
+            highlight
+            unlocked={false}
+            useLabel={t('use')}
+            upgradeLabel={t('upgrade')}
+          />
+          <FeatureRow
+            icon={<I.Share size={16} />}
+            title={t('shareTitle')}
+            desc={t('shareDesc')}
+            tier="Max"
+            highlight
+            unlocked={false}
+            useLabel={t('use')}
+            upgradeLabel={t('upgrade')}
+          />
         </div>
       </div>
 
@@ -259,11 +261,11 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
                 className="inline-block h-3 w-3 flex-shrink-0 animate-spin rounded-full border-2 border-primary-300 border-t-primary-700"
                 aria-hidden
               />
-              <span>支付确认中…收到 webhook 后将自动开始下载，可关闭此页（最多等待 5 分钟）</span>
+              <span>{t('bgPolling')}</span>
             </div>
           )}
           {statusMsg && !bgPolling && <div className="text-text-primary">{statusMsg}</div>}
-          {error && <div className="mt-1 text-recording-strong">错误：{error}</div>}
+          {error && <div className="mt-1 text-recording-strong">{t('errorPrefix', { message: error })}</div>}
         </div>
       )}
 
@@ -272,7 +274,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
         recordingId={recordingId}
         onClose={() => setPaywallOpen(false)}
         onPaid={() => {
-          setStatusMsg('已解锁，无水印模式已开启。');
+          setStatusMsg(t('paywallPaidStatus'));
           void refreshPaid();
         }}
         onUpgradePro={() => {
@@ -284,7 +286,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
         open={proUpgradeOpen}
         onClose={() => setProUpgradeOpen(false)}
         onUpgraded={() => {
-          setStatusMsg('Pro 已激活，所有录制无水印导出已开启。');
+          setStatusMsg(t('proActivatedStatus'));
           void subscription.refresh();
         }}
       />
@@ -334,7 +336,7 @@ function RadioCard({ selected, onClick, title, meta, hint, accent }: RadioCardPr
   );
 }
 
-function FeatureRow({ icon, title, desc, tier, highlight, unlocked, actionLabel, onAction }: {
+function FeatureRow({ icon, title, desc, tier, highlight, unlocked, actionLabel, onAction, useLabel, upgradeLabel }: {
   icon: React.ReactNode;
   title: string;
   desc: string;
@@ -343,6 +345,8 @@ function FeatureRow({ icon, title, desc, tier, highlight, unlocked, actionLabel,
   unlocked: boolean;
   actionLabel?: string;
   onAction?: () => void;
+  useLabel: string;
+  upgradeLabel: string;
 }): JSX.Element {
   const button = onAction ? (
     <button
@@ -356,14 +360,14 @@ function FeatureRow({ icon, title, desc, tier, highlight, unlocked, actionLabel,
       }
     >
       {!unlocked && <I.Lock size={10} />}
-      {actionLabel ?? (unlocked ? '使用' : '升级')}
+      {actionLabel ?? (unlocked ? useLabel : upgradeLabel)}
     </button>
   ) : (
     <button
       disabled
       className="flex items-center gap-1 rounded border border-border-strong bg-bg-primary px-2.5 py-1 text-[11px] font-semibold text-text-primary opacity-60"
     >
-      <I.Lock size={10} /> 升级
+      <I.Lock size={10} /> {upgradeLabel}
     </button>
   );
   return (

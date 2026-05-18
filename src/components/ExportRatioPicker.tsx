@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { ASPECT_PRESETS, type AspectRatio, type CroppingMode, type ExportConfig } from '@/types/recording';
 
 interface Props {
@@ -8,25 +9,21 @@ interface Props {
 }
 
 const RATIOS: AspectRatio[] = ['16:9', '9:16', '1:1', '4:5'];
-const RATIO_HINT: Record<AspectRatio, string> = {
-  '16:9': 'YouTube · B 站',
-  '9:16': '抖音 · TikTok · Reels',
-  '1:1':  'Instagram · 朋友圈',
-  '4:5':  'Instagram 竖图',
-};
-
-const MODES: { value: CroppingMode; label: string; hint: string }[] = [
-  { value: 'follow_viewport',  label: '跟随我的视口', hint: '镜头随用户当时看到的区域走' },
-  { value: 'fit_all_content',  label: '自动套全部内容', hint: '所有元素的并集 bbox 静态展示' },
-];
 
 export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
+  const t = useTranslations('ratioPicker');
+
+  const MODES: { value: CroppingMode; label: string; hint: string }[] = [
+    { value: 'follow_viewport', label: t('modes.followViewportLabel'), hint: t('modes.followViewportHint') },
+    { value: 'fit_all_content', label: t('modes.fitAllLabel'),         hint: t('modes.fitAllHint') },
+  ];
+
   return (
     <div className="space-y-4">
       <div>
         <div className="mb-2 flex items-baseline justify-between">
-          <h3 className="text-[13px] font-semibold text-text-primary">比例</h3>
-          <span className="text-[11px] text-text-tertiary">同一录制可分别导出多个比例</span>
+          <h3 className="text-[13px] font-semibold text-text-primary">{t('ratioHeading')}</h3>
+          <span className="text-[11px] text-text-tertiary">{t('ratioSubheading')}</span>
         </div>
         <div className="grid grid-cols-4 gap-2">
           {RATIOS.map((r) => {
@@ -55,7 +52,7 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
                   }}
                 />
                 <span className="mt-0.5 text-[12px] font-semibold">{r}</span>
-                <span className="text-[10px] text-text-tertiary">{RATIO_HINT[r]}</span>
+                <span className="text-[10px] text-text-tertiary">{t(`ratioHints.${r}` as never)}</span>
               </button>
             );
           })}
@@ -63,7 +60,7 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
       </div>
 
       <div>
-        <h3 className="mb-2 text-[13px] font-semibold text-text-primary">框选模式</h3>
+        <h3 className="mb-2 text-[13px] font-semibold text-text-primary">{t('modeHeading')}</h3>
         <div className="space-y-2">
           {MODES.map((m) => {
             const active = config.croppingMode === m.value;

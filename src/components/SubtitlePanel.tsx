@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
 import { downloadSrt, pollSubtitleJob, submitSubtitleJob } from '@/services/subtitleClient';
 
@@ -13,9 +14,10 @@ interface Props {
 type Phase = 'idle' | 'uploading' | 'pending' | 'running' | 'done' | 'failed';
 
 const POLL_INTERVAL_MS = 2500;
-const POLL_MAX = 240; // 10 分钟
+const POLL_MAX = 240;
 
 export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Element | null {
+  const t = useTranslations('subtitlePanel');
   const [phase, setPhase] = useState<Phase>('idle');
   const [srt, setSrt] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
@@ -44,10 +46,9 @@ export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Elemen
       const r = await submitSubtitleJob(recordingId);
       setJobId(r.jobId);
       if (r.mock) {
-        setMockReason(r.reason ?? '使用 mock SRT');
+        setMockReason(r.reason ?? t('mockReason'));
       }
       setPhase('pending');
-      // immediately kick off first poll cycle
       void pollOnce(r.jobId);
       pollRef.current = setInterval(() => void pollOnce(r.jobId), POLL_INTERVAL_MS);
     } catch (err) {
@@ -63,7 +64,7 @@ export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Elemen
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = null;
       setPhase('failed');
-      setError('字幕生成超时（10 分钟），请重试');
+      setError(t('timeout'));
       return;
     }
     try {
@@ -101,7 +102,7 @@ export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Elemen
         <button
           onClick={onClose}
           className="absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-md text-text-tertiary hover:bg-bg-tertiary hover:text-text-primary"
-          aria-label="关闭"
+          aria-label={t('closeAria')}
         >
           ✕
         </button>
@@ -114,10 +115,8 @@ export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Elemen
             <I.Subtitles size={22} />
           </div>
           <div>
-            <h2 className="text-[20px] font-bold leading-tight text-text-primary">语音字幕</h2>
-            <p className="text-[12px] text-text-secondary">
-              自动识别中英文，输出 SRT 时间轴文件
-            </p>
+            <h2 className="text-[20px] font-bold leading-tight text-text-primary">{t('title')}</h2>
+            <p className="text-[12px] text-text-secondary">{t('subtitle')}</p>
           </div>
         </div>
 
@@ -128,7 +127,7 @@ export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Elemen
             className="mt-2 flex items-center justify-center gap-2 rounded-md px-4 py-3 text-[13px] font-semibold text-white shadow-md"
             style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }}
           >
-            <I.Sparkles size={14} /> 开始生成字幕
+            <I.Sparkles size={14} /> {t('start')}
           </button>
         )}
 
@@ -139,9 +138,9 @@ export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Elemen
               aria-hidden
             />
             <span className="text-[12px] text-text-primary">
-              {phase === 'uploading' && '正在上传音频…'}
-              {phase === 'pending' && '已提交转写任务，等待开始…'}
-              {phase === 'running' && '正在转写中（按音频时长 30-60 秒）…'}
+              {phase === 'uploading' && t('uploading')}
+              {phase === 'pending' && t('pending')}
+              {phase === 'running' && t('running')}
             </span>
           </div>
         )}
@@ -154,14 +153,14 @@ export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Elemen
               </div>
             )}
             <div className="mt-3 flex items-center justify-between gap-2">
-              <span className="text-[12px] font-semibold text-text-primary">SRT 预览</span>
+              <span className="text-[12px] font-semibold text-text-primary">{t('preview')}</span>
               <button
                 type="button"
                 onClick={() => downloadSrt(srt, `excalicast_${recordingId.slice(0, 8)}.srt`)}
                 className="flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white"
                 style={{ background: 'var(--primary-600)' }}
               >
-                <I.Download size={12} /> 下载 SRT
+                <I.Download size={12} /> {t('download')}
               </button>
             </div>
             <pre className="mt-2 flex-1 overflow-auto rounded-md border border-border-default bg-bg-secondary p-3 text-[11px] leading-relaxed text-text-primary font-mono whitespace-pre-wrap">
@@ -172,20 +171,18 @@ export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Elemen
 
         {phase === 'failed' && (
           <div className="mt-2 rounded-md border border-recording-strong bg-red-50 p-3 text-[12px] text-recording-strong">
-            <div className="font-semibold mb-1">字幕生成失败</div>
+            <div className="font-semibold mb-1">{t('failedTitle')}</div>
             <div>{error}</div>
             <button
               onClick={() => void startJob()}
               className="mt-3 rounded-md border border-current px-3 py-1 text-[11px] font-semibold"
             >
-              重试
+              {t('retry')}
             </button>
           </div>
         )}
 
-        <p className="mt-4 text-center text-[10px] text-text-tertiary">
-          录制音频仅在生成字幕时临时上传到本应用服务器，作业完成后自动删除
-        </p>
+        <p className="mt-4 text-center text-[10px] text-text-tertiary">{t('footer')}</p>
       </div>
     </div>
   );

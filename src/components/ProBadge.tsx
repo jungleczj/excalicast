@@ -1,15 +1,23 @@
 'use client';
 
+import { useLocale } from 'next-intl';
 import type { SubscriptionTier } from '@/types/user';
 
-const styles: Record<SubscriptionTier, { bg: string; text: string; label: string }> = {
-  free: { bg: 'rgba(148,163,184,0.18)', text: '#cbd5e1', label: '免费' },
-  pro: { bg: 'linear-gradient(135deg,#3b82f6,#2563eb)', text: '#fff', label: 'Pro' },
-  max: { bg: 'linear-gradient(135deg,#a855f7,#7c3aed)', text: '#fff', label: 'Max' },
+const styles: Record<SubscriptionTier, { bg: string; text: string }> = {
+  free: { bg: 'rgba(148,163,184,0.18)', text: '#cbd5e1' },
+  pro:  { bg: 'linear-gradient(135deg,#3b82f6,#2563eb)', text: '#fff' },
+  max:  { bg: 'linear-gradient(135deg,#a855f7,#7c3aed)', text: '#fff' },
 };
 
 export function ProBadge({ tier, size = 'sm' }: { tier: SubscriptionTier; size?: 'sm' | 'md' }): JSX.Element {
+  const locale = useLocale();
+  const labelMap: Record<SubscriptionTier, string> = {
+    free: locale === 'en' ? 'Free' : '免费',
+    pro: 'Pro',
+    max: 'Max',
+  };
   const s = styles[tier];
+  const label = labelMap[tier];
   const padding = size === 'md' ? '4px 10px' : '2px 8px';
   const fontSize = size === 'md' ? 12 : 10;
   return (
@@ -25,7 +33,7 @@ export function ProBadge({ tier, size = 'sm' }: { tier: SubscriptionTier; size?:
         boxShadow: tier !== 'free' ? '0 2px 8px rgba(59,130,246,0.35)' : 'none',
       }}
     >
-      {s.label}
+      {label}
     </span>
   );
 }

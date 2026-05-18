@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { renderPreviewFrame } from '@/services/exportPipeline';
 import type { ExportConfig, RecordingMetadata } from '@/types/recording';
 import { ASPECT_PRESETS } from '@/types/recording';
@@ -13,15 +14,8 @@ interface Props {
   progress?: ExportProgressState | null;
 }
 
-const PHASE_LABEL: Record<string, string> = {
-  loading: '加载录制数据',
-  rendering_frames: '逐帧渲染',
-  encoding: '视频编码',
-  done: '完成',
-  准备: '准备',
-};
-
 export function ExportPreview({ recordingId, metadata, config, progress }: Props): JSX.Element {
+  const t = useTranslations('exportPreview');
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [timeMs, setTimeMs] = useState<number>(0);
   const [rendering, setRendering] = useState<boolean>(false);
@@ -43,7 +37,15 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
 
   const exporting = progress != null;
   const pct = exporting ? Math.round((progress?.ratio ?? 0) * 100) : 0;
-  const phaseLabel = exporting ? (PHASE_LABEL[progress?.phase ?? ''] ?? progress?.phase ?? '') : '';
+  const phaseKey = progress?.phase ?? '';
+  let phaseLabel = '';
+  if (exporting) {
+    try {
+      phaseLabel = t(`phase.${phaseKey}` as never);
+    } catch {
+      phaseLabel = phaseKey;
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -56,24 +58,22 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
           className="h-full w-full object-contain"
         />
 
-        {/* 水印模式角标 */}
         <div
           className="absolute left-3 top-3 flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] font-semibold text-white"
           style={{
             background: config.withWatermark ? 'rgba(245, 158, 11, 0.95)' : 'rgba(16, 185, 129, 0.95)',
           }}
         >
-          {config.withWatermark ? '👁️ 含水印预览' : '✓ 干净导出'}
+          {config.withWatermark ? t('watermarkBadge') : t('cleanBadge')}
         </div>
 
         {rendering && !exporting && (
-          <span className="absolute right-3 top-3 rounded bg-black/60 px-2 py-0.5 text-[10px] text-white/70">渲染中…</span>
+          <span className="absolute right-3 top-3 rounded bg-black/60 px-2 py-0.5 text-[10px] text-white/70">{t('renderingTag')}</span>
         )}
         {error && (
-          <span className="absolute inset-x-3 bottom-3 rounded bg-recording-strong px-3 py-1.5 text-[11px] text-white">预览失败：{error}</span>
+          <span className="absolute inset-x-3 bottom-3 rounded bg-recording-strong px-3 py-1.5 text-[11px] text-white">{t('previewFailed', { message: error })}</span>
         )}
 
-        {/* 底部时间标尺：导出中隐藏 */}
         {!exporting && (
           <div className="absolute inset-x-4 bottom-3 flex items-center gap-2 text-white">
             <span className="font-mono text-[11px] opacity-85">{(timeMs / 1000).toFixed(1)}s</span>
@@ -90,7 +90,6 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
           </div>
         )}
 
-        {/* 导出进度 overlay：黑色半透明 + 居中卡片 */}
         {exporting && (
           <div
             className="fade-in absolute inset-0 flex items-center justify-center"
@@ -114,7 +113,7 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
                   <span className="absolute inset-0 grid place-items-center font-mono text-[10px] font-bold text-text-primary tabular-nums">{pct}%</span>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[12.5px] font-semibold text-text-primary">正在生成视频</div>
+                  <div className="text-[12.5px] font-semibold text-text-primary">{t('generating')}</div>
                   <div className="mt-0.5 truncate text-[11px] text-text-tertiary">{phaseLabel}</div>
                 </div>
               </div>
@@ -129,9 +128,7 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
         )}
       </div>
 
-      <p className="text-[11px] text-text-tertiary">
-        预览是「按时刻渲染」而非真实回放。比例 / 框选 / 水印改变会即时刷新。
-      </p>
+      <p className="text-[11px] text-text-tertiary">{t('caption')}</p>
     </div>
   );
 }

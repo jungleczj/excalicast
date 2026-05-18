@@ -5,7 +5,7 @@ import { useMemo, type RefObject } from 'react';
 
 const Excalidraw = dynamic(
   async () => (await import('@excalidraw/excalidraw')).Excalidraw,
-  { ssr: false, loading: () => <div className="grid h-full place-items-center text-text-tertiary">加载白板内核…</div> },
+  { ssr: false, loading: () => <div className="grid h-full place-items-center text-text-tertiary" /> },
 );
 
 export interface WhiteboardChangeFn {

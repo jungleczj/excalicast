@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
 
 interface Props {
@@ -25,13 +26,8 @@ function fmt(ms: number): string {
   return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
 }
 
-/**
- * 浮动控制条 — 设计稿 ControlBar：
- *  - 深色玻璃 rgba(17,24,39,0.92) backdrop-blur
- *  - 圆形胶囊
- *  - REC 红点 pulse + 计时器（mono 字体）+ Pause/Stop + 麦克风/摄像头状态点
- */
 export function RecordingBar(props: Props): JSX.Element {
+  const t = useTranslations('recordingBar');
   const { state, elapsedMs, hasAudio, hasCamera, cameraEnabled, onToggleCamera, onStart, onStop, onDiscard, onPause, onResume } = props;
 
   if (state === 'idle') {
@@ -53,7 +49,7 @@ export function RecordingBar(props: Props): JSX.Element {
               ? 'bg-success-500 text-white'
               : 'bg-white/10 text-white/70 hover:bg-white/15'
           }`}
-          title={cameraEnabled ? '摄像头已开启 · 点击关闭' : '摄像头已关闭 · 点击开启'}
+          title={cameraEnabled ? t('cameraOnTooltip') : t('cameraOffTooltip')}
         >
           {cameraEnabled ? <I.Camera size={14} /> : <I.CameraOff size={14} />}
         </button>
@@ -64,7 +60,7 @@ export function RecordingBar(props: Props): JSX.Element {
           style={{ background: 'var(--recording-strong)', boxShadow: '0 4px 12px rgba(220,38,38,0.4)' }}
         >
           <span className="h-2 w-2 rounded-full bg-white" />
-          开始录制
+          {t('start')}
         </button>
       </div>
     );
@@ -76,7 +72,7 @@ export function RecordingBar(props: Props): JSX.Element {
         className="rounded-full px-5 py-2.5 text-sm text-white/90"
         style={{ background: 'rgba(17, 24, 39, 0.92)', backdropFilter: 'blur(12px)' }}
       >
-        正在保存录制…
+        {t('processing')}
       </div>
     );
   }
@@ -97,7 +93,7 @@ export function RecordingBar(props: Props): JSX.Element {
           style={{ background: isRec ? 'var(--recording)' : 'rgba(255,255,255,0.4)' }}
         />
         <span className="text-[12px] font-semibold tracking-[0.05em]">
-          {isRec ? 'REC' : 'PAUSED'}
+          {isRec ? t('rec') : t('paused')}
         </span>
       </div>
 
@@ -111,7 +107,7 @@ export function RecordingBar(props: Props): JSX.Element {
           onClick={onPause}
           className="flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1.5 text-[12px] font-medium hover:bg-white/15"
         >
-          <I.Pause size={13} /> 暂停
+          <I.Pause size={13} /> {t('pause')}
         </button>
       ) : (
         <button
@@ -119,7 +115,7 @@ export function RecordingBar(props: Props): JSX.Element {
           onClick={onResume}
           className="flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1.5 text-[12px] font-medium hover:bg-white/15"
         >
-          <I.Play size={13} /> 继续
+          <I.Play size={13} /> {t('resume')}
         </button>
       )}
 
@@ -129,14 +125,14 @@ export function RecordingBar(props: Props): JSX.Element {
         className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-white"
         style={{ background: 'var(--recording-strong)' }}
       >
-        <I.Stop size={13} /> 停止
+        <I.Stop size={13} /> {t('stop')}
       </button>
 
       {onDiscard && (
         <button
           type="button"
           onClick={onDiscard}
-          title="丢弃"
+          title={t('discardTooltip')}
           className="grid h-7 w-7 place-items-center rounded-full bg-white/10 text-white/80 hover:bg-white/15"
         >
           <I.Trash size={13} />
@@ -146,8 +142,8 @@ export function RecordingBar(props: Props): JSX.Element {
       <span className="h-5 w-px bg-white/20" />
 
       <div className="flex gap-1.5 pr-1">
-        <SourceDot active={hasAudio} icon={<I.Mic size={11} />} title="麦克风" />
-        <SourceDot active={hasCamera} icon={<I.Camera size={11} />} title="摄像头" />
+        <SourceDot active={hasAudio} icon={<I.Mic size={11} />} title={t('micTooltip')} />
+        <SourceDot active={hasCamera} icon={<I.Camera size={11} />} title={t('cameraTooltip')} />
       </div>
     </div>
   );
