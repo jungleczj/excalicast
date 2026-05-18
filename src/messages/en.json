@@ -1,0 +1,250 @@
+{
+  "landing": {
+    "meta": {
+      "title": "Excalicast — Whiteboard Recorder",
+      "description": "Record whiteboard activity + mic audio. One take, exported to multiple aspect ratios."
+    },
+    "nav": {
+      "pricing": "Pricing",
+      "contact": "Contact",
+      "startRecording": "Start recording"
+    },
+    "hero": {
+      "badge": "Runs in your browser · no signup",
+      "titleLine1": "Record once,",
+      "titleLine2": "ship every aspect ratio",
+      "subtitle": "Excalicast is a browser-based whiteboard recorder. Draw in Excalidraw, capture voice and actions, then export 16:9 / 9:16 / 1:1 / 4:5 MP4s — ready for YouTube, TikTok, Instagram, and more.",
+      "ctaPrimary": "Start free",
+      "ctaSecondary": "See pricing",
+      "disclaimer": "Recording is free · watermarked MP4 export is free · $9.99 per recording to unlock watermark-free export"
+    },
+    "features": {
+      "heading": "Features",
+      "lossless": { "title": "Lossless capture", "desc": "Captures the operation stream rather than screen pixels. Always crisp, never affected by window occlusion or minimization." },
+      "audio": { "title": "Synchronized voice", "desc": "Mic audio is tightly aligned with whiteboard actions. Exported MP4 includes a full audio track." },
+      "ratios": { "title": "One take, every ratio", "desc": "From the same recording, export landscape, portrait, square, and 4:5 versions. No re-recording." },
+      "local": { "title": "Local rendering", "desc": "Videos render in the browser via ffmpeg.wasm. Raw recordings never leave your computer." },
+      "camera": { "title": "Optional camera bubble", "desc": "Toggle the camera on for a draggable circular bubble overlay — great for teaching scenarios." },
+      "privacy": { "title": "Privacy first", "desc": "Recordings live in your browser (IndexedDB). The server only stores payment records and never touches your recordings." }
+    },
+    "pricing": {
+      "heading": "Pricing",
+      "subheading": "Recording and watermarked export are free. Pay per recording when you need watermark-free export.",
+      "free": {
+        "label": "Free",
+        "tagline": "No signup. Just open the app.",
+        "bullet1": "Unlimited recordings (up to 30 minutes each)",
+        "bullet2": "Voice + camera bubble",
+        "bullet3": "Export MP4 (with Excalicast watermark)",
+        "bullet4": "Multi-ratio export (16:9 / 9:16 / 1:1 / 4:5)",
+        "cta": "Start recording"
+      },
+      "oneTime": {
+        "label": "One-time unlock",
+        "recommended": "Recommended",
+        "unit": "/ per recording",
+        "tagline": "Permanent unlock for this recording. No account required.",
+        "bullet1": "Everything in Free",
+        "bullet2": "Permanent watermark removal",
+        "bullet3": "Re-export this recording into any ratio, watermark-free, as many times as you want",
+        "bullet4": "Secure Paddle checkout (cards / Apple Pay / Google Pay)",
+        "bullet5": "Recording data stays in your browser. Server only stores payment status.",
+        "cta": "Record first to unlock"
+      },
+      "methods": "Accepted payment methods: Visa · Mastercard · American Express · Apple Pay · Google Pay",
+      "processedBy": "All transactions are processed by <paddle>Paddle</paddle>. Excalicast never sees your payment details."
+    },
+    "flow": {
+      "heading": "How it works",
+      "step1": { "title": "Record", "desc": "Click \"Start recording.\" Draw, write, and narrate on the whiteboard. Optionally enable the camera bubble." },
+      "step2": { "title": "Preview", "desc": "When you stop, you jump to the export page. Pick your target ratio (16:9 / 9:16 / 1:1 / 4:5)." },
+      "step3": { "title": "Download", "desc": "Click \"Download\" for a watermarked MP4. Or pay $9.99 to permanently unlock watermark-free export of this recording." }
+    },
+    "refund": {
+      "heading": "Refund policy",
+      "body": "If you can't export a watermark-free MP4 after paying, or you're unsatisfied with the service, you can request a full refund <strong>within 14 days of purchase</strong>. Email <mail>support@excalicast.cn</mail> and we'll respond within 2 business days.",
+      "viewFull": "Read the full refund policy →"
+    },
+    "contact": {
+      "heading": "Contact",
+      "body": "Questions, feedback, partnership, or refund requests — email us. We reply within 2 business days."
+    },
+    "footer": {
+      "home": "Home",
+      "privacy": "Privacy",
+      "terms": "Terms",
+      "refund": "Refunds",
+      "contact": "Contact"
+    }
+  },
+  "header": {
+    "library": "Library",
+    "record": "Record",
+    "upgradePro": "Upgrade Pro",
+    "loggedIn": "Signed in",
+    "logout": "Sign out",
+    "loginRegister": "Sign in",
+    "languageToggle": {
+      "label": "Switch language",
+      "zh": "中文",
+      "en": "English"
+    }
+  },
+  "legal": {
+    "nav": {
+      "home": "Home",
+      "pricing": "Pricing",
+      "contact": "Contact",
+      "startRecording": "Start recording"
+    },
+    "lastUpdated": "Last updated: {date}",
+    "entity": "Entity: Excalicast",
+    "questionsCta": "Still have questions? Drop us a line.",
+    "footer": {
+      "home": "Home",
+      "privacy": "Privacy",
+      "terms": "Terms",
+      "refund": "Refunds",
+      "contact": "Contact"
+    }
+  },
+  "privacy": {
+    "meta": { "title": "Privacy Policy · Excalicast", "description": "How Excalicast collects, uses, and protects your data." },
+    "title": "Privacy Policy"
+  },
+  "terms": {
+    "meta": { "title": "Terms of Service · Excalicast", "description": "Excalicast terms of service and acceptable use." },
+    "title": "Terms of Service"
+  },
+  "refund": {
+    "meta": { "title": "Refund Policy · Excalicast", "description": "How to request a refund after purchasing watermark-free export." },
+    "title": "Refund Policy"
+  },
+  "login": {
+    "title": "Sign in to Excalicast",
+    "subtitle": "Sign in to unlock upcoming Pro / Max features. Recording + one-time purchase don't require an account.",
+    "google": "Continue with Google",
+    "or": "OR",
+    "emailPlaceholder": "Enter your email",
+    "sendMagicLink": "Send magic link",
+    "sending": "Sending…",
+    "sentTitle": "Magic link sent",
+    "sentSubtitle": "Check your {email} inbox (valid for 10 minutes)",
+    "changeEmail": "Use a different email",
+    "emailDisabled": "Email sign-in is unavailable: server config missing.",
+    "noProvider": "No sign-in method is configured.",
+    "errorInvalidEmail": "Please enter a valid email",
+    "errorSendFail": "Failed to send magic link: {message}",
+    "ackPrefix": "By continuing, you acknowledge Excalicast's ",
+    "privacyLink": "Privacy Policy",
+    "ackSuffix": "."
+  },
+  "paywall": {
+    "title": "Unlock watermark-free export",
+    "subtitle": "This recording will be <strong>permanently unlocked</strong> — re-export to every ratio / crop, watermark-free. One-time purchase, <strong>no signup required</strong>.",
+    "priceUnit": "One-time · this recording only",
+    "bullet1": "Permanent watermark removal",
+    "bullet2": "Re-export 16:9 / 9:16 / 1:1 / 4:5 as many times as you want",
+    "bullet3": "Recording data stays in your browser. Server only stores payment status.",
+    "bulletPaymentCreem": "Secure Creem checkout (cards / Apple Pay / Google Pay)",
+    "bulletPaymentPaddle": "Secure Paddle checkout (cards / Apple Pay / Google Pay)",
+    "ctaCancel": "Not now",
+    "ctaPay": "Unlock · {price}",
+    "openingCheckout": "Opening {provider}…",
+    "errorPaddleNotInit": "Paddle isn't ready yet. Please retry or check your network.",
+    "errorPrefix": "Error: {message}",
+    "checkoutCompleted": "Payment complete. Confirming…",
+    "creemRedirected": "Checkout opened in a new tab. We'll unlock automatically once payment completes.",
+    "unlocked": "Unlocked!",
+    "syncing": "Confirming payment in the background. You can close this window.",
+    "simulating": "Simulating payment…",
+    "upgradeAlt": "Or upgrade Pro · {price}/mo · all recordings watermark-free + subtitles + cloud backup",
+    "devSkip": "[dev] Skip Paddle and mark as paid",
+    "footer": "Watermark will be removed automatically after payment"
+  },
+  "workspace": {
+    "cameraOpenFailed": "Could not open camera: {message}",
+    "startFailed": "Could not start recording: {message}",
+    "stopFailed": "Could not stop recording: {message}",
+    "discardConfirm": "Discard this recording? All data will be deleted.",
+    "dragToMove": "Drag to move",
+    "loadingWhiteboard": "Loading whiteboard…"
+  },
+  "recordingBar": {
+    "audioOn": "Mic on",
+    "audioOff": "Mic off",
+    "cameraOn": "Camera on",
+    "cameraOff": "Camera off",
+    "start": "Start recording",
+    "pause": "Pause",
+    "resume": "Resume",
+    "stop": "Stop & export",
+    "discard": "Discard",
+    "processing": "Processing…",
+    "elapsed": "Recorded",
+    "permissionAlert": "Microphone permission denied. Lift the restriction from your browser's URL bar and retry."
+  },
+  "library": {
+    "title": "Library",
+    "empty": "No recordings yet. Make your first one.",
+    "newRecording": "New recording",
+    "open": "Open",
+    "export": "Export",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this recording? Data cannot be recovered.",
+    "duration": "Duration",
+    "createdAt": "Created",
+    "paid": "Paid",
+    "free": "Unpaid",
+    "loading": "Loading…"
+  },
+  "play": {
+    "loading": "Loading recording…",
+    "notFound": "Recording not found",
+    "back": "Back to library",
+    "play": "Play",
+    "pause": "Pause",
+    "restart": "Restart"
+  },
+  "export": {
+    "loading": "Loading recording…",
+    "notFound": "Recording not found",
+    "back": "Back to library",
+    "title": "Export MP4",
+    "ratio": "Ratio",
+    "exportButton": "Export MP4",
+    "exporting": "Exporting…",
+    "downloadReady": "Export ready — downloaded",
+    "exportFailed": "Export failed: {message}",
+    "unlockPrompt": "Watermark-free export purchased"
+  },
+  "proUpgrade": {
+    "title": "Upgrade to Pro",
+    "subtitle": "Unlock all advanced capabilities. Billed monthly, cancel anytime.",
+    "subscriptionTag": "Subscription · {provider} {env}",
+    "sandbox": "sandbox",
+    "secure": "secure checkout",
+    "features": [
+      "✅ Permanent watermark removal (every recording, no per-recording payment)",
+      "✅ AI subtitles (auto-generated SRT timeline)",
+      "✅ Cloud backup of recordings (multi-device access)",
+      "✅ Priority support"
+    ],
+    "needLogin": "Sign in to upgrade to Pro.",
+    "loginFirst": "Sign in to upgrade",
+    "openingCheckout": "Opening {provider}…",
+    "ctaUpgrade": "Upgrade · {price}",
+    "ctaCancel": "Not now",
+    "footnoteCreem": "Secure Creem checkout · cancel anytime",
+    "footnoteSandbox": "Paddle sandbox — use test card numbers",
+    "footnotePaddle": "Secure Paddle checkout · cancel anytime",
+    "devGrant": "🛠 DEV: skip Paddle, grant Pro",
+    "synced": "Pro is now active!",
+    "syncing": "Subscription syncing. You can close this window and check back shortly.",
+    "paymentDone": "Payment complete. Waiting for subscription activation…",
+    "creemRedirected": "Creem checkout opened in a new tab. Pro will activate automatically once payment completes.",
+    "devGranted": "Dev mode: Pro granted (bypassed Paddle)",
+    "errorPaddleNotInit": "Paddle isn't ready yet. Please retry or check your network.",
+    "errorPrefix": "Error: {message}"
+  }
+}

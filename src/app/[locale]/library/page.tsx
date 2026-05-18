@@ -1,13 +1,16 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { useLocale, useTranslations } from 'next-intl';
 import { AppHeader } from '@/components/AppHeader';
 import { RecordingsList } from '@/components/RecordingsList';
 import { listRecordings } from '@/lib/db-client';
 import type { RecordingMetadata } from '@/types/recording';
+import { Link } from '@/i18n/navigation';
 
 export default function LibraryPage(): JSX.Element {
+  const t = useTranslations('library');
+  const locale = useLocale();
   const [stats, setStats] = useState<{ count: number; totalMs: number }>({ count: 0, totalMs: 0 });
 
   useEffect(() => {
@@ -18,6 +21,10 @@ export default function LibraryPage(): JSX.Element {
   }, []);
 
   const totalMin = Math.round(stats.totalMs / 60_000);
+  const heading = locale === 'en' ? 'My recordings' : '我的录制';
+  const subline = locale === 'en'
+    ? `${stats.count} recording${stats.count === 1 ? '' : 's'} · ${totalMin} min total · all stored locally`
+    : `${stats.count} 条录制 · 共 ${totalMin} 分钟 · 全部存于本机`;
 
   return (
     <div className="flex h-full flex-col bg-bg-secondary">
@@ -27,10 +34,8 @@ export default function LibraryPage(): JSX.Element {
         <div className="mx-auto max-w-6xl">
           <div className="mb-5 flex items-end justify-between">
             <div>
-              <h1 className="text-[22px] font-bold leading-tight">我的录制</h1>
-              <div className="mt-1 text-[13px] text-text-secondary">
-                {stats.count} 条录制 · 共 {totalMin} 分钟 · 全部存于本机
-              </div>
+              <h1 className="text-[22px] font-bold leading-tight">{heading}</h1>
+              <div className="mt-1 text-[13px] text-text-secondary">{subline}</div>
             </div>
             <div className="flex gap-2">
               <Link
@@ -39,7 +44,7 @@ export default function LibraryPage(): JSX.Element {
                 style={{ background: 'var(--recording-strong)', boxShadow: '0 4px 12px rgba(220,38,38,0.25)' }}
               >
                 <span className="h-2 w-2 rounded-full bg-white" />
-                新建录制
+                {t('newRecording')}
               </Link>
             </div>
           </div>

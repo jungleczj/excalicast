@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
 import { isPaid, simulatePayment } from '@/services/paymentClient';
 import { openCheckout, closeCheckout } from '@/services/paddleClient';
@@ -17,9 +18,10 @@ interface Props {
 
 const FALLBACK_PRICE = '$3';
 const POLL_INTERVAL_MS = 1000;
-const POLL_MAX_ATTEMPTS = 30; // 30s 内大多数 webhook 都到了；之后由 ExportPanel 接管背景轮询
+const POLL_MAX_ATTEMPTS = 30;
 
 export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro }: Props): JSX.Element | null {
+  const t = useTranslations('paywall');
   const { paddle, subscribe } = usePaddle();
   const { config: paymentCfg } = usePaymentConfig();
   const [busy, setBusy] = useState(false);
@@ -28,15 +30,19 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
   const pollingRef = useRef(false);
 
   const provider = paymentCfg?.provider ?? 'paddle';
+  const providerLabel = provider === 'creem' ? 'Creem' : 'Paddle';
   const priceLabel = paymentCfg
     ? formatPrice(paymentCfg.oneTimePriceCents, paymentCfg.currency)
     : FALLBACK_PRICE;
+  const proPriceLabel = paymentCfg
+    ? formatPrice(paymentCfg.proMonthlyPriceCents, paymentCfg.currency)
+    : '$9';
 
   useEffect(() => {
     if (!open) return;
     const unsubscribe = subscribe((event) => {
       if (event.name === 'checkout.completed') {
-        setStatusMsg('支付完成，正在确认…');
+        setStatusMsg(t('checkoutCompleted'));
         if (paddle) closeCheckout(paddle);
         void pollUntilPaid();
       } else if (event.name === 'checkout.closed') {
@@ -56,7 +62,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
         try {
           if (await isPaid(recordingId)) {
-            setStatusMsg('已解锁！');
+            setStatusMsg(t('unlocked'));
             onPaid?.();
             onClose();
             return;
@@ -65,8 +71,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
           // transient — keep polling
         }
       }
-      // 30s 仍未拿到 paid → 关闭 modal，由 ExportPanel 在后台继续轮询
-      setStatusMsg('支付确认中，正在后台等待，可关闭此窗口…');
+      setStatusMsg(t('syncing'));
       onClose();
     } finally {
       pollingRef.current = false;
@@ -96,15 +101,13 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
       if (!res.ok) throw new Error(j.message ?? j.error ?? `checkout ${res.status}`);
 
       if (j.provider === 'creem' && j.redirectUrl) {
-        // Creem 流程：跳到 hosted checkout 页面。新 tab 让用户回来时 modal 还在轮询。
         window.open(j.redirectUrl, '_blank', 'noopener,noreferrer');
-        setStatusMsg('已在新标签页打开支付页面，完成后会自动解锁…');
+        setStatusMsg(t('creemRedirected'));
         void pollUntilPaid();
         return;
       }
-      // Paddle 流程：保留 SDK overlay
       if (!paddle) {
-        setError('Paddle 尚未初始化，请稍后重试或检查网络。');
+        setError(t('errorPaddleNotInit'));
         setBusy(false);
         return;
       }
@@ -117,7 +120,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
 
   const handleDevSimulate = async () => {
     setError(null);
-    setStatusMsg('正在模拟支付…');
+    setStatusMsg(t('simulating'));
     setBusy(true);
     try {
       await simulatePayment(recordingId);
@@ -145,7 +148,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
         <button
           onClick={onClose}
           className="absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-md text-text-tertiary hover:bg-bg-tertiary hover:text-text-primary"
-          aria-label="关闭"
+          aria-label="close"
         >
           ✕
         </button>
@@ -156,26 +159,18 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
         >
           <I.Lock size={28} />
         </div>
-        <h2 className="text-[20px] font-bold leading-tight text-text-primary">解锁无水印导出</h2>
+        <h2 className="text-[20px] font-bold leading-tight text-text-primary">{t('title')}</h2>
         <p className="mt-2 text-[13px] leading-relaxed text-text-secondary">
-          这条录制将<strong className="text-text-primary">永久解锁</strong>，可以任意比例 / 框选模式反复导出无水印 MP4。
-          单次购买，<strong className="text-text-primary">无需注册账号</strong>。
+          {t.rich('subtitle', { strong: (chunks) => <strong className="text-text-primary">{chunks}</strong> })}
         </p>
 
         <div className="mt-5 flex items-end gap-2 rounded-xl border border-border-default bg-bg-secondary p-4">
           <span className="font-mono text-[36px] font-bold leading-none text-text-primary">{priceLabel}</span>
-          <span className="pb-1 text-[12px] text-text-tertiary">一次性 · 仅限本录制</span>
+          <span className="pb-1 text-[12px] text-text-tertiary">{t('priceUnit')}</span>
         </div>
 
         <ul className="mt-4 space-y-2 text-[13px] text-text-secondary">
-          {[
-            '导出永久去除水印',
-            '可反复导出 16:9 / 9:16 / 1:1 / 4:5 多个比例',
-            '录制数据全程留在你浏览器，服务端只存付费状态',
-            provider === 'creem'
-              ? 'Creem 安全支付（信用卡 / Apple Pay / Google Pay）'
-              : 'Paddle 安全支付（信用卡 / Apple Pay / Google Pay）',
-          ].map((line) => (
+          {[t('bullet1'), t('bullet2'), t('bullet3'), provider === 'creem' ? t('bulletPaymentCreem') : t('bulletPaymentPaddle')].map((line) => (
             <li key={line} className="flex items-start gap-2">
               <I.Check size={14} sw={2.5} className="mt-0.5 flex-shrink-0 text-success-600" />
               <span>{line}</span>
@@ -186,7 +181,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
         {(statusMsg || error) && (
           <div className="mt-4 rounded-md border border-border-default bg-bg-secondary px-3 py-2 text-[12px]">
             {statusMsg && <div className="text-text-primary">{statusMsg}</div>}
-            {error && <div className="mt-1 text-recording-strong">错误：{error}</div>}
+            {error && <div className="mt-1 text-recording-strong">{t('errorPrefix', { message: error })}</div>}
           </div>
         )}
 
@@ -196,7 +191,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
             disabled={busy}
             className="flex-1 rounded-md border border-border-strong bg-bg-primary px-4 py-2.5 text-[13px] font-medium text-text-primary hover:bg-bg-tertiary disabled:opacity-40"
           >
-            暂不需要
+            {t('ctaCancel')}
           </button>
           <button
             onClick={() => void handleUnlock()}
@@ -205,9 +200,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
             style={{ background: 'var(--accent-600)', boxShadow: '0 4px 12px rgba(217,119,6,0.3)' }}
           >
             <I.Lock size={14} />
-            {busy
-              ? `正在打开 ${provider === 'creem' ? 'Creem' : 'Paddle'}…`
-              : `立即解锁 · ${priceLabel}`}
+            {busy ? t('openingCheckout', { provider: providerLabel }) : t('ctaPay', { price: priceLabel })}
           </button>
         </div>
 
@@ -220,7 +213,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
             disabled={busy}
             className="mt-3 w-full rounded-md border border-primary-600 bg-primary-50 px-4 py-2 text-[12px] font-semibold text-primary-700 hover:bg-primary-100 disabled:opacity-40"
           >
-            或升级 Pro · {paymentCfg ? formatPrice(paymentCfg.proMonthlyPriceCents, paymentCfg.currency) : '$9'}/月 · 所有录制无水印 + 语音字幕 + 云备份
+            {t('upgradeAlt', { price: proPriceLabel })}
           </button>
         )}
 
@@ -230,12 +223,12 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
             disabled={busy}
             className="mt-3 w-full text-center text-[10px] text-text-tertiary underline hover:text-text-secondary disabled:opacity-40"
           >
-            [dev] 跳过 Paddle，直接标记已付款
+            {t('devSkip')}
           </button>
         )}
 
         <p className="mt-3 text-center text-[10px] text-text-tertiary">
-          支付完成后自动切换到无水印模式
+          {t('footer')}
         </p>
       </div>
     </div>

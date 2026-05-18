@@ -1,12 +1,6 @@
-import { LegalLayout } from '@/components/LegalLayout';
-
-export const metadata = {
-  title: '退款政策 — Excalicast',
-};
-
-export default function RefundPage(): JSX.Element {
+export function RefundZh(): JSX.Element {
   return (
-    <LegalLayout title="退款政策" lastUpdated="2026-05-08">
+    <>
       <p>
         我们希望每一位用户都能获得满意的体验。如果你对购买的「单条录制无水印解锁」服务不满意，可在符合下列条件时申请全额退款。
       </p>
@@ -38,7 +32,7 @@ export default function RefundPage(): JSX.Element {
 
       <h2>4. 申请方式</h2>
       <p>发邮件到{' '}
-        <a href="mailto:hello@excalicast.app">hello@excalicast.app</a>，
+        <a href="mailto:support@excalicast.cn">support@excalicast.cn</a>，
         在邮件中提供：
       </p>
       <ul>
@@ -64,15 +58,15 @@ export default function RefundPage(): JSX.Element {
 
       <h2>6. 退款后的服务状态</h2>
       <p>
-        退款获批后，对应录制的"无水印解锁"权益<strong>立即失效</strong>。
+        退款获批后，对应录制的&quot;无水印解锁&quot;权益<strong>立即失效</strong>。
         但你之前已经下载到本地的 MP4 文件不受影响，依然可以使用。
       </p>
 
       <h2>7. 联系我们</h2>
       <p>
         关于退款的任何问题，请联系{' '}
-        <a href="mailto:hello@excalicast.app">hello@excalicast.app</a>。
+        <a href="mailto:support@excalicast.cn">support@excalicast.cn</a>。
       </p>
-    </LegalLayout>
+    </>
   );
 }

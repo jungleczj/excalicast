@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { getPaymentConfig } from '@/lib/paymentConfig';
 import { createCreemCheckout } from '@/services/creemServer';
+import { defaultLocale, LOCALE_COOKIE, locales } from '@/i18n/config';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,7 +18,7 @@ export const dynamic = 'force-dynamic';
  * 这条路由对 one-time 全开放（不需要登录），与现有 Paddle 一次性流程一致。
  */
 
-export async function POST(req: Request): Promise<NextResponse> {
+export async function POST(req: NextRequest): Promise<NextResponse> {
   let body: { recordingId?: string };
   try {
     body = (await req.json()) as { recordingId?: string };
@@ -31,6 +32,8 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const cfg = await getPaymentConfig();
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '') || 'http://localhost:3005';
+  const cookieLocale = req.cookies.get(LOCALE_COOKIE)?.value;
+  const locale = cookieLocale && (locales as readonly string[]).includes(cookieLocale) ? cookieLocale : defaultLocale;
 
   if (cfg.provider === 'creem') {
     const productId = cfg.creemOneTimeProductId;

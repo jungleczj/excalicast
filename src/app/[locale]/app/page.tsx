@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { AppHeader } from '@/components/AppHeader';
 import { RecordingBar } from '@/components/RecordingBar';
 import { CameraBubble } from '@/components/CameraBubble';
@@ -10,13 +10,15 @@ import { ProUpgradeModal } from '@/components/ProUpgradeModal';
 import { useSubscription } from '@/hooks/useSubscription';
 import { startRecording, type SessionHandle } from '@/services/recordingSession';
 import type { WhiteboardChangeFn } from '@/components/Whiteboard';
+import { useRouter } from '@/i18n/navigation';
 
 const Whiteboard = dynamic(() => import('@/components/Whiteboard'), {
   ssr: false,
-  loading: () => <div className="grid h-full place-items-center text-text-tertiary">加载白板…</div>,
+  loading: () => <div className="grid h-full place-items-center text-text-tertiary">…</div>,
 });
 
 export default function HomePage(): JSX.Element {
+  const t = useTranslations('workspace');
   const router = useRouter();
   const subscription = useSubscription();
   const [state, setState] = useState<'idle' | 'recording' | 'paused' | 'processing'>('idle');
@@ -132,9 +134,9 @@ export default function HomePage(): JSX.Element {
       setCameraStream(stream);
       setCameraEnabled(true);
     } catch (err) {
-      alert(`无法打开摄像头：${err instanceof Error ? err.message : 'unknown'}`);
+      alert(t('cameraOpenFailed', { message: err instanceof Error ? err.message : 'unknown' }));
     }
-  }, [cameraEnabled, cameraStream, state]);
+  }, [cameraEnabled, cameraStream, state, t]);
 
   const handleStart = useCallback(async () => {
     // 释放预览流（recordingSession 会重新申请，避免双流冲突）
@@ -150,9 +152,9 @@ export default function HomePage(): JSX.Element {
       setCameraStream(session.cameraStream);
       setState('recording');
     } catch (err) {
-      alert(`开始录制失败：${err instanceof Error ? err.message : 'unknown'}`);
+      alert(t('startFailed', { message: err instanceof Error ? err.message : 'unknown' }));
     }
-  }, [cameraEnabled, cameraStream]);
+  }, [cameraEnabled, cameraStream, t]);
 
   const handlePause = useCallback(() => {
     sessionRef.current?.pause();
@@ -176,19 +178,19 @@ export default function HomePage(): JSX.Element {
       setHasCamera(false);
       setHasAudio(false);
       setState('idle');
-      router.push(`/export/${meta.id}`);
+      router.push(`/export/${meta.id}` as never);
     } catch (err) {
-      alert(`停止录制失败：${err instanceof Error ? err.message : 'unknown'}`);
+      alert(t('stopFailed', { message: err instanceof Error ? err.message : 'unknown' }));
       sessionRef.current = null;
       changeRef.current = null;
       setState('idle');
     }
-  }, [router]);
+  }, [router, t]);
 
   const handleDiscard = useCallback(async () => {
     const s = sessionRef.current;
     if (!s) return;
-    if (!confirm('丢弃当前录制？所有数据将被删除。')) return;
+    if (!confirm(t('discardConfirm'))) return;
     try {
       const meta = await s.stop();
       const { deleteRecording } = await import('@/lib/db-client');
@@ -200,7 +202,7 @@ export default function HomePage(): JSX.Element {
     setHasCamera(false);
     setHasAudio(false);
     setState('idle');
-  }, []);
+  }, [t]);
 
   const isRecording = state === 'recording' || state === 'paused';
 
@@ -234,7 +236,7 @@ export default function HomePage(): JSX.Element {
               cursor: draggingBar ? 'grabbing' : 'grab',
             }}
             onMouseDown={handleBarMouseDown}
-            title="拖动以移动"
+            title={t('dragToMove')}
           >
             <RecordingBar
               state={state}

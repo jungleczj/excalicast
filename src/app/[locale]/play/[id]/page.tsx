@@ -1,17 +1,18 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import Link from 'next/link';
+import { useLocale, useTranslations } from 'next-intl';
 import { AppHeader } from '@/components/AppHeader';
 import { I } from '@/components/icons';
 import { loadFullRecording, deleteRecording } from '@/lib/db-client';
 import type { RecordingMetadata, WhiteboardSnapshot } from '@/types/recording';
+import { Link, useRouter } from '@/i18n/navigation';
 
 const Excalidraw = dynamic(
   async () => (await import('@excalidraw/excalidraw')).Excalidraw,
-  { ssr: false, loading: () => <div className="grid h-full place-items-center text-text-tertiary">加载白板内核…</div> },
+  { ssr: false, loading: () => <div className="grid h-full place-items-center text-text-tertiary">…</div> },
 );
 
 function snapshotAt(snaps: WhiteboardSnapshot[], t: number): WhiteboardSnapshot | null {
@@ -39,6 +40,8 @@ export default function PlayPage(): JSX.Element {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params?.id ?? '';
+  const locale = useLocale();
+  const t = useTranslations('play');
 
   const [meta, setMeta] = useState<RecordingMetadata | null>(null);
   const [snapshots, setSnapshots] = useState<WhiteboardSnapshot[]>([]);
@@ -208,10 +211,11 @@ export default function PlayPage(): JSX.Element {
   }, [snapshots, applySnapshot]);
 
   const handleDelete = useCallback(async () => {
-    if (!confirm('删除这条录制？此操作不可恢复。')) return;
+    const msg = locale === 'en' ? 'Delete this recording? Cannot be undone.' : '删除这条录制？此操作不可恢复。';
+    if (!confirm(msg)) return;
     await deleteRecording(id);
     router.push('/library');
-  }, [id, router]);
+  }, [id, router, locale]);
 
   if (error) {
     return (
@@ -220,37 +224,40 @@ export default function PlayPage(): JSX.Element {
         <div className="grid flex-1 place-items-center">
           <div className="rounded-md border border-border-default bg-bg-primary px-8 py-6 text-center shadow-sm">
             <p className="text-sm text-recording-strong">{error}</p>
-            <Link href="/library" className="mt-3 inline-block text-xs text-primary-600 underline">返回录制库</Link>
+            <Link href="/library" className="mt-3 inline-block text-xs text-primary-600 underline">{t('back')}</Link>
           </div>
         </div>
       </div>
     );
   }
 
-  const title = meta?.title?.trim() || `录制 ${id.slice(0, 8)}`;
+  const titleFallback = locale === 'en' ? `Recording ${id.slice(0, 8)}` : `录制 ${id.slice(0, 8)}`;
+  const title = meta?.title?.trim() || titleFallback;
+  const downloadLabel = locale === 'en' ? 'Download video' : '下载视频';
+  const deleteLabel = locale === 'en' ? 'Delete' : '删除';
+  const backLabel = locale === 'en' ? 'Back' : '返回';
 
   return (
     <div className="flex h-full flex-col bg-bg-secondary">
       <AppHeader tier="free" />
       <div className="flex flex-1 flex-col overflow-hidden">
-        {/* 顶部条 */}
         <div className="flex items-center gap-3 border-b border-border-default bg-bg-primary px-6 py-2.5">
-          <Link href="/library" className="text-text-tertiary hover:text-text-primary" aria-label="返回">
+          <Link href="/library" className="text-text-tertiary hover:text-text-primary" aria-label={backLabel}>
             <I.ChevronLeft size={18} />
           </Link>
           <div className="truncate text-[14px] font-semibold text-text-primary">{title}</div>
           <div className="flex-1" />
           <Link
-            href={`/export/${id}`}
+            href={`/export/${id}` as never}
             className="flex items-center gap-1.5 rounded-md bg-primary-600 px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm transition hover:bg-primary-700"
           >
-            <I.Download size={13} /> 下载视频
+            <I.Download size={13} /> {downloadLabel}
           </Link>
           <button
             onClick={handleDelete}
             className="flex items-center gap-1.5 rounded-md border border-border-default px-3 py-1.5 text-[12px] text-text-tertiary transition hover:bg-recording/10 hover:text-recording-strong"
           >
-            <I.Trash size={13} /> 删除
+            <I.Trash size={13} /> {deleteLabel}
           </button>
         </div>
 
@@ -292,19 +299,18 @@ export default function PlayPage(): JSX.Element {
           )}
           {!ready && (
             <div className="absolute inset-0 grid place-items-center bg-black/5 text-[13px] text-text-tertiary">
-              加载录制数据…
+              {t('loading')}
             </div>
           )}
         </div>
 
-        {/* 底部传输条 */}
         <div className="border-t border-border-default bg-bg-primary px-6 py-3">
           <div className="flex items-center gap-3">
             <button
               onClick={togglePlay}
               disabled={!ready || (meta?.durationMs ?? 0) === 0}
               className="grid h-10 w-10 place-items-center rounded-full bg-primary-600 text-white shadow transition hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label={playing ? '暂停' : '播放'}
+              aria-label={playing ? t('pause') : t('play')}
             >
               {playing ? <I.Pause size={16} /> : <I.Play size={16} />}
             </button>
@@ -321,9 +327,9 @@ export default function PlayPage(): JSX.Element {
             />
             <span className="font-mono text-[12px] tabular-nums text-text-tertiary">{fmt(meta?.durationMs ?? 0)}</span>
             <div className="ml-2 flex items-center gap-2 text-[11px] text-text-tertiary">
-              {meta?.hasAudio && <span className="flex items-center gap-1"><I.Mic size={12} /> 音频</span>}
-              {meta?.hasCamera && <span className="flex items-center gap-1"><I.Camera size={12} /> 摄像头</span>}
-              {!meta?.hasAudio && !meta?.hasCamera && <span>仅画板</span>}
+              {meta?.hasAudio && <span className="flex items-center gap-1"><I.Mic size={12} /> {locale === 'en' ? 'Audio' : '音频'}</span>}
+              {meta?.hasCamera && <span className="flex items-center gap-1"><I.Camera size={12} /> {locale === 'en' ? 'Camera' : '摄像头'}</span>}
+              {!meta?.hasAudio && !meta?.hasCamera && <span>{locale === 'en' ? 'Whiteboard only' : '仅画板'}</span>}
             </div>
           </div>
         </div>

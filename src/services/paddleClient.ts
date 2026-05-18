@@ -2,6 +2,13 @@
 
 import type { Paddle } from '@paddle/paddle-js';
 
+function getPaddleLocale(): 'zh' | 'en' {
+  if (typeof document === 'undefined') return 'en';
+  const cookie = document.cookie.split('; ').find((c) => c.startsWith('NEXT_LOCALE='));
+  const value = cookie?.split('=')[1];
+  return value === 'zh' ? 'zh' : 'en';
+}
+
 export interface OpenCheckoutOptions {
   paddle: Paddle;
   recordingId: string;
@@ -23,7 +30,7 @@ export function openCheckout({ paddle, recordingId }: OpenCheckoutOptions): void
     settings: {
       displayMode: 'overlay',
       theme: 'light',
-      locale: 'zh',
+      locale: getPaddleLocale(),
     },
   });
 }
@@ -65,7 +72,7 @@ export function openProSubscriptionCheckout({ paddle, userId, email }: OpenProSu
     settings: {
       displayMode: 'overlay',
       theme: 'light',
-      locale: 'zh',
+      locale: getPaddleLocale(),
     },
   });
 }

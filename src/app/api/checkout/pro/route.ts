@@ -1,7 +1,8 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getPaymentConfig } from '@/lib/paymentConfig';
 import { createCreemCheckout } from '@/services/creemServer';
+import { defaultLocale, LOCALE_COOKIE, locales } from '@/i18n/config';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,7 +16,7 @@ export const dynamic = 'force-dynamic';
  *
  * 必须已登录（Pro 订阅必须能绑定 Supabase userId）。
  */
-export async function POST(): Promise<NextResponse> {
+export async function POST(req: NextRequest): Promise<NextResponse> {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
@@ -24,6 +25,8 @@ export async function POST(): Promise<NextResponse> {
 
   const cfg = await getPaymentConfig();
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '') || 'http://localhost:3005';
+  const cookieLocale = req.cookies.get(LOCALE_COOKIE)?.value;
+  const locale = cookieLocale && (locales as readonly string[]).includes(cookieLocale) ? cookieLocale : defaultLocale;
 
   if (cfg.provider === 'creem') {
     const productId = cfg.creemProProductId;
@@ -36,7 +39,7 @@ export async function POST(): Promise<NextResponse> {
     try {
       const result = await createCreemCheckout({
         productId,
-        successUrl: `${appUrl}/app?creem_purchase=pro`,
+        successUrl: `${appUrl}/${locale}/app?creem_purchase=pro`,
         customerEmail: user.email ?? undefined,
         metadata: {
           kind: 'pro_subscription',

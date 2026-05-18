@@ -1,0 +1,250 @@
+{
+  "landing": {
+    "meta": {
+      "title": "Excalicast — 白板录制工具",
+      "description": "录制白板操作 + 麦克风音频，一次录制导出多种比例的 MP4 视频。"
+    },
+    "nav": {
+      "pricing": "价格",
+      "contact": "联系我们",
+      "startRecording": "开始录制"
+    },
+    "hero": {
+      "badge": "浏览器内运行 · 无需注册",
+      "titleLine1": "录一次白板，",
+      "titleLine2": "导出多个比例的视频",
+      "subtitle": "Excalicast 是一款基于浏览器的白板录制工具。用 Excalidraw 作画，同步采集语音和操作，最终导出 16:9 / 9:16 / 1:1 / 4:5 等多个比例的 MP4，覆盖 YouTube、抖音、Instagram 等平台。",
+      "ctaPrimary": "立即开始（免费）",
+      "ctaSecondary": "查看价格",
+      "disclaimer": "录制免费 · 导出含水印 MP4 免费 · 单条 $9.99 解锁无水印导出"
+    },
+    "features": {
+      "heading": "功能特色",
+      "lossless": { "title": "无损录制", "desc": "基于操作事件流而非屏幕像素采集，画面始终清晰，不受窗口遮挡或最小化影响。" },
+      "audio": { "title": "同步语音", "desc": "麦克风音频与白板操作严格同步，导出 MP4 含完整音轨。" },
+      "ratios": { "title": "一录多比例", "desc": "同一段录制，可分别导出横屏、竖屏、方形、4:5 多个比例。无需重录。" },
+      "local": { "title": "本地渲染", "desc": "视频在浏览器内通过 ffmpeg.wasm 渲染，录制原始数据从不离开你的电脑。" },
+      "camera": { "title": "可选人像浮窗", "desc": "开启摄像头后，画面叠加一个圆形头像浮窗，适合教学讲解场景。" },
+      "privacy": { "title": "隐私保护", "desc": "录制内容存储在你的浏览器（IndexedDB）。服务端只保存付款记录，不接触录制数据。" }
+    },
+    "pricing": {
+      "heading": "价格",
+      "subheading": "录制和含水印导出免费。需要无水印导出时按单条录制单次付费。",
+      "free": {
+        "label": "免费",
+        "tagline": "无需注册，浏览器打开即用",
+        "bullet1": "无限次录制（最长 30 分钟）",
+        "bullet2": "语音 + 摄像头浮窗",
+        "bullet3": "导出 MP4 视频（带 Excalicast 水印）",
+        "bullet4": "多比例导出（16:9 / 9:16 / 1:1 / 4:5）",
+        "cta": "开始录制"
+      },
+      "oneTime": {
+        "label": "单次解锁",
+        "recommended": "推荐",
+        "unit": "/ 单条录制",
+        "tagline": "仅这条录制永久解锁，无需账号",
+        "bullet1": "含免费档全部功能",
+        "bullet2": "导出永久去除水印",
+        "bullet3": "该录制可反复导出多个比例无水印 MP4",
+        "bullet4": "Paddle 安全支付（信用卡 / Apple Pay / Google Pay）",
+        "bullet5": "录制数据全程留在你浏览器，服务端只存付费状态",
+        "cta": "录制后即可解锁"
+      },
+      "methods": "支持的支付方式：Visa · Mastercard · American Express · Apple Pay · Google Pay",
+      "processedBy": "所有交易由 <paddle>Paddle</paddle> 处理。Excalicast 不接触你的支付信息。"
+    },
+    "flow": {
+      "heading": "使用流程",
+      "step1": { "title": "录制", "desc": "点击「开始录制」按钮，开始在白板上画图、写字，同时讲解。可以选择是否开启摄像头浮窗。" },
+      "step2": { "title": "预览", "desc": "录制完成后跳转到导出页面，选择目标比例（16:9 横屏 / 9:16 竖屏 / 1:1 方形 / 4:5）。" },
+      "step3": { "title": "下载", "desc": "点击「下载」直接生成含水印 MP4。或付费 $9.99 解锁该条录制的无水印导出，可反复使用。" }
+    },
+    "refund": {
+      "heading": "退款政策",
+      "body": "如果支付后无法成功导出无水印 MP4，或对服务不满意，可在<strong>支付后 14 天内</strong>申请全额退款。发邮件到 <mail>support@excalicast.cn</mail>，我们会在 2 个工作日内回复处理。",
+      "viewFull": "查看完整退款政策 →"
+    },
+    "contact": {
+      "heading": "联系我们",
+      "body": "有问题、建议、合作意向，或退款申请，都可以发邮件给我们。我们会在 2 个工作日内回复。"
+    },
+    "footer": {
+      "home": "主页",
+      "privacy": "隐私政策",
+      "terms": "服务条款",
+      "refund": "退款政策",
+      "contact": "联系我们"
+    }
+  },
+  "header": {
+    "library": "录制库",
+    "record": "录制",
+    "upgradePro": "升级 Pro",
+    "loggedIn": "已登录",
+    "logout": "退出登录",
+    "loginRegister": "登录 / 注册",
+    "languageToggle": {
+      "label": "切换语言",
+      "zh": "中文",
+      "en": "English"
+    }
+  },
+  "legal": {
+    "nav": {
+      "home": "主页",
+      "pricing": "价格",
+      "contact": "联系我们",
+      "startRecording": "开始录制"
+    },
+    "lastUpdated": "最后更新：{date}",
+    "entity": "主体：Excalicast",
+    "questionsCta": "还有疑问？欢迎来信",
+    "footer": {
+      "home": "主页",
+      "privacy": "隐私政策",
+      "terms": "服务条款",
+      "refund": "退款政策",
+      "contact": "联系我们"
+    }
+  },
+  "privacy": {
+    "meta": { "title": "隐私政策 · Excalicast", "description": "Excalicast 如何收集、使用、保护你的数据。" },
+    "title": "隐私政策"
+  },
+  "terms": {
+    "meta": { "title": "服务条款 · Excalicast", "description": "Excalicast 的服务条款与使用规则。" },
+    "title": "服务条款"
+  },
+  "refund": {
+    "meta": { "title": "退款政策 · Excalicast", "description": "购买无水印导出后如何申请退款。" },
+    "title": "退款政策"
+  },
+  "login": {
+    "title": "登录 Excalicast",
+    "subtitle": "登录账号以解锁未来 Pro / Max 功能。录制 + 单次购买无需登录。",
+    "google": "Continue with Google",
+    "or": "OR",
+    "emailPlaceholder": "Enter your email",
+    "sendMagicLink": "发送登录链接到邮箱",
+    "sending": "发送中…",
+    "sentTitle": "登录邮件已发送",
+    "sentSubtitle": "请查收 {email} 的收件箱（10 分钟内有效）",
+    "changeEmail": "换一个邮箱",
+    "emailDisabled": "邮箱登录暂不可用：服务端缺少配置。",
+    "noProvider": "还没有配置任何登录方式。",
+    "errorInvalidEmail": "请输入合法邮箱",
+    "errorSendFail": "发送登录邮件失败：{message}",
+    "ackPrefix": "By continuing, you acknowledge Excalicast's ",
+    "privacyLink": "Privacy Policy",
+    "ackSuffix": "."
+  },
+  "paywall": {
+    "title": "解锁无水印导出",
+    "subtitle": "这条录制将<strong>永久解锁</strong>，可以任意比例 / 框选模式反复导出无水印 MP4。单次购买，<strong>无需注册账号</strong>。",
+    "priceUnit": "一次性 · 仅限本录制",
+    "bullet1": "导出永久去除水印",
+    "bullet2": "可反复导出 16:9 / 9:16 / 1:1 / 4:5 多个比例",
+    "bullet3": "录制数据全程留在你浏览器，服务端只存付费状态",
+    "bulletPaymentCreem": "Creem 安全支付（信用卡 / Apple Pay / Google Pay）",
+    "bulletPaymentPaddle": "Paddle 安全支付（信用卡 / Apple Pay / Google Pay）",
+    "ctaCancel": "暂不需要",
+    "ctaPay": "立即解锁 · {price}",
+    "openingCheckout": "正在打开 {provider}…",
+    "errorPaddleNotInit": "Paddle 尚未初始化，请稍后重试或检查网络。",
+    "errorPrefix": "错误：{message}",
+    "checkoutCompleted": "支付完成，正在确认…",
+    "creemRedirected": "已在新标签页打开支付页面，完成后会自动解锁…",
+    "unlocked": "已解锁！",
+    "syncing": "支付确认中，正在后台等待，可关闭此窗口…",
+    "simulating": "正在模拟支付…",
+    "upgradeAlt": "或升级 Pro · {price}/月 · 所有录制无水印 + 语音字幕 + 云备份",
+    "devSkip": "[dev] 跳过 Paddle，直接标记已付款",
+    "footer": "支付完成后自动切换到无水印模式"
+  },
+  "workspace": {
+    "cameraOpenFailed": "无法打开摄像头：{message}",
+    "startFailed": "开始录制失败：{message}",
+    "stopFailed": "停止录制失败：{message}",
+    "discardConfirm": "丢弃当前录制？所有数据将被删除。",
+    "dragToMove": "拖动以移动",
+    "loadingWhiteboard": "加载白板…"
+  },
+  "recordingBar": {
+    "audioOn": "麦克风开",
+    "audioOff": "麦克风关",
+    "cameraOn": "摄像头开",
+    "cameraOff": "摄像头关",
+    "start": "开始录制",
+    "pause": "暂停",
+    "resume": "继续",
+    "stop": "停止 & 导出",
+    "discard": "丢弃",
+    "processing": "处理中…",
+    "elapsed": "已录制",
+    "permissionAlert": "麦克风权限被拒绝。可在浏览器地址栏左侧解除限制后重试。"
+  },
+  "library": {
+    "title": "录制库",
+    "empty": "还没有录制。去录第一条吧。",
+    "newRecording": "新建录制",
+    "open": "打开",
+    "export": "导出",
+    "delete": "删除",
+    "deleteConfirm": "删除这条录制？所有数据无法恢复。",
+    "duration": "时长",
+    "createdAt": "创建于",
+    "paid": "已付费",
+    "free": "未付费",
+    "loading": "加载中…"
+  },
+  "play": {
+    "loading": "正在加载录制…",
+    "notFound": "未找到该录制",
+    "back": "返回录制库",
+    "play": "播放",
+    "pause": "暂停",
+    "restart": "重头播放"
+  },
+  "export": {
+    "loading": "正在加载录制…",
+    "notFound": "未找到该录制",
+    "back": "返回录制库",
+    "title": "导出 MP4",
+    "ratio": "比例",
+    "exportButton": "导出 MP4",
+    "exporting": "导出中…",
+    "downloadReady": "导出完成，已下载",
+    "exportFailed": "导出失败：{message}",
+    "unlockPrompt": "已购买无水印导出"
+  },
+  "proUpgrade": {
+    "title": "升级到 Pro",
+    "subtitle": "解锁全部高阶能力。订阅按月计费，可随时取消。",
+    "subscriptionTag": "订阅 · {provider} {env}",
+    "sandbox": "沙盒可测",
+    "secure": "安全支付",
+    "features": [
+      "✅ 导出永久无水印（所有录制，不再单次付费）",
+      "✅ 语音字幕生成（自动转 SRT 时间轴）",
+      "✅ 云端备份录制（防丢失，多设备访问）",
+      "✅ 优先客服支持"
+    ],
+    "needLogin": "升级 Pro 需要先登录账户。",
+    "loginFirst": "先登录后再升级",
+    "openingCheckout": "正在打开 {provider}…",
+    "ctaUpgrade": "立即升级 · {price}",
+    "ctaCancel": "暂不升级",
+    "footnoteCreem": "Creem 安全支付 · 随时取消",
+    "footnoteSandbox": "当前为 Paddle 沙盒环境，可使用测试卡号支付",
+    "footnotePaddle": "Paddle 安全支付 · 随时取消",
+    "devGrant": "🛠 DEV：跳过 Paddle 直接开 Pro",
+    "synced": "Pro 已开通！",
+    "syncing": "订阅同步中，可关闭窗口稍后查看…",
+    "paymentDone": "支付完成，正在等待订阅生效…",
+    "creemRedirected": "已在新标签页打开 Creem 支付页面，完成后会自动开通 Pro…",
+    "devGranted": "Dev 模式：Pro 已开通（绕过 Paddle）",
+    "errorPaddleNotInit": "Paddle 尚未初始化，请稍后重试或检查网络。",
+    "errorPrefix": "错误：{message}"
+  }
+}

@@ -1,8 +1,15 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { defaultLocale, LOCALE_COOKIE, locales } from '@/i18n/config';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+function resolveLocale(req: NextRequest): string {
+  const cookieLocale = req.cookies.get(LOCALE_COOKIE)?.value;
+  if (cookieLocale && (locales as readonly string[]).includes(cookieLocale)) return cookieLocale;
+  return defaultLocale;
+}
 
 /**
  * Magic-link landing page. Supabase's email template ends with
@@ -16,8 +23,10 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
-  const rawNext = url.searchParams.get('next') ?? '/app';
-  const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/app';
+  const locale = resolveLocale(request);
+  const fallback = `/${locale}/app`;
+  const rawNext = url.searchParams.get('next') ?? fallback;
+  const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : fallback;
 
   if (!code) {
     return NextResponse.redirect(new URL(`${next}?login_error=missing_code`, request.url));

@@ -1,11 +1,12 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
 import { useAuth } from '@/hooks/useAuth';
 import { LoginModal } from '@/components/LoginModal';
+import { LanguageToggle } from '@/components/LanguageToggle';
+import { Link, usePathname } from '@/i18n/navigation';
 
 interface Props {
   tier?: 'free' | 'pro' | 'max';
@@ -13,9 +14,9 @@ interface Props {
 }
 
 const TIER_BADGE: Record<NonNullable<Props['tier']>, { label: string; bg: string; color: string }> = {
-  free:     { label: 'Free',     bg: 'bg-bg-tertiary',         color: 'text-text-secondary' },
-  pro:      { label: 'Pro',      bg: 'bg-primary-100',         color: 'text-primary-700' },
-  max:      { label: 'Max',      bg: '',                       color: 'text-white' },
+  free: { label: 'Free', bg: 'bg-bg-tertiary',  color: 'text-text-secondary' },
+  pro:  { label: 'Pro',  bg: 'bg-primary-100',  color: 'text-primary-700' },
+  max:  { label: 'Max',  bg: '',                color: 'text-white' },
 };
 
 export function Brand(): JSX.Element {
@@ -33,6 +34,7 @@ export function Brand(): JSX.Element {
 }
 
 export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
+  const t = useTranslations('header');
   const pathname = usePathname();
   const onLib = pathname?.startsWith('/library');
   const onRecord = pathname === '/app' || pathname?.startsWith('/export');
@@ -60,11 +62,12 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
         <div className="flex items-center gap-6">
           <Brand />
           <nav className="flex gap-1">
-            <NavItem href="/library" active={onLib}>录制库</NavItem>
-            <NavItem href="/app" active={onRecord}>录制</NavItem>
+            <NavItem href="/library" active={onLib}>{t('library')}</NavItem>
+            <NavItem href="/app" active={onRecord}>{t('record')}</NavItem>
           </nav>
         </div>
         <div className="flex items-center gap-2.5">
+          <LanguageToggle />
           {tier === 'free' && onUpgradePro && (
             <button
               type="button"
@@ -72,7 +75,7 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
               className="rounded-full px-3 py-[5px] text-[11px] font-bold text-white"
               style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)', boxShadow: '0 2px 6px rgba(59,130,246,0.4)' }}
             >
-              升级 Pro
+              {t('upgradePro')}
             </button>
           )}
           <span
@@ -100,7 +103,7 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
                   style={{ boxShadow: '0 10px 30px rgba(0,0,0,0.12)' }}
                 >
                   <div className="px-2.5 py-1.5">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">已登录</div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">{t('loggedIn')}</div>
                     <div className="mt-0.5 truncate text-[13px] font-medium text-text-primary">{user.email}</div>
                   </div>
                   <div className="my-1 h-px bg-border-default" />
@@ -109,7 +112,7 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
                     onClick={async () => { await logout(); setMenuOpen(false); }}
                     className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-[13px] text-recording-strong hover:bg-bg-tertiary"
                   >
-                    退出登录
+                    {t('logout')}
                   </button>
                 </div>
               )}
@@ -121,7 +124,7 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
               className="rounded-md bg-primary-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-primary-700"
               style={{ boxShadow: '0 1px 2px rgba(37,99,235,0.25)' }}
             >
-              登录 / 注册
+              {t('loginRegister')}
             </button>
           )}
         </div>

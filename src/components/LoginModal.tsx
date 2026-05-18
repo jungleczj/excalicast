@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { createClient } from '@/lib/supabase/client';
+import { Link } from '@/i18n/navigation';
 
 interface Props {
   open: boolean;
@@ -9,17 +11,18 @@ interface Props {
 }
 
 /**
- * 登录卡片（Supabase Auth magic link 模式，纯 SDK，无自建邮件流程）：
+ * Login card (Supabase Auth magic-link mode, pure SDK — no self-hosted email flow):
  *   ┌──────────────────────────────────┐
- *   │  G  Continue with Google         │ ← 仅当 Supabase 项目已配 Google OAuth 时可点（这里始终显示，
- *   │     Enter your email             │     未配置时点击会跳到 Supabase 错误页）
+ *   │  G  Continue with Google         │ ← only clickable when Supabase project has Google OAuth configured
+ *   │     Enter your email             │
  *   │  ▣ Send magic link               │
  *   └──────────────────────────────────┘
  *
- * 邮件发送、token 持久化、cookie 刷新 全部由 Supabase Auth 内置承担，
- * 客户端只调一次 supabase.auth.signInWithOtp。
+ * Email delivery, token persistence, and cookie refresh are all handled by Supabase Auth.
+ * The client only calls supabase.auth.signInWithOtp once.
  */
 export function LoginModal({ open, onClose }: Props): JSX.Element | null {
+  const t = useTranslations('login');
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,14 +45,13 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
       setError(error.message);
       setBusy(null);
     }
-    // 否则浏览器会被 Supabase 重定向到 Google → 回调到 /api/auth/callback
   };
 
   const handleEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     const normalized = email.trim().toLowerCase();
     if (!normalized.includes('@')) {
-      setError('请输入合法邮箱');
+      setError(t('errorInvalidEmail'));
       return;
     }
     setBusy('email');
@@ -62,7 +64,7 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
     });
     setBusy(null);
     if (error) {
-      setError(`发送登录邮件失败：${error.message}`);
+      setError(t('errorSendFail', { message: error.message }));
       return;
     }
     setSentTo(normalized);
@@ -83,16 +85,14 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
           type="button"
           onClick={onClose}
           className="absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-md text-[#666] hover:bg-black/5"
-          aria-label="关闭"
+          aria-label="close"
         >
           ✕
         </button>
 
         <div className="px-7 pb-2 pt-9">
-          <h2 className="text-[20px] font-semibold leading-tight text-[#181818]">登录 Excalicast</h2>
-          <p className="mt-1 text-[12.5px] text-[#6b6b6b]">
-            登录账号以解锁 Pro 功能。录制 + 单次购买无需登录。
-          </p>
+          <h2 className="text-[20px] font-semibold leading-tight text-[#181818]">{t('title')}</h2>
+          <p className="mt-1 text-[12.5px] text-[#6b6b6b]">{t('subtitle')}</p>
         </div>
 
         <div className="px-7 pb-6 pt-5">
@@ -104,27 +104,27 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
             style={{ borderColor: '#e0ddd6' }}
           >
             <GoogleIcon />
-            Continue with Google
+            {t('google')}
           </button>
 
           <div className="my-5 flex items-center gap-3">
             <div className="h-px flex-1 bg-[#e0ddd6]" />
-            <span className="text-[11px] font-medium tracking-wider text-[#999]">OR</span>
+            <span className="text-[11px] font-medium tracking-wider text-[#999]">{t('or')}</span>
             <div className="h-px flex-1 bg-[#e0ddd6]" />
           </div>
 
           {sentTo ? (
             <div className="rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-4 text-center">
-              <div className="text-[14px] font-semibold text-emerald-900">登录邮件已发送</div>
+              <div className="text-[14px] font-semibold text-emerald-900">{t('sentTitle')}</div>
               <div className="mt-1 text-[12.5px] text-emerald-800">
-                请查收 <span className="font-mono">{sentTo}</span> 的收件箱
+                {t('sentSubtitle', { email: sentTo })}
               </div>
               <button
                 type="button"
                 onClick={() => setSentTo(null)}
                 className="mt-3 text-[11.5px] text-emerald-900 underline"
               >
-                换一个邮箱
+                {t('changeEmail')}
               </button>
             </div>
           ) : (
@@ -134,7 +134,7 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="Enter your email"
+                placeholder={t('emailPlaceholder')}
                 className="w-full rounded-[10px] border bg-white px-4 py-3 text-[14px] text-[#181818] outline-none transition placeholder:text-[#aaa] focus:border-[#181818]"
                 style={{ borderColor: '#e0ddd6' }}
                 disabled={busy !== null}
@@ -145,7 +145,7 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
                 className="flex w-full items-center justify-center gap-2 rounded-[10px] px-4 py-3 text-[14px] font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
                 style={{ background: '#181818' }}
               >
-                {busy === 'email' ? '发送中…' : '发送登录链接到邮箱'}
+                {busy === 'email' ? t('sending') : t('sendMagicLink')}
               </button>
             </form>
           )}
@@ -158,8 +158,9 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
         </div>
 
         <div className="border-t border-[#e0ddd6] px-7 py-3.5 text-[11px] text-[#888]">
-          By continuing, you acknowledge Excalicast&apos;s{' '}
-          <a href="/privacy" className="text-[#666] underline hover:text-[#181818]">Privacy Policy</a>.
+          {t('ackPrefix')}
+          <Link href="/privacy" className="text-[#666] underline hover:text-[#181818]">{t('privacyLink')}</Link>
+          {t('ackSuffix')}
         </div>
       </div>
     </div>

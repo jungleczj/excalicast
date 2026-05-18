@@ -1,20 +1,12 @@
-import { LegalLayout } from '@/components/LegalLayout';
-
-export const metadata = {
-  title: '服务条款 — Excalicast',
-};
-
-export default function TermsPage(): JSX.Element {
+export function TermsZh(): JSX.Element {
   return (
-    <LegalLayout title="服务条款" lastUpdated="2026-05-08">
+    <>
       <p>
-        欢迎使用 Excalicast（"本服务"）。访问或使用本服务即表示你同意本服务条款。如不同意，请勿使用本服务。
+        欢迎使用 Excalicast（&quot;本服务&quot;）。访问或使用本服务即表示你同意本服务条款。如不同意，请勿使用本服务。
       </p>
 
       <h2>1. 服务说明</h2>
-      <p>
-        Excalicast 是一款基于浏览器的白板录制工具，提供：
-      </p>
+      <p>Excalicast 是一款基于浏览器的白板录制工具，提供：</p>
       <ul>
         <li>白板操作 + 麦克风音频 + 摄像头视频的同步录制</li>
         <li>多比例 MP4 视频导出（含水印免费 / 单条录制付费 $9.99 永久解锁无水印）</li>
@@ -41,7 +33,7 @@ export default function TermsPage(): JSX.Element {
         详细退款政策见{' '}
         <a href="/refund">退款政策页面</a>
         。简要说明：14 天内可申请全额退款，需联系{' '}
-        <a href="mailto:hello@excalicast.app">hello@excalicast.app</a>。
+        <a href="mailto:support@excalicast.cn">support@excalicast.cn</a>。
       </p>
 
       <h2>5. 用户行为</h2>
@@ -63,7 +55,7 @@ export default function TermsPage(): JSX.Element {
 
       <h2>7. 免责声明</h2>
       <p>
-        本服务按"现状"提供，不附带任何明示或暗示的保证，包括但不限于适销性、特定用途适用性、不侵权的保证。
+        本服务按&quot;现状&quot;提供，不附带任何明示或暗示的保证，包括但不限于适销性、特定用途适用性、不侵权的保证。
         我们尽力保证服务可用，但不保证<strong>不间断或无错误</strong>。
       </p>
       <p>具体而言，以下情况导致的损失我们不承担责任：</p>
@@ -87,7 +79,7 @@ export default function TermsPage(): JSX.Element {
 
       <h2>10. 条款变更</h2>
       <p>
-        我们可能不时更新本条款。重大变更会在本页面顶部以"最后更新"日期标明。
+        我们可能不时更新本条款。重大变更会在本页面顶部以&quot;最后更新&quot;日期标明。
         继续使用本服务视为你接受更新后的条款。
       </p>
 
@@ -100,8 +92,8 @@ export default function TermsPage(): JSX.Element {
       <h2>12. 联系我们</h2>
       <p>
         关于本条款的任何问题，请联系{' '}
-        <a href="mailto:hello@excalicast.app">hello@excalicast.app</a>。
+        <a href="mailto:support@excalicast.cn">support@excalicast.cn</a>。
       </p>
-    </LegalLayout>
+    </>
   );
 }

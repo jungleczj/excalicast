@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
+import { useLocale, useTranslations } from 'next-intl';
+import { Link } from '@/i18n/navigation';
 import { listRecordings, deleteRecording, updateRecordingTitle } from '@/lib/db-client';
 import { I } from '@/components/icons';
 import type { RecordingMetadata } from '@/types/recording';
@@ -18,17 +19,25 @@ function fmtDuration(ms: number): string {
   return `${mm}:${String(ss).padStart(2, '0')}`;
 }
 
-function fmtDate(ts: number): string {
+function fmtDate(ts: number, locale: string): string {
   const d = new Date(ts);
   const now = new Date();
   const diff = now.getTime() - ts;
-  if (diff < 24 * 3600_000 && d.getDate() === now.getDate()) return '今天';
-  if (diff < 48 * 3600_000) return '昨天';
+  if (diff < 24 * 3600_000 && d.getDate() === now.getDate()) {
+    return locale === 'en' ? 'Today' : '今天';
+  }
+  if (diff < 48 * 3600_000) {
+    return locale === 'en' ? 'Yesterday' : '昨天';
+  }
+  if (locale === 'en') {
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
   return `${d.getMonth() + 1} 月 ${d.getDate()} 日`;
 }
 
-function defaultTitle(m: RecordingMetadata): string {
-  return m.title?.trim() || `录制 ${m.id.slice(0, 8)}`;
+function defaultTitle(m: RecordingMetadata, locale: string): string {
+  if (m.title?.trim()) return m.title.trim();
+  return locale === 'en' ? `Recording ${m.id.slice(0, 8)}` : `录制 ${m.id.slice(0, 8)}`;
 }
 
 const TINTS = [
@@ -39,6 +48,8 @@ const TINTS = [
 ];
 
 export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
+  const t = useTranslations('library');
+  const locale = useLocale();
   const [items, setItems] = useState<RecordingMetadata[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -61,15 +72,15 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
   }, [editingId]);
 
   const handleDelete = useCallback(async (id: string) => {
-    if (!confirm('删除这条录制？此操作不可恢复。')) return;
+    if (!confirm(t('deleteConfirm'))) return;
     await deleteRecording(id);
     await refresh();
-  }, [refresh]);
+  }, [refresh, t]);
 
   const startEdit = useCallback((m: RecordingMetadata) => {
     setEditingId(m.id);
-    setEditValue(defaultTitle(m));
-  }, []);
+    setEditValue(defaultTitle(m, locale));
+  }, [locale]);
 
   const cancelEdit = useCallback(() => {
     setEditingId(null);
@@ -85,7 +96,7 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
   }, [editValue, refresh]);
 
   if (!loaded) {
-    return <div className="py-12 text-center text-sm text-text-tertiary">加载中…</div>;
+    return <div className="py-12 text-center text-sm text-text-tertiary">{t('loading')}</div>;
   }
 
   if (items.length === 0) {
@@ -97,15 +108,14 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
         >
           <I.Logo size={28} />
         </div>
-        <h2 className="text-[18px] font-bold text-text-primary">还没有录制</h2>
-        <p className="mt-1.5 text-[13px] text-text-secondary">点开始按钮，第一段讲解就会出现在这里。</p>
+        <h2 className="text-[18px] font-bold text-text-primary">{t('empty')}</h2>
         <Link
           href="/app"
           className="mt-5 inline-flex items-center gap-2 rounded-md px-5 py-2.5 text-[13px] font-semibold text-white"
           style={{ background: 'var(--recording-strong)', boxShadow: '0 4px 12px rgba(220,38,38,0.25)' }}
         >
           <span className="h-2 w-2 rounded-full bg-white" />
-          开始第一次录制
+          {t('newRecording')}
         </Link>
       </div>
     );
@@ -122,7 +132,7 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
             className="group relative overflow-hidden rounded-xl border border-border-default bg-bg-primary transition-all duration-150 hover:-translate-y-0.5"
             style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
           >
-            <Link href={`/play/${m.id}`} className="block">
+            <Link href={`/play/${m.id}` as never} className="block">
               <div
                 className="relative overflow-hidden"
                 style={{ aspectRatio: '16/9', background: tint }}
@@ -148,7 +158,7 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
                   {fmtDuration(m.durationMs)}
                 </span>
                 {m.status === 'recording' && (
-                  <span className="absolute left-2 top-2 rounded bg-recording px-2 py-0.5 text-[10px] font-semibold text-white">未完成</span>
+                  <span className="absolute left-2 top-2 rounded bg-recording px-2 py-0.5 text-[10px] font-semibold text-white">{locale === 'en' ? 'unfinished' : '未完成'}</span>
                 )}
 
                 {/* hover 状态：黑色蒙层 + 中央 Play 按钮 */}
@@ -182,25 +192,25 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
                 ) : (
                   <div className="flex items-center gap-1">
                     <div className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-text-primary">
-                      {defaultTitle(m)}
+                      {defaultTitle(m, locale)}
                     </div>
                     <button
                       type="button"
                       onClick={(e) => { e.preventDefault(); e.stopPropagation(); startEdit(m); }}
                       className="flex-shrink-0 rounded p-0.5 text-text-tertiary opacity-0 transition hover:bg-bg-tertiary hover:text-text-primary group-hover:opacity-100"
-                      title="重命名"
-                      aria-label="重命名"
+                      title={locale === 'en' ? 'Rename' : '重命名'}
+                      aria-label={locale === 'en' ? 'Rename' : '重命名'}
                     >
                       <I.Edit size={12} />
                     </button>
                   </div>
                 )}
                 <div className="mt-1.5 flex items-center gap-2 text-[11px] text-text-tertiary">
-                  <span>{fmtDate(m.startedAt)}</span>
+                  <span>{fmtDate(m.startedAt, locale)}</span>
                   <span
                     className="rounded px-1.5 py-px text-[10px] font-semibold"
                     style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}
-                  >本机</span>
+                  >{locale === 'en' ? 'local' : '本机'}</span>
                   <div className="flex-1" />
                   {m.hasAudio && <I.Mic size={13} />}
                   {m.hasCamera && <I.Camera size={13} />}
@@ -209,12 +219,12 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
             </Link>
             <div className="absolute right-2 top-2 flex gap-1.5 opacity-0 transition group-hover:opacity-100">
               <Link
-                href={`/export/${m.id}`}
+                href={`/export/${m.id}` as never}
                 onClick={(e) => e.stopPropagation()}
                 className="grid h-7 w-7 place-items-center rounded-md text-white transition hover:bg-primary-600"
                 style={{ background: 'rgba(0,0,0,0.7)' }}
-                title="下载（前往导出页）"
-                aria-label="下载"
+                title={locale === 'en' ? 'Download (open export page)' : '下载（前往导出页）'}
+                aria-label={locale === 'en' ? 'Download' : '下载'}
               >
                 <I.Download size={13} />
               </Link>
@@ -223,7 +233,7 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
                 onClick={(e) => { e.preventDefault(); e.stopPropagation(); void handleDelete(m.id); }}
                 className="grid h-7 w-7 place-items-center rounded-md text-white transition"
                 style={{ background: 'rgba(0,0,0,0.7)' }}
-                title="删除"
+                title={locale === 'en' ? 'Delete' : '删除'}
               >
                 <I.Trash size={13} />
               </button>

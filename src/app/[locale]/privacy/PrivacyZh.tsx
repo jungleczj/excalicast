@@ -1,14 +1,8 @@
-import { LegalLayout } from '@/components/LegalLayout';
-
-export const metadata = {
-  title: '隐私政策 — Excalicast',
-};
-
-export default function PrivacyPage(): JSX.Element {
+export function PrivacyZh(): JSX.Element {
   return (
-    <LegalLayout title="隐私政策" lastUpdated="2026-05-08">
+    <>
       <p>
-        Excalicast（"我们"、"本服务"）是一款在浏览器内运行的白板录制工具。本政策描述我们收集、使用、存储和分享你信息的方式。
+        Excalicast（&quot;我们&quot;、&quot;本服务&quot;）是一款在浏览器内运行的白板录制工具。本政策描述我们收集、使用、存储和分享你信息的方式。
       </p>
 
       <h2>1. 我们收集的信息</h2>
@@ -64,7 +58,7 @@ export default function PrivacyPage(): JSX.Element {
 
       <h2>5. 数据保留</h2>
       <ul>
-        <li>录制数据：完全由你掌控。可在浏览器开发者工具或我们的"录制库"页面随时删除。</li>
+        <li>录制数据：完全由你掌控。可在浏览器开发者工具或我们的&quot;录制库&quot;页面随时删除。</li>
         <li>付费记录：除非你申请删除账号，否则会持续保留以便提供购买后的导出权限。</li>
         <li>访问日志：通常保留 30 天。</li>
       </ul>
@@ -79,20 +73,20 @@ export default function PrivacyPage(): JSX.Element {
       </ul>
       <p>
         如需行使上述权利，请发邮件到{' '}
-        <a href="mailto:hello@excalicast.app">hello@excalicast.app</a>，我们会在 14 天内回复处理。
+        <a href="mailto:support@excalicast.cn">support@excalicast.cn</a>，我们会在 14 天内回复处理。
       </p>
 
       <h2>7. 儿童隐私</h2>
       <p>本服务不面向 13 岁以下儿童。如发现误收集了儿童信息，会立即删除。</p>
 
       <h2>8. 政策变更</h2>
-      <p>本政策可能随时更新。重大变更会在本页面顶部以"最后更新"日期标明。建议定期查看。</p>
+      <p>本政策可能随时更新。重大变更会在本页面顶部以&quot;最后更新&quot;日期标明。建议定期查看。</p>
 
       <h2>9. 联系我们</h2>
       <p>
         关于本隐私政策的任何问题、申诉，请联系{' '}
-        <a href="mailto:hello@excalicast.app">hello@excalicast.app</a>。
+        <a href="mailto:support@excalicast.cn">support@excalicast.cn</a>。
       </p>
-    </LegalLayout>
+    </>
   );
 }
