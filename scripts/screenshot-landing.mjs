@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 
-const URL = 'https://excalicast.vercel.app/landing';
+const URL = 'https://excalicast.cc/landing';
 
 const browser = await chromium.launch({ headless: true });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
@@ -16,7 +16,7 @@ await page.screenshot({ path: '/tmp/excalicast-landing.png', fullPage: true });
 const links = await page.$$eval('a[href^="/"]', (els) => els.map(e => ({ text: e.textContent?.trim() ?? '', href: e.href })));
 const hasPaddle = await page.$$eval('a', (els) => els.some(e => e.textContent?.includes('Paddle')));
 const priceShown = await page.$$eval('body', (els) => els[0].innerText.includes('$9.99'));
-const contactShown = await page.$$eval('body', (els) => els[0].innerText.includes('hello@excalicast.app'));
+const contactShown = await page.$$eval('body', (els) => els[0].innerText.includes('support@excalicast.cn'));
 
 console.log(`landing URL: ${URL}`);
 console.log(`page errors: ${errors.length}`);
