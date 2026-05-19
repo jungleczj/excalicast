@@ -48,7 +48,9 @@ export async function GET(req: Request): Promise<NextResponse<StatusResponse>> {
         await updateSubtitleJob(jobId, { status: 'failed', error: 'NEXT_PUBLIC_APP_URL not set' });
         return NextResponse.json({ status: 'failed', error: 'NEXT_PUBLIC_APP_URL not set' });
       }
-      const fileUrl = `${appUrl}/api/asr/audio/${audioToken}`;
+      // DashScope requires the URL to end with a recognized audio file extension.
+      // Recordings are captured via MediaRecorder as audio/webm (Opus codec).
+      const fileUrl = `${appUrl}/api/asr/audio/${audioToken}.webm`;
       const submit = await submitTranscriptionTask({ fileUrl });
       await updateSubtitleJob(jobId, { status: 'running', task_id: submit.taskId });
       return NextResponse.json({ status: 'running' });

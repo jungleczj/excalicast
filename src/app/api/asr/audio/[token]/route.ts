@@ -17,7 +17,10 @@ interface Ctx {
  * so the URL becomes 404. No user data is leaked beyond the audio bytes themselves.
  */
 export async function GET(_req: Request, { params }: Ctx): Promise<Response> {
-  const { token } = params;
+  // DashScope requires the file URL to end with a recognized audio file
+  // extension; we append `.webm` at submit time, strip it back off here.
+  const rawToken = params.token ?? '';
+  const token = rawToken.replace(/\.(webm|mp3|wav|m4a|aac|ogg|opus|flac)$/i, '');
   if (!token || !/^[a-z0-9-]{16,64}$/i.test(token)) {
     return NextResponse.json({ error: 'invalid_token' }, { status: 400 });
   }
