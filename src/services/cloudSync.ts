@@ -176,11 +176,67 @@ export async function uploadRecording(
   return { storagePrefix };
 }
 
+export interface BulkUploadProgress {
+  done: number;
+  total: number;
+  currentId: string | null;
+  ok: string[];
+  failed: Array<{ id: string; error: string }>;
+}
+
+/**
+ * Serially upload many local recordings. Single failures don't stop the loop —
+ * they're collected into `failed[]` and reported via onProgress + final return.
+ */
+export async function uploadMany(
+  recordingIds: string[],
+  onProgress?: (p: BulkUploadProgress) => void,
+): Promise<BulkUploadProgress> {
+  const state: BulkUploadProgress = {
+    done: 0,
+    total: recordingIds.length,
+    currentId: null,
+    ok: [],
+    failed: [],
+  };
+  onProgress?.({ ...state });
+  for (const id of recordingIds) {
+    state.currentId = id;
+    onProgress?.({ ...state });
+    try {
+      await uploadRecording(id);
+      state.ok.push(id);
+    } catch (err) {
+      state.failed.push({ id, error: err instanceof Error ? err.message : 'unknown' });
+    }
+    state.done += 1;
+    onProgress?.({ ...state });
+  }
+  state.currentId = null;
+  onProgress?.({ ...state });
+  return state;
+}
+
 export async function listCloudRecordings(): Promise<CloudRecording[]> {
   const res = await fetch('/api/recordings/list', { cache: 'no-store' });
   if (!res.ok) throw new Error(`list_failed: ${res.status}`);
   const { recordings } = (await res.json()) as { recordings: CloudRecording[] };
   return recordings ?? [];
+}
+
+export async function updateCloudRecordingTitle(
+  recordingId: string,
+  title: string | null,
+): Promise<void> {
+  const res = await fetch(`/api/recordings/${encodeURIComponent(recordingId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) {
+    const j = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+    throw new Error(j.message ?? j.error ?? `patch_failed: ${res.status}`);
+  }
 }
 
 export async function removeCloudRecording(recordingId: string): Promise<void> {

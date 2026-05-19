@@ -657,6 +657,20 @@ export async function upsertCloudRecording(params: {
   if (error) throw new Error(`upsertCloudRecording: ${error.message}`);
 }
 
+export async function updateCloudRecordingTitle(
+  userId: string,
+  id: string,
+  title: string | null,
+): Promise<void> {
+  const client = requireSupabase();
+  const { error } = await client
+    .from('recordings_cloud')
+    .update({ title })
+    .eq('user_id', userId)
+    .eq('id', id);
+  if (error) throw new Error(`updateCloudRecordingTitle: ${error.message}`);
+}
+
 export async function deleteCloudRecording(userId: string, id: string): Promise<void> {
   const client = requireSupabase();
   const { error } = await client

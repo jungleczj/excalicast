@@ -1,7 +1,16 @@
 'use client';
 
 import Dexie, { type Table } from 'dexie';
-import type { RecordingMetadata, WhiteboardSnapshot, AudioChunk, CameraChunk, BinaryFileEntry } from '@/types/recording';
+import type {
+  AudioChunk,
+  BinaryFileEntry,
+  CameraChunk,
+  RecordingMetadata,
+  ShellCanvasRect,
+  ShellSize,
+  WhiteboardSnapshot,
+  WorkspaceShellRow,
+} from '@/types/recording';
 
 interface SnapshotRow extends WhiteboardSnapshot {
   id?: number;
@@ -26,6 +35,7 @@ class ExcalicastDB extends Dexie {
   audioChunks!: Table<AudioChunkRow, number>;
   cameraChunks!: Table<CameraChunkRow, number>;
   binaryFiles!: Table<BinaryFileRow, number>;
+  workspaceShells!: Table<WorkspaceShellRow, number>;
 
   constructor() {
     super('excalicast');
@@ -78,6 +88,15 @@ class ExcalicastDB extends Dexie {
         if (r.subtitleSrt === undefined) r.subtitleSrt = null;
       });
     });
+    // v5: workspaceShells 表（录制期间捕获的 Excalicast 工作区 DOM 快照）
+    this.version(5).stores({
+      recordings: 'id, startedAt, status',
+      snapshots: '++id, recordingId, timestamp',
+      audioChunks: '++id, recordingId, index',
+      cameraChunks: '++id, recordingId, index',
+      binaryFiles: '++id, recordingId, fileId',
+      workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
+    });
   }
 }
 
@@ -115,15 +134,39 @@ export async function deleteRecording(recordingId: string): Promise<void> {
   const db = getClientDb();
   await db.transaction(
     'rw',
-    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.binaryFiles],
+    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.binaryFiles, db.workspaceShells],
     async () => {
       await db.recordings.delete(recordingId);
       await db.snapshots.where('recordingId').equals(recordingId).delete();
       await db.audioChunks.where('recordingId').equals(recordingId).delete();
       await db.cameraChunks.where('recordingId').equals(recordingId).delete();
       await db.binaryFiles.where('recordingId').equals(recordingId).delete();
+      await db.workspaceShells.where('recordingId').equals(recordingId).delete();
     },
   );
+}
+
+export async function appendWorkspaceShell(params: {
+  recordingId: string;
+  timestamp: number;
+  png: Blob;
+  canvasRect: ShellCanvasRect;
+  shellSize: ShellSize;
+  hash: string;
+}): Promise<void> {
+  await getClientDb().workspaceShells.add(params);
+}
+
+export async function getWorkspaceShells(recordingId: string): Promise<WorkspaceShellRow[]> {
+  return getClientDb().workspaceShells
+    .where('recordingId').equals(recordingId)
+    .sortBy('timestamp');
+}
+
+export async function countWorkspaceShells(recordingId: string): Promise<number> {
+  return getClientDb().workspaceShells
+    .where('recordingId').equals(recordingId)
+    .count();
 }
 
 export async function loadFullRecording(recordingId: string): Promise<{

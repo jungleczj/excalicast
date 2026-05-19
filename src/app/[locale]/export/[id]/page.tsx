@@ -7,6 +7,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { ExportRatioPicker } from '@/components/ExportRatioPicker';
 import { ExportPreview } from '@/components/ExportPreview';
 import { ExportPanel, type ExportProgressState } from '@/components/ExportPanel';
+import { WorkspaceShellToggle } from '@/components/WorkspaceShellToggle';
 import { I } from '@/components/icons';
 import { getRecording, deleteRecording } from '@/lib/db-client';
 import type { ExportConfig, RecordingMetadata } from '@/types/recording';
@@ -135,6 +136,7 @@ export default function ExportRecordingPage(): JSX.Element {
 
         <aside className="w-[420px] flex-shrink-0 overflow-y-auto border-l border-border-default bg-bg-primary p-6">
           <div className="space-y-5">
+            <WorkspaceShellToggle recordingId={id} config={config} onChange={setConfig} />
             <ExportRatioPicker config={config} onChange={setConfig} />
             <div className="border-t border-border-default" />
             <ExportPanel

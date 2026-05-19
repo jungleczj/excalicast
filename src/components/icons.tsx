@@ -97,6 +97,53 @@ export const I = {
       <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
     </Base>
   ),
+  Cloud: (p: IconProps) => (
+    <Base {...p}>
+      <path d="M17.5 19a4.5 4.5 0 1 0-1.41-8.78 6 6 0 0 0-11.66 1.78A4 4 0 0 0 5 19h12.5z" />
+    </Base>
+  ),
+  CloudUpload: (p: IconProps) => (
+    <Base {...p}>
+      <path d="M17.5 19a4.5 4.5 0 1 0-1.41-8.78 6 6 0 0 0-11.66 1.78A4 4 0 0 0 5 19h2" />
+      <polyline points="9 14 12 11 15 14" />
+      <line x1="12" y1="11" x2="12" y2="20" />
+    </Base>
+  ),
+  CloudCheck: (p: IconProps) => (
+    <Base {...p}>
+      <path d="M17.5 19a4.5 4.5 0 1 0-1.41-8.78 6 6 0 0 0-11.66 1.78A4 4 0 0 0 5 19h12.5z" />
+      <polyline points="9 13 11 15 15 11" />
+    </Base>
+  ),
+  CloudOff: (p: IconProps) => (
+    <Base {...p}>
+      <line x1="2" y1="2" x2="22" y2="22" />
+      <path d="M5.78 5.78A4 4 0 0 0 5 13h11.34M21 13a4 4 0 0 0-4-4h-1.26a8 8 0 0 0-7.05-3.74" />
+    </Base>
+  ),
+  Loader: (p: IconProps) => (
+    <Base {...p}>
+      <line x1="12" y1="2" x2="12" y2="6" />
+      <line x1="12" y1="18" x2="12" y2="22" />
+      <line x1="4.93" y1="4.93" x2="7.76" y2="7.76" />
+      <line x1="16.24" y1="16.24" x2="19.07" y2="19.07" />
+      <line x1="2" y1="12" x2="6" y2="12" />
+      <line x1="18" y1="12" x2="22" y2="12" />
+      <line x1="4.93" y1="19.07" x2="7.76" y2="16.24" />
+      <line x1="16.24" y1="7.76" x2="19.07" y2="4.93" />
+    </Base>
+  ),
+  Square: (p: IconProps) => (
+    <Base {...p}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+    </Base>
+  ),
+  CheckSquare: (p: IconProps) => (
+    <Base {...p}>
+      <polyline points="9 11 12 14 22 4" />
+      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+    </Base>
+  ),
   Logo: (p: IconProps) => (
     <svg
       width={p.size ?? 18}

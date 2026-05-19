@@ -1,7 +1,7 @@
 'use client';
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { loadFullRecording } from '@/lib/db-client';
+import { getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
 import {
   cropRectForSnapshot,
   computeContentBoundingBox,
@@ -9,7 +9,13 @@ import {
   DEFAULT_FALLBACK_VIEWPORT,
   type CropContext,
 } from '@/services/cropping';
-import { ASPECT_PRESETS, type ExportConfig, type SceneRect, type WhiteboardSnapshot } from '@/types/recording';
+import {
+  ASPECT_PRESETS,
+  type ExportConfig,
+  type SceneRect,
+  type WhiteboardSnapshot,
+  type WorkspaceShellRow,
+} from '@/types/recording';
 import { compileSubtitles, drawFrostedWatermark, drawSubtitle } from '@/utils/frameOverlays';
 
 export interface ExportOptions extends ExportConfig {
@@ -39,6 +45,40 @@ function snapshotAt(snapshots: WhiteboardSnapshot[], t: number): WhiteboardSnaps
     else hi = mid - 1;
   }
   return ans === -1 ? snapshots[0] : snapshots[ans];
+}
+
+function shellAt(shells: WorkspaceShellRow[], t: number): WorkspaceShellRow | null {
+  if (shells.length === 0) return null;
+  let lo = 0, hi = shells.length - 1, ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (shells[mid].timestamp <= t) { ans = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  return ans === -1 ? shells[0] : shells[ans];
+}
+
+interface DecodedShell extends WorkspaceShellRow {
+  bitmap: ImageBitmap;
+}
+
+async function decodeShells(rows: WorkspaceShellRow[]): Promise<DecodedShell[]> {
+  const out: DecodedShell[] = [];
+  for (const r of rows) {
+    try {
+      const bitmap = await createImageBitmap(r.png);
+      out.push({ ...r, bitmap });
+    } catch {
+      // 跳过损坏的快照
+    }
+  }
+  return out;
+}
+
+function disposeShells(decoded: DecodedShell[]): void {
+  for (const s of decoded) {
+    try { s.bitmap.close(); } catch { /* ignore */ }
+  }
 }
 
 interface ElementBoxOnly { x: number; y: number; w: number; h: number }
@@ -129,6 +169,13 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 水印开启 + 摄像头存在时，水印改放左下角避免与人像气泡视觉打架
   const watermarkPos: 'bottom-right' | 'bottom-left' = cameraBlob ? 'bottom-left' : 'bottom-right';
 
+  // 工作区 UI 外壳 —— 若录制时捕获到了 shell 且 toggle 开启，按 shellSize 输出
+  const rawShells = await getWorkspaceShells(opts.recordingId);
+  const useShell = rawShells.length > 0 && (opts.includeWorkspaceShell ?? true);
+  const decodedShells = useShell ? await decodeShells(rawShells) : [];
+  const outputW = useShell ? decodedShells[0].shellSize.width : preset.width;
+  const outputH = useShell ? decodedShells[0].shellSize.height : preset.height;
+
   const contentBox = computeContentBoundingBox(snapshots);
   const fallbackViewport = (() => {
     if (snapshots.length === 0) return DEFAULT_FALLBACK_VIEWPORT;
@@ -148,22 +195,54 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   for (let i = 0; i < totalFrames; i++) {
     const t = (i / fps) * 1000;
     const snap = snapshotAt(snapshots, t);
-    const cropRect = cropRectForSnapshot(snap, cropCtx);
 
-    // 渲染目标尺寸 = preset
+    // 渲染目标尺寸
     const target = document.createElement('canvas');
-    target.width = preset.width;
-    target.height = preset.height;
+    target.width = outputW;
+    target.height = outputH;
     const targetCtx = target.getContext('2d')!;
     targetCtx.fillStyle = '#ffffff';
     targetCtx.fillRect(0, 0, target.width, target.height);
 
+    // shell 模式：先画工作区外壳铺满 target，再把 scene 画进 canvasRect
+    // 否则：scene 直接铺满 target（旧路径）
+    let shellAtT: DecodedShell | null = null;
+    if (useShell) {
+      shellAtT = shellAt(decodedShells, t) as DecodedShell | null;
+      if (shellAtT) {
+        // shell 尺寸可能与首张 shell 不同（极少见，例如窗口大小变了），按 target 拉伸
+        targetCtx.drawImage(shellAtT.bitmap, 0, 0, target.width, target.height);
+      }
+    }
+
+    // 决定本帧 scene 渲染的目标区域 + 源 crop rect
+    const dest = (() => {
+      if (useShell && shellAtT) {
+        // dest 缩放到当前 target（首张 shellSize → target；shellAtT 自身的 canvasRect 在它原始尺寸里）
+        const sx = target.width / shellAtT.shellSize.width;
+        const sy = target.height / shellAtT.shellSize.height;
+        return {
+          x: shellAtT.canvasRect.x * sx,
+          y: shellAtT.canvasRect.y * sy,
+          width: shellAtT.canvasRect.width * sx,
+          height: shellAtT.canvasRect.height * sy,
+        };
+      }
+      return { x: 0, y: 0, width: target.width, height: target.height };
+    })();
+
+    const sceneSourceRect: SceneRect = (() => {
+      if (useShell && snap) {
+        // shell 模式：用户当时的视口
+        return viewportFromAppState(snap.appState) ?? cropRectForSnapshot(snap, cropCtx);
+      }
+      return cropRectForSnapshot(snap, cropCtx);
+    })();
+
     if (snap && (snap.elements as unknown[]).length > 0) {
-      const ghost = buildGhostRect(cropRect);
+      const ghost = buildGhostRect(sceneSourceRect);
       const elementsForRender = [ghost, ...(snap.elements as unknown[])];
 
-      // exportToCanvas 自身按 commonBounds + padding 决定输出尺寸；
-      // 我们让它按 scale=1 渲染，然后我们自己 drawImage 裁切到 target
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const sceneCanvas: HTMLCanvasElement = await exportToCanvas({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -182,25 +261,17 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         getDimensions: (w, h) => ({ width: w, height: h, scale: 1 }),
       });
 
-      // 计算 scene 中 sceneCanvas 实际覆盖的 rect：
-      // = union(realElementsBBox, cropRect)
       const realBBox = elementBoundsUnion(snap.elements as unknown[]);
       const renderedSceneRect: SceneRect = realBBox
-        ? unionRect(realBBox, cropRect)
-        : cropRect;
+        ? unionRect(realBBox, sceneSourceRect)
+        : sceneSourceRect;
 
       const scale = sceneCanvas.width / renderedSceneRect.width;
-      const sx = (cropRect.x - renderedSceneRect.x) * scale;
-      const sy = (cropRect.y - renderedSceneRect.y) * scale;
-      const sw = cropRect.width * scale;
-      const sh = cropRect.height * scale;
-
-      // sceneCanvas 长宽比 = renderedSceneRect 的长宽比；垂直方向的 scale 应该相同
-      // 校验：scale_y = sceneCanvas.height / renderedSceneRect.height ≈ scale
-      // 若不一致按各自轴向计算
+      const sx = (sceneSourceRect.x - renderedSceneRect.x) * scale;
       const scaleY = sceneCanvas.height / renderedSceneRect.height;
-      const sy2 = (cropRect.y - renderedSceneRect.y) * scaleY;
-      const sh2 = cropRect.height * scaleY;
+      const sy2 = (sceneSourceRect.y - renderedSceneRect.y) * scaleY;
+      const sw = sceneSourceRect.width * scale;
+      const sh2 = sceneSourceRect.height * scaleY;
 
       try {
         targetCtx.drawImage(
@@ -209,11 +280,10 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
           Math.max(0, sy2),
           Math.min(sw, sceneCanvas.width - sx),
           Math.min(sh2, sceneCanvas.height - sy2),
-          0, 0, target.width, target.height,
+          dest.x, dest.y, dest.width, dest.height,
         );
       } catch {
-        // 如果裁切参数越界（极端情况），退化为全图绘制
-        targetCtx.drawImage(sceneCanvas, 0, 0, target.width, target.height);
+        targetCtx.drawImage(sceneCanvas, dest.x, dest.y, dest.width, dest.height);
       }
     }
 
@@ -270,12 +340,12 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 不能简单 burn 进 PNG —— 摄像头视频独立时间线）
   const filterParts: string[] = [];
   let curLabel = '[0:v]';
-  const camSize = Math.round(preset.height * 0.22);
+  const camSize = Math.round(outputH * 0.22);
   if (cameraIdx !== null) {
     filterParts.push(
       `[${cameraIdx}:v]scale=${camSize}:${camSize}:force_original_aspect_ratio=increase,crop=${camSize}:${camSize},hflip,format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(pow(X-W/2,2)+pow(Y-H/2,2),pow(W/2-1,2)),0,255)'[cam]`,
     );
-    filterParts.push(`${curLabel}[cam]overlay=W-w-${Math.round(preset.width * 0.025)}:H-h-${Math.round(preset.height * 0.04)}[v_with_cam]`);
+    filterParts.push(`${curLabel}[cam]overlay=W-w-${Math.round(outputW * 0.025)}:H-h-${Math.round(outputH * 0.04)}[v_with_cam]`);
     curLabel = '[v_with_cam]';
   }
 
@@ -304,6 +374,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   try { await ffmpeg.deleteFile('output.mp4'); } catch { /* ignore */ }
   if (audioFile) { try { await ffmpeg.deleteFile(audioFile); } catch { /* ignore */ } }
   if (cameraFile) { try { await ffmpeg.deleteFile(cameraFile); } catch { /* ignore */ } }
+  disposeShells(decodedShells);
 
   opts.onProgress?.(1);
   opts.onPhase?.('done');
@@ -327,8 +398,16 @@ export async function renderPreviewFrame(
   const { metadata, snapshots, binaryFiles, cameraBlob } = await loadFullRecording(recordingId);
   const preset = ASPECT_PRESETS[config.aspectRatio];
 
-  target.width = preset.width;
-  target.height = preset.height;
+  // 预览也要走 shell-aware 路径
+  const rawShells = await getWorkspaceShells(recordingId);
+  const useShell = rawShells.length > 0 && (config.includeWorkspaceShell ?? true);
+  const decodedShells = useShell ? await decodeShells(rawShells) : [];
+
+  const outputW = useShell ? decodedShells[0].shellSize.width : preset.width;
+  const outputH = useShell ? decodedShells[0].shellSize.height : preset.height;
+
+  target.width = outputW;
+  target.height = outputH;
   const ctx = target.getContext('2d')!;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, target.width, target.height);
@@ -337,6 +416,15 @@ export async function renderPreviewFrame(
   const cues = ((config.burnSubtitles ?? true) && metadata.subtitleSrt)
     ? compileSubtitles(metadata.subtitleSrt)
     : [];
+
+  // shell 先铺底
+  let shellAtT: DecodedShell | null = null;
+  if (useShell) {
+    shellAtT = shellAt(decodedShells, timeMs) as DecodedShell | null;
+    if (shellAtT) {
+      ctx.drawImage(shellAtT.bitmap, 0, 0, target.width, target.height);
+    }
+  }
 
   const snap = snapshotAt(snapshots, timeMs);
   if (!snap || (snap.elements as unknown[]).length === 0) {
@@ -348,6 +436,7 @@ export async function renderPreviewFrame(
         reservedRightFraction: hasCamera ? 0.3 : 0,
       });
     }
+    disposeShells(decodedShells);
     return;
   }
 
@@ -356,14 +445,31 @@ export async function renderPreviewFrame(
 
   const contentBox = computeContentBoundingBox(snapshots);
   const fallbackViewport = viewportFromAppState(snap.appState) ?? DEFAULT_FALLBACK_VIEWPORT;
-  const cropRect = cropRectForSnapshot(snap, {
-    aspectRatio: config.aspectRatio,
-    croppingMode: config.croppingMode,
-    contentBox,
-    fallbackViewport,
-  });
 
-  const ghost = buildGhostRect(cropRect);
+  // shell 模式：用用户的视口；否则按 ASPECT 裁切
+  const sceneSourceRect: SceneRect = useShell
+    ? (viewportFromAppState(snap.appState) ?? fallbackViewport)
+    : cropRectForSnapshot(snap, {
+        aspectRatio: config.aspectRatio,
+        croppingMode: config.croppingMode,
+        contentBox,
+        fallbackViewport,
+      });
+
+  const dest = (useShell && shellAtT)
+    ? (() => {
+        const sx = target.width / shellAtT.shellSize.width;
+        const sy = target.height / shellAtT.shellSize.height;
+        return {
+          x: shellAtT.canvasRect.x * sx,
+          y: shellAtT.canvasRect.y * sy,
+          width: shellAtT.canvasRect.width * sx,
+          height: shellAtT.canvasRect.height * sy,
+        };
+      })()
+    : { x: 0, y: 0, width: target.width, height: target.height };
+
+  const ghost = buildGhostRect(sceneSourceRect);
   const elementsForRender = [ghost, ...(snap.elements as unknown[])];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -386,15 +492,15 @@ export async function renderPreviewFrame(
 
   const realBBox = elementBoundsUnion(snap.elements as unknown[]);
   const renderedSceneRect: SceneRect = realBBox
-    ? unionRect(realBBox, cropRect)
-    : cropRect;
+    ? unionRect(realBBox, sceneSourceRect)
+    : sceneSourceRect;
 
   const scale = sceneCanvas.width / renderedSceneRect.width;
   const scaleY = sceneCanvas.height / renderedSceneRect.height;
-  const sx = (cropRect.x - renderedSceneRect.x) * scale;
-  const sy = (cropRect.y - renderedSceneRect.y) * scaleY;
-  const sw = cropRect.width * scale;
-  const sh = cropRect.height * scaleY;
+  const sx = (sceneSourceRect.x - renderedSceneRect.x) * scale;
+  const sy = (sceneSourceRect.y - renderedSceneRect.y) * scaleY;
+  const sw = sceneSourceRect.width * scale;
+  const sh = sceneSourceRect.height * scaleY;
 
   try {
     ctx.drawImage(
@@ -403,11 +509,13 @@ export async function renderPreviewFrame(
       Math.max(0, sy),
       Math.min(sw, sceneCanvas.width - sx),
       Math.min(sh, sceneCanvas.height - sy),
-      0, 0, target.width, target.height,
+      dest.x, dest.y, dest.width, dest.height,
     );
   } catch {
-    ctx.drawImage(sceneCanvas, 0, 0, target.width, target.height);
+    ctx.drawImage(sceneCanvas, dest.x, dest.y, dest.width, dest.height);
   }
+
+  disposeShells(decodedShells);
 
   if (config.withWatermark) {
     drawFrostedWatermark(ctx, target.width, target.height, hasCamera ? 'bottom-left' : 'bottom-right');

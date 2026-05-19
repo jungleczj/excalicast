@@ -38,6 +38,7 @@ export default function HomePage(): JSX.Element {
   const sessionRef = useRef<SessionHandle | null>(null);
   const changeRef = useRef<WhiteboardChangeFn | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const workspaceRootRef = useRef<HTMLDivElement | null>(null);
 
   // 初始化摄像头位置（右下角，避开录制条）
   useEffect(() => {
@@ -144,7 +145,10 @@ export default function HomePage(): JSX.Element {
     setCameraStream(null);
 
     try {
-      const session = await startRecording({ withCamera: cameraEnabled });
+      const session = await startRecording({
+        withCamera: cameraEnabled,
+        workspaceRoot: workspaceRootRef.current,
+      });
       sessionRef.current = session;
       changeRef.current = session.onWhiteboardChange;
       setHasAudio(session.hasAudio);
@@ -207,29 +211,29 @@ export default function HomePage(): JSX.Element {
   const isRecording = state === 'recording' || state === 'paused';
 
   return (
-    <div className="flex h-full flex-col">
-      {/* 录制中隐藏顶部 nav，让画板 + 录制条独占屏幕 */}
-      {!isRecording && state !== 'processing' && (
-        <AppHeader tier={subscription.tier} onUpgradePro={() => setProUpgradeOpen(true)} />
-      )}
+    <div className="flex h-full flex-col" ref={workspaceRootRef}>
+      {/* AppHeader 全程可见，以便录制时被 shell capturer 抓到（之前会在录制时隐藏） */}
+      <AppHeader tier={subscription.tier} onUpgradePro={() => setProUpgradeOpen(true)} />
       <div className="relative flex-1 overflow-hidden">
         <Whiteboard onChangeRef={changeRef} />
 
         {/* 摄像头浮窗：idle 期间用预览流；录制态如启用则用 session stream */}
         {(cameraEnabled || (isRecording && hasCamera)) && (
-          <CameraBubble
-            stream={cameraStream}
-            size={160}
-            shape="circle"
-            position={cameraPos}
-            onPositionChange={setCameraPos}
-          />
+          <div className="rb-no-record">
+            <CameraBubble
+              stream={cameraStream}
+              size={160}
+              shape="circle"
+              position={cameraPos}
+              onPositionChange={setCameraPos}
+            />
+          </div>
         )}
 
         {/* 浮动录制条：position: fixed + 可拖拽，wrapper 不阻挡 Excalidraw 工具区点击 */}
         {barPos && (
           <div
-            className="fixed z-30"
+            className="rb-no-record fixed z-30"
             style={{
               left: barPos.x,
               top: barPos.y,

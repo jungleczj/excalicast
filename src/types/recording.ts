@@ -74,6 +74,29 @@ export interface ExportConfig {
   fps: number;
   withWatermark: boolean;
   burnSubtitles?: boolean;
+  includeWorkspaceShell?: boolean;
+}
+
+export interface ShellCanvasRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface ShellSize {
+  width: number;
+  height: number;
+}
+
+export interface WorkspaceShellRow {
+  id?: number;
+  recordingId: string;
+  timestamp: number;
+  png: Blob;
+  canvasRect: ShellCanvasRect;
+  shellSize: ShellSize;
+  hash: string;
 }
 
 export interface SubtitleCue {

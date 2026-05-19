@@ -224,6 +224,13 @@
     "footer": "Audio is temporarily uploaded only while generating subtitles. Deleted automatically once the job completes.",
     "mockReason": "Using mock SRT"
   },
+  "workspaceShell": {
+    "title": "Include workspace UI",
+    "lede": "Top bar / top toolbar / left properties panel",
+    "available": "{count} workspace snapshots were captured during recording",
+    "notAvailable": "This recording has no workspace snapshots (older recording)",
+    "lockedNote": "Locked to original workspace aspect ({w}×{h})"
+  },
   "exportPreview": {
     "watermarkBadge": "👁️ Watermarked preview",
     "cleanBadge": "✓ Clean export",
@@ -294,9 +301,10 @@
     "free": "Unpaid",
     "loading": "Loading…",
     "badgeLocal": "local",
-    "badgeCloud": "☁️ cloud",
-    "badgeSynced": "☁️ synced",
+    "badgeCloud": "cloud",
+    "badgeSynced": "synced",
     "saveToCloud": "Save to cloud",
+    "removeFromCloud": "Remove from cloud",
     "saveToCloudPro": "Save to cloud (upgrade Pro)",
     "uploading": "Uploading…",
     "downloadFromCloud": "Download from cloud",
@@ -306,7 +314,15 @@
     "uploadFailed": "Upload failed: {message}",
     "downloadFailed": "Download failed: {message}",
     "cloudSyncLede": "Pro account · You can save any recording to the cloud to access from another browser/device. Only sources (event stream + audio + camera webm) are uploaded — never MP4.",
-    "statsSyncedTpl": "{count} recordings · {min} min · {synced} synced to cloud"
+    "statsSyncedTpl": "{count} recordings · {min} min · {synced} synced to cloud",
+    "selectAll": "Select all",
+    "deselectAll": "Deselect all",
+    "selectionLine": "{count} selected · {pending} pending sync",
+    "saveAllToCloud": "Save all to cloud",
+    "savingAll": "Uploading {done}/{total}…",
+    "saveAllDone": "{ok} uploaded, {failed} failed",
+    "tooltipSavedClickRemove": "Synced · click to remove from cloud",
+    "tooltipUpgradePro": "Upgrade Pro to unlock cloud backup"
   },
   "play": {
     "loading": "Loading recording…",

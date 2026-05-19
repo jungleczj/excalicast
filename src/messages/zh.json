@@ -224,6 +224,13 @@
     "footer": "录制音频仅在生成字幕时临时上传到本应用服务器，作业完成后自动删除",
     "mockReason": "使用 mock SRT"
   },
+  "workspaceShell": {
+    "title": "包含工作区界面",
+    "lede": "顶栏 / 顶部工具栏 / 左侧属性面板",
+    "available": "录制时已捕获 {count} 张工作区快照",
+    "notAvailable": "该录制未捕获工作区界面（属于旧版本录制）",
+    "lockedNote": "已锁定原始工作区比例（{w}×{h}）"
+  },
   "exportPreview": {
     "watermarkBadge": "👁️ 含水印预览",
     "cleanBadge": "✓ 干净导出",
@@ -294,9 +301,10 @@
     "free": "未付费",
     "loading": "加载中…",
     "badgeLocal": "本机",
-    "badgeCloud": "☁️ 云端",
-    "badgeSynced": "☁️ 已同步",
+    "badgeCloud": "云端",
+    "badgeSynced": "已同步",
     "saveToCloud": "保存到云端",
+    "removeFromCloud": "从云端移除",
     "saveToCloudPro": "保存到云端（升级 Pro）",
     "uploading": "上传中…",
     "downloadFromCloud": "从云端下载",
@@ -306,7 +314,15 @@
     "uploadFailed": "上传失败：{message}",
     "downloadFailed": "下载失败：{message}",
     "cloudSyncLede": "已登录 Pro · 每条录制可手动保存到云端，跨浏览器/设备访问。仅同步录制源（事件流 + 音频 + 摄像头 webm），不上传 MP4。",
-    "statsSyncedTpl": "{count} 条录制 · {min} 分钟 · {synced} 条已同步云端"
+    "statsSyncedTpl": "{count} 条录制 · {min} 分钟 · {synced} 条已同步云端",
+    "selectAll": "全选",
+    "deselectAll": "取消全选",
+    "selectionLine": "已选 {count} · 其中 {pending} 条未同步",
+    "saveAllToCloud": "保存全部到云端",
+    "savingAll": "保存中 {done}/{total}…",
+    "saveAllDone": "{ok} 条已上传，{failed} 条失败",
+    "tooltipSavedClickRemove": "已同步 · 点击从云端移除",
+    "tooltipUpgradePro": "升级 Pro 解锁云端备份"
   },
   "play": {
     "loading": "正在加载录制…",
