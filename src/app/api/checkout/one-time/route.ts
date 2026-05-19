@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { getPaymentConfig } from '@/lib/paymentConfig';
+import { getActiveConfig } from '@/lib/paymentConfig';
 import { createCreemCheckout } from '@/services/creemServer';
 import { defaultLocale, LOCALE_COOKIE, locales } from '@/i18n/config';
 
@@ -13,9 +13,9 @@ export const dynamic = 'force-dynamic';
  *
  * 出参（按 provider 分两种）：
  *   - Paddle：{ provider:'paddle', priceId, recordingId } —— 客户端继续走 Paddle SDK overlay
- *   - Creem： { provider:'creem',  redirectUrl, checkoutId } —— 客户端 window.location 或 window.open
+ *   - Creem： { provider:'creem',  redirectUrl, checkoutId } —— 客户端 window.open
  *
- * 这条路由对 one-time 全开放（不需要登录），与现有 Paddle 一次性流程一致。
+ * 这条路由对 one-time 全开放（不需要登录）。
  */
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -30,23 +30,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'missing_recording_id' }, { status: 400 });
   }
 
-  const cfg = await getPaymentConfig();
+  const cfg = await getActiveConfig();
+  if (!cfg) {
+    return NextResponse.json({ error: 'no_active_payment_config' }, { status: 500 });
+  }
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '') || 'http://localhost:3005';
   const cookieLocale = req.cookies.get(LOCALE_COOKIE)?.value;
   const locale = cookieLocale && (locales as readonly string[]).includes(cookieLocale) ? cookieLocale : defaultLocale;
 
   if (cfg.provider === 'creem') {
-    const productId = cfg.creemOneTimeProductId;
-    if (!productId) {
+    if (!cfg.oneTimeProductId || !cfg.apiKey || !cfg.apiBase) {
       return NextResponse.json(
-        { error: 'creem_one_time_product_id_missing' },
+        { error: 'creem_creds_missing', mode: cfg.mode },
         { status: 500 },
       );
     }
     try {
       const result = await createCreemCheckout({
-        productId,
-        successUrl: `${appUrl}/app?creem_purchase=one_time&recording=${encodeURIComponent(recordingId)}`,
+        creds: { apiKey: cfg.apiKey, apiBase: cfg.apiBase },
+        productId: cfg.oneTimeProductId,
+        successUrl: `${appUrl}/${locale}/app?creem_purchase=one_time&recording=${encodeURIComponent(recordingId)}`,
         metadata: {
           kind: 'one_time',
           recordingId,
@@ -67,13 +70,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   // Paddle path — UI sticks with SDK overlay, we just return the priceId
-  const priceId = cfg.paddleOneTimePriceId ?? process.env.NEXT_PUBLIC_PADDLE_PRICE_ID;
-  if (!priceId) {
+  if (!cfg.oneTimeProductId) {
     return NextResponse.json({ error: 'paddle_price_id_missing' }, { status: 500 });
   }
   return NextResponse.json({
     provider: 'paddle',
-    priceId,
+    priceId: cfg.oneTimeProductId,
     recordingId,
   });
 }

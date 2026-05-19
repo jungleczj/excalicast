@@ -2,6 +2,7 @@ import { LegalLayout } from '@/components/LegalLayout';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { TermsZh } from './TermsZh';
 import { TermsEn } from './TermsEn';
+import { getActiveConfig, formatPrice } from '@/lib/paymentConfig';
 
 interface Props {
   params: Promise<{ locale: string }>;
@@ -17,9 +18,11 @@ export default async function TermsPage({ params }: Props): Promise<JSX.Element>
   const { locale } = await params;
   setRequestLocale(locale);
   const t = await getTranslations({ locale, namespace: 'terms' });
+  const cfg = await getActiveConfig();
+  const oneTimePrice = cfg ? formatPrice(cfg.oneTimePriceCents, cfg.currency) : '$9.99';
   return (
     <LegalLayout title={t('title')} lastUpdated="2026-05-08">
-      {locale === 'en' ? <TermsEn /> : <TermsZh />}
+      {locale === 'en' ? <TermsEn oneTimePrice={oneTimePrice} /> : <TermsZh oneTimePrice={oneTimePrice} />}
     </LegalLayout>
   );
 }

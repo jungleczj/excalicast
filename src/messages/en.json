@@ -16,7 +16,7 @@
       "subtitle": "Excalicast is a browser-based whiteboard recorder. Draw in Excalidraw, capture voice and actions, then export 16:9 / 9:16 / 1:1 / 4:5 MP4s — ready for YouTube, TikTok, Instagram, and more.",
       "ctaPrimary": "Start free",
       "ctaSecondary": "See pricing",
-      "disclaimer": "Recording is free · watermarked MP4 export is free · $9.99 per recording to unlock watermark-free export"
+      "disclaimer": "Recording is free · watermarked MP4 export is free · {price} per recording to unlock watermark-free export"
     },
     "features": {
       "heading": "Features",
@@ -58,7 +58,7 @@
       "heading": "How it works",
       "step1": { "title": "Record", "desc": "Click \"Start recording.\" Draw, write, and narrate on the whiteboard. Optionally enable the camera bubble." },
       "step2": { "title": "Preview", "desc": "When you stop, you jump to the export page. Pick your target ratio (16:9 / 9:16 / 1:1 / 4:5)." },
-      "step3": { "title": "Download", "desc": "Click \"Download\" for a watermarked MP4. Or pay $9.99 to permanently unlock watermark-free export of this recording." }
+      "step3": { "title": "Download", "desc": "Click \"Download\" for a watermarked MP4. Or pay {price} to permanently unlock watermark-free export of this recording." }
     },
     "refund": {
       "heading": "Refund policy",
@@ -244,11 +244,11 @@
     "cleanTitle": "Watermark-free export",
     "cleanMetaPro": "Pro · all unlocked",
     "cleanMetaPaid": "Purchased · permanent unlock",
-    "cleanMetaLocked": "$3 one-time / Pro subscription",
+    "cleanMetaLocked": "{price} one-time / Pro subscription",
     "cleanHintPro": "Unlimited watermark-free export across all recordings while subscribed",
     "cleanHintPaid": "Re-export this recording in any ratio, watermark-free",
     "cleanHintLocked": "Click export to choose one-time purchase or Pro",
-    "buttonUnlock": "Unlock & download · $3",
+    "buttonUnlock": "Unlock & download · {price}",
     "buttonWithWatermark": "Render & download (watermarked)",
     "buttonClean": "Render & download (watermark-free)",
     "exportingStatus": "Generating {ratio} {wm} MP4…",

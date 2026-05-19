@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getPaymentConfig, toPublic, type PublicPaymentConfig } from '@/lib/paymentConfig';
+import { getActiveConfig, toPublic, type PublicPaymentConfig } from '@/lib/paymentConfig';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -7,14 +7,15 @@ export const fetchCache = 'force-no-store';
 export const revalidate = 0;
 
 /**
- * 公开只读：返回当前支付提供商 + 价格。
+ * 公开只读：返回当前激活的支付提供商 + 价格 + mode。
  *
- * 仅暴露 provider/currency/价格三项，不暴露 paddle/creem 的产品 ID
- * （那些只在服务端构造 checkout 时使用）。
- *
- * 客户端用它决定弹哪个 modal / 调哪条 checkout 路由。
+ * 严格白名单：仅 provider / mode / currency / 价格。
+ * api_key / webhook_secret / product_id 永远不暴露。
  */
-export async function GET(): Promise<NextResponse<PublicPaymentConfig>> {
-  const cfg = await getPaymentConfig();
+export async function GET(): Promise<NextResponse<PublicPaymentConfig | { error: string }>> {
+  const cfg = await getActiveConfig();
+  if (!cfg) {
+    return NextResponse.json({ error: 'no_active_payment_config' }, { status: 503 });
+  }
   return NextResponse.json(toPublic(cfg));
 }

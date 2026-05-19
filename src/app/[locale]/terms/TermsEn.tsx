@@ -1,4 +1,4 @@
-export function TermsEn(): JSX.Element {
+export function TermsEn({ oneTimePrice }: { oneTimePrice: string }): JSX.Element {
   return (
     <>
       <p>
@@ -10,7 +10,7 @@ export function TermsEn(): JSX.Element {
       <p>Excalicast is a browser-based whiteboard recorder that provides:</p>
       <ul>
         <li>Synchronized capture of whiteboard activity + mic audio + optional camera video.</li>
-        <li>Multi-ratio MP4 export (watermarked is free; $9.99 per recording for permanent watermark-free unlock).</li>
+        <li>Multi-ratio MP4 export (watermarked is free; {oneTimePrice} per recording for permanent watermark-free unlock).</li>
         <li>Recordings stored in your local browser; the server only retains payment records.</li>
       </ul>
 
@@ -22,7 +22,7 @@ export function TermsEn(): JSX.Element {
 
       <h2>3. Pricing &amp; Payments</h2>
       <ul>
-        <li>Price: watermark-free unlock for a single recording is $9.99 USD, one-time payment, permanent unlock for that recording&apos;s watermark-free export.</li>
+        <li>Price: watermark-free unlock for a single recording is {oneTimePrice}, one-time payment, permanent unlock for that recording&apos;s watermark-free export.</li>
         <li>Processing: all payments are processed by Paddle.com Inc. Paddle acts as the registered merchant of record on behalf of Excalicast and handles collection and tax remittance.</li>
         <li>Currency: USD. The final amount may vary slightly due to taxes and exchange rates; the actual charge is shown on the checkout page.</li>
         <li>Receipts: Paddle emails the receipt to the address you provide upon successful payment.</li>

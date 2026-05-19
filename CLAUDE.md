@@ -1078,6 +1078,81 @@ Chrome 默认允许使用磁盘空间的 60%。录制完成后提示用户及时
 
 ---
 
+## 支付配置（payment_config 多行表 + is_active 切换）
+
+数据库表 `public.payment_config` 是全站价格 + provider 凭证的**唯一来源**。最多 4 行，每行对应一个 (provider, mode) 组合：
+
+| id | is_active | provider | mode | currency | one_time / pro prices | api_key | webhook_secret | api_base | one_time_product_id | pro_product_id |
+|----|-----------|----------|------|----------|----------------------|---------|----------------|----------|---------------------|---------------|
+| 1  | TRUE      | creem    | live | usd      | 300 / 900 cents      | creem_LIVE_*  | whsec_LIVE_*  | https://api.creem.io/v1      | prod_LIVE_*  | prod_LIVE_*  |
+| 2  | FALSE     | creem    | test | usd      | 300 / 900 cents      | creem_TEST_*  | whsec_TEST_*  | https://test-api.creem.io/v1 | prod_TEST_*  | prod_TEST_*  |
+| 3  | FALSE     | paddle   | live | usd      | 300 / 900 cents      | NULL          | NULL          | NULL                          | pri_LIVE_*   | pri_LIVE_*   |
+| 4  | FALSE     | paddle   | test | usd      | 300 / 900 cents      | NULL          | NULL          | NULL                          | pri_TEST_*   | pri_TEST_*   |
+
+`is_active = true` 全表唯一（partial unique index 保底）。读取链路: `getActiveConfig()` 一行；webhook 验签拿所有 creem 行的 webhook_secret 当候选。`toPublic()` 严格白名单，凭证永远不暴露给前端。
+
+### 改价（不切 mode）
+
+1. 在对应 provider 后台改 product 价格（Creem 后台 / Paddle 后台）
+2. `curl POST` admin API 同步 DB；服务端会调 Creem `GET /products/{id}` 校验，对不上返 409 + hint
+
+```bash
+curl -X POST https://excalicast.cc/api/admin/payment-config \
+  -H "x-admin-secret: $ADMIN_SECRET" -H "Content-Type: application/json" \
+  -d '{"provider":"creem","mode":"live","oneTimePriceCents":399}'
+```
+
+成功后会通过 Supabase Realtime broadcast 推送，所有在线用户的 PaywallModal / ProUpgradeModal 不刷新就看到新价。landing/terms 是 Server Component，下次访问见新价。
+
+### 切换 live ↔ test 模式
+
+```bash
+# 切到测试（生产域名上点付款会弹 test-api.creem.io）
+curl -X POST https://excalicast.cc/api/admin/payment-config/activate \
+  -H "x-admin-secret: $ADMIN_SECRET" -H "Content-Type: application/json" \
+  -d '{"provider":"creem","mode":"test"}'
+
+# 切回正式
+curl -X POST .../activate -d '{"provider":"creem","mode":"live"}'
+```
+
+### 首次配 test 凭证
+
+```bash
+curl -X POST https://excalicast.cc/api/admin/payment-config \
+  -H "x-admin-secret: $ADMIN_SECRET" -H "Content-Type: application/json" \
+  -d '{
+    "provider":"creem","mode":"test",
+    "apiKey":"creem_test_xxx",
+    "webhookSecret":"whsec_xxx",
+    "apiBase":"https://test-api.creem.io/v1",
+    "oneTimeProductId":"prod_test_xxx",
+    "proProductId":"prod_test_yyy"
+  }'
+```
+
+### 列出全部行（调试）
+
+```bash
+curl https://excalicast.cc/api/admin/payment-config \
+  -H "x-admin-secret: $ADMIN_SECRET"
+# → { "active": { "provider": "creem", "mode": "live" }, "rows": [ ... ] }
+```
+
+### 校验失败
+
+```
+HTTP 409
+{ "error":"creem_price_mismatch", "slot":"one_time",
+  "field":"oneTimePriceCents", "dbValue":300, "creemValue":399,
+  "productId":"prod_xxx",
+  "hint":"请先在 Creem 后台把 prod_xxx 的价格改成 3.00 USD 再 retry" }
+```
+
+意思：你想把 DB 改成 300 cents，但 Creem 后台对应 product 实际是 399 cents。Creem checkout 会按 Creem 后台的价格收，DB 改成 300 显示出来就是骗人。先改 Creem 后台，再 retry。
+
+---
+
 ## 当前开发状态（v0.1）
 
 - [x] 项目脚手架搭建

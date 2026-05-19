@@ -3,6 +3,7 @@ import { Brand } from '@/components/AppHeader';
 import { Link } from '@/i18n/navigation';
 import { useTranslations } from 'next-intl';
 import { setRequestLocale, getTranslations } from 'next-intl/server';
+import { getActiveConfig, formatPrice } from '@/lib/paymentConfig';
 
 interface Props {
   params: Promise<{ locale: string }>;
@@ -17,10 +18,12 @@ export async function generateMetadata({ params }: Props) {
 export default async function LandingPage({ params }: Props): Promise<JSX.Element> {
   const { locale } = await params;
   setRequestLocale(locale);
-  return <LandingContent />;
+  const cfg = await getActiveConfig();
+  const oneTimePrice = cfg ? formatPrice(cfg.oneTimePriceCents, cfg.currency) : '$9.99';
+  return <LandingContent oneTimePrice={oneTimePrice} />;
 }
 
-function LandingContent(): JSX.Element {
+function LandingContent({ oneTimePrice }: { oneTimePrice: string }): JSX.Element {
   const t = useTranslations('landing');
   return (
     <div className="flex h-full flex-col bg-bg-primary">
@@ -94,7 +97,7 @@ function LandingContent(): JSX.Element {
             </a>
           </div>
           <p className="mt-5 text-[12.5px] text-text-tertiary">
-            {t('hero.disclaimer')}
+            {t('hero.disclaimer', { price: oneTimePrice })}
           </p>
         </div>
       </section>
@@ -147,7 +150,7 @@ function LandingContent(): JSX.Element {
               </div>
               <div className="text-[13px] font-semibold uppercase tracking-wider opacity-80">{t('pricing.oneTime.label')}</div>
               <div className="mt-2 flex items-baseline gap-2">
-                <span className="font-mono text-[44px] font-bold leading-none">$9.99</span>
+                <span className="font-mono text-[44px] font-bold leading-none">{oneTimePrice}</span>
                 <span className="text-[13px] opacity-80">{t('pricing.oneTime.unit')}</span>
               </div>
               <p className="mt-2 text-[13px] opacity-90">{t('pricing.oneTime.tagline')}</p>
@@ -183,7 +186,7 @@ function LandingContent(): JSX.Element {
         <div className="mt-12 grid gap-10 md:grid-cols-3">
           <Step n={1} title={t('flow.step1.title')} desc={t('flow.step1.desc')} />
           <Step n={2} title={t('flow.step2.title')} desc={t('flow.step2.desc')} />
-          <Step n={3} title={t('flow.step3.title')} desc={t('flow.step3.desc')} />
+          <Step n={3} title={t('flow.step3.title')} desc={t('flow.step3.desc', { price: oneTimePrice })} />
         </div>
       </section>
 

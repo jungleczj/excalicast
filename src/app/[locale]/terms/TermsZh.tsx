@@ -1,4 +1,4 @@
-export function TermsZh(): JSX.Element {
+export function TermsZh({ oneTimePrice }: { oneTimePrice: string }): JSX.Element {
   return (
     <>
       <p>
@@ -9,7 +9,7 @@ export function TermsZh(): JSX.Element {
       <p>Excalicast 是一款基于浏览器的白板录制工具，提供：</p>
       <ul>
         <li>白板操作 + 麦克风音频 + 摄像头视频的同步录制</li>
-        <li>多比例 MP4 视频导出（含水印免费 / 单条录制付费 $9.99 永久解锁无水印）</li>
+        <li>多比例 MP4 视频导出（含水印免费 / 单条录制付费 {oneTimePrice} 永久解锁无水印）</li>
         <li>录制内容存储在用户本地浏览器；服务端只保存付款记录</li>
       </ul>
 
@@ -21,7 +21,7 @@ export function TermsZh(): JSX.Element {
 
       <h2>3. 付费与付款</h2>
       <ul>
-        <li>价格：单条录制无水印解锁 $9.99 USD，一次性付款，永久解锁该条录制的无水印导出。</li>
+        <li>价格：单条录制无水印解锁 {oneTimePrice}，一次性付款，永久解锁该条录制的无水印导出。</li>
         <li>支付处理：所有支付由 Paddle.com Inc. 全程处理。Paddle 是登记的商家代理，会代表 Excalicast 收款、报税。</li>
         <li>币种：美元（USD）。最终收款金额可能因税费和汇率略有差异，付款页面会显示实际收款金额。</li>
         <li>收据：付款成功后由 Paddle 发送到你提供的邮箱。</li>

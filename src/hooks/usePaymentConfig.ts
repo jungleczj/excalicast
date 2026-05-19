@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import type { PublicPaymentConfig } from '@/lib/paymentConfig';
+import { createClient } from '@/lib/supabase/client';
+
+// Re-export formatPrice so existing call sites continue to import it from this module.
+export { formatPrice } from '@/lib/formatPrice';
 
 interface UsePaymentConfig {
   config: PublicPaymentConfig | null;
@@ -10,12 +14,18 @@ interface UsePaymentConfig {
 }
 
 /**
- * 读取当前生效的支付配置（provider + 价格）。
- * 仅在 modal 挂载时拉一次；admin 改完配置后用户需要刷新页面才能看到新值。
+ * 读取当前激活的支付配置（provider + mode + 价格）。
+ *
+ * 初次 mount 拉一次 /api/payment/provider；
+ * 同时订阅 Supabase Realtime broadcast channel `payment-config-broadcast`，
+ * admin 改完配置后服务端会广播新 payload，所有在线 hook 自动 setConfig，
+ * 用户不刷新即看到新价。
+ *
+ * 可选 `initialConfig` 作为 SSR 预取的初始值，避免首屏 skeleton 闪烁。
  */
-export function usePaymentConfig(): UsePaymentConfig {
-  const [config, setConfig] = useState<PublicPaymentConfig | null>(null);
-  const [loading, setLoading] = useState(true);
+export function usePaymentConfig(initialConfig?: PublicPaymentConfig | null): UsePaymentConfig {
+  const [config, setConfig] = useState<PublicPaymentConfig | null>(initialConfig ?? null);
+  const [loading, setLoading] = useState(!initialConfig);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -32,28 +42,25 @@ export function usePaymentConfig(): UsePaymentConfig {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
+  }, []);
+
+  // Realtime broadcast subscription
+  useEffect(() => {
+    let supa;
+    try { supa = createClient(); }
+    catch { return; } // supabase not configured in dev / no NEXT_PUBLIC_SUPABASE_URL
+    const ch = supa.channel('payment-config-broadcast')
+      .on('broadcast', { event: 'updated' }, (msg) => {
+        const payload = msg.payload as PublicPaymentConfig | undefined;
+        if (payload && typeof payload === 'object' && 'provider' in payload) {
+          setConfig(payload);
+          setLoading(false);
+        }
+      })
+      .subscribe();
+    return () => { void supa.removeChannel(ch); };
   }, []);
 
   return { config, loading, error };
-}
-
-export function formatPrice(cents: number, currency: string): string {
-  const symbol = (() => {
-    switch (currency.toLowerCase()) {
-      case 'usd': return '$';
-      case 'eur': return '€';
-      case 'gbp': return '£';
-      case 'cny': return '¥';
-      case 'jpy': return '¥';
-      default: return '';
-    }
-  })();
-  const integral = Math.floor(cents / 100);
-  const frac = cents % 100;
-  if (currency.toLowerCase() === 'jpy') return `${symbol}${integral}`;
-  if (frac === 0) return `${symbol}${integral}`;
-  return `${symbol}${integral}.${frac.toString().padStart(2, '0')}`;
 }

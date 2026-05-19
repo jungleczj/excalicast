@@ -4,54 +4,57 @@ import fs from 'node:fs';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 // ---------------------------------------------------------------------------
-// payment_config — 单行表，控制支付提供商与定价。
+// payment_config — 多行单表 + is_active 切换
 //
-// 任何字段都可以为空 / null —— 缺失时回退到 .env 里的对应默认值。
-// 这样：
-//   - 数据库空 → 行为完全等价于现状（Paddle 走环境变量）
-//   - admin POST /api/admin/payment-config → 任意字段可改，立即生效
+// 4 行（每个 (provider, mode) 组合 1 行）：
+//   id | is_active | provider | mode | currency | prices | api_key | webhook_secret | api_base | one_time_product_id | pro_product_id
 //
-// 列同时支持 SQLite（开发回退）与 Supabase Postgres（生产）。
+// 当前生效的那行 (is_active=true) 唯一。Unique partial index 保底。
+// /api/admin/payment-config 按 (provider, mode) upsert；/activate 端点事务切换 is_active。
+//
+// 兼容期：DB 字段为 null 时回退到对应 env 变量。
 // ---------------------------------------------------------------------------
 
-export type PaymentProvider = 'paddle' | 'creem';
+export type PaymentProvider = 'creem' | 'paddle';
+export type PaymentMode = 'live' | 'test';
 
-export interface PaymentConfig {
+export interface PaymentConfigRow {
+  id: number;
+  isActive: boolean;
   provider: PaymentProvider;
-  currency: string;                // 'usd' | 'cny' | ...
-  oneTimePriceCents: number;       // 显示价 + 入库记录用
+  mode: PaymentMode;
+  currency: string;
+  oneTimePriceCents: number;
   proMonthlyPriceCents: number;
-  paddleOneTimePriceId: string | null;
-  paddleProPriceId: string | null;
-  creemOneTimeProductId: string | null;
-  creemProProductId: string | null;
+  apiKey: string | null;
+  webhookSecret: string | null;
+  apiBase: string | null;
+  oneTimeProductId: string | null;
+  proProductId: string | null;
   updatedAt: number;
 }
 
-const DEFAULT_CONFIG: PaymentConfig = {
-  provider: 'paddle',
-  currency: 'usd',
-  oneTimePriceCents: 300,
-  proMonthlyPriceCents: 900,
-  paddleOneTimePriceId: null,
-  paddleProPriceId: null,
-  creemOneTimeProductId: null,
-  creemProProductId: null,
-  updatedAt: 0,
-};
+/** Client-facing pruned view: secrets / product IDs never reach the browser. */
+export interface PublicPaymentConfig {
+  provider: PaymentProvider;
+  mode: PaymentMode;
+  currency: string;
+  oneTimePriceCents: number;
+  proMonthlyPriceCents: number;
+}
 
-function envDefaults(): PaymentConfig {
+export function toPublic(cfg: PaymentConfigRow): PublicPaymentConfig {
   return {
-    ...DEFAULT_CONFIG,
-    paddleOneTimePriceId: process.env.NEXT_PUBLIC_PADDLE_PRICE_ID ?? null,
-    paddleProPriceId: process.env.NEXT_PUBLIC_PADDLE_PRO_PRICE_ID ?? null,
-    creemOneTimeProductId: process.env.CREEM_ONE_TIME_PRODUCT_ID ?? null,
-    creemProProductId: process.env.CREEM_PRO_PRODUCT_ID ?? null,
+    provider: cfg.provider,
+    mode: cfg.mode,
+    currency: cfg.currency,
+    oneTimePriceCents: cfg.oneTimePriceCents,
+    proMonthlyPriceCents: cfg.proMonthlyPriceCents,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Backend selection — same pattern as src/lib/db.ts
+// Backend selection
 // ---------------------------------------------------------------------------
 
 function isSupabase(): boolean {
@@ -80,53 +83,134 @@ function getDb(): Database.Database {
   db.pragma('journal_mode = WAL');
   db.exec(`
     CREATE TABLE IF NOT EXISTS payment_config (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      provider TEXT NOT NULL DEFAULT 'paddle',
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      is_active INTEGER NOT NULL DEFAULT 0,
+      provider TEXT NOT NULL CHECK (provider IN ('creem','paddle')),
+      mode TEXT NOT NULL CHECK (mode IN ('live','test')),
       currency TEXT NOT NULL DEFAULT 'usd',
-      one_time_price_cents INTEGER NOT NULL DEFAULT 300,
-      pro_monthly_price_cents INTEGER NOT NULL DEFAULT 900,
-      paddle_one_time_price_id TEXT,
-      paddle_pro_price_id TEXT,
-      creem_one_time_product_id TEXT,
-      creem_pro_product_id TEXT,
-      updated_at INTEGER NOT NULL
+      one_time_price_cents INTEGER NOT NULL CHECK (one_time_price_cents >= 0),
+      pro_monthly_price_cents INTEGER NOT NULL CHECK (pro_monthly_price_cents >= 0),
+      api_key TEXT,
+      webhook_secret TEXT,
+      api_base TEXT,
+      one_time_product_id TEXT,
+      pro_product_id TEXT,
+      updated_at INTEGER NOT NULL,
+      UNIQUE (provider, mode)
     );
+    CREATE UNIQUE INDEX IF NOT EXISTS one_active_config
+      ON payment_config (is_active) WHERE is_active = 1;
   `);
+  // seed 4 行（首次启动时）
+  const count = (db.prepare('SELECT COUNT(*) as n FROM payment_config').get() as { n: number }).n;
+  if (count === 0) {
+    const now = Date.now();
+    const seedRow = db.prepare(`
+      INSERT OR IGNORE INTO payment_config
+        (is_active, provider, mode, currency, one_time_price_cents, pro_monthly_price_cents, api_base, updated_at)
+      VALUES (?, ?, ?, 'usd', 300, 900, ?, ?)
+    `);
+    seedRow.run(1, 'creem', 'live', 'https://api.creem.io/v1', now);
+    seedRow.run(0, 'creem', 'test', 'https://test-api.creem.io/v1', now);
+    seedRow.run(0, 'paddle', 'live', null, now);
+    seedRow.run(0, 'paddle', 'test', null, now);
+  }
   _db = db;
   return db;
 }
 
-interface SqliteConfigRow {
+// ---------------------------------------------------------------------------
+// Row deserialisation
+// ---------------------------------------------------------------------------
+
+interface SqliteRow {
   id: number;
+  is_active: number;
   provider: string;
+  mode: string;
   currency: string;
   one_time_price_cents: number;
   pro_monthly_price_cents: number;
-  paddle_one_time_price_id: string | null;
-  paddle_pro_price_id: string | null;
-  creem_one_time_product_id: string | null;
-  creem_pro_product_id: string | null;
+  api_key: string | null;
+  webhook_secret: string | null;
+  api_base: string | null;
+  one_time_product_id: string | null;
+  pro_product_id: string | null;
   updated_at: number;
 }
 
-interface SupabaseConfigRow extends Omit<SqliteConfigRow, 'updated_at'> {
+interface SupabaseRow extends Omit<SqliteRow, 'is_active' | 'updated_at'> {
+  is_active: boolean;
   updated_at: string;
 }
 
-function rowToConfig(row: SqliteConfigRow | null | undefined): PaymentConfig {
-  const defaults = envDefaults();
-  if (!row) return defaults;
-  const provider = (row.provider === 'creem' ? 'creem' : 'paddle') as PaymentProvider;
+function fromSqliteRow(r: SqliteRow): PaymentConfigRow {
   return {
-    provider,
-    currency: row.currency || defaults.currency,
-    oneTimePriceCents: row.one_time_price_cents ?? defaults.oneTimePriceCents,
-    proMonthlyPriceCents: row.pro_monthly_price_cents ?? defaults.proMonthlyPriceCents,
-    paddleOneTimePriceId: row.paddle_one_time_price_id ?? defaults.paddleOneTimePriceId,
-    paddleProPriceId: row.paddle_pro_price_id ?? defaults.paddleProPriceId,
-    creemOneTimeProductId: row.creem_one_time_product_id ?? defaults.creemOneTimeProductId,
-    creemProProductId: row.creem_pro_product_id ?? defaults.creemProProductId,
-    updatedAt: row.updated_at ?? 0,
+    id: r.id,
+    isActive: r.is_active === 1,
+    provider: (r.provider === 'paddle' ? 'paddle' : 'creem') as PaymentProvider,
+    mode: (r.mode === 'test' ? 'test' : 'live') as PaymentMode,
+    currency: r.currency,
+    oneTimePriceCents: r.one_time_price_cents,
+    proMonthlyPriceCents: r.pro_monthly_price_cents,
+    apiKey: r.api_key,
+    webhookSecret: r.webhook_secret,
+    apiBase: r.api_base,
+    oneTimeProductId: r.one_time_product_id,
+    proProductId: r.pro_product_id,
+    updatedAt: r.updated_at,
+  };
+}
+
+function fromSupabaseRow(r: SupabaseRow): PaymentConfigRow {
+  return {
+    id: r.id,
+    isActive: r.is_active,
+    provider: (r.provider === 'paddle' ? 'paddle' : 'creem') as PaymentProvider,
+    mode: (r.mode === 'test' ? 'test' : 'live') as PaymentMode,
+    currency: r.currency,
+    oneTimePriceCents: r.one_time_price_cents,
+    proMonthlyPriceCents: r.pro_monthly_price_cents,
+    apiKey: r.api_key,
+    webhookSecret: r.webhook_secret,
+    apiBase: r.api_base,
+    oneTimeProductId: r.one_time_product_id,
+    proProductId: r.pro_product_id,
+    updatedAt: new Date(r.updated_at).getTime(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Env fallback — read 兼容期 env defaults when DB fields are null
+// ---------------------------------------------------------------------------
+
+function applyEnvFallback(row: PaymentConfigRow): PaymentConfigRow {
+  if (row.provider === 'creem') {
+    return {
+      ...row,
+      apiKey: row.apiKey
+        ?? (row.mode === 'test' ? process.env.CREEM_API_KEY_TEST : process.env.CREEM_API_KEY)
+        ?? null,
+      webhookSecret: row.webhookSecret
+        ?? (row.mode === 'test' ? process.env.CREEM_WEBHOOK_SECRET_TEST : process.env.CREEM_WEBHOOK_SECRET)
+        ?? null,
+      apiBase: row.apiBase
+        ?? (row.mode === 'test'
+              ? (process.env.CREEM_API_BASE_TEST ?? 'https://test-api.creem.io/v1')
+              : (process.env.CREEM_API_BASE ?? 'https://api.creem.io/v1')),
+      oneTimeProductId: row.oneTimeProductId
+        ?? (row.mode === 'live' ? (process.env.CREEM_ONE_TIME_PRODUCT_ID ?? null) : null),
+      proProductId: row.proProductId
+        ?? (row.mode === 'live' ? (process.env.CREEM_PRO_PRODUCT_ID ?? null) : null),
+    };
+  }
+  // paddle: 价格 ID 走 env 兜底
+  return {
+    ...row,
+    oneTimeProductId: row.oneTimeProductId
+      ?? (row.mode === 'live' ? (process.env.NEXT_PUBLIC_PADDLE_PRICE_ID ?? null) : null),
+    proProductId: row.proProductId
+      ?? (row.mode === 'live' ? (process.env.NEXT_PUBLIC_PADDLE_PRO_PRICE_ID ?? null) : null),
   };
 }
 
@@ -134,128 +218,256 @@ function rowToConfig(row: SqliteConfigRow | null | undefined): PaymentConfig {
 // Public API
 // ---------------------------------------------------------------------------
 
-export async function getPaymentConfig(): Promise<PaymentConfig> {
+/** Returns the row currently flagged is_active=true. */
+export async function getActiveConfig(): Promise<PaymentConfigRow | null> {
   if (isSupabase()) {
     const { data, error } = await sb()
       .from('payment_config')
       .select('*')
-      .eq('id', 1)
+      .eq('is_active', true)
       .maybeSingle();
     if (error && error.code !== 'PGRST116') {
-      throw new Error(`getPaymentConfig: ${error.message}`);
+      throw new Error(`getActiveConfig: ${error.message}`);
     }
-    if (!data) return envDefaults();
-    const sup = data as SupabaseConfigRow;
-    return rowToConfig({
-      ...sup,
-      updated_at: new Date(sup.updated_at).getTime(),
-    });
+    if (!data) return null;
+    return applyEnvFallback(fromSupabaseRow(data as SupabaseRow));
   }
   const row = getDb()
-    .prepare('SELECT * FROM payment_config WHERE id = 1')
-    .get() as SqliteConfigRow | undefined;
-  return rowToConfig(row);
+    .prepare('SELECT * FROM payment_config WHERE is_active = 1 LIMIT 1')
+    .get() as SqliteRow | undefined;
+  if (!row) return null;
+  return applyEnvFallback(fromSqliteRow(row));
 }
 
+/** Returns all 4 rows for admin GET. */
+export async function listAllConfigs(): Promise<PaymentConfigRow[]> {
+  if (isSupabase()) {
+    const { data, error } = await sb().from('payment_config').select('*').order('id');
+    if (error) throw new Error(`listAllConfigs: ${error.message}`);
+    return (data as SupabaseRow[]).map((r) => applyEnvFallback(fromSupabaseRow(r)));
+  }
+  const rows = getDb()
+    .prepare('SELECT * FROM payment_config ORDER BY id')
+    .all() as SqliteRow[];
+  return rows.map((r) => applyEnvFallback(fromSqliteRow(r)));
+}
+
+/**
+ * Get the row for a specific (provider, mode). Returns null if not present.
+ * Used by:
+ *   - upsert flow (read current → merge patch → write)
+ *   - admin GET on a single row
+ */
+export async function getConfigByProviderMode(
+  provider: PaymentProvider,
+  mode: PaymentMode,
+): Promise<PaymentConfigRow | null> {
+  if (isSupabase()) {
+    const { data, error } = await sb()
+      .from('payment_config')
+      .select('*')
+      .eq('provider', provider)
+      .eq('mode', mode)
+      .maybeSingle();
+    if (error && error.code !== 'PGRST116') {
+      throw new Error(`getConfigByProviderMode: ${error.message}`);
+    }
+    if (!data) return null;
+    return applyEnvFallback(fromSupabaseRow(data as SupabaseRow));
+  }
+  const row = getDb()
+    .prepare('SELECT * FROM payment_config WHERE provider = ? AND mode = ?')
+    .get(provider, mode) as SqliteRow | undefined;
+  return row ? applyEnvFallback(fromSqliteRow(row)) : null;
+}
+
+/**
+ * Returns all configured Creem webhook secrets (from every creem row plus
+ * env fallback). Used by the webhook handler to try all candidates so old
+ * in-flight retries from the other mode still verify.
+ */
+export async function getAllCreemWebhookSecrets(): Promise<string[]> {
+  const all = await listAllConfigs();
+  const secrets = new Set<string>();
+  for (const row of all) {
+    if (row.provider === 'creem' && row.webhookSecret) {
+      secrets.add(row.webhookSecret);
+    }
+  }
+  // Defensive env fallbacks
+  for (const e of [process.env.CREEM_WEBHOOK_SECRET, process.env.CREEM_WEBHOOK_SECRET_TEST]) {
+    if (e) secrets.add(e);
+  }
+  return Array.from(secrets);
+}
+
+// ---------------------------------------------------------------------------
+// Mutation API
+// ---------------------------------------------------------------------------
+
 export interface PaymentConfigPatch {
-  provider?: PaymentProvider;
+  provider: PaymentProvider;
+  mode: PaymentMode;
   currency?: string;
   oneTimePriceCents?: number;
   proMonthlyPriceCents?: number;
-  paddleOneTimePriceId?: string | null;
-  paddleProPriceId?: string | null;
-  creemOneTimeProductId?: string | null;
-  creemProProductId?: string | null;
+  apiKey?: string | null;
+  webhookSecret?: string | null;
+  apiBase?: string | null;
+  oneTimeProductId?: string | null;
+  proProductId?: string | null;
 }
 
-export async function setPaymentConfig(patch: PaymentConfigPatch): Promise<PaymentConfig> {
-  const current = await getPaymentConfig();
-  const next: PaymentConfig = {
-    provider: patch.provider ?? current.provider,
-    currency: patch.currency ?? current.currency,
-    oneTimePriceCents: patch.oneTimePriceCents ?? current.oneTimePriceCents,
-    proMonthlyPriceCents: patch.proMonthlyPriceCents ?? current.proMonthlyPriceCents,
-    paddleOneTimePriceId: patch.paddleOneTimePriceId !== undefined
-      ? patch.paddleOneTimePriceId
-      : current.paddleOneTimePriceId,
-    paddleProPriceId: patch.paddleProPriceId !== undefined
-      ? patch.paddleProPriceId
-      : current.paddleProPriceId,
-    creemOneTimeProductId: patch.creemOneTimeProductId !== undefined
-      ? patch.creemOneTimeProductId
-      : current.creemOneTimeProductId,
-    creemProProductId: patch.creemProProductId !== undefined
-      ? patch.creemProProductId
-      : current.creemProProductId,
-    updatedAt: Date.now(),
+/**
+ * Upsert a row identified by (provider, mode). Only provided fields are
+ * updated; unset fields preserve current values. Pass `null` explicitly to
+ * clear a field.
+ *
+ * Does NOT touch is_active — use activateConfig() to switch.
+ */
+export async function upsertConfigRow(patch: PaymentConfigPatch): Promise<PaymentConfigRow> {
+  const existing = await getConfigByProviderMode(patch.provider, patch.mode);
+  const now = Date.now();
+
+  const merge = <T>(provided: T | undefined, fallback: T): T =>
+    provided === undefined ? fallback : provided;
+
+  const next: Omit<PaymentConfigRow, 'id' | 'isActive' | 'updatedAt'> = {
+    provider: patch.provider,
+    mode: patch.mode,
+    currency: merge(patch.currency, existing?.currency ?? 'usd'),
+    oneTimePriceCents: merge(patch.oneTimePriceCents, existing?.oneTimePriceCents ?? 300),
+    proMonthlyPriceCents: merge(patch.proMonthlyPriceCents, existing?.proMonthlyPriceCents ?? 900),
+    apiKey: merge(patch.apiKey, existing?.apiKey ?? null),
+    webhookSecret: merge(patch.webhookSecret, existing?.webhookSecret ?? null),
+    apiBase: merge(patch.apiBase, existing?.apiBase ?? null),
+    oneTimeProductId: merge(patch.oneTimeProductId, existing?.oneTimeProductId ?? null),
+    proProductId: merge(patch.proProductId, existing?.proProductId ?? null),
   };
+
   if (isSupabase()) {
-    const { error } = await sb()
+    const { data, error } = await sb()
       .from('payment_config')
       .upsert(
         {
-          id: 1,
           provider: next.provider,
+          mode: next.mode,
           currency: next.currency,
           one_time_price_cents: next.oneTimePriceCents,
           pro_monthly_price_cents: next.proMonthlyPriceCents,
-          paddle_one_time_price_id: next.paddleOneTimePriceId,
-          paddle_pro_price_id: next.paddleProPriceId,
-          creem_one_time_product_id: next.creemOneTimeProductId,
-          creem_pro_product_id: next.creemProProductId,
-          updated_at: new Date(next.updatedAt).toISOString(),
+          api_key: next.apiKey,
+          webhook_secret: next.webhookSecret,
+          api_base: next.apiBase,
+          one_time_product_id: next.oneTimeProductId,
+          pro_product_id: next.proProductId,
         },
-        { onConflict: 'id' },
-      );
-    if (error) throw new Error(`setPaymentConfig: ${error.message}`);
-    return next;
+        { onConflict: 'provider,mode' },
+      )
+      .select()
+      .single();
+    if (error) throw new Error(`upsertConfigRow: ${error.message}`);
+    return applyEnvFallback(fromSupabaseRow(data as SupabaseRow));
   }
+
   getDb()
     .prepare(
-      `INSERT INTO payment_config (id, provider, currency, one_time_price_cents, pro_monthly_price_cents,
-        paddle_one_time_price_id, paddle_pro_price_id, creem_one_time_product_id, creem_pro_product_id, updated_at)
-       VALUES (1, @provider, @currency, @one_time, @pro_monthly, @paddle_one_time, @paddle_pro, @creem_one_time, @creem_pro, @updated_at)
-       ON CONFLICT(id) DO UPDATE SET
-         provider = excluded.provider,
+      `INSERT INTO payment_config
+         (is_active, provider, mode, currency, one_time_price_cents, pro_monthly_price_cents,
+          api_key, webhook_secret, api_base, one_time_product_id, pro_product_id, updated_at)
+       VALUES (0, @provider, @mode, @currency, @oneTime, @proMonthly,
+               @apiKey, @webhookSecret, @apiBase, @oneTimeProductId, @proProductId, @updatedAt)
+       ON CONFLICT (provider, mode) DO UPDATE SET
          currency = excluded.currency,
          one_time_price_cents = excluded.one_time_price_cents,
          pro_monthly_price_cents = excluded.pro_monthly_price_cents,
-         paddle_one_time_price_id = excluded.paddle_one_time_price_id,
-         paddle_pro_price_id = excluded.paddle_pro_price_id,
-         creem_one_time_product_id = excluded.creem_one_time_product_id,
-         creem_pro_product_id = excluded.creem_pro_product_id,
+         api_key = excluded.api_key,
+         webhook_secret = excluded.webhook_secret,
+         api_base = excluded.api_base,
+         one_time_product_id = excluded.one_time_product_id,
+         pro_product_id = excluded.pro_product_id,
          updated_at = excluded.updated_at`,
     )
     .run({
       provider: next.provider,
+      mode: next.mode,
       currency: next.currency,
-      one_time: next.oneTimePriceCents,
-      pro_monthly: next.proMonthlyPriceCents,
-      paddle_one_time: next.paddleOneTimePriceId,
-      paddle_pro: next.paddleProPriceId,
-      creem_one_time: next.creemOneTimeProductId,
-      creem_pro: next.creemProProductId,
-      updated_at: next.updatedAt,
+      oneTime: next.oneTimePriceCents,
+      proMonthly: next.proMonthlyPriceCents,
+      apiKey: next.apiKey,
+      webhookSecret: next.webhookSecret,
+      apiBase: next.apiBase,
+      oneTimeProductId: next.oneTimeProductId,
+      proProductId: next.proProductId,
+      updatedAt: now,
     });
-  return next;
+
+  const row = getDb()
+    .prepare('SELECT * FROM payment_config WHERE provider = ? AND mode = ?')
+    .get(next.provider, next.mode) as SqliteRow;
+  return applyEnvFallback(fromSqliteRow(row));
 }
 
 /**
- * 客户端可见的精简视图：不包含 product/price ID，只暴露选择和价格。
- * 这样后端切换 provider 不会让 UI 知道任何对应的支付商内部 ID。
+ * Activate a specific (provider, mode) row. Transactionally:
+ *   1. UPDATE ... SET is_active=FALSE WHERE is_active=TRUE
+ *   2. UPDATE ... SET is_active=TRUE  WHERE provider=$1 AND mode=$2
+ *
+ * Throws if no such row exists.
  */
-export interface PublicPaymentConfig {
-  provider: PaymentProvider;
-  currency: string;
-  oneTimePriceCents: number;
-  proMonthlyPriceCents: number;
+export async function activateConfig(
+  provider: PaymentProvider,
+  mode: PaymentMode,
+): Promise<PaymentConfigRow> {
+  if (isSupabase()) {
+    // No client-side transaction support → two updates back-to-back.
+    // The unique partial index on is_active=true is the integrity backstop;
+    // if a race produces two TRUEs the second write fails and we surface it.
+    const { error: e1 } = await sb()
+      .from('payment_config')
+      .update({ is_active: false })
+      .eq('is_active', true);
+    if (e1) throw new Error(`activateConfig (clear): ${e1.message}`);
+
+    const { data, error: e2 } = await sb()
+      .from('payment_config')
+      .update({ is_active: true })
+      .eq('provider', provider)
+      .eq('mode', mode)
+      .select()
+      .single();
+    if (e2) throw new Error(`activateConfig (set): ${e2.message}`);
+    if (!data) throw new Error(`activateConfig: no row for ${provider}/${mode}`);
+    return applyEnvFallback(fromSupabaseRow(data as SupabaseRow));
+  }
+
+  const db = getDb();
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE payment_config SET is_active = 0 WHERE is_active = 1').run();
+    const r = db.prepare('UPDATE payment_config SET is_active = 1 WHERE provider = ? AND mode = ?')
+      .run(provider, mode);
+    if (r.changes === 0) throw new Error(`activateConfig: no row for ${provider}/${mode}`);
+  });
+  tx();
+
+  const row = db.prepare('SELECT * FROM payment_config WHERE is_active = 1').get() as SqliteRow;
+  return applyEnvFallback(fromSqliteRow(row));
 }
 
-export function toPublic(cfg: PaymentConfig): PublicPaymentConfig {
-  return {
-    provider: cfg.provider,
-    currency: cfg.currency,
-    oneTimePriceCents: cfg.oneTimePriceCents,
-    proMonthlyPriceCents: cfg.proMonthlyPriceCents,
-  };
+// formatPrice lives in @/lib/formatPrice so it can be bundled into the client.
+export { formatPrice } from './formatPrice';
+
+// ---------------------------------------------------------------------------
+// Mismatch error for Creem write-time validation
+// ---------------------------------------------------------------------------
+
+export class PaymentConfigMismatchError extends Error {
+  constructor(
+    public field: string,
+    public dbValue: unknown,
+    public creemValue: unknown,
+    public productId: string,
+  ) {
+    super(`payment_config mismatch: ${field}: db=${JSON.stringify(dbValue)} creem=${JSON.stringify(creemValue)} (product=${productId})`);
+    this.name = 'PaymentConfigMismatchError';
+  }
 }

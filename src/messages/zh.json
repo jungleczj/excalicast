@@ -16,7 +16,7 @@
       "subtitle": "Excalicast 是一款基于浏览器的白板录制工具。用 Excalidraw 作画，同步采集语音和操作，最终导出 16:9 / 9:16 / 1:1 / 4:5 等多个比例的 MP4，覆盖 YouTube、抖音、Instagram 等平台。",
       "ctaPrimary": "立即开始（免费）",
       "ctaSecondary": "查看价格",
-      "disclaimer": "录制免费 · 导出含水印 MP4 免费 · 单条 $9.99 解锁无水印导出"
+      "disclaimer": "录制免费 · 导出含水印 MP4 免费 · 单条 {price} 解锁无水印导出"
     },
     "features": {
       "heading": "功能特色",
@@ -58,7 +58,7 @@
       "heading": "使用流程",
       "step1": { "title": "录制", "desc": "点击「开始录制」按钮，开始在白板上画图、写字，同时讲解。可以选择是否开启摄像头浮窗。" },
       "step2": { "title": "预览", "desc": "录制完成后跳转到导出页面，选择目标比例（16:9 横屏 / 9:16 竖屏 / 1:1 方形 / 4:5）。" },
-      "step3": { "title": "下载", "desc": "点击「下载」直接生成含水印 MP4。或付费 $9.99 解锁该条录制的无水印导出，可反复使用。" }
+      "step3": { "title": "下载", "desc": "点击「下载」直接生成含水印 MP4。或付费 {price} 解锁该条录制的无水印导出，可反复使用。" }
     },
     "refund": {
       "heading": "退款政策",
@@ -244,11 +244,11 @@
     "cleanTitle": "无水印导出",
     "cleanMetaPro": "Pro · 全部解锁",
     "cleanMetaPaid": "已购买 · 永久解锁",
-    "cleanMetaLocked": "$3 单次 / Pro 订阅",
+    "cleanMetaLocked": "{price} 单次 / Pro 订阅",
     "cleanHintPro": "订阅期内所有录制无限次无水印导出",
     "cleanHintPaid": "本录制可任意比例反复导出无水印",
     "cleanHintLocked": "点导出按钮选择单次购买或升级 Pro",
-    "buttonUnlock": "解锁并下载 · $3",
+    "buttonUnlock": "解锁并下载 · {price}",
     "buttonWithWatermark": "渲染并下载（含水印）",
     "buttonClean": "渲染并下载（无水印）",
     "exportingStatus": "正在生成 {ratio} {wm} MP4…",

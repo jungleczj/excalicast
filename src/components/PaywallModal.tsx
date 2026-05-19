@@ -16,7 +16,6 @@ interface Props {
   onUpgradePro?: () => void;
 }
 
-const FALLBACK_PRICE = '$3';
 const POLL_INTERVAL_MS = 1000;
 const POLL_MAX_ATTEMPTS = 30;
 
@@ -31,12 +30,13 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
 
   const provider = paymentCfg?.provider ?? 'paddle';
   const providerLabel = provider === 'creem' ? 'Creem' : 'Paddle';
+  // Loading state: show "…" skeleton instead of a fake fallback price.
   const priceLabel = paymentCfg
     ? formatPrice(paymentCfg.oneTimePriceCents, paymentCfg.currency)
-    : FALLBACK_PRICE;
+    : '…';
   const proPriceLabel = paymentCfg
     ? formatPrice(paymentCfg.proMonthlyPriceCents, paymentCfg.currency)
-    : '$9';
+    : '…';
 
   useEffect(() => {
     if (!open) return;

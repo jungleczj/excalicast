@@ -11,28 +11,20 @@
  *   - metadata 会在 webhook 回传，把 recordingId / userId 放这里
  *   - webhook 签名头：`creem-signature`，HMAC-SHA256(rawBody, webhookSecret)
  *
- * 配置：
- *   - CREEM_API_KEY            必填
- *   - CREEM_WEBHOOK_SECRET     必填（验证回调）
- *   - CREEM_API_BASE           可选；默认 'https://test-api.creem.io/v1'
- *   - CREEM_ONE_TIME_PRODUCT_ID, CREEM_PRO_PRODUCT_ID 默认值（payment_config 表可覆盖）
+ * 凭证来源：调用方从 payment_config 表的 active 行取出 { apiKey, apiBase, webhookSecret }
+ * 传入。本模块不再读 `process.env.CREEM_*`（兜底由 paymentConfig.ts 的 applyEnvFallback
+ * 在 DB 层完成）。
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-const DEFAULT_BASE = 'https://test-api.creem.io/v1';
-
-function getApiKey(): string {
-  const k = process.env.CREEM_API_KEY;
-  if (!k) throw new Error('CREEM_API_KEY is not set');
-  return k;
-}
-
-function getBase(): string {
-  return process.env.CREEM_API_BASE || DEFAULT_BASE;
+export interface CreemCreds {
+  apiKey: string;
+  apiBase: string;
 }
 
 export interface CreateCheckoutOptions {
+  creds: CreemCreds;
   productId: string;
   successUrl: string;
   metadata?: Record<string, string>;
@@ -52,6 +44,9 @@ export interface CreateCheckoutResult {
 export async function createCreemCheckout(
   opts: CreateCheckoutOptions,
 ): Promise<CreateCheckoutResult> {
+  if (!opts.creds.apiKey) throw new Error('createCreemCheckout: apiKey is empty');
+  if (!opts.creds.apiBase) throw new Error('createCreemCheckout: apiBase is empty');
+
   const body: Record<string, unknown> = {
     product_id: opts.productId,
     success_url: opts.successUrl,
@@ -60,10 +55,10 @@ export async function createCreemCheckout(
   if (opts.customerEmail) body.customer = { email: opts.customerEmail };
   if (opts.requestId) body.request_id = opts.requestId;
 
-  const res = await fetch(`${getBase()}/checkouts`, {
+  const res = await fetch(`${opts.creds.apiBase}/checkouts`, {
     method: 'POST',
     headers: {
-      'x-api-key': getApiKey(),
+      'x-api-key': opts.creds.apiKey,
       'content-type': 'application/json',
     },
     body: JSON.stringify(body),
@@ -93,39 +88,95 @@ export async function createCreemCheckout(
 }
 
 // ---------------------------------------------------------------------------
+// Product lookup for admin write-time price validation
+// ---------------------------------------------------------------------------
+
+export interface CreemProduct {
+  id: string;
+  priceCents: number;
+  currency: string;
+  billingType: string;
+}
+
+/** GET /v1/products/{id} — used by admin POST to verify DB price matches Creem. */
+export async function fetchCreemProduct(
+  productId: string,
+  creds: CreemCreds,
+): Promise<CreemProduct> {
+  if (!creds.apiKey || !creds.apiBase) {
+    throw new Error('fetchCreemProduct: missing apiKey/apiBase');
+  }
+  const res = await fetch(`${creds.apiBase}/products/${encodeURIComponent(productId)}`, {
+    headers: { 'x-api-key': creds.apiKey },
+  });
+  const text = await res.text();
+  let json: Record<string, unknown> = {};
+  try { json = text ? JSON.parse(text) : {}; } catch {
+    throw new Error(`Creem product fetch non-JSON (${res.status}): ${text.slice(0, 200)}`);
+  }
+  if (!res.ok) {
+    const msg = (json.message as string | undefined) ?? text.slice(0, 200);
+    throw new Error(`Creem product fetch failed (${res.status}): ${msg}`);
+  }
+  // Creem 返回的价格字段历史上叫过 `price`, `amount`, `unit_amount` 等，这里都试一下
+  const priceCents =
+    numField(json, 'price') ??
+    numField(json, 'amount') ??
+    numField(json, 'unit_amount') ??
+    numField(json, 'price_cents') ??
+    0;
+  const currency = ((json.currency as string | undefined) ?? 'usd').toLowerCase();
+  const billingType = (json.billing_type as string | undefined) ?? 'one_time';
+  return { id: productId, priceCents, currency, billingType };
+}
+
+function numField(obj: Record<string, unknown>, key: string): number | null {
+  const v = obj[key];
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Webhook signature verification
 // ---------------------------------------------------------------------------
 
-export function verifyCreemWebhook(rawBody: string, signature: string | null): boolean {
-  const secret = process.env.CREEM_WEBHOOK_SECRET;
-  if (!secret) {
-    // No secret configured → reject all webhooks to avoid spoofing.
-    return false;
-  }
+/**
+ * 验签：HMAC-SHA256(rawBody, secret) === header['creem-signature']
+ * 尝试 candidates 中的每个 secret（live + test 同时存在时，老的在飞 webhook
+ * 仍能被验通）。任一通过即算合法。
+ */
+export function verifyCreemWebhook(
+  rawBody: string,
+  signature: string | null,
+  candidates: string[],
+): boolean {
   if (!signature) return false;
+  if (candidates.length === 0) return false;
 
-  const expected = createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex');
+  let sigBuf: Buffer;
   try {
-    const a = Buffer.from(expected, 'hex');
-    const b = Buffer.from(signature, 'hex');
-    if (a.length !== b.length) return false;
-    return timingSafeEqual(a, b);
+    sigBuf = Buffer.from(signature, 'hex');
   } catch {
     return false;
   }
-}
+  if (sigBuf.length === 0) return false;
 
-/** Debug-only helper — returns the expected signature and meta about the secret.
- *  Intentionally NOT exporting the secret value itself. */
-export function debugComputeSignature(rawBody: string): {
-  expected: string | null;
-  secretSet: boolean;
-  secretLen: number;
-} {
-  const secret = process.env.CREEM_WEBHOOK_SECRET;
-  if (!secret) return { expected: null, secretSet: false, secretLen: 0 };
-  const expected = createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex');
-  return { expected, secretSet: true, secretLen: secret.length };
+  for (const secret of candidates) {
+    if (!secret) continue;
+    const expected = createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex');
+    try {
+      const expBuf = Buffer.from(expected, 'hex');
+      if (expBuf.length !== sigBuf.length) continue;
+      if (timingSafeEqual(expBuf, sigBuf)) return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------

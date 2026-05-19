@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { getPaymentConfig } from '@/lib/paymentConfig';
+import { getActiveConfig } from '@/lib/paymentConfig';
 import { createCreemCheckout } from '@/services/creemServer';
 import { defaultLocale, LOCALE_COOKIE, locales } from '@/i18n/config';
 
@@ -23,22 +23,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
   }
 
-  const cfg = await getPaymentConfig();
+  const cfg = await getActiveConfig();
+  if (!cfg) {
+    return NextResponse.json({ error: 'no_active_payment_config' }, { status: 500 });
+  }
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '') || 'http://localhost:3005';
   const cookieLocale = req.cookies.get(LOCALE_COOKIE)?.value;
   const locale = cookieLocale && (locales as readonly string[]).includes(cookieLocale) ? cookieLocale : defaultLocale;
 
   if (cfg.provider === 'creem') {
-    const productId = cfg.creemProProductId;
-    if (!productId) {
+    if (!cfg.proProductId || !cfg.apiKey || !cfg.apiBase) {
       return NextResponse.json(
-        { error: 'creem_pro_product_id_missing' },
+        { error: 'creem_creds_missing', mode: cfg.mode },
         { status: 500 },
       );
     }
     try {
       const result = await createCreemCheckout({
-        productId,
+        creds: { apiKey: cfg.apiKey, apiBase: cfg.apiBase },
+        productId: cfg.proProductId,
         successUrl: `${appUrl}/${locale}/app?creem_purchase=pro`,
         customerEmail: user.email ?? undefined,
         metadata: {
@@ -60,13 +63,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  const priceId = cfg.paddleProPriceId ?? process.env.NEXT_PUBLIC_PADDLE_PRO_PRICE_ID;
-  if (!priceId) {
+  if (!cfg.proProductId) {
     return NextResponse.json({ error: 'paddle_pro_price_id_missing' }, { status: 500 });
   }
   return NextResponse.json({
     provider: 'paddle',
-    priceId,
+    priceId: cfg.proProductId,
     userId: user.id,
     email: user.email ?? null,
   });

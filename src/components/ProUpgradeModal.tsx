@@ -16,7 +16,6 @@ interface Props {
   onUpgraded?: () => void;
 }
 
-const FALLBACK_PRICE = '$9';
 const POLL_INTERVAL_MS = 1500;
 const POLL_MAX_ATTEMPTS = 40;
 
@@ -37,7 +36,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded }: Props): JSX.Eleme
   const providerLabel = provider === 'creem' ? 'Creem' : 'Paddle';
   const priceLabel = paymentCfg
     ? `${formatPrice(paymentCfg.proMonthlyPriceCents, paymentCfg.currency)}/mo`
-    : FALLBACK_PRICE;
+    : '…';
 
   const pollUntilPro = async () => {
     if (pollingRef.current) return;
