@@ -1,7 +1,6 @@
 'use client';
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile } from '@ffmpeg/util';
 import { loadFullRecording } from '@/lib/db-client';
 import {
   cropRectForSnapshot,
@@ -11,6 +10,7 @@ import {
   type CropContext,
 } from '@/services/cropping';
 import { ASPECT_PRESETS, type ExportConfig, type SceneRect, type WhiteboardSnapshot } from '@/types/recording';
+import { compileSubtitles, drawFrostedWatermark, drawSubtitle } from '@/utils/frameOverlays';
 
 export interface ExportOptions extends ExportConfig {
   recordingId: string;
@@ -123,6 +123,12 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const filesForExport: Record<string, unknown> = {};
   for (const bf of binaryFiles) filesForExport[bf.fileId] = bf.data;
 
+  // 字幕与水印：在帧画布上直接绘制（不再走 ffmpeg overlay 滤镜）
+  const burnSubs = (opts.burnSubtitles ?? true) && !!metadata.subtitleSrt;
+  const cues = burnSubs ? compileSubtitles(metadata.subtitleSrt) : [];
+  // 水印开启 + 摄像头存在时，水印改放左下角避免与人像气泡视觉打架
+  const watermarkPos: 'bottom-right' | 'bottom-left' = cameraBlob ? 'bottom-left' : 'bottom-right';
+
   const contentBox = computeContentBoundingBox(snapshots);
   const fallbackViewport = (() => {
     if (snapshots.length === 0) return DEFAULT_FALLBACK_VIEWPORT;
@@ -211,6 +217,17 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       }
     }
 
+    // 毛玻璃水印（在字幕之前画 — 字幕居中位置可能与水印边角重叠，字幕在上更可读）
+    if (opts.withWatermark) {
+      drawFrostedWatermark(targetCtx, target.width, target.height, watermarkPos);
+    }
+    // 字幕硬嵌入（摄像头在右下角时为其预留空间）
+    if (cues.length > 0) {
+      drawSubtitle(targetCtx, target.width, target.height, cues, t, {
+        reservedRightFraction: cameraBlob ? 0.3 : 0,
+      });
+    }
+
     const blob: Blob = await new Promise<Blob>((resolve, reject) => {
       target.toBlob((b) => b ? resolve(b) : reject(new Error('toBlob_failed')), 'image/png');
     });
@@ -234,48 +251,32 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     await ffmpeg.writeFile(cameraFile, new Uint8Array(await cameraBlob.arrayBuffer()));
   }
 
-  if (opts.withWatermark) {
-    const wm = await fetchFile('/watermark.png');
-    await ffmpeg.writeFile('watermark.png', wm);
-  }
-
   opts.onPhase?.('encoding');
   opts.onProgress?.(0.72);
   ffmpeg.on('progress', ({ progress }) => {
     opts.onProgress?.(0.72 + Math.min(1, Math.max(0, progress)) * 0.28);
   });
 
-  // 输入顺序：[0] 帧序列 [1] 音频?  [2] 摄像头?  [last] 水印?
+  // 输入顺序：[0] 帧序列 [1] 音频?  [2] 摄像头?
+  // 注意：水印和字幕已在帧画布层画进 PNG，这里不再有水印 input
   const inputs: string[] = ['-framerate', String(fps), '-i', 'f_%06d.png'];
   let nextIdx = 1;
   let audioIdx: number | null = null;
   let cameraIdx: number | null = null;
-  let watermarkIdx: number | null = null;
   if (audioFile) { inputs.push('-i', audioFile); audioIdx = nextIdx++; }
   if (cameraFile) { inputs.push('-i', cameraFile); cameraIdx = nextIdx++; }
-  if (opts.withWatermark) { inputs.push('-i', 'watermark.png'); watermarkIdx = nextIdx++; }
 
-  // 构建 filter 链：依次 [video] → camera overlay → watermark overlay → [final]
+  // filter 链：仅保留 camera overlay（人像气泡用 ffmpeg 合成是为了用视频流，
+  // 不能简单 burn 进 PNG —— 摄像头视频独立时间线）
   const filterParts: string[] = [];
   let curLabel = '[0:v]';
-  const camSize = Math.round(preset.height * 0.22); // 摄像头气泡 ≈ 视频高 22%
+  const camSize = Math.round(preset.height * 0.22);
   if (cameraIdx !== null) {
-    // 圆形 bubble：scale + crop + hflip 后转 rgba，用 geq 在 alpha 通道里画圆
-    // 公式：到中心距离 > (W/2 - 1) 的像素 alpha=0，圆内 alpha=255
     filterParts.push(
       `[${cameraIdx}:v]scale=${camSize}:${camSize}:force_original_aspect_ratio=increase,crop=${camSize}:${camSize},hflip,format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(pow(X-W/2,2)+pow(Y-H/2,2),pow(W/2-1,2)),0,255)'[cam]`,
     );
     filterParts.push(`${curLabel}[cam]overlay=W-w-${Math.round(preset.width * 0.025)}:H-h-${Math.round(preset.height * 0.04)}[v_with_cam]`);
     curLabel = '[v_with_cam]';
-  }
-  if (watermarkIdx !== null) {
-    // 水印默认右下角；当摄像头开启时改放左下角，避免与人脸气泡视觉打架
-    const wmSideMargin = Math.round(preset.width * 0.02);
-    const wmBottomMargin = Math.round(preset.height * 0.04);
-    const wmX = cameraIdx !== null ? `${wmSideMargin}` : `W-w-${wmSideMargin}`;
-    filterParts.push(`[${watermarkIdx}:v]format=rgba,colorchannelmixer=aa=0.85[wm]`);
-    filterParts.push(`${curLabel}[wm]overlay=${wmX}:H-h-${wmBottomMargin}[v_final]`);
-    curLabel = '[v_final]';
   }
 
   const filter: string[] = [];
@@ -303,7 +304,6 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   try { await ffmpeg.deleteFile('output.mp4'); } catch { /* ignore */ }
   if (audioFile) { try { await ffmpeg.deleteFile(audioFile); } catch { /* ignore */ } }
   if (cameraFile) { try { await ffmpeg.deleteFile(cameraFile); } catch { /* ignore */ } }
-  if (opts.withWatermark) { try { await ffmpeg.deleteFile('watermark.png'); } catch { /* ignore */ } }
 
   opts.onProgress?.(1);
   opts.onPhase?.('done');
@@ -324,7 +324,7 @@ export async function renderPreviewFrame(
   target: HTMLCanvasElement,
 ): Promise<void> {
   const { exportToCanvas } = await import('@excalidraw/excalidraw');
-  const { snapshots, binaryFiles } = await loadFullRecording(recordingId);
+  const { metadata, snapshots, binaryFiles, cameraBlob } = await loadFullRecording(recordingId);
   const preset = ASPECT_PRESETS[config.aspectRatio];
 
   target.width = preset.width;
@@ -333,8 +333,23 @@ export async function renderPreviewFrame(
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, target.width, target.height);
 
+  const hasCamera = !!cameraBlob;
+  const cues = ((config.burnSubtitles ?? true) && metadata.subtitleSrt)
+    ? compileSubtitles(metadata.subtitleSrt)
+    : [];
+
   const snap = snapshotAt(snapshots, timeMs);
-  if (!snap || (snap.elements as unknown[]).length === 0) return;
+  if (!snap || (snap.elements as unknown[]).length === 0) {
+    if (config.withWatermark) {
+      drawFrostedWatermark(ctx, target.width, target.height, hasCamera ? 'bottom-left' : 'bottom-right');
+    }
+    if (cues.length > 0) {
+      drawSubtitle(ctx, target.width, target.height, cues, timeMs, {
+        reservedRightFraction: hasCamera ? 0.3 : 0,
+      });
+    }
+    return;
+  }
 
   const filesForExport: Record<string, unknown> = {};
   for (const bf of binaryFiles) filesForExport[bf.fileId] = bf.data;
@@ -392,6 +407,15 @@ export async function renderPreviewFrame(
     );
   } catch {
     ctx.drawImage(sceneCanvas, 0, 0, target.width, target.height);
+  }
+
+  if (config.withWatermark) {
+    drawFrostedWatermark(ctx, target.width, target.height, hasCamera ? 'bottom-left' : 'bottom-right');
+  }
+  if (cues.length > 0) {
+    drawSubtitle(ctx, target.width, target.height, cues, timeMs, {
+      reservedRightFraction: hasCamera ? 0.3 : 0,
+    });
   }
 }
 

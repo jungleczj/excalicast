@@ -34,6 +34,7 @@ export interface RecordingMetadata {
   status: 'recording' | 'done' | 'error';
   lastFrameThumbnail?: string;
   title?: string;
+  subtitleSrt?: string;
 }
 
 export interface AudioChunk {
@@ -72,6 +73,14 @@ export interface ExportConfig {
   croppingMode: CroppingMode;
   fps: number;
   withWatermark: boolean;
+  burnSubtitles?: boolean;
+}
+
+export interface SubtitleCue {
+  index: number;
+  startMs: number;
+  endMs: number;
+  text: string;
 }
 
 export interface SceneRect {

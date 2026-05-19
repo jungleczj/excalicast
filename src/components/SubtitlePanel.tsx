@@ -4,11 +4,13 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
 import { downloadSrt, pollSubtitleJob, submitSubtitleJob } from '@/services/subtitleClient';
+import { clearSubtitleSrt, getRecording, saveSubtitleSrt } from '@/lib/db-client';
 
 interface Props {
   open: boolean;
   recordingId: string;
   onClose: () => void;
+  onSaved?: (srt: string) => void;
 }
 
 type Phase = 'idle' | 'uploading' | 'pending' | 'running' | 'done' | 'failed';
@@ -16,13 +18,14 @@ type Phase = 'idle' | 'uploading' | 'pending' | 'running' | 'done' | 'failed';
 const POLL_INTERVAL_MS = 2500;
 const POLL_MAX = 240;
 
-export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Element | null {
+export function SubtitlePanel({ open, recordingId, onClose, onSaved }: Props): JSX.Element | null {
   const t = useTranslations('subtitlePanel');
   const [phase, setPhase] = useState<Phase>('idle');
   const [srt, setSrt] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [mockReason, setMockReason] = useState<string | null>(null);
+  const [existingSrt, setExistingSrt] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -32,12 +35,23 @@ export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Elemen
       setError(null);
       setJobId(null);
       setMockReason(null);
+      setExistingSrt(null);
       if (pollRef.current) {
         clearInterval(pollRef.current);
         pollRef.current = null;
       }
+      return;
     }
-  }, [open]);
+    // 打开时检查是否已有字幕
+    void getRecording(recordingId).then((r) => {
+      const existing = r?.subtitleSrt ?? null;
+      if (existing) {
+        setExistingSrt(existing);
+        setSrt(existing);
+        setPhase('done');
+      }
+    });
+  }, [open, recordingId]);
 
   const startJob = async () => {
     setError(null);
@@ -70,10 +84,16 @@ export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Elemen
     try {
       const r = await pollSubtitleJob(id);
       if (r.status === 'done') {
-        setSrt(r.srt ?? '');
+        const finalSrt = r.srt ?? '';
+        setSrt(finalSrt);
         setPhase('done');
         if (pollRef.current) clearInterval(pollRef.current);
         pollRef.current = null;
+        if (finalSrt) {
+          await saveSubtitleSrt(recordingId, finalSrt);
+          setExistingSrt(finalSrt);
+          onSaved?.(finalSrt);
+        }
       } else if (r.status === 'failed') {
         setPhase('failed');
         setError(r.error ?? 'unknown');
@@ -87,7 +107,16 @@ export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Elemen
     }
   };
 
+  const handleRemove = async () => {
+    await clearSubtitleSrt(recordingId);
+    setExistingSrt(null);
+    setSrt('');
+    setPhase('idle');
+  };
+
   if (!open) return null;
+
+  const hasPersistedSrt = phase === 'done' && existingSrt && existingSrt === srt;
 
   return (
     <div
@@ -120,7 +149,7 @@ export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Elemen
           </div>
         </div>
 
-        {phase === 'idle' && (
+        {phase === 'idle' && !existingSrt && (
           <button
             type="button"
             onClick={() => void startJob()}
@@ -152,20 +181,43 @@ export function SubtitlePanel({ open, recordingId, onClose }: Props): JSX.Elemen
                 ⚠️ {mockReason}
               </div>
             )}
+            {hasPersistedSrt && (
+              <div className="mt-2 rounded-md border border-success-300 bg-success-50 px-3 py-2 text-[12px] text-success-700">
+                {t('savedHint')}
+              </div>
+            )}
             <div className="mt-3 flex items-center justify-between gap-2">
               <span className="text-[12px] font-semibold text-text-primary">{t('preview')}</span>
-              <button
-                type="button"
-                onClick={() => downloadSrt(srt, `excalicast_${recordingId.slice(0, 8)}.srt`)}
-                className="flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white"
-                style={{ background: 'var(--primary-600)' }}
-              >
-                <I.Download size={12} /> {t('download')}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void startJob()}
+                  className="flex items-center gap-1 rounded-md border border-border-strong bg-bg-primary px-3 py-1.5 text-[11px] font-semibold text-text-secondary hover:bg-bg-tertiary"
+                >
+                  <I.Sparkles size={11} /> {t('regenerate')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadSrt(srt, `excalicast_${recordingId.slice(0, 8)}.srt`)}
+                  className="flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white"
+                  style={{ background: 'var(--primary-600)' }}
+                >
+                  <I.Download size={12} /> {t('download')}
+                </button>
+              </div>
             </div>
             <pre className="mt-2 flex-1 overflow-auto rounded-md border border-border-default bg-bg-secondary p-3 text-[11px] leading-relaxed text-text-primary font-mono whitespace-pre-wrap">
               {srt}
             </pre>
+            {hasPersistedSrt && (
+              <button
+                type="button"
+                onClick={() => void handleRemove()}
+                className="mt-3 self-start text-[11px] text-text-tertiary underline-offset-2 hover:text-recording-strong hover:underline"
+              >
+                {t('removeFromRecording')}
+              </button>
+            )}
           </>
         )}
 

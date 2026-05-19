@@ -64,6 +64,20 @@ class ExcalicastDB extends Dexie {
         if (r.hasCamera === undefined) r.hasCamera = false;
       });
     });
+    // v4: recordings.subtitleSrt（嵌入 SRT 文本，~10-50KB，行内存）
+    this.version(4).stores({
+      recordings: 'id, startedAt, status',
+      snapshots: '++id, recordingId, timestamp',
+      audioChunks: '++id, recordingId, index',
+      cameraChunks: '++id, recordingId, index',
+      binaryFiles: '++id, recordingId, fileId',
+    }).upgrade(async (tx) => {
+      await tx.table('recordings').toCollection().modify((row) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const r = row as any;
+        if (r.subtitleSrt === undefined) r.subtitleSrt = null;
+      });
+    });
   }
 }
 
@@ -87,6 +101,14 @@ export async function updateRecordingTitle(recordingId: string, title: string): 
   await getClientDb().recordings.update(recordingId, {
     title: trimmed.length > 0 ? trimmed : undefined,
   });
+}
+
+export async function saveSubtitleSrt(recordingId: string, srt: string): Promise<void> {
+  await getClientDb().recordings.update(recordingId, { subtitleSrt: srt });
+}
+
+export async function clearSubtitleSrt(recordingId: string): Promise<void> {
+  await getClientDb().recordings.update(recordingId, { subtitleSrt: undefined });
 }
 
 export async function deleteRecording(recordingId: string): Promise<void> {

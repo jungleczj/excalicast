@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import { useLocale, useTranslations } from 'next-intl';
 import { AppHeader } from '@/components/AppHeader';
 import { I } from '@/components/icons';
+import { SubtitleOverlay } from '@/components/SubtitleOverlay';
 import { loadFullRecording, deleteRecording } from '@/lib/db-client';
 import type { RecordingMetadata, WhiteboardSnapshot } from '@/types/recording';
 import { Link, useRouter } from '@/i18n/navigation';
@@ -269,6 +270,7 @@ export default function PlayPage(): JSX.Element {
             viewModeEnabled
             zenModeEnabled
           />
+          <SubtitleOverlay srt={meta?.subtitleSrt} timeMs={timeMs} />
           {cameraUrl && (
             <video
               ref={cameraRef}
