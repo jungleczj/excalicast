@@ -12,7 +12,11 @@
  * ⚠️ 强制约束：本项目字幕统一用千问，禁止 OpenAI Whisper（见 CLAUDE.md）
  */
 
-const DASHSCOPE_BASE = 'https://dashscope.aliyuncs.com/api/v1';
+// DashScope endpoint. Defaults to the international region (used by intl-tier
+// accounts). Override via DASHSCOPE_API_BASE if your key is on the mainland
+// region (`https://dashscope.aliyuncs.com/api/v1`) or you need a different
+// endpoint for testing.
+const DASHSCOPE_BASE = process.env.DASHSCOPE_API_BASE || 'https://dashscope-intl.aliyuncs.com/api/v1';
 const DEFAULT_MODEL = 'paraformer-v2';
 const POLL_INTERVAL_MS = 3000;
 const POLL_MAX_ATTEMPTS = 100;
