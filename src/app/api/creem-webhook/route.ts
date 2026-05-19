@@ -26,6 +26,17 @@ export async function POST(req: Request): Promise<NextResponse> {
   const signature = req.headers.get('creem-signature');
 
   if (!verifyCreemWebhook(rawBody, signature)) {
+    // 临时调试：把 Creem 实际发的 signature + 我们自己算的 expected 打到 Vercel logs，
+    // 便于 401 故障排查。secret 不打印，仅打印长度。修好后请删除。
+    const debug = (await import('@/services/creemServer')).debugComputeSignature(rawBody);
+    // eslint-disable-next-line no-console
+    console.warn('[creem-webhook] invalid_signature', {
+      received: signature,
+      expected: debug.expected,
+      bodyLen: rawBody.length,
+      secretSet: debug.secretSet,
+      secretLen: debug.secretLen,
+    });
     return NextResponse.json({ error: 'invalid_signature' }, { status: 401 });
   }
 

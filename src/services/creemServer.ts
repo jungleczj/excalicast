@@ -115,6 +115,19 @@ export function verifyCreemWebhook(rawBody: string, signature: string | null): b
   }
 }
 
+/** Debug-only helper — returns the expected signature and meta about the secret.
+ *  Intentionally NOT exporting the secret value itself. */
+export function debugComputeSignature(rawBody: string): {
+  expected: string | null;
+  secretSet: boolean;
+  secretLen: number;
+} {
+  const secret = process.env.CREEM_WEBHOOK_SECRET;
+  if (!secret) return { expected: null, secretSet: false, secretLen: 0 };
+  const expected = createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex');
+  return { expected, secretSet: true, secretLen: secret.length };
+}
+
 // ---------------------------------------------------------------------------
 // Webhook payload parsing — minimal, defensive subset.
 //
