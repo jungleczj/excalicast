@@ -17,10 +17,11 @@
 // region (`https://dashscope.aliyuncs.com/api/v1`) or you need a different
 // endpoint for testing.
 const DASHSCOPE_BASE = process.env.DASHSCOPE_API_BASE || 'https://dashscope-intl.aliyuncs.com/api/v1';
-// ASR model. Intl region exposes `qwen3-asr-flash` (Qwen3 ASR family);
-// mainland exposes `paraformer-v2`. Override via DASHSCOPE_ASR_MODEL.
+// Intl region uses Qwen3 ASR file-trans model + `input.file_url` (string).
+// Mainland region uses Paraformer + `input.file_urls` (array).
+const IS_INTL = DASHSCOPE_BASE.includes('dashscope-intl');
 const DEFAULT_MODEL = process.env.DASHSCOPE_ASR_MODEL
-  || (DASHSCOPE_BASE.includes('dashscope-intl') ? 'qwen3-asr-flash' : 'paraformer-v2');
+  || (IS_INTL ? 'qwen3-asr-flash-filetrans' : 'paraformer-v2');
 const POLL_INTERVAL_MS = 3000;
 const POLL_MAX_ATTEMPTS = 100;
 
@@ -47,6 +48,16 @@ function getApiKey(): string {
 }
 
 export async function submitTranscriptionTask(opts: SubmitOptions): Promise<SubmitResult> {
+  // Intl Qwen3-ASR uses `input.file_url` (singular string); mainland paraformer
+  // uses `input.file_urls` (array). Build the right shape based on region.
+  const input = IS_INTL
+    ? { file_url: opts.fileUrl }
+    : { file_urls: [opts.fileUrl] };
+  // Qwen3-ASR doesn't accept `language_hints` the same way; only pass it for paraformer.
+  const parameters: Record<string, unknown> = IS_INTL
+    ? { enable_words: true }
+    : { language_hints: opts.languageHints ?? ['zh', 'en'] };
+
   const res = await fetch(`${DASHSCOPE_BASE}/services/audio/asr/transcription`, {
     method: 'POST',
     headers: {
@@ -56,10 +67,8 @@ export async function submitTranscriptionTask(opts: SubmitOptions): Promise<Subm
     },
     body: JSON.stringify({
       model: opts.model ?? DEFAULT_MODEL,
-      input: { file_urls: [opts.fileUrl] },
-      parameters: {
-        language_hints: opts.languageHints ?? ['zh', 'en'],
-      },
+      input,
+      parameters,
     }),
   });
   if (!res.ok) {
@@ -93,12 +102,18 @@ export async function pollTranscriptionTaskOnce(taskId: string): Promise<PollRes
   const json = (await res.json()) as {
     output?: {
       task_status?: string;
+      // Paraformer-v2 (mainland): output.results[0].transcription_url
       results?: Array<{ transcription_url?: string; subtask_status?: string }>;
+      // Qwen3-ASR-Flash (intl): output.result.transcription_url
+      result?: { transcription_url?: string };
       message?: string;
     };
   };
   const status = (json.output?.task_status ?? 'UNKNOWN') as PollResult['status'];
-  const url = json.output?.results?.[0]?.transcription_url ?? null;
+  const url =
+    json.output?.result?.transcription_url ??
+    json.output?.results?.[0]?.transcription_url ??
+    null;
   return {
     status,
     transcriptionUrl: url,
