@@ -17,7 +17,10 @@
 // region (`https://dashscope.aliyuncs.com/api/v1`) or you need a different
 // endpoint for testing.
 const DASHSCOPE_BASE = process.env.DASHSCOPE_API_BASE || 'https://dashscope-intl.aliyuncs.com/api/v1';
-const DEFAULT_MODEL = 'paraformer-v2';
+// ASR model. Intl region exposes `qwen3-asr-flash` (Qwen3 ASR family);
+// mainland exposes `paraformer-v2`. Override via DASHSCOPE_ASR_MODEL.
+const DEFAULT_MODEL = process.env.DASHSCOPE_ASR_MODEL
+  || (DASHSCOPE_BASE.includes('dashscope-intl') ? 'qwen3-asr-flash' : 'paraformer-v2');
 const POLL_INTERVAL_MS = 3000;
 const POLL_MAX_ATTEMPTS = 100;
 
