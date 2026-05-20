@@ -42,14 +42,33 @@ export interface ScreenRecordingHandle {
 }
 
 const CHUNK_INTERVAL_MS = 1000;
-const RECORDER_MIME_CANDIDATES = [
-  'video/webm;codecs=vp9,opus',
-  'video/webm;codecs=vp8,opus',
-  'video/webm',
-];
 
-function pickRecorderMime(): string {
-  for (const m of RECORDER_MIME_CANDIDATES) {
+/**
+ * Pick the MediaRecorder mime based on what's ACTUALLY in the stream.
+ * If the user denied mic permission, our output stream has no audio track —
+ * declaring `opus` in the mime then makes Chrome stall the encoder and emit
+ * empty chunks. So we conditionally include opus only when audio is present.
+ *
+ * VP8 is listed before VP9 deliberately. VP8 encodes much faster than VP9 in
+ * software (Chrome's MediaRecorder VP9 path) and is more reliable at high
+ * resolutions like 2940×1702 (Retina screen capture).
+ */
+function pickRecorderMime(stream: MediaStream): string {
+  const hasAudio = stream.getAudioTracks().length > 0;
+  const candidates = hasAudio
+    ? [
+        'video/webm;codecs=vp8,opus',
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=h264,opus',
+        'video/webm',
+      ]
+    : [
+        'video/webm;codecs=vp8',
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=h264',
+        'video/webm',
+      ];
+  for (const m of candidates) {
     if (MediaRecorder.isTypeSupported(m)) return m;
   }
   return 'video/webm';
@@ -128,13 +147,19 @@ export async function startScreenRecording(opts: StartScreenRecordingOpts): Prom
     status: 'recording',
   });
 
-  // 6) MediaRecorder
-  const mimeType = pickRecorderMime();
-  const recorder = new MediaRecorder(composite.outputStream, {
-    mimeType,
-    videoBitsPerSecond: 6_000_000,
-    audioBitsPerSecond: 128_000,
-  });
+  // 6) MediaRecorder — pick mime based on actual stream tracks so we don't
+  // declare opus when there's no audio (Chrome stalls the encoder otherwise).
+  const mimeType = pickRecorderMime(composite.outputStream);
+  const hasOutputAudio = composite.outputStream.getAudioTracks().length > 0;
+  // Don't pin a bitrate — at Retina resolutions (2940×1702) our previous
+  // 6 Mbps was too tight and the VP9 encoder produced empty chunks. Letting
+  // Chrome pick its default works for all resolutions.
+  const recorderOpts: MediaRecorderOptions = { mimeType };
+  if (hasOutputAudio) recorderOpts.audioBitsPerSecond = 128_000;
+  console.info(LOG_TAG, 'creating MediaRecorder with', recorderOpts,
+    'video tracks:', composite.outputStream.getVideoTracks().length,
+    'audio tracks:', composite.outputStream.getAudioTracks().length);
+  const recorder = new MediaRecorder(composite.outputStream, recorderOpts);
 
   let chunkIndex = 0;
   let droppedEmpty = 0;

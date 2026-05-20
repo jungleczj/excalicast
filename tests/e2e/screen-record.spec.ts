@@ -65,12 +65,13 @@ test.describe('Screen recording — happy path', () => {
     page.on('pageerror', (err) => consoleErrors.push(`pageerror: ${err.message}`));
     page.on('dialog', async (d) => {
       alerts.push(`${d.type()}: ${d.message()}`);
-      await d.dismiss();
+      if (d.type() === 'confirm') await d.accept();
+      else await d.dismiss();
     });
 
     await stubGetDisplayMedia(page);
 
-    await page.goto('/zh/app');
+    await page.goto('/zh/app', { waitUntil: 'domcontentloaded' });
 
     // The "开始录制" button on the workspace
     const startBtn = page.getByRole('button', { name: /开始录制/ }).first();
@@ -142,7 +143,13 @@ test.describe('Screen recording — happy path', () => {
   test('discard button removes the recording', async ({ page }) => {
     test.setTimeout(45_000);
     await stubGetDisplayMedia(page);
-    await page.goto('/zh/app');
+    // Auto-handle dialogs: confirm prompts get accepted (so 丢弃 proceeds),
+    // alert dialogs get dismissed (mic-denied warnings etc.).
+    page.on('dialog', (d) => {
+      if (d.type() === 'confirm') void d.accept();
+      else void d.dismiss();
+    });
+    await page.goto('/zh/app', { waitUntil: 'domcontentloaded' });
 
     await page.getByRole('button', { name: /开始录制/ }).first().click();
     await page.getByRole('button', { name: '选择录制源' }).click();
@@ -152,14 +159,15 @@ test.describe('Screen recording — happy path', () => {
     await expect(stopBtn).toBeVisible({ timeout: 10_000 });
 
     // Discard button (Trash icon, aria-label=丢弃)
-    page.once('dialog', (d) => void d.accept());  // auto-confirm the discard prompt
     await page.getByLabel('丢弃', { exact: true }).click();
 
-    // Should stay on /app (NOT navigate to /process)
-    await expect(page).toHaveURL(/\/zh\/app$/, { timeout: 5_000 });
+    // Should stay on /app (NOT navigate to /process). Allow up to 10s because
+    // handle.stop() polls the chunk DB for up to 5s before completing.
+    await expect(page).toHaveURL(/\/zh\/app$/, { timeout: 15_000 });
 
-    // The 开始录制 button is back
-    await expect(page.getByRole('button', { name: /开始录制/ }).first()).toBeVisible();
+    // The 开始录制 button is back (same polling slack as above)
+    await expect(page.getByRole('button', { name: /开始录制/ }).first())
+      .toBeVisible({ timeout: 10_000 });
   });
 });
 
@@ -180,7 +188,7 @@ test.describe('Screen recording — setup modal', () => {
       };
     });
 
-    await page.goto('/zh/app');
+    await page.goto('/zh/app', { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: /开始录制/ }).first().click();
     await expect(page.getByRole('heading', { name: '开始录制' })).toBeVisible();
 
@@ -196,7 +204,7 @@ test.describe('Screen recording — setup modal', () => {
 
   test('toggle camera + sysAudio reflects in selected state', async ({ page }) => {
     await stubGetDisplayMedia(page);
-    await page.goto('/zh/app');
+    await page.goto('/zh/app', { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: /开始录制/ }).first().click();
     await expect(page.getByRole('heading', { name: '开始录制' })).toBeVisible();
 

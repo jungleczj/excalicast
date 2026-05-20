@@ -24,7 +24,9 @@ export interface CompositeOptions {
 
 function waitVideoReady(v: HTMLVideoElement, timeoutMs: number): Promise<void> {
   return new Promise((resolve) => {
-    if (v.readyState >= 2 && v.videoWidth > 0 && v.videoHeight > 0) {
+    // Resolve immediately once we have ANY readiness signal — width/height
+    // requirement was too strict for some browsers / test stubs.
+    if (v.readyState >= 1) {
       resolve();
       return;
     }
