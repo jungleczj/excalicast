@@ -1,9 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { AppHeader } from '@/components/AppHeader';
-import { CameraBubble } from '@/components/CameraBubble';
 import { ProUpgradeModal } from '@/components/ProUpgradeModal';
 import { RecordSetupModal, type RecordSetupValues } from '@/components/RecordSetupModal';
 import { ScreenRecordingBar } from '@/components/ScreenRecordingBar';
@@ -26,19 +25,6 @@ export default function HomePage(): JSX.Element {
   const [setupOpen, setSetupOpen] = useState(false);
   const screenSessionRef = useRef<ScreenRecordingHandle | null>(null);
   const [screenState, setScreenState] = useState<'idle' | 'recording' | 'paused' | 'processing'>('idle');
-  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
-  const [cameraPos, setCameraPos] = useState({ x: 0, y: 0 });
-
-  useEffect(() => {
-    // 摄像头气泡默认右下角
-    setCameraPos({ x: window.innerWidth - 200, y: window.innerHeight - 280 });
-  }, []);
-
-  // 拖动摄像头气泡时，回写到 live composite 让最终视频里也跟着动
-  const updateCameraPos = useCallback((next: { x: number; y: number }) => {
-    setCameraPos(next);
-    screenSessionRef.current?.setCameraPosition(next);
-  }, []);
 
   const handleConfirmSetup = useCallback(async (vals: RecordSetupValues) => {
     setSetupOpen(false);
@@ -54,7 +40,6 @@ export default function HomePage(): JSX.Element {
         },
       });
       screenSessionRef.current = handle;
-      setCameraStream(handle.cameraStream);
       setScreenState('recording');
     } catch (err) {
       alert(`无法开始录制：${err instanceof Error ? err.message : 'unknown'}`);
@@ -78,13 +63,11 @@ export default function HomePage(): JSX.Element {
     try {
       const meta = await handle.stop();
       screenSessionRef.current = null;
-      setCameraStream(null);
       setScreenState('idle');
       router.push(`/process/${meta.id}` as never);
     } catch (err) {
       alert(`停止录制失败：${err instanceof Error ? err.message : 'unknown'}`);
       screenSessionRef.current = null;
-      setCameraStream(null);
       setScreenState('idle');
     }
   }, [router]);
@@ -98,7 +81,6 @@ export default function HomePage(): JSX.Element {
       await deleteScreenRecording(meta.id);
     } catch { /* ignore */ }
     screenSessionRef.current = null;
-    setCameraStream(null);
     setScreenState('idle');
   }, []);
 
@@ -110,16 +92,13 @@ export default function HomePage(): JSX.Element {
       <div className="relative flex-1 overflow-hidden">
         <Whiteboard onChangeRef={{ current: null }} />
 
-        {/* 摄像头气泡：录制中可拖动，位置实时反映到合成视频里 */}
-        {isActive && screenSessionRef.current?.hasCamera && cameraStream && (
-          <CameraBubble
-            stream={cameraStream}
-            size={160}
-            shape="circle"
-            position={cameraPos}
-            onPositionChange={updateCameraPos}
-          />
-        )}
+        {/*
+          注：录制期间故意不渲染 DOM 摄像头气泡。
+          原因：若用户在 getDisplayMedia 里选「当前 Excalicast tab」，
+          DOM 上的气泡会被一同录进画面，再叠加 liveComposite 自己画的那一个
+          → 出现两个气泡。所以录制中只在 canvas 里画一个；
+          DOM 上完全不放气泡。拖拽定位是 P2/P3 才加。
+        */}
 
         {/* idle 状态：底部居中的「开始录制」按钮 */}
         {screenState === 'idle' && (
