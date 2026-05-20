@@ -6,6 +6,8 @@ import type {
   BinaryFileEntry,
   CameraChunk,
   RecordingMetadata,
+  ScreenRecordingChunk,
+  ScreenRecordingMetadata,
   ShellCanvasRect,
   ShellSize,
   WhiteboardSnapshot,
@@ -29,6 +31,10 @@ interface BinaryFileRow extends BinaryFileEntry {
   id?: number;
 }
 
+interface ScreenChunkRow extends ScreenRecordingChunk {
+  id?: number;
+}
+
 class ExcalicastDB extends Dexie {
   recordings!: Table<RecordingMetadata, string>;
   snapshots!: Table<SnapshotRow, number>;
@@ -36,6 +42,8 @@ class ExcalicastDB extends Dexie {
   cameraChunks!: Table<CameraChunkRow, number>;
   binaryFiles!: Table<BinaryFileRow, number>;
   workspaceShells!: Table<WorkspaceShellRow, number>;
+  screenRecordings!: Table<ScreenRecordingMetadata, string>;
+  screenChunks!: Table<ScreenChunkRow, number>;
 
   constructor() {
     super('excalicast');
@@ -96,6 +104,17 @@ class ExcalicastDB extends Dexie {
       cameraChunks: '++id, recordingId, index',
       binaryFiles: '++id, recordingId, fileId',
       workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
+    });
+    // v6: new tables for screen-capture recordings; old tables untouched (read-only path).
+    this.version(6).stores({
+      recordings: 'id, startedAt, status',
+      snapshots: '++id, recordingId, timestamp',
+      audioChunks: '++id, recordingId, index',
+      cameraChunks: '++id, recordingId, index',
+      binaryFiles: '++id, recordingId, fileId',
+      workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
+      screenRecordings: 'id, startedAt, status',
+      screenChunks: '++id, recordingId, index, [recordingId+index]',
     });
   }
 }
@@ -201,4 +220,50 @@ export async function loadFullRecording(recordingId: string): Promise<{
   const binaryFiles = await db.binaryFiles.where('recordingId').equals(recordingId).toArray();
 
   return { metadata, snapshots, audioBlob, cameraBlob, binaryFiles };
+}
+
+// ============================================================================
+// Screen-capture (v6) helpers — new pipeline for getDisplayMedia recordings
+// ============================================================================
+
+export async function appendScreenChunk(row: ScreenRecordingChunk): Promise<void> {
+  await getClientDb().screenChunks.add(row);
+}
+
+export async function listScreenRecordings(): Promise<ScreenRecordingMetadata[]> {
+  return getClientDb().screenRecordings
+    .orderBy('startedAt')
+    .reverse()
+    .toArray();
+}
+
+export async function getScreenRecording(id: string): Promise<ScreenRecordingMetadata | undefined> {
+  return getClientDb().screenRecordings.get(id);
+}
+
+export async function putScreenRecording(meta: ScreenRecordingMetadata): Promise<void> {
+  await getClientDb().screenRecordings.put(meta);
+}
+
+export async function updateScreenRecording(
+  id: string,
+  patch: Partial<ScreenRecordingMetadata>,
+): Promise<void> {
+  await getClientDb().screenRecordings.update(id, patch);
+}
+
+export async function loadScreenRecordingWebm(id: string): Promise<Blob> {
+  const chunks = await getClientDb().screenChunks
+    .where('recordingId').equals(id)
+    .sortBy('index');
+  if (chunks.length === 0) throw new Error(`no_chunks_for_${id}`);
+  return new Blob(chunks.map((c) => c.blob), { type: chunks[0].blob.type || 'video/webm' });
+}
+
+export async function deleteScreenRecording(id: string): Promise<void> {
+  const db = getClientDb();
+  await db.transaction('rw', [db.screenRecordings, db.screenChunks], async () => {
+    await db.screenRecordings.delete(id);
+    await db.screenChunks.where('recordingId').equals(id).delete();
+  });
 }
