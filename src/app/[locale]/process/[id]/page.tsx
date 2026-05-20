@@ -6,7 +6,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { I } from '@/components/icons';
 import { getScreenRecording, loadScreenRecordingWebm } from '@/lib/db-client';
 import { useSubscription } from '@/hooks/useSubscription';
-import { downloadMp4Blob, exportScreenRecording } from '@/services/screenExport';
+import { downloadMp4Blob, exportScreenRecording, type ScreenExportFormat } from '@/services/screenExport';
 import {
   pollScreenSubtitleJob,
   saveScreenSubtitle,
@@ -36,6 +36,7 @@ export default function ProcessRecordingPage(): JSX.Element {
   // Download state
   const [busy, setBusy] = useState(false);
   const [burnSubtitles, setBurnSubtitles] = useState(true); // default ON when SRT exists
+  const [format, setFormat] = useState<ScreenExportFormat>('mp4');
   const [progress, setProgress] = useState<{ phase: string; ratio: number } | null>(null);
 
   // Subtitle generation state
@@ -87,6 +88,7 @@ export default function ProcessRecordingPage(): JSX.Element {
     try {
       const blob = await exportScreenRecording({
         recordingId: id,
+        format,
         withWatermark: !proUnlocked,
         burnSubtitles: burnSubtitles && !!meta?.subtitleSrt,
         onPhase: (p) => setProgress((s) => ({ phase: p, ratio: s?.ratio ?? 0 })),
@@ -94,7 +96,7 @@ export default function ProcessRecordingPage(): JSX.Element {
       });
       const wmTag = proUnlocked ? 'clean' : 'wm';
       const subTag = burnSubtitles && meta?.subtitleSrt ? '_sub' : '';
-      downloadMp4Blob(blob, `excalicast_${id.slice(0, 8)}_${wmTag}${subTag}.mp4`);
+      downloadMp4Blob(blob, `excalicast_${id.slice(0, 8)}_${wmTag}${subTag}.${format}`);
     } catch (err) {
       alert(`下载失败：${err instanceof Error ? err.message : 'unknown'}`);
     } finally {
@@ -217,11 +219,38 @@ export default function ProcessRecordingPage(): JSX.Element {
           <div className="space-y-5">
             {/* ===== Section: 下载 ===== */}
             <div>
-              <h3 className="mb-2 text-[13px] font-semibold text-text-primary">下载 MP4</h3>
+              <h3 className="mb-2 text-[13px] font-semibold text-text-primary">下载视频</h3>
               <p className="mb-3 text-[11px] leading-relaxed text-text-secondary">
                 {proUnlocked
                   ? '✓ 已订阅 Pro · 导出无水印'
                   : '免费版导出右下角带 excalicast.cc 水印；升级 Pro 后所有录制均可重下 clean 版'}
+              </p>
+
+              {/* Format picker */}
+              <div className="mb-3 grid grid-cols-3 gap-2">
+                <FormatButton
+                  label="MP4"
+                  sub="最广兼容"
+                  selected={format === 'mp4'}
+                  onClick={() => setFormat('mp4')}
+                />
+                <FormatButton
+                  label="MOV"
+                  sub="Mac / 剪辑软件"
+                  selected={format === 'mov'}
+                  onClick={() => setFormat('mov')}
+                />
+                <FormatButton
+                  label="WebM"
+                  sub="体积最小"
+                  selected={format === 'webm'}
+                  onClick={() => setFormat('webm')}
+                />
+              </div>
+              <p className="mb-3 text-[10.5px] text-text-tertiary">
+                {format === 'mp4' && 'H.264 + AAC · Windows / Mac QuickTime / Linux / iOS / Android / 抖音 / B 站 / YouTube 全平台兼容'}
+                {format === 'mov' && 'H.264 + AAC · 与 MP4 同编码，.mov 容器。适合 Final Cut / Premiere 二次剪辑'}
+                {format === 'webm' && 'VP9 + Opus · 体积约 MP4 的 70%，浏览器原生。Mac QuickTime 不支持，需用 VLC 或 Chrome 打开'}
               </p>
 
               {/* Burn-in subtitles toggle (shown only when SRT exists) */}
@@ -262,7 +291,7 @@ export default function ProcessRecordingPage(): JSX.Element {
                 style={{ background: 'var(--primary-600)' }}
               >
                 <I.Download size={16} />
-                {proUnlocked ? '下载 MP4（无水印）' : '下载 MP4（含水印）'}
+                下载 {format.toUpperCase()} {proUnlocked ? '（无水印）' : '（含水印）'}
               </button>
 
               {progress && (
@@ -413,5 +442,34 @@ export default function ProcessRecordingPage(): JSX.Element {
         </aside>
       </div>
     </div>
+  );
+}
+
+function FormatButton({
+  label,
+  sub,
+  selected,
+  onClick,
+}: {
+  label: string;
+  sub: string;
+  selected: boolean;
+  onClick: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex flex-col items-center gap-0.5 rounded-md border px-2 py-2 text-center transition ${
+        selected
+          ? 'border-primary-600 bg-primary-50'
+          : 'border-border-default bg-bg-primary hover:bg-bg-tertiary'
+      }`}
+    >
+      <span className={`text-[12.5px] font-bold ${selected ? 'text-primary-700' : 'text-text-primary'}`}>
+        {label}
+      </span>
+      <span className="text-[10px] text-text-tertiary">{sub}</span>
+    </button>
   );
 }
