@@ -121,14 +121,20 @@ export async function startScreenRecording(opts: StartScreenRecordingOpts): Prom
   });
 
   let chunkIndex = 0;
-  recorder.ondataavailable = async (e: BlobEvent) => {
-    if (e.data && e.data.size > 0) {
-      await appendScreenChunk({
-        recordingId,
-        index: chunkIndex++,
-        blob: e.data,
-      });
-    }
+  // Track in-flight chunk writes so stopInternal can wait for the final
+  // ondataavailable burst to fully land in IndexedDB before we navigate to
+  // /process/[id]. Without this we get races where loadScreenRecordingWebm
+  // throws "no_chunks_for_<id>" because the final chunk write hadn't completed.
+  const pendingChunkWrites = new Set<Promise<unknown>>();
+  recorder.ondataavailable = (e: BlobEvent) => {
+    if (!e.data || e.data.size === 0) return;
+    const p = appendScreenChunk({
+      recordingId,
+      index: chunkIndex++,
+      blob: e.data,
+    });
+    pendingChunkWrites.add(p);
+    void p.finally(() => pendingChunkWrites.delete(p));
   };
 
   let paused = false;
@@ -149,6 +155,12 @@ export async function startScreenRecording(opts: StartScreenRecordingOpts): Prom
       recorder.onstop = () => resolve();
       recorder.stop();
     });
+    // The final ondataavailable handler may still be running after onstop —
+    // wait for ALL pending IndexedDB writes to settle before proceeding so
+    // /process/[id] doesn't load an empty chunk set.
+    if (pendingChunkWrites.size > 0) {
+      await Promise.allSettled([...pendingChunkWrites]);
+    }
     composite.stop();
 
     const durationMs = elapsed();
