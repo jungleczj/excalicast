@@ -1,5 +1,7 @@
 'use client';
 
+const LOG_TAG = '[liveComposite]';
+
 export interface CompositeInputs {
   displayStream: MediaStream;
   cameraStream: MediaStream | null;
@@ -20,6 +22,28 @@ export interface CompositeOptions {
   initialCameraPosition: { x: number; y: number };
 }
 
+function waitVideoReady(v: HTMLVideoElement, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (v.readyState >= 2 && v.videoWidth > 0 && v.videoHeight > 0) {
+      resolve();
+      return;
+    }
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      v.removeEventListener('loadedmetadata', finish);
+      v.removeEventListener('loadeddata', finish);
+      v.removeEventListener('canplay', finish);
+      resolve();
+    };
+    v.addEventListener('loadedmetadata', finish);
+    v.addEventListener('loadeddata', finish);
+    v.addEventListener('canplay', finish);
+    setTimeout(finish, timeoutMs);
+  });
+}
+
 /**
  * Build a single output MediaStream that mixes:
  *   - display video (drawn into canvas)
@@ -28,15 +52,16 @@ export interface CompositeOptions {
  *
  * The output canvas has no watermark and no subtitles — those are decided
  * at download time (so Pro purchase retroactively removes watermark).
+ *
+ * Returns a Promise: we await displayVideo metadata so we can size the canvas
+ * to the real captured dimensions rather than guessing.
  */
-export function startLiveComposite(
+export async function startLiveComposite(
   inputs: CompositeInputs,
   opts: CompositeOptions,
-): CompositeOutput {
+): Promise<CompositeOutput> {
   // Holder for off-screen video elements. Attaching to DOM (even invisible)
-  // makes browser autoplay + frame production more reliable than orphan
-  // <video> nodes — without DOM attachment, Chrome sometimes never advances
-  // `readyState` past 1, so drawImage paints nothing.
+  // is required for Chrome to reliably advance readyState past 1.
   const hiddenHost = document.createElement('div');
   hiddenHost.style.cssText = 'position:fixed;left:-99999px;top:-99999px;width:1px;height:1px;overflow:hidden;pointer-events:none;';
   document.body.appendChild(hiddenHost);
@@ -46,7 +71,9 @@ export function startLiveComposite(
   displayVideo.muted = true;
   displayVideo.playsInline = true;
   hiddenHost.appendChild(displayVideo);
-  void displayVideo.play().catch(() => { /* autoplay may reject in some cases */ });
+  const displayPlay = displayVideo.play().catch((err) => {
+    console.warn(LOG_TAG, 'displayVideo.play() rejected:', err);
+  });
 
   const cameraVideo = inputs.cameraStream ? document.createElement('video') : null;
   if (cameraVideo && inputs.cameraStream) {
@@ -54,15 +81,22 @@ export function startLiveComposite(
     cameraVideo.muted = true;
     cameraVideo.playsInline = true;
     hiddenHost.appendChild(cameraVideo);
-    void cameraVideo.play().catch(() => { /* same */ });
+    void cameraVideo.play().catch((err) => {
+      console.warn(LOG_TAG, 'cameraVideo.play() rejected:', err);
+    });
   }
 
-  // Best-effort initial sizing: settings may report nominal dims; Chrome updates
-  // them after the first frame. We pick the displayed track's settings, defaulting
-  // to 1920×1080 if not yet known.
-  const settings = inputs.displayStream.getVideoTracks()[0].getSettings();
-  const W = settings.width ?? 1920;
-  const H = settings.height ?? 1080;
+  // Wait for display metadata so we know the real dimensions before sizing
+  // the output canvas. Bound to 3s so we don't hang if metadata never arrives.
+  await Promise.race([displayPlay, waitVideoReady(displayVideo, 3000)]);
+  await waitVideoReady(displayVideo, 3000);
+
+  // Use the actual decoded dimensions; fall back to track settings; final
+  // fallback to 1280x720.
+  const settings = inputs.displayStream.getVideoTracks()[0]?.getSettings() ?? {};
+  const W = (displayVideo.videoWidth || settings.width || 1280);
+  const H = (displayVideo.videoHeight || settings.height || 720);
+  console.info(LOG_TAG, 'canvas size:', W, 'x', H, 'displayVideo.readyState=', displayVideo.readyState);
 
   const canvas = document.createElement('canvas');
   canvas.width = W;
@@ -70,34 +104,43 @@ export function startLiveComposite(
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) throw new Error('canvas_2d_unavailable');
 
-  // Caller passes initialCameraPosition in window pixel coords (its convenient
-  // frame of reference), but the canvas might be a totally different size
-  // (e.g. 1280×720 from getDisplayMedia, while the window is 1920×1080).
-  // Clamp into canvas bounds, else the bubble draws off-screen and never
-  // appears in the recorded video.
+  // CRITICAL: paint at least one initial frame BEFORE handing the canvas
+  // stream to MediaRecorder. canvas.captureStream() only emits frames after
+  // the canvas has been modified. Without this, MediaRecorder may receive
+  // zero frames if the display video is slow to be ready.
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  // Clamp camera position into canvas bounds (callers pass window-pixel coords
+  // which may be larger than the canvas).
   const margin = 24;
   const maxX = Math.max(margin, W - opts.cameraSizePx - margin);
   const maxY = Math.max(margin, H - opts.cameraSizePx - margin);
   let cameraX = Math.min(Math.max(opts.initialCameraPosition.x, margin), maxX);
   let cameraY = Math.min(Math.max(opts.initialCameraPosition.y, margin), maxY);
-  // If the clamped value still puts the bubble outside (canvas smaller than
-  // bubble + margin), pin to bottom-right.
   if (cameraX + opts.cameraSizePx > W) cameraX = Math.max(0, W - opts.cameraSizePx - margin);
   if (cameraY + opts.cameraSizePx > H) cameraY = Math.max(0, H - opts.cameraSizePx - margin);
 
   let running = true;
+  let frameCounter = 0;
   const drawFrame = () => {
     if (!running) return;
     if (displayVideo.readyState >= 2) {
       ctx.drawImage(displayVideo, 0, 0, W, H);
+    } else if (frameCounter % 30 === 0) {
+      // Display not ready yet — keep canvas modified so captureStream still
+      // emits frames; paint a moving placeholder so the user sees feedback
+      // if they're somehow viewing the canvas.
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, W, H);
     }
     if (cameraVideo && cameraVideo.readyState >= 2) {
       const r = opts.cameraSizePx / 2;
       ctx.save();
-      // mirror horizontally to match user expectation
       ctx.beginPath();
       ctx.arc(cameraX + r, cameraY + r, r, 0, Math.PI * 2);
       ctx.clip();
+      // mirror horizontally to match user expectation
       ctx.translate(cameraX + r, cameraY + r);
       ctx.scale(-1, 1);
       ctx.translate(-(cameraX + r), -(cameraY + r));
@@ -109,6 +152,12 @@ export function startLiveComposite(
       ctx.lineWidth = 3;
       ctx.strokeStyle = 'rgba(255,255,255,0.95)';
       ctx.stroke();
+    }
+    frameCounter++;
+    if (frameCounter === 60) {
+      console.info(LOG_TAG, 'frame 60 — displayReady=', displayVideo.readyState,
+        'cameraReady=', cameraVideo?.readyState ?? 'n/a',
+        'cameraPos=', cameraX, cameraY, 'cameraSize=', opts.cameraSizePx);
     }
     requestAnimationFrame(drawFrame);
   };

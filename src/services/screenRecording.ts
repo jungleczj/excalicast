@@ -3,6 +3,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import {
   appendScreenChunk,
+  getClientDb,
   getScreenRecording,
   putScreenRecording,
   updateScreenRecording,
@@ -10,6 +11,8 @@ import {
 import { captureCamera, captureDisplay, captureMicrophone } from '@/services/displayCapture';
 import { startLiveComposite, type CompositeOutput } from '@/services/liveComposite';
 import type { ScreenRecordingMetadata } from '@/types/recording';
+
+const LOG_TAG = '[screenRecording]';
 
 export interface StartScreenRecordingOpts {
   withMic: boolean;
@@ -26,6 +29,9 @@ export interface ScreenRecordingHandle {
   hasMic: boolean;
   hasSystemAudio: boolean;
   hasCamera: boolean;
+  /** Permission failures we caught — UI can surface these to the user. */
+  micError?: string;
+  cameraError?: string;
   /** for live preview UI */
   cameraStream: MediaStream | null;
   setCameraPosition: (pos: { x: number; y: number }) => void;
@@ -62,30 +68,40 @@ export async function startScreenRecording(opts: StartScreenRecordingOpts): Prom
   // 2) Mic — graceful degrade
   let micStream: MediaStream | null = null;
   let hasMic = false;
+  let micError: string | undefined;
   if (opts.withMic) {
     try {
       micStream = await captureMicrophone();
       hasMic = true;
     } catch (err) {
-      // Mic permission denied — degrade silently. UI shows hasMic=false.
-      if (process.env.NODE_ENV !== 'production') console.warn('mic_failed', err);
+      micError = err instanceof Error ? err.message : 'unknown';
+      console.warn(LOG_TAG, 'mic_failed:', micError);
     }
   }
 
   // 3) Camera — graceful degrade
   let cameraStream: MediaStream | null = null;
   let hasCamera = false;
+  let cameraError: string | undefined;
   if (opts.withCamera) {
     try {
       cameraStream = await captureCamera();
       hasCamera = true;
     } catch (err) {
-      if (process.env.NODE_ENV !== 'production') console.warn('camera_failed', err);
+      cameraError = err instanceof Error ? err.message : 'unknown';
+      console.warn(LOG_TAG, 'camera_failed:', cameraError);
     }
   }
+  console.info(LOG_TAG, 'start:', {
+    recordingId,
+    withMic: opts.withMic, hasMic, micError,
+    withSystemAudio: opts.withSystemAudio, hasSystemAudio,
+    withCamera: opts.withCamera, hasCamera, cameraError,
+  });
 
-  // 4) Composite
-  const composite: CompositeOutput = startLiveComposite(
+  // 4) Composite — async because we await displayVideo metadata so we can
+  // size the canvas to the real capture dimensions.
+  const composite: CompositeOutput = await startLiveComposite(
     {
       displayStream,
       cameraStream,
@@ -121,26 +137,39 @@ export async function startScreenRecording(opts: StartScreenRecordingOpts): Prom
   });
 
   let chunkIndex = 0;
+  let droppedEmpty = 0;
   // Track in-flight chunk writes so stopInternal can wait for the final
   // ondataavailable burst to fully land in IndexedDB before we navigate to
   // /process/[id]. Without this we get races where loadScreenRecordingWebm
   // throws "no_chunks_for_<id>" because the final chunk write hadn't completed.
   const pendingChunkWrites = new Set<Promise<unknown>>();
   recorder.ondataavailable = (e: BlobEvent) => {
-    if (!e.data || e.data.size === 0) return;
+    if (!e.data || e.data.size === 0) {
+      droppedEmpty++;
+      console.warn(LOG_TAG, 'empty chunk dropped (total:', droppedEmpty, ')');
+      return;
+    }
+    const idx = chunkIndex++;
     const p = appendScreenChunk({
       recordingId,
-      index: chunkIndex++,
+      index: idx,
       blob: e.data,
-    });
+    }).then(
+      () => { console.debug(LOG_TAG, 'chunk', idx, 'persisted', e.data.size, 'bytes'); },
+      (err) => { console.error(LOG_TAG, 'chunk', idx, 'WRITE FAILED:', err); throw err; },
+    );
     pendingChunkWrites.add(p);
     void p.finally(() => pendingChunkWrites.delete(p));
+  };
+  recorder.onerror = (e: Event) => {
+    console.error(LOG_TAG, 'MediaRecorder error:', e);
   };
 
   let paused = false;
   let pauseStartedAt = 0;
   let pausedTotal = 0;
   recorder.start(CHUNK_INTERVAL_MS);
+  console.info(LOG_TAG, 'MediaRecorder started, mime=', mimeType, 'state=', recorder.state);
 
   const elapsed = () => Date.now() - startedAt - pausedTotal - (paused ? Date.now() - pauseStartedAt : 0);
 
@@ -149,19 +178,51 @@ export async function startScreenRecording(opts: StartScreenRecordingOpts): Prom
       pausedTotal += Date.now() - pauseStartedAt;
       paused = false;
     }
-    // Flush + wait for the final ondataavailable
+    console.info(LOG_TAG, 'stop: requestData + recorder.stop()');
+    // requestData flushes the current buffer to ondataavailable BEFORE we stop,
+    // so we get one final chunk regardless of where in the timeslice cycle we are.
+    try { recorder.requestData(); } catch { /* recorder may have ended early */ }
     await new Promise<void>((resolve) => {
       if (recorder.state === 'inactive') return resolve();
       recorder.onstop = () => resolve();
       recorder.stop();
     });
-    // The final ondataavailable handler may still be running after onstop —
-    // wait for ALL pending IndexedDB writes to settle before proceeding so
-    // /process/[id] doesn't load an empty chunk set.
+    console.info(LOG_TAG, 'recorder onstop fired. pending writes:', pendingChunkWrites.size);
+
+    // Wait for ALL outstanding chunk writes (including any final ondataavailable
+    // that fires AFTER onstop in some browsers).
     if (pendingChunkWrites.size > 0) {
       await Promise.allSettled([...pendingChunkWrites]);
     }
+
+    // Defensive: poll the actual chunk count for up to 5s, in case a final
+    // ondataavailable hasn't been delivered to the JS event loop yet.
+    const db = getClientDb();
+    const deadline = Date.now() + 5000;
+    let chunkCount = 0;
+    while (Date.now() < deadline) {
+      chunkCount = await db.screenChunks.where('recordingId').equals(recordingId).count();
+      if (chunkCount > 0) break;
+      // Drain any newly arrived writes
+      if (pendingChunkWrites.size > 0) {
+        await Promise.allSettled([...pendingChunkWrites]);
+        continue;
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    console.info(LOG_TAG, 'final chunk count in IndexedDB:', chunkCount, 'droppedEmpty:', droppedEmpty);
+
     composite.stop();
+
+    if (chunkCount === 0) {
+      // Clean up the orphan metadata row so the library doesn't show a 0-byte item
+      try { await db.screenRecordings.delete(recordingId); } catch { /* */ }
+      throw new Error(
+        `no_data_captured: 录制未产生任何视频数据（dropped=${droppedEmpty}）。\n` +
+        '常见原因：浏览器在 getDisplayMedia 后没拿到帧（macOS 屏幕录制权限被拒？显示器进入睡眠？）。\n' +
+        '建议：检查浏览器是否有「屏幕录制」权限，并确保录制中屏幕不进入睡眠。',
+      );
+    }
 
     const durationMs = elapsed();
     await updateScreenRecording(recordingId, { durationMs, status: 'done' });

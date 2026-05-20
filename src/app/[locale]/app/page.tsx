@@ -41,6 +41,22 @@ export default function HomePage(): JSX.Element {
       });
       screenSessionRef.current = handle;
       setScreenState('recording');
+
+      // Surface degraded-permission cases so the user understands what they got
+      const warnings: string[] = [];
+      if (vals.withMic && !handle.hasMic) {
+        warnings.push(`麦克风未启用：${handle.micError ?? '未知原因'}`);
+      }
+      if (vals.withCamera && !handle.hasCamera) {
+        warnings.push(`摄像头未启用：${handle.cameraError ?? '未知原因'}（macOS 需在 系统设置 → 隐私与安全性 → 摄像头 里允许浏览器）`);
+      }
+      if (vals.withSystemAudio && !handle.hasSystemAudio) {
+        warnings.push('系统音频未捕获：可能你选了「应用窗口」(只能选「整个屏幕」或某个标签页才能捕获系统音频)');
+      }
+      if (warnings.length > 0) {
+        // setTimeout so the alert doesn't block the recording-bar render
+        setTimeout(() => alert(warnings.join('\n\n')), 100);
+      }
     } catch (err) {
       alert(`无法开始录制：${err instanceof Error ? err.message : 'unknown'}`);
     }
