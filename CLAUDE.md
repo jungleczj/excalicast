@@ -1061,7 +1061,10 @@ Chrome 默认允许使用磁盘空间的 60%。录制完成后提示用户及时
 
 ## 不要做的事（禁止事项）
 
-- ❌ **绝对不用 `getDisplayMedia()`** 采集画板内容——录屏幕像素，遮挡/最小化时内容错误
+- ❌ ~~不用 `getDisplayMedia()`~~ **反转（2026-05-20，screen-record 重构）**：getDisplayMedia 成为新录制路径的核心 API。旧 scene-replay 录制（保留 read-only）仍以 onChange 事件流为采集源
+- ❌ **水印永远在下载阶段合成**，绝不在录制阶段烧入 webm。理由：Pro 升级后可对历史录制重下 clean MP4
+- ❌ **不上传任何视频 / 音频到服务器**（DashScope 字幕识别例外，仍仅是临时上传）
+- ❌ 不再引入云端备份 / 跨浏览器同步（云端 storage bucket 已删除，见 supabase/migrations/20260520_drop_recordings_cloud.sql）
 - ❌ 不要在时长到达限制时硬中断录制，必须先完整保存数据再弹引导
 - ❌ 不要在单次购买令牌验证时传输任何录制数据，`/api/consume-token` 只接受令牌字符串
 - ❌ 不要把令牌存 `localStorage`，必须存 `sessionStorage`（关闭浏览器自动清除）
