@@ -20,7 +20,6 @@ export async function captureDisplay(req: DisplayCaptureRequest): Promise<Displa
   const constraints: DisplayMediaStreamOptions = {
     video: {
       // Hint Chrome to prefer browser-tab capture, but the user can still pick anything.
-      // @ts-expect-error displaySurface is in the spec but not in all TS lib versions
       displaySurface: 'browser',
       frameRate: { ideal: 30, max: 60 },
     },
