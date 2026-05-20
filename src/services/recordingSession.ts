@@ -4,7 +4,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { getClientDb } from '@/lib/db-client';
 import { startAudioRecorder, type AudioRecorderHandle } from '@/services/audioRecorder';
 import { startCameraRecorder, type CameraHandle } from '@/services/cameraRecorder';
-import { ShellCapturer } from '@/services/workspaceShellCapture';
 import type { RecordingMetadata } from '@/types/recording';
 
 export interface SessionHandle {
@@ -26,7 +25,6 @@ export interface SessionHandle {
 
 export interface StartOptions {
   withCamera: boolean;
-  workspaceRoot?: HTMLElement | null;
 }
 
 const SNAPSHOT_THROTTLE_MS = 50;
@@ -64,19 +62,6 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
   let paused = false;
   let pauseStartedAt = 0;
   let pausedTotal = 0;
-
-  // 工作区 UI 快照采集器（best-effort，失败不影响录制）
-  let shellCapturer: ShellCapturer | null = null;
-  if (opts.workspaceRoot) {
-    shellCapturer = new ShellCapturer({
-      recordingId,
-      rootEl: opts.workspaceRoot,
-      getElapsedMs: () => elapsed(),
-      isPaused: () => paused,
-    });
-    // 延迟到 next tick 启动，等 UI 状态（AppHeader / RecordingBar）切换稳定
-    setTimeout(() => shellCapturer?.start(), 200);
-  }
 
   const flushSnapshot = async () => {
     if (!pendingSnapshot) return;
@@ -118,8 +103,6 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
         elements: structuredClone(elements as unknown[]),
         appState: structuredClone(appState),
       };
-      // 通知 shell capturer：appState 关键字段变化时按需重抓快照
-      shellCapturer?.onAppStateChange(appState);
 
       if (t - lastSnapshotAt < SNAPSHOT_THROTTLE_MS) {
         if (pendingTimer === null) {
@@ -150,7 +133,6 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
         clearTimeout(pendingTimer);
         await flushSnapshot();
       }
-      shellCapturer?.stop();
       if (audio) { try { await audio.stop(); } catch { /* ignore */ } }
       if (camera) { try { await camera.stop(); } catch { /* ignore */ } }
       const durationMs = Date.now() - startedAt - pausedTotal;
