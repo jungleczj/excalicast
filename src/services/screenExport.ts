@@ -54,9 +54,7 @@ export async function exportScreenRecording(opts: ScreenExportOptions): Promise<
       hasCamera: meta.hasCamera,
       videoH: meta.output.height,
     });
-    args.push('-filter_complex', filter, '-map', '[wm]', '-map', '0:a?');
-  } else {
-    args.push('-map', '0:v', '-map', '0:a?');
+    args.push('-vf', filter);
   }
   args.push(
     '-c:v', 'libx264',
@@ -68,7 +66,23 @@ export async function exportScreenRecording(opts: ScreenExportOptions): Promise<
     'output.mp4',
   );
 
-  await ffmpeg.exec(args);
+  // Capture ffmpeg log into a buffer in case exec fails — so the caller / user
+  // sees the real error instead of a generic "exec failed".
+  let lastLogs = '';
+  const logHandler = ({ message }: { message: string }) => {
+    lastLogs += message + '\n';
+    if (lastLogs.length > 4000) lastLogs = lastLogs.slice(-4000);
+  };
+  ffmpeg.on('log', logHandler);
+
+  try {
+    await ffmpeg.exec(args);
+  } catch (err) {
+    ffmpeg.off('log', logHandler);
+    const msg = err instanceof Error ? err.message : 'ffmpeg_exec_failed';
+    throw new Error(`${msg}\n\n--- ffmpeg log tail ---\n${lastLogs}`);
+  }
+  ffmpeg.off('log', logHandler);
 
   const data = await ffmpeg.readFile('output.mp4');
   const arr = data instanceof Uint8Array ? data : new TextEncoder().encode(String(data));

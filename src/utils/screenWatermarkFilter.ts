@@ -1,11 +1,13 @@
 /**
- * Build the ffmpeg -filter_complex argument that overlays an `excalicast.cc`
- * watermark in the bottom-right corner (or bottom-left when camera is present).
+ * Build a single-string ffmpeg -vf filter that overlays an `excalicast.cc`
+ * watermark in the bottom-right corner (or bottom-left when camera bubble
+ * is sitting in the bottom-right).
  *
- * Assumes a font file is already inside ffmpeg's virtual FS at `watermark-latin.ttf`.
+ * Assumes a font file is already in ffmpeg's virtual FS at `watermark-latin.ttf`.
  *
- * Returned filter graph input label is `[0:v]` (the source video) and the final
- * label is `[wm]`. The caller maps `[wm]` to the output.
+ * Returns a `-vf` value (NOT `-filter_complex`). drawtext's built-in `box=1`
+ * gives us the translucent dark pill behind the text — no separate drawbox
+ * filter needed, which keeps the syntax minimal and robust.
  */
 export function buildScreenWatermarkFilter(opts: {
   hasCamera: boolean;
@@ -13,31 +15,32 @@ export function buildScreenWatermarkFilter(opts: {
 }): string {
   const corner = opts.hasCamera ? 'bl' : 'br';
   const fontSize = Math.max(14, Math.round(opts.videoH * 0.022));
-
-  // Box geometry: roughly text-width-aware, but ffmpeg drawtext doesn't expose tw
-  // before drawing. We use drawbox at a known size that fits "excalicast.cc" at
-  // the chosen fontSize.
-  const boxW = Math.round(fontSize * 10);     // ~10 chars including padding
-  const boxH = Math.round(fontSize * 1.8);
   const marginX = Math.round(opts.videoH * 0.025);
   const marginY = Math.round(opts.videoH * 0.04);
+  const boxBorder = Math.max(8, Math.round(fontSize * 0.6));
 
-  // X / Y of the watermark box, expressed as ffmpeg expressions
-  const xExpr = corner === 'br' ? `W-w-${marginX}` : `${marginX}`;
-  const yExpr = `H-h-${marginY}`;
+  // ffmpeg drawtext positioning vars:
+  //   W, H = input frame dims
+  //   tw, th = rendered text width/height (after font shaping)
+  // Position the bottom-edge of text `marginY` from bottom; right-edge
+  // (or left-edge) `marginX` from the respective side.
+  const xExpr = corner === 'br' ? `W-tw-${marginX}` : `${marginX}`;
+  const yExpr = `H-th-${marginY}`;
 
-  // drawbox creates a semi-transparent dark pill; drawtext writes the URL inside.
-  // x_drawtext / y_drawtext are absolute inside the frame.
-  const textXExpr = corner === 'br'
-    ? `W-${boxW + marginX} + (${boxW}-tw)/2`
-    : `${marginX} + (${boxW}-tw)/2`;
-  const textYExpr = `H-${boxH + marginY} + (${boxH}-th)/2`;
-
+  // Compose a single drawtext filter. Spaces and commas inside the value
+  // are fine; only `:` separates drawtext options.
   return [
-    `[0:v]drawbox=x=${xExpr}:y=${yExpr}:w=${boxW}:h=${boxH}:[email protected]:t=fill[bg]`,
-    `[bg]drawtext=fontfile=watermark-latin.ttf:text='excalicast.cc'` +
-      `:fontcolor=white@0.95:fontsize=${fontSize}` +
-      `:x=${textXExpr}:y=${textYExpr}` +
-      `:shadowcolor=black@0.4:shadowx=1:shadowy=1[wm]`,
-  ].join(';');
+    'drawtext=fontfile=watermark-latin.ttf',
+    `text='excalicast.cc'`,
+    `fontcolor=white@0.95`,
+    `fontsize=${fontSize}`,
+    `x=${xExpr}`,
+    `y=${yExpr}`,
+    `box=1`,
+    `[email protected]`,
+    `boxborderw=${boxBorder}`,
+    `shadowcolor=black@0.5`,
+    `shadowx=1`,
+    `shadowy=1`,
+  ].join(':');
 }

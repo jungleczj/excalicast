@@ -36,7 +36,18 @@ export interface ScreenRecordingHandle {
 }
 
 const CHUNK_INTERVAL_MS = 1000;
-const RECORDER_MIME = 'video/webm;codecs=vp9,opus';
+const RECORDER_MIME_CANDIDATES = [
+  'video/webm;codecs=vp9,opus',
+  'video/webm;codecs=vp8,opus',
+  'video/webm',
+];
+
+function pickRecorderMime(): string {
+  for (const m of RECORDER_MIME_CANDIDATES) {
+    if (MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return 'video/webm';
+}
 
 export async function startScreenRecording(opts: StartScreenRecordingOpts): Promise<ScreenRecordingHandle> {
   const recordingId = uuidv4();
@@ -102,8 +113,9 @@ export async function startScreenRecording(opts: StartScreenRecordingOpts): Prom
   });
 
   // 6) MediaRecorder
+  const mimeType = pickRecorderMime();
   const recorder = new MediaRecorder(composite.outputStream, {
-    mimeType: RECORDER_MIME,
+    mimeType,
     videoBitsPerSecond: 6_000_000,
     audioBitsPerSecond: 128_000,
   });
