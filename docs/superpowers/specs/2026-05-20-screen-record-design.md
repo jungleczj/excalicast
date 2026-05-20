@@ -37,7 +37,9 @@
 - 录制时支持比例预选 + 裁剪框定位
 - 摄像头气泡可拖动，位置实时反映在最终视频里
 - 输出 MP4（webm 转码）
-- Pro 价值：去水印（**Pro 后可重下旧录制**，不需要重录）、字幕、大纲
+- **集成提词器**：浮动面板可弹出到 Document PiP（隔离于录制流，不入镜）
+- **实时字幕**：录制中边录边识别（Pro 功能）
+- Pro 价值：**无水印** + **实时字幕** + **生成讲义**（Pro 后可重下旧录制，不需要重录）
 
 ### 反向约束（不再有的事）
 
@@ -63,6 +65,10 @@
 | 旧录制标识？ | 不加徽标，新旧混合显示 |
 | 水印 / 字幕烧入时机？ | **下载阶段** ffmpeg overlay（Pro 后可清水印） |
 | 大纲生成？ | **v1 包含**（Pro 解锁，调 Deepseek） |
+| 提词器集成？ | **保留**（从 feature/teleprompter 移植）；提词器面板里加「弹出」按钮 |
+| 提词器隔离机制？ | **Document PiP 主 + window.open 兜底** |
+| 提词器弹出触发？ | 提词器面板里手动点「弹出」按钮（不自动） |
+| 实时字幕实现？ | Web Speech API（Chrome 内置，前端零成本）；DashScope 批处理作为「高精度重识别」可选项 |
 
 ## 架构
 
@@ -227,17 +233,181 @@ interface ScreenRecordingChunk {
 
 ## Pro 权限重映射
 
+会员核心三件套：**无水印 + 实时字幕 + 生成讲义**。
+
 | 权限 | Free | Pro |
 |---|---|---|
 | 录屏（任意比例 / 任意源） | ✅ | ✅ |
 | 录制时长 | 无限 | 无限 |
 | 麦克风 + 系统音频 + 摄像头 | ✅ | ✅ |
-| 下载 MP4 | ✅（水印烧入）| ✅（无水印）|
-| 字幕生成 | ❌ | ✅ |
-| 大纲 / 章节生成 | ❌ | ✅ |
+| 提词器（含 PiP 弹出） | ✅ | ✅ |
+| 下载 MP4 | ✅（水印烧入）| ✅（**无水印**）|
+| **实时字幕**（边录边识别） | ❌ | ✅ |
+| **生成讲义 / 大纲** | ❌ | ✅ |
 | Pro 后回看旧录制可去水印 | — | ✅ |
 
-**关键不变量**：水印不在录制时烧；Free 用户买 Pro 后，对**任何**录制（包括 Free 时期录的）重下都是 clean。
+**关键不变量**：水印不在录制时烧；Free 用户买 Pro 后，对**任何**录制（包括 Free 时期录的）重下都是 clean。提词器对所有用户开放，不是付费门控。
+
+## 提词器集成
+
+### 基础设计
+
+复用 `feature/teleprompter` 分支已经做的 `TeleprompterPanel` 组件（491 行）+ 3 个 hook（`useTeleprompterScroll` 自动滚动、`useTeleprompterDock` 磁吸停靠、`useTeleprompterVoiceSync` 语音同步）。
+
+把那个分支的提词器代码移植进 `feature/screen-record`：
+- `src/components/TeleprompterPanel.tsx`
+- `src/hooks/useTeleprompterScroll.ts`
+- `src/hooks/useTeleprompterDock.ts`
+- `src/hooks/useTeleprompterVoiceSync.ts`
+- `src/types/recording.ts` 里的 `TeleprompterConfig` / `TeleprompterDockState`
+
+### 「弹出到 PiP」核心功能（新增）
+
+提词器面板顶部加按钮 `📤 弹出独立窗口`。点击后：
+
+```typescript
+// services/teleprompterPip.ts
+async function popOutTeleprompter(): Promise<Window> {
+  // Chrome 116+
+  if ('documentPictureInPicture' in window) {
+    const pipWindow = await window.documentPictureInPicture.requestWindow({
+      width: 480,
+      height: 360,
+      disallowReturnToOpener: false, // 允许折回
+    });
+    // 把 TeleprompterPanel DOM 节点移动进去
+    movePanelToWindow(pipWindow);
+    return pipWindow;
+  }
+  // 兜底：普通弹窗
+  const popup = window.open(
+    '',
+    'teleprompter',
+    'width=480,height=360,alwaysRaised=yes',
+  );
+  if (!popup) throw new Error('popup_blocked');
+  movePanelToWindow(popup);
+  return popup;
+}
+```
+
+**移动 DOM 进 PiP 的实现**：用 React Portal 把 TeleprompterPanel 渲染到 PiP window 的 `<body>`。同时把 Excalicast 主页的 CSS 复制进 PiP（否则样式丢失）。
+
+### PiP 模式下的行为差异
+
+| 特性 | 嵌入模式 | PiP 模式 |
+|---|---|---|
+| 位置 | 主页面 z-50 浮层，拖拽 | PiP 窗口本身可拖（OS 级）|
+| 大小 | 组件内拖拽 resize | PiP 窗口边角 resize |
+| 磁吸到摄像头 | ✅ | ❌（PiP 是独立 OS 窗口）|
+| 语音同步 | ✅ | ✅（同主线程跑）|
+| 录制中是否入镜 | **入镜**（属于 Excalicast tab DOM） | **不入镜**（独立窗口；用户录 tab/window 都不会包含）|
+
+### 用户引导
+
+录制开始的 setup modal 加一行：
+
+```
+ℹ️ 提词器需要在录制中不被录进去？
+   → 点开提词器面板里的「弹出」按钮，它会变成独立 PiP 窗口
+   ⚠️ 录整屏时，PiP 窗口仍会被录进去（请放到第二显示器或改录别的窗口）
+```
+
+### 改动文件
+
+- 移植 4 个文件（见上）
+- 新建 `src/services/teleprompterPip.ts`
+- 改 `src/components/TeleprompterPanel.tsx` 加「弹出」按钮 + Portal 逻辑
+- 改 RecordSetupModal 加录制中提词器引导
+
+## 实时字幕
+
+### MVP 实现：Web Speech API
+
+```typescript
+// services/realtimeSubtitle.ts
+const SpeechRecognition =
+  (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+interface RealtimeSubtitleHandle {
+  start(): void;
+  pause(): void;
+  resume(): void;
+  stop(): SubtitleCue[];  // 返回累积的 SRT 段
+  onInterim?: (text: string) => void;  // 实时显示用
+}
+
+function createRealtimeSubtitle(opts: { lang: 'zh-CN' | 'en-US' }): RealtimeSubtitleHandle {
+  const recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = opts.lang;
+
+  const cues: SubtitleCue[] = [];
+  let startedAt = 0;
+
+  recognition.onresult = (event: SpeechRecognitionEvent) => {
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const result = event.results[i];
+      if (result.isFinal) {
+        // 写入累积 SRT
+        cues.push({
+          index: cues.length + 1,
+          startMs: ...,  // 用 event.timeStamp 推算
+          endMs: ...,
+          text: result[0].transcript,
+        });
+      } else {
+        // interim：即时显示，不存 SRT
+        opts.onInterim?.(result[0].transcript);
+      }
+    }
+  };
+
+  return { ... };
+}
+```
+
+### UX 渲染
+
+录制中：屏幕底部固定一行半透明黑条显示当前识别中的句子（interim），完成后变成已识别的句子并加入 SRT。**这个 UI 元素如果留在 Excalicast tab 的 DOM 里会被录进去**——与提词器同样问题。
+
+**解决方案：实时字幕条始终在 PiP 中显示**
+
+| 场景 | 提词器 PiP 状态 | 字幕条位置 |
+|---|---|---|
+| 用户启用了实时字幕 + 提词器已弹出 PiP | 已有 PiP | **复用提词器 PiP**，分两区（上提词器、下字幕条）|
+| 用户启用了实时字幕 + 提词器在 DOM 模式 | 无 PiP | **额外开一个 PiP 只显示字幕条** |
+| 用户启用了实时字幕 + 没开提词器 | 无 PiP | **开 PiP 只显示字幕条** |
+| 用户没启用实时字幕 | — | SRT 数据没有 / 不展示 |
+
+无论哪种场景，**实时字幕条永远不在 Excalicast tab 的 DOM 里渲染**，因此永远不会被录进去。
+
+合成 canvas 也永远不画字幕——下载时按需 ffmpeg `drawtext` 烧入。
+
+### 高精度重识别（可选）
+
+录完后处理页提供「用 DashScope 重新识别（更准）」按钮：调现有 `paraformer-v2` 异步任务接口，结果覆盖原 SRT。这是 Pro 用户的额外福利（不另收费，因为已经 Pro 了）。
+
+### Free 用户的体验
+
+Free 用户的录制：
+- **没有实时字幕显示**（按钮变灰带「Pro」徽标）
+- 下载选项里「字幕烧入」也变灰
+- 处理页可以看到「升级 Pro 解锁实时字幕」CTA
+
+### 错误降级
+
+- Chrome 不支持 Web Speech 或用户拒绝麦克风权限 → 字幕条提示「浏览器不支持实时识别，可在录制结束后用『重新识别』」
+- 识别中断（网络等）→ 自动重连 3 次
+- 静音段 > 30s → 暂停识别避免空跑
+
+### 改动文件
+
+- 新建 `src/services/realtimeSubtitle.ts`
+- 新建 `src/components/SubtitleLiveBox.tsx`（PiP 内底部字幕条）
+- 改 RecordSetupModal 加「实时字幕」toggle（Free 灰、Pro 默认开）
+- 改 `src/services/qwenAsr.ts` 改名为「post-process refinement」语义
 
 ## 关键文件清单
 
@@ -250,11 +420,24 @@ interface ScreenRecordingChunk {
 | `src/services/liveComposite.ts` | OffscreenCanvas 实时合成（屏幕 crop + 摄像头）+ 音频混合（AudioContext）+ canvas.captureStream |
 | `src/services/screenExport.ts` | webm → MP4，可选字幕烧入、可选水印 overlay |
 | `src/services/outlineGenerator.ts` | 调 Deepseek 生成大纲（输入：字幕 + 关键帧截图） |
-| `src/components/RecordSetupModal.tsx` | 比例 / 音频 / 摄像头预设 |
+| `src/services/realtimeSubtitle.ts` | Web Speech API 实时识别 + interim 派发 + 累积 SRT |
+| `src/services/teleprompterPip.ts` | Document PiP 弹出 + window.open 兜底 + Portal 注入 |
+| `src/components/RecordSetupModal.tsx` | 比例 / 音频 / 摄像头 / 提词器 / 实时字幕 toggle 预设 |
 | `src/components/RegionSelector.tsx` | 裁剪定位（比例锁定的可拖拽框） |
 | `src/components/RecordingControlBar.tsx` | 录制中浮动条（重写，更简） |
+| `src/components/SubtitleLiveBox.tsx` | 实时字幕浮条（渲染到 PiP 内底部） |
 | `src/app/[locale]/process/[id]/page.tsx` | 处理页（播放 + 字幕 / 大纲 / 下载） |
 | `supabase/migrations/2026_05_20_drop_cloud_recordings.sql` | drop recordings_cloud + bucket |
+
+### 从 feature/teleprompter 移植（直接 copy）
+
+| 文件 | 改动 |
+|---|---|
+| `src/components/TeleprompterPanel.tsx` | 移植；加「弹出」按钮 + PiP 集成 |
+| `src/hooks/useTeleprompterScroll.ts` | 移植不动 |
+| `src/hooks/useTeleprompterDock.ts` | 移植；PiP 模式禁用磁吸 |
+| `src/hooks/useTeleprompterVoiceSync.ts` | 移植不动 |
+| `src/types/recording.ts` 里的 `TeleprompterConfig` / `TeleprompterDockState` | 合并到主 types |
 
 ### 修改
 
@@ -347,18 +530,36 @@ Alternative：录完字幕已存在的话，把 webm 解码出来逐帧贴字幕
 ### 必须通过
 
 1. ✅ Workspace 主页有「开始录制」入口
-2. ✅ 录制 setup modal 让选比例 / 音频 / 摄像头
+2. ✅ 录制 setup modal 让选比例 / 音频 / 摄像头 / 提词器 / 实时字幕
 3. ✅ 选择源走 native getDisplayMedia 弹窗，可挑 tab/window/screen
 4. ✅ 非「原始」比例下，进入 RegionSelector，可拖动 / 缩放裁剪框
 5. ✅ 开始录制后浮动条显示计时；可暂停 / 继续 / 停止
 6. ✅ 摄像头气泡录制中可拖，位置变化反映在最终视频
 7. ✅ 停止后 webm 写完，跳到 `/process/[id]`
 8. ✅ 播放器能正常播 webm
-9. ✅ Pro 用户点字幕生成 → DashScope → SRT 写回本地
-10. ✅ Pro 用户点大纲生成 → Deepseek → markdown 写回本地
-11. ✅ Free 用户下载 MP4 → 自动加水印；Pro 下载 → 无水印
-12. ✅ 字幕烧入 toggle 工作
-13. ✅ 旧 scene-replay 录制仍能在库列表看到，点开仍能正常播放和导出
+9. ✅ Pro 用户**录制中**实时字幕在 PiP 底部条显示 + SRT 同步写入 IndexedDB
+10. ✅ Pro 用户处理页可点「DashScope 重新识别」获得更高精度 SRT
+11. ✅ Pro 用户点大纲生成 → Deepseek → markdown 写回本地
+12. ✅ Free 用户下载 MP4 → 自动加水印；Pro 下载 → 无水印
+13. ✅ 字幕烧入 toggle 工作
+14. ✅ 旧 scene-replay 录制仍能在库列表看到，点开仍能正常播放和导出
+
+### 提词器专项
+
+15. ✅ 提词器面板默认是 Excalicast tab 内的 z-50 浮层
+16. ✅ 点「弹出」按钮 → Chrome 116+ 走 Document PiP，老浏览器走 window.open
+17. ✅ PiP 模式下，录制 Excalicast tab 或其他窗口都不会拍到提词器内容
+18. ✅ PiP 模式下语音同步仍工作（高亮当前词）
+19. ✅ 关闭 PiP 窗口或点「收回」→ 提词器 DOM 还原到 Excalicast tab 内
+20. ✅ Setup modal 录制整屏时提示「PiP 也会被录进去」
+
+### 实时字幕专项
+
+21. ✅ 录制开始即开始识别；interim 文本即时显示在 PiP 字幕条
+22. ✅ Final 识别结果累积成 SRT 数组，停止录制时已是完整 SRT
+23. ✅ Free 用户的 toggle 灰显，带「Pro」徽标
+24. ✅ Chrome 不支持 Web Speech → 友好降级到「请用 DashScope 重新识别」
+25. ✅ 实时字幕**绝不进合成 canvas**，最终 webm 不带烧入字幕（除非下载时用户勾了烧入）
 
 ### 应当通过
 
