@@ -14,6 +14,9 @@ export interface ScreenRecordingMetadata {
   thumbnail?: string;       // base64 data URL, generated at stop
   status: RecordingStatus;
   title?: string;
+  // SRT text bound to this recording. Generated via DashScope ASR (Pro feature).
+  // Burned in at download time when the user opts in.
+  subtitleSrt?: string;
   // The recorded webm is the union of all `screenChunks` rows ordered by `index`.
   // We do NOT store the watermark state here — watermark is decided at download.
 }

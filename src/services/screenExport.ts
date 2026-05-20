@@ -4,6 +4,8 @@ import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
 import { getScreenRecording, loadScreenRecordingWebm } from '@/lib/db-client';
 import { buildScreenWatermarkFilter } from '@/utils/screenWatermarkFilter';
+import { buildSubtitleDrawtextFilters } from '@/utils/screenSubtitleFilter';
+import { parseSrt } from '@/utils/srtParser';
 
 let _ffmpeg: FFmpeg | null = null;
 async function getFfmpeg(onLog?: (m: string) => void): Promise<FFmpeg> {
@@ -18,6 +20,7 @@ async function getFfmpeg(onLog?: (m: string) => void): Promise<FFmpeg> {
 export interface ScreenExportOptions {
   recordingId: string;
   withWatermark: boolean;          // false ONLY when current user is Pro at download-time
+  burnSubtitles: boolean;          // when true and meta.subtitleSrt is present, burn cues into the video
   onProgress?: (ratio: number) => void;
   onPhase?: (phase: 'loading' | 'transcoding' | 'done') => void;
   onLog?: (message: string) => void;
@@ -36,7 +39,9 @@ export async function exportScreenRecording(opts: ScreenExportOptions): Promise<
 
   await ffmpeg.writeFile('input.webm', new Uint8Array(await webm.arrayBuffer()));
 
-  if (opts.withWatermark) {
+  // Watermark + subtitles share the same font file in ffmpeg FS.
+  const needsFont = opts.withWatermark || (opts.burnSubtitles && !!meta.subtitleSrt);
+  if (needsFont) {
     const ttf = await fetchFile('/fonts/watermark-latin.ttf');
     await ffmpeg.writeFile('watermark-latin.ttf', ttf);
   }
@@ -48,13 +53,23 @@ export async function exportScreenRecording(opts: ScreenExportOptions): Promise<
     opts.onProgress?.(0.15 + Math.min(1, Math.max(0, progress)) * 0.83);
   });
 
-  const args = ['-i', 'input.webm'];
+  // Build combined -vf chain: subtitles first (so watermark stays on top), then watermark.
+  const filterParts: string[] = [];
+  if (opts.burnSubtitles && meta.subtitleSrt) {
+    const cues = parseSrt(meta.subtitleSrt);
+    const subFilters = buildSubtitleDrawtextFilters(cues, meta.output.height);
+    filterParts.push(...subFilters);
+  }
   if (opts.withWatermark) {
-    const filter = buildScreenWatermarkFilter({
+    filterParts.push(buildScreenWatermarkFilter({
       hasCamera: meta.hasCamera,
       videoH: meta.output.height,
-    });
-    args.push('-vf', filter);
+    }));
+  }
+
+  const args = ['-i', 'input.webm'];
+  if (filterParts.length > 0) {
+    args.push('-vf', filterParts.join(','));
   }
   args.push(
     '-c:v', 'libx264',
@@ -90,7 +105,7 @@ export async function exportScreenRecording(opts: ScreenExportOptions): Promise<
   // Cleanup
   try { await ffmpeg.deleteFile('input.webm'); } catch { /* */ }
   try { await ffmpeg.deleteFile('output.mp4'); } catch { /* */ }
-  if (opts.withWatermark) {
+  if (needsFont) {
     try { await ffmpeg.deleteFile('watermark-latin.ttf'); } catch { /* */ }
   }
 
