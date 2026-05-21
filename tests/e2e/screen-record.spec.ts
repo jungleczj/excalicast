@@ -112,6 +112,22 @@ test.describe('Screen recording — happy path', () => {
     await expect(video).toBeVisible();
     await expect(video).toHaveAttribute('src', /^blob:/);
 
+    // CRITICAL REGRESSION CHECK — the previous failure mode was MediaRecorder
+    // emitting empty chunks while everything LOOKED fine. Verify the actual
+    // bytes in IndexedDB are non-zero.
+    const chunkStats = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const Dexie = (await import('https://cdn.jsdelivr.net/npm/dexie@4/+esm' as any)).default;
+      const db = new Dexie('excalicast');
+      await db.open();
+      const rows = await db.table('screenChunks').toArray();
+      const totalBytes = rows.reduce((s: number, r: { blob: Blob }) => s + r.blob.size, 0);
+      await db.close();
+      return { count: rows.length, totalBytes };
+    });
+    expect(chunkStats.count, `expected at least 1 chunk in IndexedDB but got ${chunkStats.count}`).toBeGreaterThan(0);
+    expect(chunkStats.totalBytes, `expected non-zero recorded bytes; chunks=${chunkStats.count}`).toBeGreaterThan(0);
+
     // Format picker present (use unique sub-text to disambiguate from the
     // "下载 MP4" download button)
     await expect(page.getByRole('button', { name: /MP4.*最广兼容/ })).toBeVisible();

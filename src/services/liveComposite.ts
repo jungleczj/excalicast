@@ -1,6 +1,6 @@
 'use client';
 
-const LOG_TAG = '[liveComposite]';
+const LOG_TAG = '[liveComposite v4]';
 
 export interface CompositeInputs {
   displayStream: MediaStream;
@@ -167,20 +167,37 @@ export async function startLiveComposite(
 
   const videoTrack = canvas.captureStream(opts.fps).getVideoTracks()[0];
 
-  // Audio mix
-  const audioCtx = new AudioContext();
-  const dest = audioCtx.createMediaStreamDestination();
-  if (inputs.micStream) {
-    audioCtx.createMediaStreamSource(inputs.micStream).connect(dest);
+  // Audio mix — but ONLY build the AudioContext + destination if we actually
+  // have a real audio input. The MediaStreamAudioDestinationNode always has
+  // a track even with no sources connected (it emits silence), but Chrome's
+  // MediaRecorder stalls when the declared codec is opus and the track is a
+  // phantom silent one with no source feeding it. We saw this in the user's
+  // session: hundreds of empty chunks dropped.
+  const hasRealAudio = !!(inputs.micStream || inputs.systemAudioTrack);
+  let audioCtx: AudioContext | null = null;
+  const audioTracksForOutput: MediaStreamTrack[] = [];
+  if (hasRealAudio) {
+    audioCtx = new AudioContext();
+    const dest = audioCtx.createMediaStreamDestination();
+    if (inputs.micStream) {
+      audioCtx.createMediaStreamSource(inputs.micStream).connect(dest);
+    }
+    if (inputs.systemAudioTrack) {
+      const sysStream = new MediaStream([inputs.systemAudioTrack]);
+      audioCtx.createMediaStreamSource(sysStream).connect(dest);
+    }
+    audioTracksForOutput.push(...dest.stream.getAudioTracks());
   }
-  if (inputs.systemAudioTrack) {
-    const sysStream = new MediaStream([inputs.systemAudioTrack]);
-    audioCtx.createMediaStreamSource(sysStream).connect(dest);
-  }
+  console.info(LOG_TAG, 'audio inputs:', {
+    micStream: !!inputs.micStream,
+    systemAudio: !!inputs.systemAudioTrack,
+    hasRealAudio,
+    outputAudioTrackCount: audioTracksForOutput.length,
+  });
 
   const outputStream = new MediaStream([
     videoTrack,
-    ...dest.stream.getAudioTracks(),
+    ...audioTracksForOutput,
   ]);
 
   return {
@@ -193,7 +210,7 @@ export async function startLiveComposite(
     stop: () => {
       running = false;
       videoTrack.stop();
-      try { audioCtx.close(); } catch { /* ignore */ }
+      try { audioCtx?.close(); } catch { /* ignore */ }
       try { inputs.displayStream.getTracks().forEach((t) => t.stop()); } catch { /* */ }
       try { inputs.cameraStream?.getTracks().forEach((t) => t.stop()); } catch { /* */ }
       try { inputs.micStream?.getTracks().forEach((t) => t.stop()); } catch { /* */ }

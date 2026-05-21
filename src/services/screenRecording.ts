@@ -12,7 +12,7 @@ import { captureCamera, captureDisplay, captureMicrophone } from '@/services/dis
 import { startLiveComposite, type CompositeOutput } from '@/services/liveComposite';
 import type { ScreenRecordingMetadata } from '@/types/recording';
 
-const LOG_TAG = '[screenRecording]';
+const LOG_TAG = '[screenRecording v4]';
 
 export interface StartScreenRecordingOpts {
   withMic: boolean;
