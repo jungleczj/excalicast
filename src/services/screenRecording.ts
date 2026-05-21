@@ -9,7 +9,13 @@ import {
   putScreenRecording,
   updateScreenRecording,
 } from '@/lib/db-client';
-import { captureCamera, captureDisplay, captureMicrophone } from '@/services/displayCapture';
+import {
+  assertNotBlackFrames,
+  captureDisplayWithAbort,
+  makeScreenError,
+  SCREEN_ERROR,
+  type AbortFlag,
+} from '@/services/displayCapture';
 import { startLiveComposite, type CompositeOutput } from '@/services/liveComposite';
 import { openCameraPreview, type PipHandle } from '@/services/cameraPreviewPip';
 import type {
@@ -18,12 +24,16 @@ import type {
   ScreenRecordingMetadata,
 } from '@/types/recording';
 
-const LOG_TAG = '[screenRecording v5]';
+const LOG_TAG = '[screenRecording v6]';
 
 export interface StartScreenRecordingOpts {
-  withMic: boolean;
   withSystemAudio: boolean;
-  withCamera: boolean;
+  /** Mic stream pre-acquired by the setup modal. null = user didn't enable mic or permission failed. */
+  presetMicStream: MediaStream | null;
+  /** Camera stream pre-acquired by the setup modal. null = user didn't enable camera or permission failed. */
+  presetCameraStream: MediaStream | null;
+  /** Abort signal shared with the UI. Setting `aborted=true` cancels the current picker wait. */
+  abortFlag: AbortFlag;
 }
 
 export interface ScreenRecordingHandle {
@@ -33,8 +43,6 @@ export interface ScreenRecordingHandle {
   hasMic: boolean;
   hasSystemAudio: boolean;
   hasCamera: boolean;
-  micError?: string;
-  cameraError?: string;
   displaySurface: DisplaySurface;
   bubbleSource: BubbleSource;
   /** Whether we successfully opened a Picture-in-Picture preview for the camera.
@@ -77,54 +85,111 @@ function detectDisplaySurface(stream: MediaStream): DisplaySurface {
   return 'unknown';
 }
 
+/** Module-level mutex: prevents HMR re-renders or double-clicks from starting
+ *  two parallel recordings (the previous architecture would leak both streams
+ *  and confuse IndexedDB). */
+let inflightStart: Promise<ScreenRecordingHandle> | null = null;
+
 export async function startScreenRecording(opts: StartScreenRecordingOpts): Promise<ScreenRecordingHandle> {
+  if (inflightStart) {
+    console.warn(LOG_TAG, 'startScreenRecording already in flight — returning existing promise');
+    return inflightStart;
+  }
+  inflightStart = (async () => {
+    try {
+      return await _startInner(opts);
+    } finally {
+      inflightStart = null;
+    }
+  })();
+  return inflightStart;
+}
+
+async function _startInner(opts: StartScreenRecordingOpts): Promise<ScreenRecordingHandle> {
   const recordingId = uuidv4();
   const startedAt = Date.now();
-
-  // 1) Display capture (synchronous user-gesture window)
-  const { videoStream: displayStream, systemAudioTrack } = await captureDisplay({
+  console.info(LOG_TAG, 'STAGE 0 entered. opts=', {
     withSystemAudio: opts.withSystemAudio,
+    hasPresetMic: !!opts.presetMicStream,
+    hasPresetCamera: !!opts.presetCameraStream,
   });
+
+  // Preset streams from the setup modal — recording owns them now.
+  const micStream: MediaStream | null = opts.presetMicStream;
+  const cameraStream: MediaStream | null = opts.presetCameraStream;
+  const hasMic = !!micStream;
+  const hasCamera = !!cameraStream;
+
+  // Cleanup helper for fail-fast paths so we don't leak the preset streams.
+  const releasePresets = (): void => {
+    try { micStream?.getTracks().forEach((t) => t.stop()); } catch { /* */ }
+    try { cameraStream?.getTracks().forEach((t) => t.stop()); } catch { /* */ }
+  };
+
+  // STAGE 1: Display capture (the only OS permission still pending). Wrapped
+  // with abortFlag race so the UI can cancel while the picker is open.
+  console.info(LOG_TAG, 'STAGE 1 calling captureDisplayWithAbort …');
+  let displayStream: MediaStream;
+  let systemAudioTrack: MediaStreamTrack | null;
+  try {
+    const result = await captureDisplayWithAbort(
+      { withSystemAudio: opts.withSystemAudio },
+      opts.abortFlag,
+    );
+    displayStream = result.videoStream;
+    systemAudioTrack = result.systemAudioTrack;
+  } catch (err) {
+    releasePresets();
+    throw err;
+  }
+
+  // If the user clicked Cancel AFTER the picker silently resolved, we must
+  // discard the orphan stream so the OS-level "Chrome is recording" indicator
+  // disappears.
+  if (opts.abortFlag.aborted) {
+    console.info(LOG_TAG, 'STAGE 1 aborted — stopping orphan stream');
+    try { displayStream.getTracks().forEach((t) => t.stop()); } catch { /* */ }
+    try { systemAudioTrack?.stop(); } catch { /* */ }
+    releasePresets();
+    throw makeScreenError(SCREEN_ERROR.PICKER_CANCELLED, 'aborted after picker resolved');
+  }
+
+  // STAGE 1.5: stream sanity
+  if (displayStream.getVideoTracks().length === 0) {
+    releasePresets();
+    try { systemAudioTrack?.stop(); } catch { /* */ }
+    throw makeScreenError(SCREEN_ERROR.NO_VIDEO_TRACK, 'getDisplayMedia returned a stream without a video track');
+  }
   const hasSystemAudio = systemAudioTrack !== null;
   const displaySurface = detectDisplaySurface(displayStream);
+  console.info(LOG_TAG, 'STAGE 1 done. surface=', displaySurface, 'hasSysAudio=', hasSystemAudio);
 
-  // 2) Mic — graceful degrade
-  let micStream: MediaStream | null = null;
-  let hasMic = false;
-  let micError: string | undefined;
-  if (opts.withMic) {
-    try {
-      micStream = await captureMicrophone();
-      hasMic = true;
-    } catch (err) {
-      micError = err instanceof Error ? err.message : 'unknown';
-      console.warn(LOG_TAG, 'mic_failed:', micError);
-    }
+  // STAGE 1.6: black-frame check (macOS TCC silent failure)
+  console.info(LOG_TAG, 'STAGE 1.6 checking for black frames …');
+  try {
+    await assertNotBlackFrames(displayStream);
+    console.info(LOG_TAG, 'STAGE 1.6 OK (frames have content)');
+  } catch (err) {
+    console.warn(LOG_TAG, 'STAGE 1.6 black frame check threw:', err);
+    try { displayStream.getTracks().forEach((t) => t.stop()); } catch { /* */ }
+    try { systemAudioTrack?.stop(); } catch { /* */ }
+    releasePresets();
+    throw err;
   }
 
-  // 3) Camera — graceful degrade
-  let cameraStream: MediaStream | null = null;
-  let hasCamera = false;
-  let cameraError: string | undefined;
-  if (opts.withCamera) {
-    try {
-      cameraStream = await captureCamera();
-      hasCamera = true;
-    } catch (err) {
-      cameraError = err instanceof Error ? err.message : 'unknown';
-      console.warn(LOG_TAG, 'camera_failed:', cameraError);
-    }
-  }
-
-  // 4) PiP preview — only if we actually have a camera stream.
+  // STAGE 4: PiP preview — only if we actually have a camera stream.
   let pipHandle: PipHandle | null = null;
   if (cameraStream) {
+    console.info(LOG_TAG, 'STAGE 4 opening PiP preview …');
     try {
       pipHandle = await openCameraPreview(cameraStream);
+      console.info(LOG_TAG, 'STAGE 4 done. pipHandle=', pipHandle ? 'opened' : 'null');
     } catch (err) {
-      console.warn(LOG_TAG, 'PiP attempt threw:', err);
+      console.warn(LOG_TAG, 'STAGE 4 PiP attempt threw:', err);
       pipHandle = null;
     }
+  } else {
+    console.info(LOG_TAG, 'STAGE 4 skipped (no cameraStream)');
   }
   const previewActive = !!pipHandle;
 
@@ -142,17 +207,17 @@ export async function startScreenRecording(opts: StartScreenRecordingOpts): Prom
 
   console.info(LOG_TAG, 'start:', {
     recordingId,
-    withMic: opts.withMic, hasMic, micError,
-    withSystemAudio: opts.withSystemAudio, hasSystemAudio,
-    withCamera: opts.withCamera, hasCamera, cameraError,
+    hasMic, hasSystemAudio, hasCamera,
     displaySurface, previewActive, bubbleSource,
   });
 
   // 6) Screen composite (no camera path inside) + screen MediaRecorder
+  console.info(LOG_TAG, 'STAGE 6 calling startLiveComposite …');
   const composite: CompositeOutput = await startLiveComposite(
     { displayStream, micStream, systemAudioTrack },
     { fps: 30 },
   );
+  console.info(LOG_TAG, 'STAGE 6 done. canvas=', composite.output);
 
   await putScreenRecording({
     id: recordingId,
@@ -314,8 +379,6 @@ export async function startScreenRecording(opts: StartScreenRecordingOpts): Prom
     hasMic,
     hasSystemAudio,
     hasCamera,
-    micError,
-    cameraError,
     displaySurface,
     bubbleSource,
     previewActive,

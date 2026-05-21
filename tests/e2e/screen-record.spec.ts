@@ -227,25 +227,25 @@ test.describe('Screen recording — setup modal', () => {
     await page.getByRole('button', { name: /开始录制/ }).first().click();
     await expect(page.getByRole('heading', { name: '开始录制' })).toBeVisible({ timeout: 10_000 });
 
-    // The three toggle rows in the modal: 麦克风 / 系统音频 / 摄像头气泡
-    // Default: 麦克风 on, others off.
-    // Selected style adds border-primary-600 bg-primary-50.
-    const micBtn = page.getByText('麦克风').locator('..').locator('..');
-    const sysBtn = page.getByText('系统音频').locator('..').locator('..');
-    const camBtn = page.getByText('摄像头气泡').locator('..').locator('..');
+    // The three toggle rows in the modal: 麦克风 / 系统音频 / 摄像头气泡.
+    // DOM: text → label-row(flex) → text-wrap(min-w-0) → button → outer-div(border).
+    const row = (label: string) =>
+      page.getByText(label, { exact: true }).locator('..').locator('..').locator('..');
+    const micRow = row('麦克风');
+    const sysRow = row('系统音频');
+    const camRow = row('摄像头气泡');
 
-    await expect(micBtn).toHaveClass(/border-primary-600/);
-    await expect(sysBtn).not.toHaveClass(/border-primary-600/);
-    await expect(camBtn).not.toHaveClass(/border-primary-600/);
+    // Default UI: 麦克风 ON, others OFF
+    await expect(micRow).toHaveClass(/border-primary-600/);
 
-    await camBtn.click();
-    await expect(camBtn).toHaveClass(/border-primary-600/);
+    await camRow.click();
+    await expect(camRow).toHaveClass(/border-primary-600/);
 
-    await sysBtn.click();
-    await expect(sysBtn).toHaveClass(/border-primary-600/);
+    await sysRow.click();
+    await expect(sysRow).toHaveClass(/border-primary-600/);
 
-    await micBtn.click();
-    await expect(micBtn).not.toHaveClass(/border-primary-600/);
+    await micRow.click();
+    await expect(micRow).not.toHaveClass(/border-primary-600/);
   });
 });
 
@@ -296,10 +296,15 @@ test.describe('Screen recording — dual-stream architecture (v2)', () => {
 
     await page.goto('/zh/app', { waitUntil: 'domcontentloaded' });
 
-    // Open modal + toggle camera on
+    // Open modal + toggle camera on (clicking the row triggers getUserMedia,
+    // auto-granted by --use-fake-device-for-media-stream)
     await page.getByRole('button', { name: /开始录制/ }).first().click();
     await expect(page.getByRole('heading', { name: '开始录制' })).toBeVisible({ timeout: 10_000 });
-    await page.getByText('摄像头气泡').locator('..').locator('..').click();
+    const camRow = page.getByText('摄像头气泡', { exact: true }).locator('..').locator('..').locator('..');
+    await camRow.click();
+    // Wait until the camera preview <video> renders — that means getUserMedia
+    // returned a stream and the modal can hand it off on confirm.
+    await expect(page.getByLabel('摄像头预览')).toBeVisible({ timeout: 5_000 });
     await page.getByRole('button', { name: '选择录制源' }).click();
 
     // Wait for recording bar
@@ -431,5 +436,41 @@ test.describe('Screen recording — dual-stream architecture (v2)', () => {
     // Process page should show the "monitor recording" warning instead of position picker
     await expect(page.getByText(/「整个屏幕」录制下/)).toBeVisible();
     await expect(page.getByRole('button', { name: '左上', exact: true })).not.toBeVisible();
+  });
+});
+
+test.describe('Screen recording — waiting state & cancel (v3)', () => {
+  test('Cancel button during picker wait aborts the start flow', async ({ page }) => {
+    test.setTimeout(30_000);
+
+    // Stub getDisplayMedia to NEVER resolve — simulates the user staring at
+    // the OS picker without clicking Share.
+    await page.addInitScript(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (navigator.mediaDevices as any).getDisplayMedia = () =>
+        new Promise(() => { /* never resolve */ });
+    });
+
+    page.on('dialog', (d) => void d.dismiss());
+    await page.goto('/zh/app', { waitUntil: 'domcontentloaded' });
+
+    await page.getByRole('button', { name: /开始录制/ }).first().click();
+    await expect(page.getByRole('heading', { name: '开始录制' })).toBeVisible({ timeout: 10_000 });
+    await page.getByRole('button', { name: '选择录制源' }).click();
+
+    // Modal should now show the waiting panel
+    await expect(page.getByRole('heading', { name: '等待选择源…' })).toBeVisible({ timeout: 5_000 });
+
+    // There's a Cancel button visible during waiting
+    const cancelBtn = page.getByRole('button', { name: '取消' });
+    await expect(cancelBtn).toBeVisible();
+    await cancelBtn.click();
+
+    // Cancelling returns us to /app (modal closes; no recording started)
+    await expect(page.getByRole('heading', { name: '等待选择源…' })).not.toBeVisible({ timeout: 5_000 });
+    await expect(page.getByRole('button', { name: /开始录制/ }).first()).toBeVisible();
+
+    // No stop button anywhere — recording never started
+    await expect(page.getByLabel('停止', { exact: true })).not.toBeVisible();
   });
 });

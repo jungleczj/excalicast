@@ -10,6 +10,29 @@ export interface DisplayCaptureResult {
   // When user picks 'window' or denies sysAudio, this is null; UI should fall back gracefully.
 }
 
+export interface AbortFlag {
+  aborted: boolean;
+}
+
+/**
+ * Stable error codes thrown by the display-capture path. The recording layer
+ * surfaces these to the UI which routes them to specific help cards.
+ */
+export const SCREEN_ERROR = {
+  PICKER_CANCELLED: 'PICKER_CANCELLED',
+  BLACK_FRAMES: 'BLACK_FRAMES',
+  NO_VIDEO_TRACK: 'NO_VIDEO_TRACK',
+} as const;
+export type ScreenErrorCode = typeof SCREEN_ERROR[keyof typeof SCREEN_ERROR];
+
+export interface ScreenError extends Error {
+  code: ScreenErrorCode;
+}
+
+export function makeScreenError(code: ScreenErrorCode, message: string): ScreenError {
+  return Object.assign(new Error(message), { code });
+}
+
 /**
  * Trigger the system picker. The user chooses tab / window / screen.
  * Returns the resulting video stream + an optional system-audio track.
@@ -24,7 +47,11 @@ export async function captureDisplay(req: DisplayCaptureRequest): Promise<Displa
       frameRate: { ideal: 30, max: 60 },
     },
     audio: req.withSystemAudio,
-  };
+    // Don't allow user to pick the Excalicast tab itself — would create a
+    // self-capture loop (recursive thumbnail) and is never what they want.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    selfBrowserSurface: 'exclude',
+  } as DisplayMediaStreamOptions;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const stream: MediaStream = await (navigator.mediaDevices as any).getDisplayMedia(constraints);
@@ -38,6 +65,96 @@ export async function captureDisplay(req: DisplayCaptureRequest): Promise<Displa
   const systemAudioTrack = audioTracks[0] ?? null;
 
   return { videoStream, systemAudioTrack };
+}
+
+/**
+ * Wrapper around captureDisplay that races against an `aborted` flag. Polls
+ * the flag every 100ms; if the user clicks Cancel while the OS picker is
+ * still up, this promise rejects with PICKER_CANCELLED so the UI can
+ * recover.
+ *
+ * IMPORTANT: There is no programmatic way to dismiss Chromium's display
+ * picker. If the user later confirms it after we've aborted, the underlying
+ * getDisplayMedia promise still resolves with a real stream — caller must
+ * inspect abortFlag.aborted AFTER our race resolves and stop the orphaned
+ * tracks themselves.
+ */
+export async function captureDisplayWithAbort(
+  req: DisplayCaptureRequest,
+  abortFlag: AbortFlag,
+): Promise<DisplayCaptureResult> {
+  const displayPromise = captureDisplay(req).catch((err) => {
+    // Normalize getDisplayMedia rejections (user clicked Cancel in picker).
+    if (err && typeof err === 'object' && (err as { name?: string }).name === 'NotAllowedError') {
+      throw makeScreenError(SCREEN_ERROR.PICKER_CANCELLED, 'user cancelled picker');
+    }
+    throw err;
+  });
+
+  const abortPromise = new Promise<DisplayCaptureResult>((_, reject) => {
+    const check = (): void => {
+      if (abortFlag.aborted) {
+        reject(makeScreenError(SCREEN_ERROR.PICKER_CANCELLED, 'user clicked cancel'));
+        return;
+      }
+      setTimeout(check, 100);
+    };
+    check();
+  });
+
+  // Whichever wins, we forward. If abort wins, the underlying picker may
+  // later resolve and produce an orphan stream — caller handles that.
+  return Promise.race([displayPromise, abortPromise]);
+}
+
+/**
+ * After capture, sample one frame from the stream and detect if it's
+ * effectively all-black. This catches the macOS TCC silent-failure case where
+ * Chrome has lost its Screen Recording entitlement (e.g. after a Chrome
+ * version bump) — the stream resolves but every frame is solid black.
+ */
+export async function assertNotBlackFrames(stream: MediaStream): Promise<void> {
+  const video = document.createElement('video');
+  video.srcObject = stream;
+  video.muted = true;
+  video.playsInline = true;
+  try { await video.play(); } catch { /* keep going; readyState may still advance */ }
+
+  // Wait for first frame, bounded.
+  await new Promise<void>((resolve) => {
+    if (video.readyState >= 2) { resolve(); return; }
+    const onReady = (): void => {
+      video.removeEventListener('loadeddata', onReady);
+      resolve();
+    };
+    video.addEventListener('loadeddata', onReady);
+    setTimeout(resolve, 2_000);
+  });
+
+  // Some browsers (older Safari) lack OffscreenCanvas. Skip the check.
+  if (typeof OffscreenCanvas === 'undefined') return;
+
+  try {
+    const cv = new OffscreenCanvas(64, 64);
+    const ctx = cv.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+    ctx.drawImage(video, 0, 0, 64, 64);
+    const data = ctx.getImageData(0, 0, 64, 64).data;
+    let blackPixels = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] < 5 && data[i + 1] < 5 && data[i + 2] < 5) blackPixels++;
+    }
+    const ratio = blackPixels / (64 * 64);
+    if (ratio > 0.95) {
+      throw makeScreenError(
+        SCREEN_ERROR.BLACK_FRAMES,
+        `display stream returned all-black frames (${(ratio * 100).toFixed(0)}%) — macOS Screen Recording permission may be missing`,
+      );
+    }
+  } finally {
+    // The probe video element is discarded; track lifecycle stays with caller.
+    video.srcObject = null;
+  }
 }
 
 /**
