@@ -107,7 +107,15 @@ export interface SubtitleCue {
 }
 
 // Screen-capture types — separate file to keep the old scene-replay types isolated.
-export type { RecordingKind, RecordingStatus, ScreenRecordingMetadata, ScreenRecordingChunk } from './screenRecording';
+export type {
+  RecordingKind,
+  RecordingStatus,
+  ScreenRecordingMetadata,
+  ScreenRecordingChunk,
+  BubbleSource,
+  CameraOverlayPosition,
+  DisplaySurface,
+} from './screenRecording';
 
 export interface SceneRect {
   x: number;

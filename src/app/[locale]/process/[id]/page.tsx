@@ -14,7 +14,7 @@ import {
   clearScreenSubtitle,
   downloadSrt,
 } from '@/services/screenSubtitle';
-import type { ScreenRecordingMetadata } from '@/types/recording';
+import type { CameraOverlayPosition, ScreenRecordingMetadata } from '@/types/recording';
 import { Link } from '@/i18n/navigation';
 
 type SubtitlePhase = 'idle' | 'extracting' | 'pending' | 'running' | 'done' | 'failed';
@@ -37,6 +37,7 @@ export default function ProcessRecordingPage(): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [burnSubtitles, setBurnSubtitles] = useState(true); // default ON when SRT exists
   const [format, setFormat] = useState<ScreenExportFormat>('mp4');
+  const [cameraPos, setCameraPos] = useState<CameraOverlayPosition>('bottom-right');
   const [progress, setProgress] = useState<{ phase: string; ratio: number } | null>(null);
 
   // Subtitle generation state
@@ -66,6 +67,7 @@ export default function ProcessRecordingPage(): JSX.Element {
         setMeta(m);
         // Initial burn-in toggle: ON if SRT already exists, OFF if not
         setBurnSubtitles(!!m.subtitleSrt);
+        if (m.cameraOverlayPosition) setCameraPos(m.cameraOverlayPosition);
         const blob = await loadScreenRecordingWebm(id);
         if (cancelled) return;
         created = URL.createObjectURL(blob);
@@ -91,6 +93,7 @@ export default function ProcessRecordingPage(): JSX.Element {
         format,
         withWatermark: !proUnlocked,
         burnSubtitles: burnSubtitles && !!meta?.subtitleSrt,
+        cameraOverlayPosition: cameraPos,
         onPhase: (p) => setProgress((s) => ({ phase: p, ratio: s?.ratio ?? 0 })),
         onProgress: (r) => setProgress((s) => ({ phase: s?.phase ?? 'transcoding', ratio: r })),
       });
@@ -252,6 +255,24 @@ export default function ProcessRecordingPage(): JSX.Element {
                 {format === 'mov' && 'H.264 + AAC · 与 MP4 同编码，.mov 容器。适合 Final Cut / Premiere 二次剪辑'}
                 {format === 'webm' && 'VP9 + Opus · 体积约 MP4 的 70%，浏览器原生。Mac QuickTime 不支持，需用 VLC 或 Chrome 打开'}
               </p>
+
+              {/* Camera bubble position picker — only meaningful when bubbleSource === 'overlay' */}
+              {meta?.hasCamera && meta?.bubbleSource === 'overlay' && (
+                <div className="mb-3 rounded-md border border-border-default bg-bg-secondary p-2.5">
+                  <div className="mb-2 text-[11.5px] font-semibold text-text-primary">摄像头气泡位置</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <PositionButton label="左上" selected={cameraPos === 'top-left'} onClick={() => setCameraPos('top-left')} />
+                    <PositionButton label="右上" selected={cameraPos === 'top-right'} onClick={() => setCameraPos('top-right')} />
+                    <PositionButton label="左下" selected={cameraPos === 'bottom-left'} onClick={() => setCameraPos('bottom-left')} />
+                    <PositionButton label="右下" selected={cameraPos === 'bottom-right'} onClick={() => setCameraPos('bottom-right')} />
+                  </div>
+                </div>
+              )}
+              {meta?.hasCamera && meta?.bubbleSource === 'in_screen' && (
+                <div className="mb-3 rounded-md border border-yellow-200 bg-yellow-50 p-2.5 text-[10.5px] text-yellow-900">
+                  ⚠️ 「整个屏幕」录制下，摄像头气泡位置由你拖动 PiP 决定，已烧入视频，不可在此修改。
+                </div>
+              )}
 
               {/* Burn-in subtitles toggle (shown only when SRT exists) */}
               {hasSrt && (
@@ -470,6 +491,30 @@ function FormatButton({
         {label}
       </span>
       <span className="text-[10px] text-text-tertiary">{sub}</span>
+    </button>
+  );
+}
+
+function PositionButton({
+  label,
+  selected,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  onClick: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-md border px-2 py-1.5 text-[11.5px] font-semibold transition ${
+        selected
+          ? 'border-primary-600 bg-primary-50 text-primary-700'
+          : 'border-border-default bg-bg-primary text-text-secondary hover:bg-bg-tertiary'
+      }`}
+    >
+      {label}
     </button>
   );
 }

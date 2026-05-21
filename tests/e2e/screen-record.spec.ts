@@ -220,9 +220,12 @@ test.describe('Screen recording — setup modal', () => {
 
   test('toggle camera + sysAudio reflects in selected state', async ({ page }) => {
     await stubGetDisplayMedia(page);
+    // Auto-dismiss any lingering alert dialogs (warning messages) that might
+    // pop unexpectedly and block the modal interaction.
+    page.on('dialog', (d) => void d.dismiss());
     await page.goto('/zh/app', { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: /开始录制/ }).first().click();
-    await expect(page.getByRole('heading', { name: '开始录制' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '开始录制' })).toBeVisible({ timeout: 10_000 });
 
     // The three toggle rows in the modal: 麦克风 / 系统音频 / 摄像头气泡
     // Default: 麦克风 on, others off.
@@ -243,5 +246,190 @@ test.describe('Screen recording — setup modal', () => {
 
     await micBtn.click();
     await expect(micBtn).not.toHaveClass(/border-primary-600/);
+  });
+});
+
+test.describe('Screen recording — dual-stream architecture (v2)', () => {
+  test('with camera: bubbleSource is overlay (browser surface), camera.webm separately recorded', async ({ page }) => {
+    test.setTimeout(60_000);
+
+    // Stub getDisplayMedia returning displaySurface=browser (camera path: PiP →
+    // bubbleSource='overlay', camera.webm recorded for ffmpeg-overlay at export)
+    await page.addInitScript(() => {
+      // Fake screen stream from canvas + report displaySurface=browser
+      const canvas = document.createElement('canvas');
+      canvas.width = 1280;
+      canvas.height = 720;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      let f = 0;
+      setInterval(() => {
+        ctx.fillStyle = `hsl(${(f * 4) % 360}, 70%, 50%)`;
+        ctx.fillRect(0, 0, 1280, 720);
+        f++;
+      }, 33);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const stream = (canvas as any).captureStream(30) as MediaStream;
+      const track = stream.getVideoTracks()[0];
+      // Override getSettings to report browser surface
+      const origGetSettings = track.getSettings.bind(track);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (track as any).getSettings = () => ({ ...origGetSettings(), displaySurface: 'browser' });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (navigator.mediaDevices as any).getDisplayMedia = async () => stream;
+
+      // Stub requestPictureInPicture to succeed (we don't actually need a real
+      // PiP window in headless Chromium — we just need handle.previewActive=true
+      // so the bubbleSource heuristic picks 'overlay' as expected for 'browser'.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (HTMLVideoElement.prototype as any).requestPictureInPicture = async function () {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return {} as any;
+      };
+    });
+
+    // Dismiss any alerts
+    page.on('dialog', async (d) => {
+      if (d.type() === 'confirm') await d.accept();
+      else await d.dismiss();
+    });
+
+    await page.goto('/zh/app', { waitUntil: 'domcontentloaded' });
+
+    // Open modal + toggle camera on
+    await page.getByRole('button', { name: /开始录制/ }).first().click();
+    await expect(page.getByRole('heading', { name: '开始录制' })).toBeVisible({ timeout: 10_000 });
+    await page.getByText('摄像头气泡').locator('..').locator('..').click();
+    await page.getByRole('button', { name: '选择录制源' }).click();
+
+    // Wait for recording bar
+    await expect(page.getByLabel('停止', { exact: true })).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(3_000);
+    await page.getByLabel('停止', { exact: true }).click();
+
+    await expect(page).toHaveURL(/\/zh\/process\/[a-f0-9-]+$/, { timeout: 15_000 });
+
+    // Verify BOTH chunk tables have data + metadata has bubbleSource='overlay'
+    const stats = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const Dexie = (await import('https://cdn.jsdelivr.net/npm/dexie@4/+esm' as any)).default;
+      const db = new Dexie('excalicast');
+      await db.open();
+      const screenChunks = await db.table('screenChunks').toArray();
+      const camChunks = await db.table('screenCameraChunks').toArray();
+      const recordings = await db.table('screenRecordings').toArray();
+      await db.close();
+      const screenBytes = screenChunks.reduce((s: number, r: { blob: Blob }) => s + r.blob.size, 0);
+      const camBytes = camChunks.reduce((s: number, r: { blob: Blob }) => s + r.blob.size, 0);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const meta = recordings[0] as any;
+      return {
+        screenCount: screenChunks.length,
+        screenBytes,
+        camCount: camChunks.length,
+        camBytes,
+        bubbleSource: meta?.bubbleSource,
+        displaySurface: meta?.displaySurface,
+        hasCamera: meta?.hasCamera,
+      };
+    });
+
+    // Screen track has bytes
+    expect(stats.screenCount, 'expected screen chunks').toBeGreaterThan(0);
+    expect(stats.screenBytes, 'expected screen bytes > 0').toBeGreaterThan(0);
+
+    // bubbleSource should be 'overlay' because displaySurface='browser' + PiP active
+    expect(stats.bubbleSource).toBe('overlay');
+    expect(stats.displaySurface).toBe('browser');
+    expect(stats.hasCamera).toBe(true);
+
+    // Camera chunks should have data (separate recorder is active for 'overlay')
+    expect(stats.camCount, 'expected camera chunks for overlay mode').toBeGreaterThan(0);
+    expect(stats.camBytes, 'expected camera bytes > 0').toBeGreaterThan(0);
+
+    // Process page should show position picker (4 anchor buttons) because
+    // bubbleSource === 'overlay'
+    await expect(page.getByRole('button', { name: '左上', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '右上', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '左下', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '右下', exact: true })).toBeVisible();
+  });
+
+  test('with camera + monitor surface: bubbleSource is in_screen (PiP baked into screen.webm)', async ({ page }) => {
+    test.setTimeout(60_000);
+
+    // Stub getDisplayMedia returning displaySurface=monitor
+    await page.addInitScript(() => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1920;
+      canvas.height = 1080;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      let f = 0;
+      setInterval(() => {
+        ctx.fillStyle = `hsl(${(f * 4) % 360}, 70%, 50%)`;
+        ctx.fillRect(0, 0, 1920, 1080);
+        f++;
+      }, 33);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const stream = (canvas as any).captureStream(30) as MediaStream;
+      const track = stream.getVideoTracks()[0];
+      const origGetSettings = track.getSettings.bind(track);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (track as any).getSettings = () => ({ ...origGetSettings(), displaySurface: 'monitor' });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (navigator.mediaDevices as any).getDisplayMedia = async () => stream;
+
+      // PiP succeeds → monitor + PiP → bubbleSource='in_screen'
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (HTMLVideoElement.prototype as any).requestPictureInPicture = async function () {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return {} as any;
+      };
+    });
+
+    page.on('dialog', async (d) => {
+      if (d.type() === 'confirm') await d.accept();
+      else await d.dismiss();
+    });
+
+    await page.goto('/zh/app', { waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: /开始录制/ }).first().click();
+    await expect(page.getByRole('heading', { name: '开始录制' })).toBeVisible({ timeout: 10_000 });
+    await page.getByText('摄像头气泡').locator('..').locator('..').click();
+    await page.getByRole('button', { name: '选择录制源' }).click();
+
+    await expect(page.getByLabel('停止', { exact: true })).toBeVisible({ timeout: 15_000 });
+    await page.waitForTimeout(3_000);
+    await page.getByLabel('停止', { exact: true }).click();
+
+    await expect(page).toHaveURL(/\/zh\/process\/[a-f0-9-]+$/, { timeout: 15_000 });
+
+    const stats = await page.evaluate(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const Dexie = (await import('https://cdn.jsdelivr.net/npm/dexie@4/+esm' as any)).default;
+      const db = new Dexie('excalicast');
+      await db.open();
+      const camChunks = await db.table('screenCameraChunks').toArray();
+      const recordings = await db.table('screenRecordings').toArray();
+      await db.close();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const meta = recordings[recordings.length - 1] as any;
+      return {
+        camCount: camChunks.length,
+        bubbleSource: meta?.bubbleSource,
+        displaySurface: meta?.displaySurface,
+      };
+    });
+
+    expect(stats.displaySurface).toBe('monitor');
+    expect(stats.bubbleSource).toBe('in_screen');
+    // In 'in_screen' mode we don't run a separate camera recorder
+    // (bubbleSource decided before MediaRecorder creation)
+    expect(stats.camCount, 'no camera recorder in in_screen mode').toBe(0);
+
+    // Process page should show the "monitor recording" warning instead of position picker
+    await expect(page.getByText(/「整个屏幕」录制下/)).toBeVisible();
+    await expect(page.getByRole('button', { name: '左上', exact: true })).not.toBeVisible();
   });
 });

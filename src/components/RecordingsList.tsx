@@ -17,7 +17,11 @@ interface Props {
   refreshKey?: number;
 }
 
-interface MergedItem {
+/**
+ * Unified card model — abstracts the two underlying storage paths
+ * (scene-replay legacy vs new screen-capture) into one display shape.
+ */
+interface CardItem {
   id: string;
   kind: 'scene_replay' | 'screen_capture';
   startedAt: number;
@@ -29,7 +33,7 @@ interface MergedItem {
   status: 'recording' | 'done' | 'error';
 }
 
-function fromSceneReplay(m: RecordingMetadata): MergedItem {
+function fromSceneReplay(m: RecordingMetadata): CardItem {
   return {
     id: m.id,
     kind: 'scene_replay',
@@ -43,7 +47,7 @@ function fromSceneReplay(m: RecordingMetadata): MergedItem {
   };
 }
 
-function fromScreenCapture(m: ScreenRecordingMetadata): MergedItem {
+function fromScreenCapture(m: ScreenRecordingMetadata): CardItem {
   return {
     id: m.id,
     kind: 'screen_capture',
@@ -92,23 +96,35 @@ const TINTS = [
   'linear-gradient(135deg, #dcfce7, #bbf7d0)',
 ];
 
+/** Per-kind routing helpers — screen_capture lives at /process/[id] (it's the
+ *  unified post-record page that doubles as a download page).  scene_replay
+ *  has separate /play/[id] (playback) and /export/[id] (export options). */
+function playRoute(kind: CardItem['kind'], id: string): string {
+  return kind === 'screen_capture' ? `/process/${id}` : `/play/${id}`;
+}
+
+function downloadRoute(kind: CardItem['kind'], id: string): string {
+  return kind === 'screen_capture' ? `/process/${id}` : `/export/${id}`;
+}
+
 export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
   const t = useTranslations('library');
   const locale = useLocale();
-  const [items, setItems] = useState<MergedItem[]>([]);
+
+  const [items, setItems] = useState<CardItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<string>('');
   const editInputRef = useRef<HTMLInputElement | null>(null);
 
   const refresh = useCallback(async () => {
-    const [localOld, localNew] = await Promise.all([
+    const [legacy, screen] = await Promise.all([
       listRecordings(),
       listScreenRecordings(),
     ]);
-    const merged: MergedItem[] = [
-      ...localOld.map(fromSceneReplay),
-      ...localNew.map(fromScreenCapture),
+    const merged: CardItem[] = [
+      ...legacy.map(fromSceneReplay),
+      ...screen.map(fromScreenCapture),
     ].sort((a, b) => b.startedAt - a.startedAt);
     setItems(merged);
     setLoaded(true);
@@ -123,7 +139,7 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
     }
   }, [editingId]);
 
-  const handleDelete = useCallback(async (it: MergedItem) => {
+  const handleDelete = useCallback(async (it: CardItem) => {
     if (!confirm(t('deleteConfirm'))) return;
     if (it.kind === 'screen_capture') {
       await deleteScreenRecording(it.id);
@@ -133,7 +149,7 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
     await refresh();
   }, [refresh, t]);
 
-  const startEdit = useCallback((it: MergedItem) => {
+  const startEdit = useCallback((it: CardItem) => {
     setEditingId(it.id);
     setEditValue(defaultTitle(it, locale));
   }, [locale]);
@@ -143,7 +159,7 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
     setEditValue('');
   }, []);
 
-  const commitEdit = useCallback(async (it: MergedItem) => {
+  const commitEdit = useCallback(async (it: CardItem) => {
     const next = editValue;
     setEditingId(null);
     setEditValue('');
@@ -190,99 +206,112 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
       {items.map((it, i) => {
         const tint = TINTS[(it.id.charCodeAt(0) + i) % 4];
         const isEditing = editingId === it.id;
-        const playRoute = it.kind === 'screen_capture' ? '/process' : '/play';
-        const downloadRoute = it.kind === 'screen_capture' ? '/process' : '/export';
+        const tileInner = (
+          <>
+            <div className="relative overflow-hidden" style={{ aspectRatio: '16/9', background: tint }}>
+              {it.thumbnail ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={it.thumbnail} alt="thumbnail" className="h-full w-full object-cover" />
+              ) : (
+                <div className="absolute inset-0 grid place-items-center opacity-55">
+                  <svg width="60%" height="60%" viewBox="0 0 200 120">
+                    <rect x="20" y="30" width="50" height="30" fill="none" stroke="#1f2937" strokeWidth="2" rx="2" />
+                    <rect x="130" y="30" width="50" height="30" fill="none" stroke="#1f2937" strokeWidth="2" rx="2" />
+                    <line x1="70" y1="45" x2="130" y2="45" stroke="#1f2937" strokeWidth="2" />
+                    <polygon points="130,45 124,42 124,48" fill="#1f2937" />
+                    <rect x="65" y="80" width="70" height="22" fill="none" stroke="#1f2937" strokeWidth="2" rx="2" />
+                  </svg>
+                </div>
+              )}
+              <span
+                className="absolute bottom-2 right-2 rounded font-mono text-[11px] font-semibold text-white"
+                style={{ background: 'rgba(0,0,0,0.7)', padding: '2px 7px' }}
+              >
+                {fmtDuration(it.durationMs)}
+              </span>
+              {it.status === 'recording' && (
+                <span className="absolute left-2 top-2 rounded bg-recording px-2 py-0.5 text-[10px] font-semibold text-white">
+                  {locale === 'en' ? 'unfinished' : '未完成'}
+                </span>
+              )}
+
+              <div className="pointer-events-none absolute inset-0 bg-black/0 transition group-hover:bg-black/15" />
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition group-hover:opacity-100">
+                <div
+                  className="grid h-12 w-12 place-items-center rounded-full text-text-primary"
+                  style={{ background: 'rgba(255,255,255,0.95)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}
+                >
+                  <I.Play size={20} />
+                </div>
+              </div>
+            </div>
+            <div className="px-3.5 pb-3 pt-3">
+              {isEditing ? (
+                <input
+                  ref={editInputRef}
+                  type="text"
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') { e.preventDefault(); void commitEdit(it); }
+                    else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+                  }}
+                  onBlur={() => { void commitEdit(it); }}
+                  maxLength={80}
+                  className="w-full rounded border border-primary-600 bg-bg-primary px-1.5 py-0.5 text-[13.5px] font-semibold text-text-primary outline-none"
+                />
+              ) : (
+                <div className="flex items-center gap-1">
+                  <div className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-text-primary">
+                    {defaultTitle(it, locale)}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); startEdit(it); }}
+                    className="flex-shrink-0 rounded p-0.5 text-text-tertiary opacity-0 transition hover:bg-bg-tertiary hover:text-text-primary group-hover:opacity-100"
+                    title={locale === 'en' ? 'Rename' : '重命名'}
+                    aria-label={locale === 'en' ? 'Rename' : '重命名'}
+                  >
+                    <I.Edit size={12} />
+                  </button>
+                </div>
+              )}
+              <div className="mt-1.5 flex items-center gap-2 text-[11px] text-text-tertiary">
+                <span>{fmtDate(it.startedAt, locale)}</span>
+                <span
+                  className="rounded px-1.5 py-px text-[10px] font-semibold"
+                  style={{ background: 'var(--bg-tertiary)', color: 'var(--text-secondary)' }}
+                >
+                  {t('badgeLocal')}
+                </span>
+                <div className="flex-1" />
+                {it.hasAudio && <I.Mic size={13} />}
+                {it.hasCamera && <I.Camera size={13} />}
+              </div>
+            </div>
+          </>
+        );
+
         return (
           <div
             key={it.id}
             className="group relative overflow-hidden rounded-xl border border-border-default bg-bg-primary transition-all duration-150 hover:-translate-y-0.5"
             style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}
           >
-            <Link href={`${playRoute}/${it.id}` as never} className="block">
-              <div className="relative overflow-hidden" style={{ aspectRatio: '16/9', background: tint }}>
-                {it.thumbnail ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={it.thumbnail} alt="thumbnail" className="h-full w-full object-cover" />
-                ) : (
-                  <div className="absolute inset-0 grid place-items-center opacity-55">
-                    <svg width="60%" height="60%" viewBox="0 0 200 120">
-                      <rect x="20" y="30" width="50" height="30" fill="none" stroke="#1f2937" strokeWidth="2" rx="2" />
-                      <rect x="130" y="30" width="50" height="30" fill="none" stroke="#1f2937" strokeWidth="2" rx="2" />
-                      <line x1="70" y1="45" x2="130" y2="45" stroke="#1f2937" strokeWidth="2" />
-                      <polygon points="130,45 124,42 124,48" fill="#1f2937" />
-                      <rect x="65" y="80" width="70" height="22" fill="none" stroke="#1f2937" strokeWidth="2" rx="2" />
-                    </svg>
-                  </div>
-                )}
-                <span
-                  className="absolute bottom-2 right-2 rounded font-mono text-[11px] font-semibold text-white"
-                  style={{ background: 'rgba(0,0,0,0.7)', padding: '2px 7px' }}
-                >
-                  {fmtDuration(it.durationMs)}
-                </span>
-                {it.status === 'recording' && (
-                  <span className="absolute left-2 top-2 rounded bg-recording px-2 py-0.5 text-[10px] font-semibold text-white">
-                    {locale === 'en' ? 'unfinished' : '未完成'}
-                  </span>
-                )}
-                <div className="pointer-events-none absolute inset-0 bg-black/0 transition group-hover:bg-black/15" />
-                <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-0 transition group-hover:opacity-100">
-                  <div
-                    className="grid h-12 w-12 place-items-center rounded-full text-text-primary"
-                    style={{ background: 'rgba(255,255,255,0.95)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}
-                  >
-                    <I.Play size={20} />
-                  </div>
-                </div>
-              </div>
-              <div className="px-3.5 pb-3 pt-3">
-                {isEditing ? (
-                  <input
-                    ref={editInputRef}
-                    type="text"
-                    value={editValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                    onKeyDown={(e) => {
-                      e.stopPropagation();
-                      if (e.key === 'Enter') { e.preventDefault(); void commitEdit(it); }
-                      else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
-                    }}
-                    onBlur={() => { void commitEdit(it); }}
-                    maxLength={80}
-                    className="w-full rounded border border-primary-600 bg-bg-primary px-1.5 py-0.5 text-[13.5px] font-semibold text-text-primary outline-none"
-                  />
-                ) : (
-                  <div className="flex items-center gap-1">
-                    <div className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-text-primary">
-                      {defaultTitle(it, locale)}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); startEdit(it); }}
-                      className="flex-shrink-0 rounded p-0.5 text-text-tertiary opacity-0 transition hover:bg-bg-tertiary hover:text-text-primary group-hover:opacity-100"
-                      title={locale === 'en' ? 'Rename' : '重命名'}
-                      aria-label={locale === 'en' ? 'Rename' : '重命名'}
-                    >
-                      <I.Edit size={12} />
-                    </button>
-                  </div>
-                )}
-                <div className="mt-1.5 flex items-center gap-2 text-[11px] text-text-tertiary">
-                  <span>{fmtDate(it.startedAt, locale)}</span>
-                  <div className="flex-1" />
-                  {it.hasAudio && <I.Mic size={13} />}
-                  {it.hasCamera && <I.Camera size={13} />}
-                </div>
-              </div>
+            <Link href={playRoute(it.kind, it.id) as never} className="block">
+              {tileInner}
             </Link>
+
             <div className="absolute right-2 top-2 flex gap-1.5 opacity-0 transition group-hover:opacity-100">
               <Link
-                href={`${downloadRoute}/${it.id}` as never}
+                href={downloadRoute(it.kind, it.id) as never}
                 onClick={(e) => e.stopPropagation()}
                 className="grid h-7 w-7 place-items-center rounded-md text-white transition hover:bg-primary-600"
                 style={{ background: 'rgba(0,0,0,0.7)' }}
-                title={locale === 'en' ? 'Download' : '下载'}
+                title={locale === 'en' ? 'Download (open export page)' : '下载（前往导出页）'}
+                aria-label={locale === 'en' ? 'Download' : '下载'}
               >
                 <I.Download size={13} />
               </Link>

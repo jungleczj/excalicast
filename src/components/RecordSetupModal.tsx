@@ -37,13 +37,13 @@ export function RecordSetupModal({ open, onCancel, onConfirm }: Props): JSX.Elem
         <Toggle label="麦克风" desc="录入你说的话" checked={withMic} onChange={setWithMic} />
         <Toggle
           label="系统音频"
-          desc="录入网页 / 应用的声音（仅当选「整个屏幕」或某个标签页有声音时生效）"
+          desc="录入网页 / 应用的声音。仅在「整个屏幕」（系统选择器里需勾选「分享音频」）或「某个标签页」（自动）下生效；macOS Chrome 不支持「应用窗口」的系统音频"
           checked={withSystemAudio}
           onChange={setWithSystemAudio}
         />
         <Toggle
           label="摄像头气泡"
-          desc="圆形头像浮在屏幕右下角"
+          desc="录制时弹出 OS 级悬浮窗显示你的脸（用户能看到，不被录进 tab/window；录「整个屏幕」时浮窗会被录进屏幕，请拖到合适位置 · 仅支持单显示器）"
           checked={withCamera}
           onChange={setWithCamera}
         />

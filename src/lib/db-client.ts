@@ -44,6 +44,7 @@ class ExcalicastDB extends Dexie {
   workspaceShells!: Table<WorkspaceShellRow, number>;
   screenRecordings!: Table<ScreenRecordingMetadata, string>;
   screenChunks!: Table<ScreenChunkRow, number>;
+  screenCameraChunks!: Table<ScreenChunkRow, number>;
 
   constructor() {
     super('excalicast');
@@ -115,6 +116,19 @@ class ExcalicastDB extends Dexie {
       workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
       screenRecordings: 'id, startedAt, status',
       screenChunks: '++id, recordingId, index, [recordingId+index]',
+    });
+    // v7: 新增 screenCameraChunks 表 —— Pattern B 双流分录架构下，摄像头单独
+    // 录一条 webm（无音频），导出时由 ffmpeg overlay 与 screen 合成。
+    this.version(7).stores({
+      recordings: 'id, startedAt, status',
+      snapshots: '++id, recordingId, timestamp',
+      audioChunks: '++id, recordingId, index',
+      cameraChunks: '++id, recordingId, index',
+      binaryFiles: '++id, recordingId, fileId',
+      workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
+      screenRecordings: 'id, startedAt, status',
+      screenChunks: '++id, recordingId, index, [recordingId+index]',
+      screenCameraChunks: '++id, recordingId, index, [recordingId+index]',
     });
   }
 }
@@ -230,6 +244,11 @@ export async function appendScreenChunk(row: ScreenRecordingChunk): Promise<void
   await getClientDb().screenChunks.add(row);
 }
 
+/** v7 — camera-track companion to screenChunks (Pattern B dual-stream). */
+export async function appendScreenCameraChunk(row: ScreenRecordingChunk): Promise<void> {
+  await getClientDb().screenCameraChunks.add(row);
+}
+
 export async function listScreenRecordings(): Promise<ScreenRecordingMetadata[]> {
   return getClientDb().screenRecordings
     .orderBy('startedAt')
@@ -260,10 +279,30 @@ export async function loadScreenRecordingWebm(id: string): Promise<Blob> {
   return new Blob(chunks.map((c) => c.blob), { type: chunks[0].blob.type || 'video/webm' });
 }
 
+/** v7 — camera-track companion. Returns null if no camera chunks (e.g. recording
+ *  was made without camera, or bubbleSource === 'in_screen' so no separate
+ *  recorder was started). */
+export async function loadScreenRecordingCameraWebm(id: string): Promise<Blob | null> {
+  const chunks = await getClientDb().screenCameraChunks
+    .where('recordingId').equals(id)
+    .sortBy('index');
+  if (chunks.length === 0) return null;
+  return new Blob(chunks.map((c) => c.blob), { type: chunks[0].blob.type || 'video/webm' });
+}
+
+export async function countScreenCameraChunks(id: string): Promise<number> {
+  return getClientDb().screenCameraChunks.where('recordingId').equals(id).count();
+}
+
 export async function deleteScreenRecording(id: string): Promise<void> {
   const db = getClientDb();
-  await db.transaction('rw', [db.screenRecordings, db.screenChunks], async () => {
-    await db.screenRecordings.delete(id);
-    await db.screenChunks.where('recordingId').equals(id).delete();
-  });
+  await db.transaction(
+    'rw',
+    [db.screenRecordings, db.screenChunks, db.screenCameraChunks],
+    async () => {
+      await db.screenRecordings.delete(id);
+      await db.screenChunks.where('recordingId').equals(id).delete();
+      await db.screenCameraChunks.where('recordingId').equals(id).delete();
+    },
+  );
 }
