@@ -32,6 +32,10 @@ export interface ScreenRecordingHandle {
   /** Permission failures we caught — UI can surface these to the user. */
   micError?: string;
   cameraError?: string;
+  /** Which surface the user picked in getDisplayMedia. UI uses this to decide
+   *  whether showing a DOM camera preview is safe (recording 'browser' surface
+   *  risks bubble recursion when the user picked our own tab). */
+  displaySurface: 'monitor' | 'window' | 'browser' | 'unknown';
   /** for live preview UI */
   cameraStream: MediaStream | null;
   setCameraPosition: (pos: { x: number; y: number }) => void;
@@ -263,6 +267,23 @@ export async function startScreenRecording(opts: StartScreenRecordingOpts): Prom
     }
   });
 
+  // Detect which surface the user picked, so the UI can decide whether
+  // showing a DOM camera preview would cause bubble-recursion. 'browser' =
+  // a tab (possibly OURS), 'window' = an app window, 'monitor' = the entire
+  // display. Recursion is only possible when 'browser' AND it's our own tab,
+  // but we can't tell THAT from outside, so any 'browser' value is treated
+  // as risky.
+  const displaySurface: 'monitor' | 'window' | 'browser' | 'unknown' = (() => {
+    const s = (displayStream.getVideoTracks()[0]?.getSettings() ?? {}) as {
+      displaySurface?: string;
+    };
+    if (s.displaySurface === 'monitor' || s.displaySurface === 'window' || s.displaySurface === 'browser') {
+      return s.displaySurface;
+    }
+    return 'unknown';
+  })();
+  console.info(LOG_TAG, 'displaySurface =', displaySurface);
+
   return {
     recordingId,
     startedAt,
@@ -270,6 +291,9 @@ export async function startScreenRecording(opts: StartScreenRecordingOpts): Prom
     hasMic,
     hasSystemAudio,
     hasCamera,
+    micError,
+    cameraError,
+    displaySurface,
     cameraStream,
     setCameraPosition: composite.setCameraPosition,
     getElapsedMs: elapsed,
