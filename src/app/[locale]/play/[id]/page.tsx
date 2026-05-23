@@ -220,12 +220,26 @@ export default function PlayPage(): JSX.Element {
 
   if (error) {
     return (
-      <div className="flex h-full flex-col">
+      <div className="flex h-full flex-col" style={{ background: 'var(--paper)' }}>
         <AppHeader tier="free" />
         <div className="grid flex-1 place-items-center">
-          <div className="rounded-md border border-border-default bg-bg-primary px-8 py-6 text-center shadow-sm">
-            <p className="text-sm text-recording-strong">{error}</p>
-            <Link href="/library" className="mt-3 inline-block text-xs text-primary-600 underline">{t('back')}</Link>
+          <div
+            className="px-8 py-6 text-center"
+            style={{
+              background: 'var(--paper)',
+              border: '1.6px solid var(--ink)',
+              borderRadius: 4,
+              boxShadow: '3px 3px 0 var(--ink)',
+            }}
+          >
+            <p style={{ fontSize: 13, color: 'var(--rec)', fontFamily: 'var(--font-mono)', letterSpacing: '0.04em' }}>{error}</p>
+            <Link
+              href="/library"
+              className="mt-4 inline-block"
+              style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink)', borderBottom: '1.5px solid var(--ink)', textDecoration: 'none', letterSpacing: '0.06em', textTransform: 'uppercase' }}
+            >
+              {t('back')}
+            </Link>
           </div>
         </div>
       </div>
@@ -239,26 +253,50 @@ export default function PlayPage(): JSX.Element {
   const backLabel = locale === 'en' ? 'Back' : '返回';
 
   return (
-    <div className="flex h-full flex-col bg-bg-secondary">
+    <div className="flex h-full flex-col" style={{ background: 'var(--paper-2)' }}>
       <AppHeader tier="free" />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex items-center gap-3 border-b border-border-default bg-bg-primary px-6 py-2.5">
-          <Link href="/library" className="text-text-tertiary hover:text-text-primary" aria-label={backLabel}>
-            <I.ChevronLeft size={18} />
+        <div
+          className="flex items-center gap-3 px-6 py-3"
+          style={{ background: 'var(--paper)', borderBottom: '1.5px solid var(--ink)' }}
+        >
+          <Link
+            href="/library"
+            aria-label={backLabel}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 30,
+              height: 30,
+              border: '1.4px solid var(--ink)',
+              background: 'var(--paper)',
+              borderRadius: 3,
+              color: 'var(--ink)',
+            }}
+          >
+            <I.ChevronLeft size={14} />
           </Link>
-          <div className="truncate text-[14px] font-semibold text-text-primary">{title}</div>
+          <div
+            className="truncate"
+            style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', letterSpacing: '-0.01em' }}
+          >
+            {title}
+          </div>
           <div className="flex-1" />
           <Link
             href={`/export/${id}` as never}
-            className="flex items-center gap-1.5 rounded-md bg-primary-600 px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm transition hover:bg-primary-700"
+            className="btn-sketch btn-sketch-primary"
+            style={{ padding: '7px 12px', fontSize: 10.5 }}
           >
-            <I.Download size={13} /> {downloadLabel}
+            <I.Download size={12} /> {downloadLabel}
           </Link>
           <button
             onClick={handleDelete}
-            className="flex items-center gap-1.5 rounded-md border border-border-default px-3 py-1.5 text-[12px] text-text-tertiary transition hover:bg-recording/10 hover:text-recording-strong"
+            className="btn-sketch"
+            style={{ padding: '7px 12px', fontSize: 10.5, color: 'var(--rec)', borderColor: 'var(--rec)' }}
           >
-            <I.Trash size={13} /> {deleteLabel}
+            <I.Trash size={12} /> {deleteLabel}
           </button>
         </div>
 
@@ -272,23 +310,39 @@ export default function PlayPage(): JSX.Element {
           />
           <SubtitleOverlay srt={meta?.subtitleSrt} timeMs={timeMs} />
           {cameraUrl && (
-            <video
-              ref={cameraRef}
-              src={cameraUrl}
-              muted
-              playsInline
-              className="pointer-events-none absolute"
+            <div
+              className="pointer-events-none absolute z-40 overflow-hidden"
               style={{
                 right: 24,
                 bottom: 24,
                 width: 160,
                 height: 160,
                 borderRadius: '50%',
-                objectFit: 'cover',
-                transform: 'scaleX(-1)',
+                background: '#1f2937',
                 boxShadow: '0 8px 24px rgba(0,0,0,0.25), 0 0 0 3px rgba(255,255,255,0.9)',
               }}
-            />
+            >
+              <video
+                ref={cameraRef}
+                src={cameraUrl}
+                muted
+                playsInline
+                preload="auto"
+                onLoadedMetadata={() => {
+                  // 强制画面解码出第一帧，避免播放前显示黑色占位
+                  const v = cameraRef.current;
+                  if (v && !playing) {
+                    try { v.currentTime = Math.min(0.05, (isFinite(v.duration) ? v.duration : 0.05)); } catch { /* ignore */ }
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  transform: 'scaleX(-1)',
+                }}
+              />
+            </div>
           )}
           {audioUrl && (
             // 音频元素隐藏：用 timeMs/playing 控制
@@ -300,23 +354,51 @@ export default function PlayPage(): JSX.Element {
             />
           )}
           {!ready && (
-            <div className="absolute inset-0 grid place-items-center bg-black/5 text-[13px] text-text-tertiary">
+            <div
+              className="absolute inset-0 grid place-items-center"
+              style={{
+                background: 'rgba(26,26,26,0.05)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: 12,
+                color: 'var(--ink-3)',
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+              }}
+            >
               {t('loading')}
             </div>
           )}
         </div>
 
-        <div className="border-t border-border-default bg-bg-primary px-6 py-3">
+        <div
+          className="px-6 py-4"
+          style={{ background: 'var(--paper)', borderTop: '1.5px solid var(--ink)' }}
+        >
           <div className="flex items-center gap-3">
             <button
               onClick={togglePlay}
               disabled={!ready || (meta?.durationMs ?? 0) === 0}
-              className="grid h-10 w-10 place-items-center rounded-full bg-primary-600 text-white shadow transition hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-40"
+              className="grid place-items-center transition"
+              style={{
+                width: 40,
+                height: 40,
+                background: 'var(--ink)',
+                color: 'var(--paper)',
+                border: '1.6px solid var(--ink)',
+                boxShadow: '3px 3px 0 var(--hi)',
+                borderRadius: 999,
+                cursor: !ready || (meta?.durationMs ?? 0) === 0 ? 'not-allowed' : 'pointer',
+                opacity: !ready || (meta?.durationMs ?? 0) === 0 ? 0.4 : 1,
+              }}
               aria-label={playing ? t('pause') : t('play')}
             >
-              {playing ? <I.Pause size={16} /> : <I.Play size={16} />}
+              {playing ? <I.Pause size={15} /> : <I.Play size={15} />}
             </button>
-            <span className="font-mono text-[12px] tabular-nums text-text-secondary">{fmt(timeMs)}</span>
+            <span
+              style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--ink)', fontWeight: 600 }}
+            >
+              {fmt(timeMs)}
+            </span>
             <input
               type="range"
               min={0}
@@ -325,10 +407,18 @@ export default function PlayPage(): JSX.Element {
               value={Math.min(timeMs, meta?.durationMs ?? 0)}
               onChange={(e) => handleSeek(Number(e.target.value))}
               disabled={!ready || (meta?.durationMs ?? 0) === 0}
-              className="h-1.5 flex-1 accent-primary-600 disabled:opacity-40"
+              className="h-1.5 flex-1"
+              style={{ accentColor: 'var(--ink)' }}
             />
-            <span className="font-mono text-[12px] tabular-nums text-text-tertiary">{fmt(meta?.durationMs ?? 0)}</span>
-            <div className="ml-2 flex items-center gap-2 text-[11px] text-text-tertiary">
+            <span
+              style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--ink-3)' }}
+            >
+              {fmt(meta?.durationMs ?? 0)}
+            </span>
+            <div
+              className="ml-2 flex items-center gap-3"
+              style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.04em', textTransform: 'uppercase' }}
+            >
               {meta?.hasAudio && <span className="flex items-center gap-1"><I.Mic size={12} /> {locale === 'en' ? 'Audio' : '音频'}</span>}
               {meta?.hasCamera && <span className="flex items-center gap-1"><I.Camera size={12} /> {locale === 'en' ? 'Camera' : '摄像头'}</span>}
               {!meta?.hasAudio && !meta?.hasCamera && <span>{locale === 'en' ? 'Whiteboard only' : '仅画板'}</span>}
