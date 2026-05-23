@@ -58,8 +58,10 @@ export default function PlayPage(): JSX.Element {
   const cameraRef = useRef<HTMLVideoElement>(null);
   const rafRef = useRef<number | null>(null);
   const lastAppliedTsRef = useRef<number>(-1);
-  // 没有音频时用 performance.now() 推进时间
-  const noAudioStartRef = useRef<{ perfStart: number; baseTime: number } | null>(null);
+  // 用 performance.now() 推进时间。
+  // 注意：MediaRecorder 分片产出的 webm 的 duration / currentTime 不可信
+  // （EBML 缺少 Duration 字段），不要把 audio.currentTime 当时间源用。
+  const clockRef = useRef<{ perfStart: number; baseTime: number } | null>(null);
 
   // 加载录制
   useEffect(() => {
@@ -122,40 +124,40 @@ export default function PlayPage(): JSX.Element {
     }
   }, [snapshots, applySnapshot]);
 
-  // 播放循环：用 audio.currentTime（如有）或 performance.now() 作为时间源
-  // 注意 deps 里不能放 timeMs，否则每帧 setTimeMs 都会重启 rAF
+  // 播放循环：始终以 performance.now() 为时间源，meta.durationMs 为终点判断依据。
+  // 不用 audio.currentTime — 分片 webm duration 不可信，会导致播放卡住。
   useEffect(() => {
     if (!playing) {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
-      noAudioStartRef.current = null;
+      clockRef.current = null;
       return;
     }
+    clockRef.current = { perfStart: performance.now(), baseTime: timeMs };
     const audio = audioRef.current;
     const camera = cameraRef.current;
-    if (!audio) {
-      // 进入播放时一次性记录起点（用最新的 timeMs 作为 baseTime）
-      noAudioStartRef.current = { perfStart: performance.now(), baseTime: timeMs };
-    }
     const tick = () => {
-      let t: number;
-      if (audio) {
-        t = audio.currentTime * 1000;
-      } else {
-        const ref = noAudioStartRef.current;
-        t = ref ? ref.baseTime + (performance.now() - ref.perfStart) : 0;
-      }
+      const ref = clockRef.current;
+      if (!ref) return;
+      const t = ref.baseTime + (performance.now() - ref.perfStart);
       const dur = meta?.durationMs ?? 0;
       if (dur > 0 && t >= dur) {
         setTimeMs(dur);
         applySnapshot(dur);
         setPlaying(false);
+        if (audio) { try { audio.pause(); } catch { /* ignore */ } }
+        if (camera) { try { camera.pause(); } catch { /* ignore */ } }
         return;
       }
       setTimeMs(t);
       applySnapshot(t);
-      if (camera && audio && Math.abs(camera.currentTime - audio.currentTime) > 0.3) {
-        try { camera.currentTime = audio.currentTime; } catch { /* ignore */ }
+      // 媒体漂移修正：每帧检查 audio/camera 是否漂离主时钟 > 0.3s
+      const tSec = t / 1000;
+      if (audio && isFinite(audio.currentTime) && Math.abs(audio.currentTime - tSec) > 0.3) {
+        try { audio.currentTime = tSec; } catch { /* ignore */ }
+      }
+      if (camera && isFinite(camera.currentTime) && Math.abs(camera.currentTime - tSec) > 0.3) {
+        try { camera.currentTime = tSec; } catch { /* ignore */ }
       }
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -173,15 +175,22 @@ export default function PlayPage(): JSX.Element {
       const camera = cameraRef.current;
       const dur = meta?.durationMs ?? 0;
       if (next) {
-        // 已播完则从头来
-        if (dur > 0 && timeMs >= dur) {
-          if (audio) audio.currentTime = 0;
-          if (camera) { try { camera.currentTime = 0; } catch { /* ignore */ } }
+        // 已播完则从头来；否则保持在当前 timeMs（但要把 audio/camera 同步过去，
+        // 防止它们卡在 "ended" 状态）。
+        const restart = dur > 0 && timeMs >= dur - 50;
+        const startT = restart ? 0 : timeMs;
+        if (restart) {
           setTimeMs(0);
           lastAppliedTsRef.current = -1;
         }
-        if (audio) void audio.play().catch(() => { /* user-gesture lost */ });
-        if (camera) void camera.play().catch(() => { /* ignore */ });
+        if (audio) {
+          try { audio.currentTime = startT / 1000; } catch { /* ignore */ }
+          void audio.play().catch(() => { /* user-gesture lost */ });
+        }
+        if (camera) {
+          try { camera.currentTime = startT / 1000; } catch { /* ignore */ }
+          void camera.play().catch(() => { /* ignore */ });
+        }
       } else {
         if (audio) audio.pause();
         if (camera) camera.pause();
@@ -196,10 +205,10 @@ export default function PlayPage(): JSX.Element {
     applySnapshot(t);
     const audio = audioRef.current;
     const camera = cameraRef.current;
-    if (audio) audio.currentTime = t / 1000;
+    if (audio) { try { audio.currentTime = t / 1000; } catch { /* ignore */ } }
     if (camera) { try { camera.currentTime = t / 1000; } catch { /* ignore */ } }
-    if (noAudioStartRef.current && playing) {
-      noAudioStartRef.current = { perfStart: performance.now(), baseTime: t };
+    if (playing) {
+      clockRef.current = { perfStart: performance.now(), baseTime: t };
     }
   }, [applySnapshot, playing]);
 
@@ -345,11 +354,13 @@ export default function PlayPage(): JSX.Element {
             </div>
           )}
           {audioUrl && (
-            // 音频元素隐藏：用 timeMs/playing 控制
+            // 音频元素隐藏：用 timeMs/playing 控制。不挂 onEnded —
+            // MediaRecorder 分片 webm 缺 Duration，onEnded 会在真正播完之前
+            // 误触发，让播放半途卡住。改由主时钟 (clockRef) 判断终点。
             <audio
               ref={audioRef}
               src={audioUrl}
-              onEnded={() => setPlaying(false)}
+              preload="auto"
               hidden
             />
           )}
