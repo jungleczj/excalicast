@@ -290,9 +290,10 @@ async function _startInner(opts: StartScreenRecordingOpts): Promise<ScreenRecord
   let pauseStartedAt = 0;
   let pausedTotal = 0;
 
+  console.info(LOG_TAG, 'STAGE 9 starting MediaRecorders …');
   screenRecorder.start(CHUNK_INTERVAL_MS);
   cameraRecorder?.start(CHUNK_INTERVAL_MS);
-  console.info(LOG_TAG, 'recorders started');
+  console.info(LOG_TAG, 'STAGE 9 done — recorders running. Returning handle.');
 
   const elapsed = (): number => Date.now() - startedAt - pausedTotal - (paused ? Date.now() - pauseStartedAt : 0);
 

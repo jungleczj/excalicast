@@ -91,20 +91,25 @@ export async function captureDisplayWithAbort(
     throw err;
   });
 
+  let pollHandle: ReturnType<typeof setTimeout> | null = null;
   const abortPromise = new Promise<DisplayCaptureResult>((_, reject) => {
     const check = (): void => {
       if (abortFlag.aborted) {
         reject(makeScreenError(SCREEN_ERROR.PICKER_CANCELLED, 'user clicked cancel'));
         return;
       }
-      setTimeout(check, 100);
+      pollHandle = setTimeout(check, 100);
     };
     check();
   });
 
   // Whichever wins, we forward. If abort wins, the underlying picker may
   // later resolve and produce an orphan stream — caller handles that.
-  return Promise.race([displayPromise, abortPromise]);
+  try {
+    return await Promise.race([displayPromise, abortPromise]);
+  } finally {
+    if (pollHandle !== null) clearTimeout(pollHandle);
+  }
 }
 
 /**
@@ -112,29 +117,64 @@ export async function captureDisplayWithAbort(
  * effectively all-black. This catches the macOS TCC silent-failure case where
  * Chrome has lost its Screen Recording entitlement (e.g. after a Chrome
  * version bump) — the stream resolves but every frame is solid black.
+ *
+ * The whole probe is bounded by `HARD_TIMEOUT_MS` so a flaky video element
+ * can never hang the start path. On timeout we log and proceed (better to
+ * record than to lock the user out on a flaky check).
  */
+const HARD_TIMEOUT_MS = 4_000;
+
 export async function assertNotBlackFrames(stream: MediaStream): Promise<void> {
+  // Hidden DOM host — Chromium needs the <video> attached for some pipelines
+  // to advance readyState reliably.
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:-99999px;top:-99999px;width:1px;height:1px;overflow:hidden;pointer-events:none;';
+  document.body.appendChild(host);
+
   const video = document.createElement('video');
   video.srcObject = stream;
   video.muted = true;
   video.playsInline = true;
-  try { await video.play(); } catch { /* keep going; readyState may still advance */ }
+  video.autoplay = true;
+  host.appendChild(video);
 
-  // Wait for first frame, bounded.
-  await new Promise<void>((resolve) => {
-    if (video.readyState >= 2) { resolve(); return; }
-    const onReady = (): void => {
-      video.removeEventListener('loadeddata', onReady);
-      resolve();
-    };
-    video.addEventListener('loadeddata', onReady);
-    setTimeout(resolve, 2_000);
-  });
+  const cleanup = (): void => {
+    try { video.pause(); } catch { /* */ }
+    try { video.srcObject = null; } catch { /* */ }
+    try { host.remove(); } catch { /* */ }
+  };
 
-  // Some browsers (older Safari) lack OffscreenCanvas. Skip the check.
-  if (typeof OffscreenCanvas === 'undefined') return;
+  // Race the whole probe against a hard timeout.
+  const probe = (async () => {
+    try { await video.play(); } catch { /* readyState may still advance */ }
 
-  try {
+    await new Promise<void>((resolve) => {
+      if (video.readyState >= 2) { resolve(); return; }
+      const onReady = (): void => {
+        video.removeEventListener('loadeddata', onReady);
+        video.removeEventListener('canplay', onReady);
+        resolve();
+      };
+      video.addEventListener('loadeddata', onReady);
+      video.addEventListener('canplay', onReady);
+      // Inner bound (separate from hard timeout) — if loadeddata doesn't fire
+      // in 2s the frame check still proceeds with whatever's there.
+      setTimeout(() => {
+        video.removeEventListener('loadeddata', onReady);
+        video.removeEventListener('canplay', onReady);
+        resolve();
+      }, 2_000);
+    });
+
+    // Some browsers (older Safari) lack OffscreenCanvas. Skip the check.
+    if (typeof OffscreenCanvas === 'undefined') return;
+
+    // Video has no dimensions yet → can't probe; skip rather than throw.
+    if (!video.videoWidth || !video.videoHeight) {
+      console.warn('[displayCapture] black-frame probe skipped: video has 0×0 dimensions');
+      return;
+    }
+
     const cv = new OffscreenCanvas(64, 64);
     const ctx = cv.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
@@ -151,9 +191,27 @@ export async function assertNotBlackFrames(stream: MediaStream): Promise<void> {
         `display stream returned all-black frames (${(ratio * 100).toFixed(0)}%) — macOS Screen Recording permission may be missing`,
       );
     }
+  })();
+
+  let timedOut = false;
+  const timer = new Promise<void>((resolve) => {
+    setTimeout(() => {
+      timedOut = true;
+      console.warn('[displayCapture] black-frame probe HARD TIMEOUT (', HARD_TIMEOUT_MS, 'ms) — proceeding without check');
+      resolve();
+    }, HARD_TIMEOUT_MS);
+  });
+
+  try {
+    await Promise.race([probe, timer]);
+    if (timedOut) {
+      // Best-effort wait so probe doesn't reject after we returned (would be uncaught).
+      probe.catch(() => { /* */ });
+    } else {
+      await probe;
+    }
   } finally {
-    // The probe video element is discarded; track lifecycle stays with caller.
-    video.srcObject = null;
+    cleanup();
   }
 }
 

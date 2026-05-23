@@ -76,8 +76,16 @@ export async function openCameraPreview(
     setTimeout(resolve, 1500);
   });
 
+  // Hard timeout around requestPictureInPicture so we never hang the
+  // recording start path on a flaky PiP implementation.
+  const PIP_TIMEOUT_MS = 3_000;
   try {
-    await video.requestPictureInPicture();
+    await Promise.race([
+      video.requestPictureInPicture(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('PiP request timed out after 3s')), PIP_TIMEOUT_MS),
+      ),
+    ]);
   } catch (err) {
     console.warn(LOG_TAG, 'requestPictureInPicture failed:', err);
     try { host.remove(); } catch { /* */ }
