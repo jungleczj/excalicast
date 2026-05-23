@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { I } from '@/components/icons';
+import { I, LogoMark } from '@/components/icons';
 import { useAuth } from '@/hooks/useAuth';
 import { LoginModal } from '@/components/LoginModal';
 import { LanguageToggle } from '@/components/LanguageToggle';
@@ -13,22 +13,19 @@ interface Props {
   onUpgradePro?: () => void;
 }
 
-const TIER_BADGE: Record<NonNullable<Props['tier']>, { label: string; bg: string; color: string }> = {
-  free: { label: 'Free', bg: 'bg-bg-tertiary',  color: 'text-text-secondary' },
-  pro:  { label: 'Pro',  bg: 'bg-primary-100',  color: 'text-primary-700' },
-  max:  { label: 'Max',  bg: '',                color: 'text-white' },
+const TIER_VARIANT: Record<NonNullable<Props['tier']>, string> = {
+  free: 'tag-mono-soft',
+  pro: 'tag-mono-pro',
+  max: 'tag-mono-max',
 };
 
 export function Brand(): JSX.Element {
   return (
-    <Link href="/app" className="flex items-center gap-2">
-      <div
-        className="grid h-[26px] w-[26px] place-items-center rounded-[7px] text-white"
-        style={{ background: 'linear-gradient(135deg, var(--primary-600) 0%, var(--secondary-600) 100%)' }}
-      >
-        <I.Logo size={16} />
-      </div>
-      <span className="text-[15px] font-bold tracking-tight">Excalicast</span>
+    <Link href="/app" className="flex items-center gap-2.5">
+      <LogoMark size={28} />
+      <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', color: 'var(--ink)' }}>
+        Excalicast
+      </span>
     </Link>
   );
 }
@@ -38,7 +35,8 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
   const pathname = usePathname();
   const onLib = pathname?.startsWith('/library');
   const onRecord = pathname === '/app' || pathname?.startsWith('/export');
-  const badge = TIER_BADGE[tier];
+  const badgeClass = TIER_VARIANT[tier];
+  const badgeLabel = tier === 'free' ? 'FREE' : tier === 'pro' ? 'PRO' : 'MAX';
 
   const { user, logout, loading } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
@@ -58,59 +56,77 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
 
   return (
     <>
-      <header className="flex h-12 flex-shrink-0 items-center justify-between border-b border-border-default bg-bg-primary px-5">
-        <div className="flex items-center gap-6">
+      <header
+        className="flex h-14 flex-shrink-0 items-center justify-between px-6"
+        style={{
+          background: 'var(--paper)',
+          borderBottom: '2px solid var(--ink)',
+          color: 'var(--ink)',
+        }}
+      >
+        <div className="flex items-center gap-8">
           <Brand />
-          <nav className="flex gap-1">
+          <nav className="flex items-center gap-6">
             <NavItem href="/library" active={onLib}>{t('library')}</NavItem>
             <NavItem href="/app" active={onRecord}>{t('record')}</NavItem>
           </nav>
         </div>
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-3">
           <LanguageToggle />
           {tier === 'free' && onUpgradePro && (
             <button
               type="button"
               onClick={onUpgradePro}
-              className="rounded-full px-3 py-[5px] text-[11px] font-bold text-white"
-              style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)', boxShadow: '0 2px 6px rgba(59,130,246,0.4)' }}
+              className="btn-sketch btn-sketch-hi"
+              style={{ padding: '8px 14px', fontSize: 11 }}
             >
               {t('upgradePro')}
             </button>
           )}
-          <span
-            className={`rounded-full px-2.5 py-[3px] text-[11px] font-semibold ${badge.bg} ${badge.color}`}
-            style={tier === 'max' ? { background: 'linear-gradient(90deg, #9333ea, #db2777)' } : undefined}
-          >
-            {badge.label}
-          </span>
+          <span className={`tag-mono ${badgeClass}`}>{badgeLabel}</span>
 
           {loading ? (
-            <div className="h-7 w-7 rounded-full bg-bg-tertiary" />
+            <div className="h-8 w-8 rounded-full" style={{ background: 'var(--paper-2)' }} />
           ) : user ? (
             <div className="relative" ref={menuRef}>
               <button
                 onClick={() => setMenuOpen((v) => !v)}
-                className="grid h-7 w-7 place-items-center rounded-full text-[12px] font-semibold text-white transition hover:opacity-90"
-                style={{ background: 'linear-gradient(135deg, #60a5fa, #a78bfa)' }}
+                className="grid h-9 w-9 place-items-center rounded-full text-[12px] font-bold"
+                style={{
+                  background: 'var(--paper)',
+                  color: 'var(--ink)',
+                  border: '1.5px solid var(--ink)',
+                  fontFamily: 'var(--font-mono)',
+                }}
                 title={user.email}
               >
                 {initial}
               </button>
               {menuOpen && (
                 <div
-                  className="absolute right-0 top-[calc(100%+6px)] z-50 w-[220px] rounded-xl border border-border-default bg-bg-primary p-1.5 shadow-lg"
-                  style={{ boxShadow: '0 10px 30px rgba(0,0,0,0.12)' }}
+                  className="absolute right-0 top-[calc(100%+8px)] z-50 w-[240px] p-2"
+                  style={{
+                    background: 'var(--paper)',
+                    border: '1.6px solid var(--ink)',
+                    borderRadius: 4,
+                    boxShadow: '4px 4px 0 var(--ink)',
+                  }}
                 >
-                  <div className="px-2.5 py-1.5">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">{t('loggedIn')}</div>
-                    <div className="mt-0.5 truncate text-[13px] font-medium text-text-primary">{user.email}</div>
+                  <div className="px-3 py-2">
+                    <div className="label-mono" style={{ fontSize: 9 }}>{t('loggedIn')}</div>
+                    <div
+                      className="mt-1 truncate text-[13px] font-medium"
+                      style={{ color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}
+                    >
+                      {user.email}
+                    </div>
                   </div>
-                  <div className="my-1 h-px bg-border-default" />
+                  <div className="my-1.5 h-px" style={{ background: 'var(--rule-faint)' }} />
                   <button
                     type="button"
                     onClick={async () => { await logout(); setMenuOpen(false); }}
-                    className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-[13px] text-recording-strong hover:bg-bg-tertiary"
+                    className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-[13px]"
+                    style={{ color: 'var(--rec)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.06em' }}
                   >
                     {t('logout')}
                   </button>
@@ -121,8 +137,8 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
             <button
               type="button"
               onClick={() => setLoginOpen(true)}
-              className="rounded-md bg-primary-600 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-primary-700"
-              style={{ boxShadow: '0 1px 2px rgba(37,99,235,0.25)' }}
+              className="btn-sketch btn-sketch-primary"
+              style={{ padding: '8px 14px', fontSize: 11 }}
             >
               {t('loginRegister')}
             </button>
@@ -138,11 +154,19 @@ function NavItem({ href, active, children }: { href: string; active?: boolean; c
   return (
     <Link
       href={href}
-      className={`rounded-md px-3 py-1.5 text-[13px] font-medium transition ${
-        active
-          ? 'bg-bg-tertiary text-text-primary'
-          : 'text-text-secondary hover:bg-bg-tertiary/60 hover:text-text-primary'
-      }`}
+      style={{
+        position: 'relative',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 12,
+        fontWeight: 600,
+        textTransform: 'uppercase',
+        letterSpacing: '0.08em',
+        color: 'var(--ink)',
+        opacity: active ? 1 : 0.55,
+        textDecoration: 'none',
+        paddingBottom: 4,
+        borderBottom: active ? '2px solid var(--ink)' : '2px solid transparent',
+      }}
     >
       {children}
     </Link>

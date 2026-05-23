@@ -137,10 +137,10 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
   const isCleanLocked = !config.withWatermark && !effectivelyUnlocked;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div>
-        <h3 className="mb-2 text-[13px] font-semibold text-text-primary">{t('title')}</h3>
-        <p className="mb-3 text-[11px] leading-relaxed text-text-secondary">{t('lede')}</p>
+        <h3 className="label-mono mb-2" style={{ fontSize: 11 }}>{t('title')}</h3>
+        <p className="mb-3" style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--ink-2)' }}>{t('lede')}</p>
 
         <RadioCard
           selected={config.withWatermark}
@@ -164,28 +164,41 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
           type="button"
           onClick={handleExport}
           disabled={busy}
-          className="mt-3 flex w-full items-center justify-center gap-2 rounded-md px-4 py-3 text-[13px] font-semibold text-white shadow-md transition disabled:opacity-40"
-          style={
-            isCleanLocked
-              ? { background: 'var(--accent-600)', boxShadow: '0 4px 12px rgba(217,119,6,0.3)' }
-              : { background: 'var(--primary-600)', boxShadow: '0 1px 3px rgba(37,99,235,0.3)' }
-          }
+          className="mt-4 flex w-full items-center justify-center gap-2 transition"
+          style={{
+            padding: '14px 18px',
+            background: 'var(--ink)',
+            color: 'var(--paper)',
+            border: '1.6px solid var(--ink)',
+            boxShadow: '4px 4px 0 var(--hi)',
+            borderRadius: 4,
+            fontFamily: 'var(--font-mono)',
+            fontSize: 12,
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            cursor: busy ? 'not-allowed' : 'pointer',
+            opacity: busy ? 0.5 : 1,
+          }}
         >
           {isCleanLocked ? (
             <>
-              <I.Lock size={16} />
+              <I.Lock size={14} />
               {t('buttonUnlock')}
             </>
           ) : (
             <>
-              <I.Download size={16} />
+              <I.Download size={14} />
               {config.withWatermark ? t('buttonWithWatermark') : t('buttonClean')}
             </>
           )}
         </button>
 
         {(paid || proUnlocked) && (
-          <p className="mt-2 flex items-center justify-center gap-1.5 text-[11px] text-success-600">
+          <p
+            className="mt-3 flex items-center justify-center gap-1.5"
+            style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ok)', letterSpacing: '0.04em' }}
+          >
             <I.Check size={12} sw={2.5} />
             {proUnlocked ? (
               <span className="flex items-center gap-1">
@@ -198,23 +211,23 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
         )}
       </div>
 
-      <div className="border-t border-border-default" />
+      <div style={{ height: 1.5, background: 'var(--ink)', opacity: 0.4 }} />
 
       <div>
-        <h3 className="mb-2 flex items-center gap-2 text-[13px] font-semibold text-text-primary">
+        <h3 className="mb-2 flex items-center gap-2 label-mono" style={{ fontSize: 11 }}>
           {t('advancedHeading')}
           {!proUnlocked && (
             <button
               type="button"
               onClick={() => setProUpgradeOpen(true)}
-              className="ml-auto rounded-md px-2 py-1 text-[11px] font-bold text-white"
-              style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }}
+              className="ml-auto btn-sketch btn-sketch-hi"
+              style={{ padding: '5px 10px', fontSize: 10 }}
             >
               {t('upgradePro')}
             </button>
           )}
         </h3>
-        <p className="mb-3 text-[11px] leading-relaxed text-text-secondary">{t('advancedLede')}</p>
+        <p className="mb-3" style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--ink-2)' }}>{t('advancedLede')}</p>
         <div className="space-y-2">
           <FeatureRow
             icon={<I.Subtitles size={16} />}
@@ -254,18 +267,28 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
       </div>
 
       {(statusMsg || error || bgPolling) && (
-        <div className="rounded-md border border-border-default bg-bg-secondary p-3 text-[12px]">
+        <div
+          className="p-3"
+          style={{
+            background: 'var(--paper-2)',
+            border: '1.4px solid var(--ink)',
+            borderRadius: 3,
+            fontSize: 12,
+            fontFamily: 'var(--font-mono)',
+          }}
+        >
           {bgPolling && (
-            <div className="flex items-center gap-2 text-primary-700">
+            <div className="flex items-center gap-2" style={{ color: 'var(--ink)' }}>
               <span
-                className="inline-block h-3 w-3 flex-shrink-0 animate-spin rounded-full border-2 border-primary-300 border-t-primary-700"
+                className="inline-block h-3 w-3 flex-shrink-0 animate-spin rounded-full"
+                style={{ border: '2px solid var(--rule-soft)', borderTopColor: 'var(--ink)' }}
                 aria-hidden
               />
               <span>{t('bgPolling')}</span>
             </div>
           )}
-          {statusMsg && !bgPolling && <div className="text-text-primary">{statusMsg}</div>}
-          {error && <div className="mt-1 text-recording-strong">{t('errorPrefix', { message: error })}</div>}
+          {statusMsg && !bgPolling && <div style={{ color: 'var(--ink)' }}>{statusMsg}</div>}
+          {error && <div className="mt-1" style={{ color: 'var(--rec)' }}>{t('errorPrefix', { message: error })}</div>}
         </div>
       )}
 
@@ -312,25 +335,37 @@ function RadioCard({ selected, onClick, title, meta, hint, accent }: RadioCardPr
   return (
     <button
       onClick={onClick}
-      className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition ${
-        selected
-          ? 'border-primary-600 bg-primary-50'
-          : 'border-border-default bg-bg-primary hover:bg-bg-tertiary'
-      }`}
-      style={{ borderWidth: selected ? 1.5 : 1 }}
+      className="flex w-full items-start gap-3 p-3 text-left transition"
+      style={{
+        background: selected ? (accent ? 'var(--hi)' : 'var(--hi-soft)') : 'var(--paper)',
+        border: '1.4px solid var(--ink)',
+        borderRadius: 3,
+        boxShadow: selected ? '2px 2px 0 var(--ink)' : 'none',
+      }}
     >
       <span
-        className="mt-0.5 grid h-[18px] w-[18px] flex-shrink-0 place-items-center rounded-full border-2"
-        style={{ borderColor: selected ? 'var(--primary-600)' : 'var(--border-strong)' }}
+        className="mt-0.5 grid h-[18px] w-[18px] flex-shrink-0 place-items-center rounded-full"
+        style={{ border: '1.6px solid var(--ink)', background: 'var(--paper)' }}
       >
-        {selected && <span className="h-2 w-2 rounded-full bg-primary-600" />}
+        {selected && <span className="h-2 w-2 rounded-full" style={{ background: 'var(--ink)' }} />}
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          <span className="text-[13px] font-semibold text-text-primary">{title}</span>
-          <span className={`text-[11px] font-semibold ${accent ? 'text-primary-700' : 'text-text-secondary'}`}>{meta}</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', letterSpacing: '-0.005em' }}>{title}</span>
+          <span
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              color: 'var(--ink-2)',
+              textTransform: 'uppercase',
+            }}
+          >
+            {meta}
+          </span>
         </div>
-        {hint && <div className="mt-0.5 text-[11px] text-text-tertiary">{hint}</div>}
+        {hint && <div className="mt-1" style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.5 }}>{hint}</div>}
       </div>
     </button>
   );
@@ -352,12 +387,20 @@ function FeatureRow({ icon, title, desc, tier, highlight, unlocked, actionLabel,
     <button
       type="button"
       onClick={onAction}
-      className="flex items-center gap-1 rounded border px-2.5 py-1 text-[11px] font-semibold"
-      style={
-        unlocked
-          ? { background: 'var(--primary-600)', color: 'white', borderColor: 'var(--primary-600)' }
-          : { background: 'var(--bg-primary)', color: 'var(--text-primary)', borderColor: 'var(--border-strong)' }
-      }
+      className="flex items-center gap-1"
+      style={{
+        padding: '5px 10px',
+        background: unlocked ? 'var(--ink)' : 'var(--paper)',
+        color: unlocked ? 'var(--paper)' : 'var(--ink)',
+        border: '1.3px solid var(--ink)',
+        borderRadius: 3,
+        fontFamily: 'var(--font-mono)',
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        cursor: 'pointer',
+      }}
     >
       {!unlocked && <I.Lock size={10} />}
       {actionLabel ?? (unlocked ? useLabel : upgradeLabel)}
@@ -365,33 +408,64 @@ function FeatureRow({ icon, title, desc, tier, highlight, unlocked, actionLabel,
   ) : (
     <button
       disabled
-      className="flex items-center gap-1 rounded border border-border-strong bg-bg-primary px-2.5 py-1 text-[11px] font-semibold text-text-primary opacity-60"
+      className="flex items-center gap-1"
+      style={{
+        padding: '5px 10px',
+        background: 'var(--paper-2)',
+        color: 'var(--ink-3)',
+        border: '1.3px dashed var(--ink)',
+        borderRadius: 3,
+        fontFamily: 'var(--font-mono)',
+        fontSize: 10,
+        fontWeight: 600,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+      }}
     >
       <I.Lock size={10} /> {upgradeLabel}
     </button>
   );
+  const tierBg = tier === 'Max' ? 'var(--max)' : 'var(--pro)';
   return (
-    <div className="flex items-center gap-3 rounded-md border border-border-default bg-bg-secondary px-3 py-2.5">
+    <div
+      className="flex items-center gap-3 px-3 py-3"
+      style={{
+        background: 'var(--paper)',
+        border: '1.4px solid var(--ink)',
+        borderRadius: 3,
+      }}
+    >
       <div
-        className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-md text-text-tertiary"
+        className="grid h-8 w-8 flex-shrink-0 place-items-center"
         style={{
-          background: highlight ? 'linear-gradient(135deg, #9333ea, #db2777)' : 'var(--primary-100)',
-          color: highlight ? 'white' : 'var(--primary-700)',
+          background: highlight ? 'var(--max)' : 'var(--pro)',
+          border: '1.4px solid var(--ink)',
+          borderRadius: 3,
+          color: 'var(--ink)',
         }}
       >
         {icon}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[12.5px] font-semibold">{title}</span>
+        <div className="flex items-center gap-2">
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink)' }}>{title}</span>
           <span
-            className="rounded-full px-1.5 py-px text-[9px] font-bold tracking-wider text-white"
-            style={{ background: tier === 'Max' ? 'linear-gradient(90deg, #9333ea, #db2777)' : 'var(--primary-600)' }}
+            style={{
+              padding: '1px 6px',
+              background: tierBg,
+              border: '1px solid var(--ink)',
+              borderRadius: 999,
+              fontFamily: 'var(--font-mono)',
+              fontSize: 9,
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              color: 'var(--ink)',
+            }}
           >
             {tier.toUpperCase()}
           </span>
         </div>
-        <div className="mt-0.5 text-[11px] text-text-secondary">{desc}</div>
+        <div className="mt-0.5" style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.4 }}>{desc}</div>
       </div>
       {button}
     </div>

@@ -19,11 +19,15 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
   ];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div>
-        <div className="mb-2 flex items-baseline justify-between">
-          <h3 className="text-[13px] font-semibold text-text-primary">{t('ratioHeading')}</h3>
-          <span className="text-[11px] text-text-tertiary">{t('ratioSubheading')}</span>
+        <div className="mb-3 flex items-baseline justify-between">
+          <h3 className="label-mono" style={{ fontSize: 11 }}>{t('ratioHeading')}</h3>
+          <span
+            style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', letterSpacing: '0.04em' }}
+          >
+            {t('ratioSubheading')}
+          </span>
         </div>
         <div className="grid grid-cols-4 gap-2">
           {RATIOS.map((r) => {
@@ -35,24 +39,33 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
                 key={r}
                 type="button"
                 onClick={() => onChange({ ...config, aspectRatio: r })}
-                className={`flex flex-col items-center justify-center gap-1 rounded-lg border px-2 py-2.5 transition ${
-                  active
-                    ? 'border-primary-600 bg-primary-50 text-primary-700'
-                    : 'border-border-default bg-bg-primary text-text-secondary hover:bg-bg-tertiary'
-                }`}
-                style={{ borderWidth: active ? 1.5 : 1 }}
+                className="flex flex-col items-center justify-center gap-1.5 transition"
+                style={{
+                  padding: '10px 8px',
+                  background: active ? 'var(--hi)' : 'var(--paper)',
+                  border: '1.5px solid var(--ink)',
+                  borderRadius: 3,
+                  boxShadow: active ? '2px 2px 0 var(--ink)' : 'none',
+                  color: 'var(--ink)',
+                }}
               >
                 <div
-                  className="rounded-sm border border-current"
                   style={{
                     width: 28 * (preset.width / max),
                     height: 28 * (preset.height / max),
                     minWidth: 8,
                     minHeight: 8,
+                    border: '1.4px solid var(--ink)',
+                    background: active ? 'var(--paper)' : 'var(--paper-2)',
+                    borderRadius: 1,
                   }}
                 />
-                <span className="mt-0.5 text-[12px] font-semibold">{r}</span>
-                <span className="text-[10px] text-text-tertiary">{t(`ratioHints.${r}` as never)}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{r}</span>
+                <span
+                  style={{ fontSize: 9, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', letterSpacing: '0.04em', textTransform: 'uppercase' }}
+                >
+                  {t(`ratioHints.${r}` as never)}
+                </span>
               </button>
             );
           })}
@@ -60,7 +73,7 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
       </div>
 
       <div>
-        <h3 className="mb-2 text-[13px] font-semibold text-text-primary">{t('modeHeading')}</h3>
+        <h3 className="label-mono mb-3" style={{ fontSize: 11 }}>{t('modeHeading')}</h3>
         <div className="space-y-2">
           {MODES.map((m) => {
             const active = config.croppingMode === m.value;
@@ -69,22 +82,28 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
                 key={m.value}
                 type="button"
                 onClick={() => onChange({ ...config, croppingMode: m.value })}
-                className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition ${
-                  active
-                    ? 'border-primary-600 bg-primary-50'
-                    : 'border-border-default bg-bg-primary hover:bg-bg-tertiary'
-                }`}
-                style={{ borderWidth: active ? 1.5 : 1 }}
+                className="flex w-full items-start gap-3 p-3 text-left transition"
+                style={{
+                  background: active ? 'var(--hi-soft)' : 'var(--paper)',
+                  border: '1.4px solid var(--ink)',
+                  borderRadius: 3,
+                  boxShadow: active ? '2px 2px 0 var(--ink)' : 'none',
+                }}
               >
                 <span
-                  className="mt-0.5 grid h-4 w-4 flex-shrink-0 place-items-center rounded-full border-2"
-                  style={{ borderColor: active ? 'var(--primary-600)' : 'var(--border-strong)' }}
+                  className="mt-0.5 grid h-4 w-4 flex-shrink-0 place-items-center rounded-full"
+                  style={{
+                    border: '1.6px solid var(--ink)',
+                    background: 'var(--paper)',
+                  }}
                 >
-                  {active && <span className="h-2 w-2 rounded-full bg-primary-600" />}
+                  {active && <span className="h-2 w-2 rounded-full" style={{ background: 'var(--ink)' }} />}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-semibold text-text-primary">{m.label}</div>
-                  <div className="mt-0.5 text-[11px] text-text-tertiary">{m.hint}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{m.label}</div>
+                  <div className="mt-0.5" style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.4 }}>
+                    {m.hint}
+                  </div>
                 </div>
               </button>
             );

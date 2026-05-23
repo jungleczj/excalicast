@@ -23,7 +23,19 @@ export function LanguageToggle(): JSX.Element {
     <div
       role="group"
       aria-label={t('label')}
-      className="inline-flex items-center rounded-full border border-border-default bg-bg-secondary p-0.5 text-[11px] font-semibold"
+      className="inline-flex items-center"
+      style={{
+        border: '1.4px solid var(--ink)',
+        background: 'var(--paper-2)',
+        borderRadius: 999,
+        padding: 2,
+        gap: 2,
+        fontFamily: 'var(--font-mono)',
+        fontSize: 10.5,
+        fontWeight: 600,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+      }}
     >
       {locales.map((loc) => {
         const active = loc === locale;
@@ -33,11 +45,15 @@ export function LanguageToggle(): JSX.Element {
             type="button"
             onClick={() => onChange(loc as Locale)}
             disabled={pending}
-            className={`rounded-full px-2.5 py-[3px] transition ${
-              active
-                ? 'bg-bg-primary text-text-primary shadow-sm'
-                : 'text-text-tertiary hover:text-text-primary'
-            }`}
+            className="transition"
+            style={{
+              padding: '4px 10px',
+              background: active ? 'var(--ink)' : 'transparent',
+              color: active ? 'var(--paper)' : 'var(--ink-2)',
+              border: 'none',
+              borderRadius: 999,
+              cursor: pending ? 'not-allowed' : 'pointer',
+            }}
           >
             {loc === 'zh' ? t('zh') : t('en')}
           </button>

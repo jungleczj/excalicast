@@ -21,29 +21,51 @@ export default function LibraryPage(): JSX.Element {
   }, []);
 
   const totalMin = Math.round(stats.totalMs / 60_000);
-  const heading = locale === 'en' ? 'My recordings' : '我的录制';
+  const heading = locale === 'en' ? 'Library' : '录制库';
   const subline = locale === 'en'
-    ? `${stats.count} recording${stats.count === 1 ? '' : 's'} · ${totalMin} min total · all stored locally`
-    : `${stats.count} 条录制 · 共 ${totalMin} 分钟 · 全部存于本机`;
+    ? `// ${stats.count} RECORDING${stats.count === 1 ? '' : 'S'} · ${totalMin} MIN TOTAL · STORED LOCALLY`
+    : `// ${stats.count} 条录制 · 共 ${totalMin} 分钟 · 存于本机`;
+
+  const description = locale === 'en'
+    ? 'Every recording stays on this device until you choose to export. Pro / Max users see cloud backups too.'
+    : '每条录制都保留在本机，直到你主动导出。Pro / Max 用户还会看到云端备份。';
 
   return (
-    <div className="flex h-full flex-col bg-bg-secondary">
+    <div className="flex h-full flex-col" style={{ background: 'var(--paper)' }}>
       <AppHeader tier="free" />
 
-      <div className="flex-1 overflow-auto px-8 py-6">
-        <div className="mx-auto max-w-6xl">
-          <div className="mb-5 flex items-end justify-between">
+      <div className="flex-1 overflow-auto px-12 py-10">
+        <div className="mx-auto" style={{ maxWidth: 1200 }}>
+          {/* Title row */}
+          <div className="mb-8 flex items-end justify-between">
             <div>
-              <h1 className="text-[22px] font-bold leading-tight">{heading}</h1>
-              <div className="mt-1 text-[13px] text-text-secondary">{subline}</div>
+              <div className="label-mono mb-2">{subline}</div>
+              <h1
+                style={{
+                  fontSize: 44,
+                  fontWeight: 700,
+                  letterSpacing: '-0.03em',
+                  margin: 0,
+                  lineHeight: 1,
+                  color: 'var(--ink)',
+                }}
+              >
+                {heading}
+              </h1>
+              <p
+                className="mt-3"
+                style={{ fontSize: 14, color: 'var(--ink-2)', maxWidth: 460, lineHeight: 1.5 }}
+              >
+                {description}
+              </p>
             </div>
-            <div className="flex gap-2">
+
+            <div className="flex items-center gap-3">
               <Link
                 href="/app"
-                className="flex items-center gap-1.5 rounded-md px-4 py-2 text-[13px] font-semibold text-white"
-                style={{ background: 'var(--recording-strong)', boxShadow: '0 4px 12px rgba(220,38,38,0.25)' }}
+                className="btn-sketch btn-sketch-primary"
               >
-                <span className="h-2 w-2 rounded-full bg-white" />
+                <span className="recording-indicator h-1.5 w-1.5 rounded-full" style={{ background: 'white' }} />
                 {t('newRecording')}
               </Link>
             </div>

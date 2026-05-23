@@ -26,40 +26,61 @@ function fmt(ms: number): string {
   return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
 }
 
+const BAR_STYLE: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '8px 10px',
+  background: 'var(--ink)',
+  color: 'var(--paper)',
+  border: '1.8px solid var(--ink)',
+  borderRadius: 5,
+  boxShadow: '4px 4px 0 var(--hi)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 12,
+};
+
 export function RecordingBar(props: Props): JSX.Element {
   const t = useTranslations('recordingBar');
   const { state, elapsedMs, hasAudio, hasCamera, cameraEnabled, onToggleCamera, onStart, onStop, onDiscard, onPause, onResume } = props;
 
   if (state === 'idle') {
     return (
-      <div
-        className="fade-in flex items-center gap-2 rounded-full px-3 py-2"
-        style={{
-          background: 'rgba(17, 24, 39, 0.92)',
-          backdropFilter: 'blur(12px)',
-          boxShadow: '0 10px 40px rgba(0,0,0,0.3)',
-          color: 'white',
-        }}
-      >
+      <div className="fade-in" style={BAR_STYLE}>
         <button
           type="button"
           onClick={onToggleCamera}
-          className={`grid h-8 w-8 place-items-center rounded-full transition ${
-            cameraEnabled
-              ? 'bg-success-500 text-white'
-              : 'bg-white/10 text-white/70 hover:bg-white/15'
-          }`}
+          className="grid h-7 w-7 place-items-center"
+          style={{
+            background: cameraEnabled ? 'var(--ok)' : 'rgba(255,255,255,0.08)',
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: 3,
+            color: 'var(--paper)',
+            cursor: 'pointer',
+          }}
           title={cameraEnabled ? t('cameraOnTooltip') : t('cameraOffTooltip')}
         >
-          {cameraEnabled ? <I.Camera size={14} /> : <I.CameraOff size={14} />}
+          {cameraEnabled ? <I.Camera size={13} /> : <I.CameraOff size={13} />}
         </button>
         <button
           type="button"
           onClick={onStart}
-          className="flex items-center gap-2 rounded-full px-4 py-2 text-[13px] font-semibold text-white transition hover:opacity-90"
-          style={{ background: 'var(--recording-strong)', boxShadow: '0 4px 12px rgba(220,38,38,0.4)' }}
+          className="flex items-center gap-2"
+          style={{
+            padding: '7px 14px',
+            background: 'var(--rec)',
+            color: 'var(--paper)',
+            border: 'none',
+            borderRadius: 3,
+            fontFamily: 'var(--font-mono)',
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            cursor: 'pointer',
+          }}
         >
-          <span className="h-2 w-2 rounded-full bg-white" />
+          <span className="recording-indicator h-1.5 w-1.5 rounded-full" style={{ background: 'white' }} />
           {t('start')}
         </button>
       </div>
@@ -69,8 +90,15 @@ export function RecordingBar(props: Props): JSX.Element {
   if (state === 'processing') {
     return (
       <div
-        className="rounded-full px-5 py-2.5 text-sm text-white/90"
-        style={{ background: 'rgba(17, 24, 39, 0.92)', backdropFilter: 'blur(12px)' }}
+        style={{
+          ...BAR_STYLE,
+          padding: '12px 22px',
+          fontFamily: 'var(--font-mono)',
+          fontSize: 11,
+          fontWeight: 600,
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+        }}
       >
         {t('processing')}
       </div>
@@ -79,84 +107,141 @@ export function RecordingBar(props: Props): JSX.Element {
 
   const isRec = state === 'recording';
   return (
-    <div
-      className="flex items-center gap-3 rounded-full px-3.5 py-2 text-white"
-      style={{
-        background: 'rgba(17, 24, 39, 0.92)',
-        backdropFilter: 'blur(12px)',
-        boxShadow: '0 10px 40px rgba(0,0,0,0.3)',
-      }}
-    >
-      <div className="flex items-center gap-2 pl-1">
+    <div style={BAR_STYLE}>
+      {/* REC + timer */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          background: isRec ? 'var(--rec)' : 'rgba(255,255,255,0.1)',
+          padding: '4px 12px',
+          borderRadius: 3,
+        }}
+      >
         <span
-          className={isRec ? 'recording-indicator h-2.5 w-2.5 rounded-full' : 'h-2.5 w-2.5 rounded-full'}
-          style={{ background: isRec ? 'var(--recording)' : 'rgba(255,255,255,0.4)' }}
+          className={isRec ? 'recording-indicator' : ''}
+          style={{
+            width: 8,
+            height: 8,
+            background: isRec ? 'white' : 'rgba(255,255,255,0.5)',
+            borderRadius: 999,
+          }}
         />
-        <span className="text-[12px] font-semibold tracking-[0.05em]">
+        <span style={{ fontWeight: 700, letterSpacing: '0.08em', fontSize: 10 }}>
           {isRec ? t('rec') : t('paused')}
+        </span>
+        <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: 12.5 }}>
+          {fmt(elapsedMs)}
         </span>
       </div>
 
-      <div className="font-mono text-[14px] font-medium tabular-nums">{fmt(elapsedMs)}</div>
-
-      <span className="h-5 w-px bg-white/20" />
+      <Divider />
 
       {isRec ? (
-        <button
-          type="button"
-          onClick={onPause}
-          className="flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1.5 text-[12px] font-medium hover:bg-white/15"
-        >
-          <I.Pause size={13} /> {t('pause')}
-        </button>
+        <CtrlBtn onClick={onPause} Icon={I.Pause} label={t('pause')} />
       ) : (
-        <button
-          type="button"
-          onClick={onResume}
-          className="flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1.5 text-[12px] font-medium hover:bg-white/15"
-        >
-          <I.Play size={13} /> {t('resume')}
-        </button>
+        <CtrlBtn onClick={onResume} Icon={I.Play} label={t('resume')} />
       )}
-
-      <button
-        type="button"
-        onClick={onStop}
-        className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[12px] font-medium text-white"
-        style={{ background: 'var(--recording-strong)' }}
-      >
-        <I.Stop size={13} /> {t('stop')}
-      </button>
+      <CtrlBtn onClick={onStop} Icon={I.Stop} label={t('stop')} tone="rec" />
 
       {onDiscard && (
         <button
           type="button"
           onClick={onDiscard}
           title={t('discardTooltip')}
-          className="grid h-7 w-7 place-items-center rounded-full bg-white/10 text-white/80 hover:bg-white/15"
+          style={{
+            width: 28,
+            height: 28,
+            background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.18)',
+            color: 'var(--paper)',
+            borderRadius: 3,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
         >
           <I.Trash size={13} />
         </button>
       )}
 
-      <span className="h-5 w-px bg-white/20" />
+      <Divider />
 
-      <div className="flex gap-1.5 pr-1">
-        <SourceDot active={hasAudio} icon={<I.Mic size={11} />} title={t('micTooltip')} />
-        <SourceDot active={hasCamera} icon={<I.Camera size={11} />} title={t('cameraTooltip')} />
-      </div>
+      <SrcDot Icon={I.Mic} on={hasAudio} title={t('micTooltip')} />
+      <SrcDot Icon={I.Camera} on={hasCamera} title={t('cameraTooltip')} />
     </div>
   );
 }
 
-function SourceDot({ active, icon, title }: { active: boolean; icon: React.ReactNode; title: string }) {
+function Divider() {
+  return <div style={{ width: 1.5, height: 22, background: 'rgba(255,255,255,0.15)' }} />;
+}
+
+function CtrlBtn({
+  onClick,
+  Icon,
+  label,
+  tone,
+}: {
+  onClick?: () => void;
+  Icon: (p: { size?: number; sw?: number }) => JSX.Element;
+  label: string;
+  tone?: 'rec';
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '6px 11px',
+        background: tone === 'rec' ? 'var(--rec)' : 'rgba(255,255,255,0.08)',
+        color: 'var(--paper)',
+        border: 'none',
+        borderRadius: 3,
+        fontFamily: 'var(--font-mono)',
+        fontSize: 10.5,
+        fontWeight: 600,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        cursor: 'pointer',
+      }}
+    >
+      <Icon size={12} />
+      {label}
+    </button>
+  );
+}
+
+function SrcDot({
+  Icon,
+  on,
+  title,
+}: {
+  Icon: (p: { size?: number; sw?: number }) => JSX.Element;
+  on: boolean;
+  title: string;
+}) {
   return (
     <div
       title={title}
-      className="grid h-6 w-6 place-items-center rounded-full text-white"
-      style={{ background: active ? 'var(--success-500)' : 'rgba(255,255,255,0.1)' }}
+      style={{
+        width: 26,
+        height: 26,
+        borderRadius: 999,
+        background: on ? 'var(--ok)' : 'rgba(255,255,255,0.06)',
+        border: '1px solid rgba(255,255,255,0.2)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'white',
+      }}
     >
-      {icon}
+      <Icon size={12} />
     </div>
   );
 }

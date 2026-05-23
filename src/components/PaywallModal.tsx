@@ -138,98 +138,203 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
   return (
     <div
       className="fade-in fixed inset-0 z-50 grid place-items-center"
-      style={{ background: 'rgba(15, 23, 42, 0.55)', backdropFilter: 'blur(4px)' }}
+      style={{ background: 'rgba(26, 26, 26, 0.45)' }}
       onClick={onClose}
     >
       <div
-        className="relative w-[460px] max-w-[92vw] rounded-2xl bg-bg-primary p-7 shadow-2xl"
+        className="relative max-w-[92vw]"
+        style={{
+          width: 480,
+          background: 'var(--paper)',
+          border: '2px solid var(--ink)',
+          borderRadius: 5,
+          boxShadow: '6px 6px 0 var(--ink)',
+          overflow: 'hidden',
+        }}
         onClick={(e) => e.stopPropagation()}
       >
-        <button
-          onClick={onClose}
-          className="absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-md text-text-tertiary hover:bg-bg-tertiary hover:text-text-primary"
-          aria-label="close"
-        >
-          ✕
-        </button>
-
+        {/* Header band */}
         <div
-          className="mb-4 grid h-14 w-14 place-items-center rounded-2xl text-white"
-          style={{ background: 'linear-gradient(135deg, var(--accent-500), var(--accent-600))' }}
+          style={{
+            padding: 24,
+            background: 'var(--hi-soft)',
+            borderBottom: '1.6px solid var(--ink)',
+            position: 'relative',
+          }}
         >
-          <I.Lock size={28} />
-        </div>
-        <h2 className="text-[20px] font-bold leading-tight text-text-primary">{t('title')}</h2>
-        <p className="mt-2 text-[13px] leading-relaxed text-text-secondary">
-          {t.rich('subtitle', { strong: (chunks) => <strong className="text-text-primary">{chunks}</strong> })}
-        </p>
-
-        <div className="mt-5 flex items-end gap-2 rounded-xl border border-border-default bg-bg-secondary p-4">
-          <span className="font-mono text-[36px] font-bold leading-none text-text-primary">{priceLabel}</span>
-          <span className="pb-1 text-[12px] text-text-tertiary">{t('priceUnit')}</span>
-        </div>
-
-        <ul className="mt-4 space-y-2 text-[13px] text-text-secondary">
-          {[t('bullet1'), t('bullet2'), t('bullet3'), provider === 'creem' ? t('bulletPaymentCreem') : t('bulletPaymentPaddle')].map((line) => (
-            <li key={line} className="flex items-start gap-2">
-              <I.Check size={14} sw={2.5} className="mt-0.5 flex-shrink-0 text-success-600" />
-              <span>{line}</span>
-            </li>
-          ))}
-        </ul>
-
-        {(statusMsg || error) && (
-          <div className="mt-4 rounded-md border border-border-default bg-bg-secondary px-3 py-2 text-[12px]">
-            {statusMsg && <div className="text-text-primary">{statusMsg}</div>}
-            {error && <div className="mt-1 text-recording-strong">{t('errorPrefix', { message: error })}</div>}
+          <div className="flex items-start justify-between">
+            <span className="tag-mono tag-mono-hi">ONE-TIME · {priceLabel}</span>
+            <button
+              onClick={onClose}
+              className="grid place-items-center"
+              style={{
+                width: 30,
+                height: 30,
+                border: '1.4px solid var(--ink)',
+                background: 'var(--paper)',
+                borderRadius: 3,
+                color: 'var(--ink)',
+                cursor: 'pointer',
+              }}
+              aria-label="close"
+            >
+              <I.Close size={13} />
+            </button>
           </div>
-        )}
 
-        <div className="mt-6 flex gap-2">
-          <button
-            onClick={onClose}
-            disabled={busy}
-            className="flex-1 rounded-md border border-border-strong bg-bg-primary px-4 py-2.5 text-[13px] font-medium text-text-primary hover:bg-bg-tertiary disabled:opacity-40"
+          <div
+            className="mt-4 mb-4 grid h-14 w-14 place-items-center"
+            style={{
+              background: 'var(--paper)',
+              border: '1.6px solid var(--ink)',
+              borderRadius: 4,
+              boxShadow: '3px 3px 0 var(--ink)',
+              color: 'var(--ink)',
+            }}
           >
-            {t('ctaCancel')}
-          </button>
-          <button
-            onClick={() => void handleUnlock()}
-            disabled={busy || (provider === 'paddle' && !paddle)}
-            className="flex flex-[2] items-center justify-center gap-2 rounded-md px-4 py-2.5 text-[13px] font-semibold text-white shadow-md disabled:opacity-40"
-            style={{ background: 'var(--accent-600)', boxShadow: '0 4px 12px rgba(217,119,6,0.3)' }}
+            <I.Lock size={26} sw={1.6} />
+          </div>
+          <h2
+            style={{
+              fontSize: 24,
+              fontWeight: 700,
+              letterSpacing: '-0.025em',
+              lineHeight: 1.15,
+              margin: 0,
+              color: 'var(--ink)',
+            }}
           >
-            <I.Lock size={14} />
-            {busy ? t('openingCheckout', { provider: providerLabel }) : t('ctaPay', { price: priceLabel })}
-          </button>
+            {t('title')}
+          </h2>
         </div>
 
-        {onUpgradePro && (
-          <button
-            onClick={() => {
-              onClose();
-              onUpgradePro();
+        <div className="p-6">
+          <p style={{ fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.55, margin: 0 }}>
+            {t.rich('subtitle', { strong: (chunks) => <strong style={{ color: 'var(--ink)' }}>{chunks}</strong> })}
+          </p>
+
+          <div
+            className="mt-5 flex items-end gap-2 p-4"
+            style={{
+              background: 'var(--paper-2)',
+              border: '1.4px solid var(--ink)',
+              borderRadius: 3,
             }}
-            disabled={busy}
-            className="mt-3 w-full rounded-md border border-primary-600 bg-primary-50 px-4 py-2 text-[12px] font-semibold text-primary-700 hover:bg-primary-100 disabled:opacity-40"
           >
-            {t('upgradeAlt', { price: proPriceLabel })}
-          </button>
-        )}
+            <span
+              style={{
+                fontFamily: 'var(--font-display)',
+                fontSize: 38,
+                fontWeight: 700,
+                letterSpacing: '-0.025em',
+                color: 'var(--ink)',
+                lineHeight: 1,
+              }}
+            >
+              {priceLabel}
+            </span>
+            <span
+              className="pb-1"
+              style={{ fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', letterSpacing: '0.04em' }}
+            >
+              {t('priceUnit')}
+            </span>
+          </div>
 
-        {showDevLink && (
-          <button
-            onClick={handleDevSimulate}
-            disabled={busy}
-            className="mt-3 w-full text-center text-[10px] text-text-tertiary underline hover:text-text-secondary disabled:opacity-40"
+          <ul className="mt-5 space-y-2.5" style={{ fontSize: 13, color: 'var(--ink)' }}>
+            {[t('bullet1'), t('bullet2'), t('bullet3'), provider === 'creem' ? t('bulletPaymentCreem') : t('bulletPaymentPaddle')].map((line) => (
+              <li key={line} className="flex items-start gap-2">
+                <I.Check size={14} sw={2.4} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--ok)' }} />
+                <span>{line}</span>
+              </li>
+            ))}
+          </ul>
+
+          {(statusMsg || error) && (
+            <div
+              className="mt-4 px-3 py-2"
+              style={{
+                background: 'var(--paper-2)',
+                border: '1.4px solid var(--ink)',
+                borderRadius: 3,
+                fontSize: 12,
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              {statusMsg && <div style={{ color: 'var(--ink)' }}>{statusMsg}</div>}
+              {error && <div className="mt-1" style={{ color: 'var(--rec)' }}>{t('errorPrefix', { message: error })}</div>}
+            </div>
+          )}
+
+          <div className="mt-6 flex gap-3">
+            <button
+              onClick={onClose}
+              disabled={busy}
+              className="btn-sketch flex-1"
+              style={{ justifyContent: 'center' }}
+            >
+              {t('ctaCancel')}
+            </button>
+            <button
+              onClick={() => void handleUnlock()}
+              disabled={busy || (provider === 'paddle' && !paddle)}
+              className="btn-sketch btn-sketch-primary"
+              style={{ flex: 1.5, justifyContent: 'center' }}
+            >
+              <I.Lock size={13} />
+              {busy ? t('openingCheckout', { provider: providerLabel }) : t('ctaPay', { price: priceLabel })}
+            </button>
+          </div>
+
+          {onUpgradePro && (
+            <button
+              onClick={() => {
+                onClose();
+                onUpgradePro();
+              }}
+              disabled={busy}
+              className="btn-sketch btn-sketch-hi mt-3 w-full"
+              style={{ justifyContent: 'center' }}
+            >
+              {t('upgradeAlt', { price: proPriceLabel })}
+            </button>
+          )}
+
+          {showDevLink && (
+            <button
+              onClick={handleDevSimulate}
+              disabled={busy}
+              className="mt-3 w-full text-center"
+              style={{
+                fontSize: 10,
+                color: 'var(--ink-3)',
+                fontFamily: 'var(--font-mono)',
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                background: 'none',
+                border: 'none',
+                borderBottom: '1px dashed var(--ink-3)',
+                paddingBottom: 2,
+                cursor: 'pointer',
+              }}
+            >
+              {t('devSkip')}
+            </button>
+          )}
+
+          <p
+            className="mt-4 text-center"
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 10,
+              color: 'var(--ink-3)',
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+            }}
           >
-            {t('devSkip')}
-          </button>
-        )}
-
-        <p className="mt-3 text-center text-[10px] text-text-tertiary">
-          {t('footer')}
-        </p>
+            {t('footer')}
+          </p>
+        </div>
       </div>
     </div>
   );

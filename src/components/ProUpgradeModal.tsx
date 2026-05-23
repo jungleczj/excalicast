@@ -182,90 +182,187 @@ export function ProUpgradeModal({ open, onClose, onUpgraded }: Props): JSX.Eleme
   return (
     <div
       className="fade-in fixed inset-0 z-50 grid place-items-center"
-      style={{ background: 'rgba(15, 23, 42, 0.55)', backdropFilter: 'blur(4px)' }}
+      style={{ background: 'rgba(26, 26, 26, 0.45)' }}
       onClick={onClose}
     >
       <div
-        className="relative w-[480px] max-w-[92vw] rounded-2xl bg-bg-primary p-7 shadow-2xl"
+        className="relative max-w-[92vw]"
+        style={{
+          width: 500,
+          background: 'var(--paper)',
+          border: '2px solid var(--ink)',
+          borderRadius: 5,
+          boxShadow: '6px 6px 0 var(--ink)',
+          overflow: 'hidden',
+        }}
         onClick={(e) => e.stopPropagation()}
       >
-        <button
-          onClick={onClose}
-          className="absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-md text-text-tertiary hover:bg-bg-tertiary hover:text-text-primary"
-          aria-label="close"
-        >
-          ✕
-        </button>
-
         <div
-          className="mb-4 grid h-14 w-14 place-items-center rounded-2xl text-white"
-          style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }}
+          style={{
+            padding: 24,
+            background: 'var(--pro)',
+            borderBottom: '1.6px solid var(--ink)',
+            position: 'relative',
+          }}
         >
-          <I.Sparkles size={28} />
-        </div>
-        <h2 className="text-[22px] font-bold leading-tight text-text-primary">{t('title')}</h2>
-        <p className="mt-2 text-[13px] leading-relaxed text-text-secondary">{t('subtitle')}</p>
-
-        <div className="mt-5 flex items-end gap-2 rounded-xl border border-border-default bg-bg-secondary p-4">
-          <span className="font-mono text-[34px] font-bold leading-none text-text-primary">{priceLabel}</span>
-          <span className="pb-1 text-[12px] text-text-tertiary">
-            {t('subscriptionTag', { provider: providerLabel, env: subscriptionEnvLabel })}
-          </span>
-        </div>
-
-        <ul className="mt-4 space-y-2 text-[13px] text-text-secondary">
-          {features.map((line) => <li key={line}>{line}</li>)}
-        </ul>
-
-        {(statusMsg || error || needLogin) && (
-          <div className="mt-4 rounded-md border border-border-default bg-bg-secondary px-3 py-2 text-[12px]">
-            {needLogin && <div className="text-text-primary">{t('needLogin')}</div>}
-            {statusMsg && <div className="text-text-primary">{statusMsg}</div>}
-            {error && <div className="mt-1 text-recording-strong">{t('errorPrefix', { message: error })}</div>}
+          <div className="flex items-start justify-between">
+            <span className="tag-mono tag-mono-pro">PRO · {priceLabel}</span>
+            <button
+              onClick={onClose}
+              className="grid place-items-center"
+              style={{
+                width: 30,
+                height: 30,
+                border: '1.4px solid var(--ink)',
+                background: 'var(--paper)',
+                borderRadius: 3,
+                color: 'var(--ink)',
+                cursor: 'pointer',
+              }}
+              aria-label="close"
+            >
+              <I.Close size={13} />
+            </button>
           </div>
-        )}
 
-        <div className="mt-6 flex gap-2">
-          <button
-            onClick={onClose}
-            disabled={busy}
-            className="flex-1 rounded-md border border-border-strong bg-bg-primary px-4 py-2.5 text-[13px] font-medium text-text-primary hover:bg-bg-tertiary disabled:opacity-40"
+          <div
+            className="mt-4 mb-4 grid h-14 w-14 place-items-center"
+            style={{
+              background: 'var(--paper)',
+              border: '1.6px solid var(--ink)',
+              borderRadius: 4,
+              boxShadow: '3px 3px 0 var(--ink)',
+              color: 'var(--ink)',
+            }}
           >
-            {t('ctaCancel')}
-          </button>
-          <button
-            onClick={handleUpgrade}
-            disabled={busy || (provider === 'paddle' && !paddle && !needLogin)}
-            className="flex flex-[2] items-center justify-center gap-2 rounded-md px-4 py-2.5 text-[13px] font-semibold text-white shadow-md disabled:opacity-40"
-            style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)', boxShadow: '0 4px 12px rgba(59,130,246,0.35)' }}
+            <I.Sparkles size={26} sw={1.6} />
+          </div>
+          <h2
+            style={{
+              fontSize: 26,
+              fontWeight: 700,
+              letterSpacing: '-0.025em',
+              lineHeight: 1.15,
+              margin: 0,
+              color: 'var(--ink)',
+            }}
           >
-            <I.Sparkles size={14} />
-            {needLogin
-              ? t('loginFirst')
-              : busy
-                ? t('openingCheckout', { provider: providerLabel })
-                : t('ctaUpgrade', { price: priceLabel })}
-          </button>
+            {t('title')}
+          </h2>
         </div>
 
-        <p className="mt-3 text-center text-[10px] text-text-tertiary">
-          {provider === 'creem'
-            ? t('footnoteCreem')
-            : isPaddleSandbox
-              ? t('footnoteSandbox')
-              : t('footnotePaddle')}
-        </p>
+        <div className="p-6">
+          <p style={{ fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.55, margin: 0 }}>
+            {t('subtitle')}
+          </p>
 
-        {process.env.NEXT_PUBLIC_DEV_MODE === 'true' && (
-          <button
-            type="button"
-            onClick={() => void handleDevGrantPro()}
-            disabled={busy}
-            className="mt-2 w-full rounded-md border border-dashed border-orange-400 bg-orange-50 px-3 py-2 text-[11px] font-semibold text-orange-700 hover:bg-orange-100 disabled:opacity-40"
+          <div
+            className="mt-5 flex items-end gap-2 p-4"
+            style={{
+              background: 'var(--paper-2)',
+              border: '1.4px solid var(--ink)',
+              borderRadius: 3,
+            }}
           >
-            {t('devGrant')}
-          </button>
-        )}
+            <span
+              style={{
+                fontFamily: 'var(--font-display)',
+                fontSize: 36,
+                fontWeight: 700,
+                letterSpacing: '-0.025em',
+                color: 'var(--ink)',
+                lineHeight: 1,
+              }}
+            >
+              {priceLabel}
+            </span>
+            <span
+              className="pb-1"
+              style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', letterSpacing: '0.04em' }}
+            >
+              {t('subscriptionTag', { provider: providerLabel, env: subscriptionEnvLabel })}
+            </span>
+          </div>
+
+          <ul className="mt-5 space-y-2.5" style={{ fontSize: 13, color: 'var(--ink)' }}>
+            {features.map((line) => (
+              <li key={line} className="flex items-start gap-2">
+                <I.Check size={14} sw={2.4} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--ok)' }} />
+                <span>{line}</span>
+              </li>
+            ))}
+          </ul>
+
+          {(statusMsg || error || needLogin) && (
+            <div
+              className="mt-4 px-3 py-2"
+              style={{
+                background: 'var(--paper-2)',
+                border: '1.4px solid var(--ink)',
+                borderRadius: 3,
+                fontSize: 12,
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              {needLogin && <div style={{ color: 'var(--ink)' }}>{t('needLogin')}</div>}
+              {statusMsg && <div style={{ color: 'var(--ink)' }}>{statusMsg}</div>}
+              {error && <div className="mt-1" style={{ color: 'var(--rec)' }}>{t('errorPrefix', { message: error })}</div>}
+            </div>
+          )}
+
+          <div className="mt-6 flex gap-3">
+            <button
+              onClick={onClose}
+              disabled={busy}
+              className="btn-sketch flex-1"
+              style={{ justifyContent: 'center' }}
+            >
+              {t('ctaCancel')}
+            </button>
+            <button
+              onClick={handleUpgrade}
+              disabled={busy || (provider === 'paddle' && !paddle && !needLogin)}
+              className="btn-sketch btn-sketch-primary"
+              style={{ flex: 1.5, justifyContent: 'center' }}
+            >
+              <I.Sparkles size={14} />
+              {needLogin
+                ? t('loginFirst')
+                : busy
+                  ? t('openingCheckout', { provider: providerLabel })
+                  : t('ctaUpgrade', { price: priceLabel })}
+            </button>
+          </div>
+
+          <p
+            className="mt-4 text-center"
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 10,
+              color: 'var(--ink-3)',
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+            }}
+          >
+            {provider === 'creem'
+              ? t('footnoteCreem')
+              : isPaddleSandbox
+                ? t('footnoteSandbox')
+                : t('footnotePaddle')}
+          </p>
+
+          {process.env.NEXT_PUBLIC_DEV_MODE === 'true' && (
+            <button
+              type="button"
+              onClick={() => void handleDevGrantPro()}
+              disabled={busy}
+              className="btn-sketch mt-3 w-full"
+              style={{ justifyContent: 'center', borderStyle: 'dashed', fontSize: 10, padding: '8px 12px' }}
+            >
+              {t('devGrant')}
+            </button>
+          )}
+        </div>
       </div>
 
       <LoginModal

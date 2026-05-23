@@ -73,56 +73,125 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
   return (
     <div
       className="fade-in fixed inset-0 z-50 grid place-items-center"
-      style={{ background: 'rgba(15, 23, 42, 0.55)', backdropFilter: 'blur(4px)' }}
+      style={{ background: 'rgba(26, 26, 26, 0.45)' }}
       onClick={onClose}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative w-[420px] max-w-[92vw] overflow-hidden rounded-[14px] shadow-2xl"
-        style={{ background: '#faf8f3' }}
+        className="relative max-w-[92vw]"
+        style={{
+          width: 440,
+          background: 'var(--paper)',
+          border: '2px solid var(--ink)',
+          borderRadius: 5,
+          boxShadow: '6px 6px 0 var(--ink)',
+          overflow: 'hidden',
+        }}
       >
-        <button
-          type="button"
-          onClick={onClose}
-          className="absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-md text-[#666] hover:bg-black/5"
-          aria-label="close"
+        <div
+          style={{
+            padding: '24px 28px',
+            background: 'var(--hi-soft)',
+            borderBottom: '1.6px solid var(--ink)',
+            position: 'relative',
+          }}
         >
-          ✕
-        </button>
-
-        <div className="px-7 pb-2 pt-9">
-          <h2 className="text-[20px] font-semibold leading-tight text-[#181818]">{t('title')}</h2>
-          <p className="mt-1 text-[12.5px] text-[#6b6b6b]">{t('subtitle')}</p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute right-3 top-3 grid place-items-center"
+            style={{
+              width: 30,
+              height: 30,
+              border: '1.4px solid var(--ink)',
+              background: 'var(--paper)',
+              borderRadius: 3,
+              color: 'var(--ink)',
+              cursor: 'pointer',
+            }}
+            aria-label="close"
+          >
+            ✕
+          </button>
+          <div className="label-mono" style={{ fontSize: 10 }}>// SIGN IN</div>
+          <h2
+            className="mt-2"
+            style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--ink)', margin: 0, lineHeight: 1.2 }}
+          >
+            {t('title')}
+          </h2>
+          <p className="mt-1" style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5 }}>{t('subtitle')}</p>
         </div>
 
-        <div className="px-7 pb-6 pt-5">
+        <div className="px-7 pb-6 pt-6">
           <button
             type="button"
             onClick={handleGoogle}
             disabled={busy !== null}
-            className="flex w-full items-center justify-center gap-3 rounded-[10px] border bg-white px-4 py-3 text-[14px] font-medium text-[#181818] transition hover:bg-[#fafafa] disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ borderColor: '#e0ddd6' }}
+            className="flex w-full items-center justify-center gap-3"
+            style={{
+              padding: '12px 18px',
+              background: 'var(--paper)',
+              border: '1.5px solid var(--ink)',
+              borderRadius: 4,
+              fontSize: 14,
+              fontWeight: 600,
+              color: 'var(--ink)',
+              cursor: busy ? 'not-allowed' : 'pointer',
+              opacity: busy ? 0.5 : 1,
+              boxShadow: '2px 2px 0 var(--ink)',
+            }}
           >
             <GoogleIcon />
             {t('google')}
           </button>
 
           <div className="my-5 flex items-center gap-3">
-            <div className="h-px flex-1 bg-[#e0ddd6]" />
-            <span className="text-[11px] font-medium tracking-wider text-[#999]">{t('or')}</span>
-            <div className="h-px flex-1 bg-[#e0ddd6]" />
+            <div className="h-px flex-1" style={{ background: 'var(--rule-soft)' }} />
+            <span
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: 10.5,
+                fontWeight: 600,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                color: 'var(--ink-3)',
+              }}
+            >
+              {t('or')}
+            </span>
+            <div className="h-px flex-1" style={{ background: 'var(--rule-soft)' }} />
           </div>
 
           {sentTo ? (
-            <div className="rounded-[10px] border border-emerald-200 bg-emerald-50 px-4 py-4 text-center">
-              <div className="text-[14px] font-semibold text-emerald-900">{t('sentTitle')}</div>
-              <div className="mt-1 text-[12.5px] text-emerald-800">
+            <div
+              className="px-4 py-4 text-center"
+              style={{
+                background: 'var(--hi-soft)',
+                border: '1.4px solid var(--ink)',
+                borderRadius: 3,
+              }}
+            >
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)' }}>{t('sentTitle')}</div>
+              <div className="mt-1" style={{ fontSize: 12.5, color: 'var(--ink-2)', fontFamily: 'var(--font-mono)' }}>
                 {t('sentSubtitle', { email: sentTo })}
               </div>
               <button
                 type="button"
                 onClick={() => setSentTo(null)}
-                className="mt-3 text-[11.5px] text-emerald-900 underline"
+                className="mt-3"
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 11,
+                  color: 'var(--ink)',
+                  background: 'none',
+                  border: 'none',
+                  borderBottom: '1.4px solid var(--ink)',
+                  paddingBottom: 1,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  cursor: 'pointer',
+                }}
               >
                 {t('changeEmail')}
               </button>
@@ -135,15 +204,23 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder={t('emailPlaceholder')}
-                className="w-full rounded-[10px] border bg-white px-4 py-3 text-[14px] text-[#181818] outline-none transition placeholder:text-[#aaa] focus:border-[#181818]"
-                style={{ borderColor: '#e0ddd6' }}
+                className="w-full outline-none transition"
+                style={{
+                  padding: '12px 14px',
+                  background: 'var(--paper)',
+                  border: '1.5px solid var(--ink)',
+                  borderRadius: 3,
+                  fontSize: 14,
+                  fontFamily: 'var(--font-mono)',
+                  color: 'var(--ink)',
+                }}
                 disabled={busy !== null}
               />
               <button
                 type="submit"
                 disabled={busy !== null || !email}
-                className="flex w-full items-center justify-center gap-2 rounded-[10px] px-4 py-3 text-[14px] font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-                style={{ background: '#181818' }}
+                className="btn-sketch btn-sketch-primary w-full"
+                style={{ justifyContent: 'center', padding: '13px 18px' }}
               >
                 {busy === 'email' ? t('sending') : t('sendMagicLink')}
               </button>
@@ -151,15 +228,40 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
           )}
 
           {error && (
-            <div className="mt-3 rounded-[8px] border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">
+            <div
+              className="mt-3 px-3 py-2"
+              style={{
+                background: 'var(--rec-soft)',
+                border: '1.4px solid var(--rec)',
+                borderRadius: 3,
+                fontSize: 12,
+                color: 'var(--rec)',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
               {error}
             </div>
           )}
         </div>
 
-        <div className="border-t border-[#e0ddd6] px-7 py-3.5 text-[11px] text-[#888]">
+        <div
+          className="px-7 py-3.5"
+          style={{
+            borderTop: '1.5px solid var(--ink)',
+            background: 'var(--paper-2)',
+            fontSize: 11,
+            color: 'var(--ink-3)',
+            fontFamily: 'var(--font-mono)',
+            letterSpacing: '0.04em',
+          }}
+        >
           {t('ackPrefix')}
-          <Link href="/privacy" className="text-[#666] underline hover:text-[#181818]">{t('privacyLink')}</Link>
+          <Link
+            href="/privacy"
+            style={{ color: 'var(--ink)', borderBottom: '1.4px solid var(--hi)', textDecoration: 'none' }}
+          >
+            {t('privacyLink')}
+          </Link>
           {t('ackSuffix')}
         </div>
       </div>

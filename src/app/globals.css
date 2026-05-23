@@ -1,75 +1,100 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Caveat:wght@400;600&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  /* Primary (Blue) */
-  --primary-50:  #eff6ff;
-  --primary-100: #dbeafe;
-  --primary-200: #bfdbfe;
-  --primary-300: #93c5fd;
-  --primary-400: #60a5fa;
-  --primary-500: #3b82f6;
-  --primary-600: #2563eb;
-  --primary-700: #1d4ed8;
-  --primary-800: #1e40af;
-  --primary-900: #1e3a8a;
+  /* ── Sketch-Minimalist Palette ─────────────────────────── */
+  --paper:        #FBFBFA;
+  --paper-2:      #F4F3EE;
+  --paper-3:      #ECEAE0;
+  --ink:          #1A1A1A;
+  --ink-2:        #3A3A38;
+  --ink-3:        #6B6B66;
+  --ink-4:        #9B9B95;
+  --rule:         #1A1A1A;
+  --rule-soft:    #C9C7BD;
+  --rule-faint:   #E5E5E2;
 
-  /* Secondary (Violet — premium tier accent) */
-  --secondary-50:  #f5f3ff;
-  --secondary-100: #ede9fe;
-  --secondary-500: #8b5cf6;
-  --secondary-600: #7c3aed;
+  --hi:           #FFD166;   /* highlighter yellow */
+  --hi-soft:      #FFE9B0;
+  --hi-deep:      #E5B73D;
+  --rec:          #DC2626;
+  --rec-soft:     #FECACA;
+  --ok:           #2F8A3F;
+  --pro:          #B7E0C8;
+  --max:          #C9B8FF;
+
+  /* ── Legacy tokens still used by some components ─────── */
+  --primary-50:  #fef8e6;
+  --primary-100: #ffe9b0;
+  --primary-200: #ffd166;
+  --primary-300: #e5b73d;
+  --primary-400: #e5b73d;
+  --primary-500: #1A1A1A;
+  --primary-600: #1A1A1A;
+  --primary-700: #1A1A1A;
+  --primary-800: #1A1A1A;
+  --primary-900: #1A1A1A;
+
+  --secondary-50:  #efeaff;
+  --secondary-100: #C9B8FF;
+  --secondary-500: #6d28d9;
+  --secondary-600: #6d28d9;
   --secondary-700: #6d28d9;
 
-  /* Accent (Amber — one_time tier) */
-  --accent-50:  #fffbeb;
-  --accent-100: #fef3c7;
-  --accent-500: #f59e0b;
-  --accent-600: #d97706;
+  --accent-50:  #fef8e6;
+  --accent-100: #ffe9b0;
+  --accent-500: #FFD166;
+  --accent-600: #E5B73D;
 
-  /* Recording */
-  --recording: #ef4444;
-  --recording-strong: #dc2626;
+  --recording: #DC2626;
+  --recording-strong: #DC2626;
 
-  /* Status */
-  --success-500: #10b981;
-  --success-600: #059669;
+  --success-500: #2F8A3F;
+  --success-600: #2F8A3F;
 
-  /* Neutrals — light */
-  --bg-primary:   #ffffff;
-  --bg-secondary: #f9fafb;
-  --bg-tertiary:  #f3f4f6;
-  --canvas-bg:    #fafafa;
+  --bg-primary:   #FBFBFA;
+  --bg-secondary: #F4F3EE;
+  --bg-tertiary:  #ECEAE0;
+  --canvas-bg:    #FBFBFA;
 
-  --border-default: #e5e7eb;
-  --border-strong:  #d1d5db;
+  --border-default: #1A1A1A;
+  --border-strong:  #1A1A1A;
 
-  --text-primary:   #111827;
-  --text-secondary: #6b7280;
-  --text-tertiary:  #9ca3af;
+  --text-primary:   #1A1A1A;
+  --text-secondary: #3A3A38;
+  --text-tertiary:  #6B6B66;
 
-  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", "Consolas", ui-monospace, monospace;
+  --font-display: "Geist", system-ui, -apple-system, sans-serif;
+  --font-sans:    "Geist", system-ui, -apple-system, sans-serif;
+  --font-mono:    "JetBrains Mono", ui-monospace, "Consolas", monospace;
+  --font-hand:    "Caveat", "Geist", cursive;
 
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 5px;
+  --radius-xl: 6px;
 
-  --shadow-sm:  0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
-  --shadow-md:  0 4px 6px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06);
-  --shadow-lg:  0 10px 15px rgba(0,0,0,0.1), 0 4px 6px rgba(0,0,0,0.05);
-  --shadow-xl:  0 20px 25px rgba(0,0,0,0.1), 0 10px 10px rgba(0,0,0,0.04);
-  --shadow-2xl: 0 25px 50px rgba(0,0,0,0.25);
+  --shadow-sm:  2px 2px 0 0 var(--ink);
+  --shadow-md:  3px 3px 0 0 var(--ink);
+  --shadow-lg:  4px 4px 0 0 var(--ink);
+  --shadow-xl:  5px 5px 0 0 var(--ink);
+  --shadow-2xl: 6px 6px 0 0 var(--ink);
+
+  --hard:        4px 4px 0 0 var(--ink);
+  --hard-sm:     2px 2px 0 0 var(--ink);
+  --hard-lg:     6px 6px 0 0 var(--ink);
+  --hard-hi:     4px 4px 0 0 var(--hi);
 }
+
+* { box-sizing: border-box; }
 
 html, body {
   height: 100%;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
+  background: var(--paper);
+  color: var(--ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -77,11 +102,115 @@ html, body {
 
 body {
   overflow: hidden;
+  margin: 0;
+}
+
+/* ── Sketch helpers ───────────────────────────────────── */
+.sketch-card {
+  background: var(--paper);
+  border: 1.6px solid var(--ink);
+  border-radius: 4px;
+  box-shadow: 3px 3px 0 0 var(--ink);
+}
+.sketch-card-accent {
+  box-shadow: 4px 4px 0 0 var(--hi);
+}
+.sketch-card-flat {
+  background: var(--paper);
+  border: 1.5px solid var(--ink);
+  border-radius: 4px;
+}
+
+.marker {
+  background: linear-gradient(180deg, transparent 0 28%, var(--hi) 28% 92%, transparent 92% 100%);
+  padding: 0 6px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  border-radius: 1px;
+}
+
+.tag-mono {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1.2px solid var(--ink);
+  border-radius: 9999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--paper);
+}
+.tag-mono-hi  { background: var(--hi); }
+.tag-mono-rec { background: var(--rec); color: white; border-color: var(--rec); }
+.tag-mono-pro { background: var(--pro); }
+.tag-mono-max { background: var(--max); }
+.tag-mono-soft { background: var(--paper-2); color: var(--ink-2); border-color: var(--rule-soft); }
+
+.btn-sketch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 18px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1.5px solid var(--ink);
+  border-radius: 4px;
+  cursor: pointer;
+  background: var(--paper);
+  color: var(--ink);
+  text-decoration: none;
+  transition: transform 100ms, box-shadow 100ms;
+}
+.btn-sketch:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 2px 2px 0 0 var(--ink);
+}
+.btn-sketch:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.btn-sketch-primary {
+  background: var(--ink);
+  color: var(--paper);
+}
+.btn-sketch-primary:hover {
+  box-shadow: 4px 4px 0 0 var(--hi);
+}
+.btn-sketch-hi {
+  background: var(--hi);
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.label-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.dots-bg {
+  background-image: radial-gradient(circle, #C9C7BD 1px, transparent 1.5px);
+  background-size: 22px 22px;
+}
+.dots-fine-bg {
+  background-image: radial-gradient(circle, #D9D7CC 0.8px, transparent 1.2px);
+  background-size: 16px 16px;
 }
 
 @keyframes recording-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
-  50%      { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.5); }
+  50%      { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
 }
 .recording-indicator { animation: recording-pulse 1.2s ease-in-out infinite; }
 
@@ -93,7 +222,7 @@ body {
 
 /* Excalidraw 的工具栏 / 容器在浅色画布上保持原样 */
 .excalicast-board .excalidraw {
-  background: var(--canvas-bg);
+  background: var(--paper);
 }
 
 /* ────────────────────────────────────────────────────────
@@ -113,7 +242,7 @@ body {
   margin-top: 2.2em;
   margin-bottom: 0.6em;
   padding-top: 1.2em;
-  border-top: 1px solid var(--border-default);
+  border-top: 1.5px solid var(--ink);
 }
 .legal-prose h2:first-of-type {
   margin-top: 1.5em;
@@ -151,19 +280,19 @@ body {
   font-weight: 600;
 }
 .legal-prose a {
-  color: var(--primary-600);
+  color: var(--ink);
   text-decoration: none;
-  border-bottom: 1px solid color-mix(in srgb, var(--primary-600) 30%, transparent);
+  border-bottom: 1.5px solid var(--hi);
   transition: border-color 120ms;
 }
 .legal-prose a:hover {
-  border-bottom-color: var(--primary-600);
+  border-bottom-color: var(--ink);
 }
 .legal-prose code {
   font-family: var(--font-mono);
   font-size: 0.9em;
   padding: 1px 6px;
-  background: var(--bg-tertiary);
-  border-radius: 4px;
-  border: 1px solid var(--border-default);
+  background: var(--paper-2);
+  border-radius: 3px;
+  border: 1px solid var(--rule-soft);
 }
