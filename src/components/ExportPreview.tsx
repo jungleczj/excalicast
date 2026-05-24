@@ -236,6 +236,10 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
         style={{
           aspectRatio: `${aspect}`,
           maxHeight: '52vh',
+          // CSS aspect-ratio 在 max-height 截断后不会自动同步缩 max-width，
+          // 不显式补一条 max-width 的话，竖屏 picker 下 box 会被父容器宽度强行拉宽
+          // 变成 ~4:3 而不是真正的 9:16，进度条 / canvas / 摄像头叠加层也跟着错配。
+          maxWidth: `calc(52vh * ${aspect})`,
           background: 'var(--paper)',
           border: '1.5px solid var(--ink)',
           borderRadius: 3,
