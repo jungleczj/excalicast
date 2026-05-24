@@ -38,6 +38,60 @@ export interface CreateCheckoutResult {
   status: string;
 }
 
+// ---------------------------------------------------------------------------
+// Credential introspection (无网络调用，仅按前缀 / host 推断模式)
+// ---------------------------------------------------------------------------
+
+export type CreemMode = 'live' | 'test' | 'unknown';
+
+export function inferKeyMode(apiKey: string): CreemMode {
+  if (!apiKey) return 'unknown';
+  if (apiKey.startsWith('creem_test_')) return 'test';
+  if (apiKey.startsWith('creem_live_')) return 'live';
+  return 'unknown';
+}
+
+export function inferBaseMode(apiBase: string): CreemMode {
+  if (!apiBase) return 'unknown';
+  if (apiBase.includes('test-api.creem.io')) return 'test';
+  // 注意：'test-api.creem.io' 也包含 'api.creem.io'，所以先判 test
+  if (apiBase.includes('api.creem.io')) return 'live';
+  return 'unknown';
+}
+
+export interface CreemCredsDiagnostic {
+  keyMode: CreemMode;
+  baseMode: CreemMode;
+  apiBaseHost: string | null;
+  keyPrefix: string;        // 仅展示前 11 字符（包含 `creem_live_` / `creem_test_`）
+  keySuffix: string;        // 仅展示后 4 字符
+  mismatch: boolean;
+}
+
+export function diagnoseCreemCreds(creds: CreemCreds): CreemCredsDiagnostic {
+  const keyMode = inferKeyMode(creds.apiKey);
+  const baseMode = inferBaseMode(creds.apiBase);
+  let host: string | null = null;
+  try { host = new URL(creds.apiBase).host; } catch { /* ignore */ }
+  return {
+    keyMode,
+    baseMode,
+    apiBaseHost: host,
+    keyPrefix: (creds.apiKey ?? '').slice(0, 11),
+    keySuffix: (creds.apiKey ?? '').slice(-4),
+    mismatch: keyMode !== 'unknown' && baseMode !== 'unknown' && keyMode !== baseMode,
+  };
+}
+
+function describeMismatch(diag: CreemCredsDiagnostic): string {
+  return (
+    `apiKey 是 ${diag.keyMode} 模式（前缀 ${diag.keyPrefix}…），` +
+    `但 apiBase 指向 ${diag.baseMode} 模式（${diag.apiBaseHost ?? 'unknown'}）。` +
+    `请去 admin：POST /api/admin/payment-config/activate 切换 active 行，` +
+    `或 POST /api/admin/payment-config 改 apiBase/apiKey。`
+  );
+}
+
 /**
  * 创建 Creem checkout（one-time 或 subscription，由 productId 的 billing_type 决定）。
  */
@@ -46,6 +100,12 @@ export async function createCreemCheckout(
 ): Promise<CreateCheckoutResult> {
   if (!opts.creds.apiKey) throw new Error('createCreemCheckout: apiKey is empty');
   if (!opts.creds.apiBase) throw new Error('createCreemCheckout: apiBase is empty');
+
+  // Fail-fast：调用 Creem 之前先看 apiKey 前缀和 apiBase host 是否一致
+  const diag = diagnoseCreemCreds(opts.creds);
+  if (diag.mismatch) {
+    throw new Error(`Creem 配置错配：${describeMismatch(diag)}`);
+  }
 
   const body: Record<string, unknown> = {
     product_id: opts.productId,
@@ -73,6 +133,20 @@ export async function createCreemCheckout(
   }
 
   if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      console.warn(
+        `[creem] auth failed status=${res.status} host=${diag.apiBaseHost} ` +
+        `keyMode=${diag.keyMode} baseMode=${diag.baseMode} prefix=${diag.keyPrefix}…${diag.keySuffix}`,
+      );
+      throw new Error(
+        `Creem 鉴权失败 (${res.status}): ${json.message ?? 'Invalid API Key'}. ` +
+        `当前配对：keyMode=${diag.keyMode}, baseHost=${diag.apiBaseHost ?? '?'}, ` +
+        `keyPrefix=${diag.keyPrefix}…${diag.keySuffix}。` +
+        `常见原因：(a) Creem dashboard 已经重置过 key 但 DB 没更新； ` +
+        `(b) active 行的 mode 与 apiKey 实际模式不匹配。 ` +
+        `可访问 GET /api/admin/payment-config/diagnose 自检（带 x-admin-secret 头）。`,
+      );
+    }
     throw new Error(
       `Creem checkout failed (${res.status}): ${json.message ?? text.slice(0, 200)}`,
     );
