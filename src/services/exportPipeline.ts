@@ -299,7 +299,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     // shell 模式：先按 cover 把工作区外壳画到 target，再把 scene 画进映射后的 canvasRect。
     // 否则：scene 直接铺满 target（picker 比例 == target 比例）。
     let shellAtT: DecodedShell | null = null;
-    let shellCoverScale = 1;
+    let shellRenderScale = 1;
     let shellOffsetX = 0;
     let shellOffsetY = 0;
     if (useShell) {
@@ -307,10 +307,11 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       if (shellAtT) {
         const shellW = shellAtT.shellSize.width;
         const shellH = shellAtT.shellSize.height;
-        // cover：取较大缩放比，让 shell 在 target 上始终撑满，溢出的部分被裁。
-        shellCoverScale = Math.max(target.width / shellW, target.height / shellH);
-        const scaledW = shellW * shellCoverScale;
-        const scaledH = shellH * shellCoverScale;
+        // contain（letterbox）：取较小缩放比，让整张 shell 完整落在 target 内、四周可能留白。
+        // 这是用户期望的"整体缩放画面，包括 workspace UI"行为。
+        shellRenderScale = Math.min(target.width / shellW, target.height / shellH);
+        const scaledW = shellW * shellRenderScale;
+        const scaledH = shellH * shellRenderScale;
         shellOffsetX = (target.width - scaledW) / 2;
         shellOffsetY = (target.height - scaledH) / 2;
         targetCtx.drawImage(shellAtT.bitmap, shellOffsetX, shellOffsetY, scaledW, scaledH);
@@ -320,12 +321,12 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     // 决定本帧 scene 渲染的目标区域 + 源 crop rect
     const dest = (() => {
       if (useShell && shellAtT) {
-        // canvasRect 在 shell 原始坐标里 → 通过 cover 变换映射到 target 坐标
+        // canvasRect 在 shell 原始坐标里 → 通过 contain 变换映射到 target 坐标
         return {
-          x: shellOffsetX + shellAtT.canvasRect.x * shellCoverScale,
-          y: shellOffsetY + shellAtT.canvasRect.y * shellCoverScale,
-          width: shellAtT.canvasRect.width * shellCoverScale,
-          height: shellAtT.canvasRect.height * shellCoverScale,
+          x: shellOffsetX + shellAtT.canvasRect.x * shellRenderScale,
+          y: shellOffsetY + shellAtT.canvasRect.y * shellRenderScale,
+          width: shellAtT.canvasRect.width * shellRenderScale,
+          height: shellAtT.canvasRect.height * shellRenderScale,
         };
       }
       return { x: 0, y: 0, width: target.width, height: target.height };
@@ -551,9 +552,9 @@ export async function renderPreviewFrame(
     ? compileSubtitles(metadata.subtitleSrt)
     : [];
 
-  // shell 先铺底（cover 缩放居中）
+  // shell 先铺底（contain / letterbox：整张 shell 完整落在 target 内）
   let shellAtT: DecodedShell | null = null;
-  let shellCoverScale = 1;
+  let shellRenderScale = 1;
   let shellOffsetX = 0;
   let shellOffsetY = 0;
   if (useShell) {
@@ -561,9 +562,9 @@ export async function renderPreviewFrame(
     if (shellAtT) {
       const shellW = shellAtT.shellSize.width;
       const shellH = shellAtT.shellSize.height;
-      shellCoverScale = Math.max(target.width / shellW, target.height / shellH);
-      const scaledW = shellW * shellCoverScale;
-      const scaledH = shellH * shellCoverScale;
+      shellRenderScale = Math.min(target.width / shellW, target.height / shellH);
+      const scaledW = shellW * shellRenderScale;
+      const scaledH = shellH * shellRenderScale;
       shellOffsetX = (target.width - scaledW) / 2;
       shellOffsetY = (target.height - scaledH) / 2;
       ctx.drawImage(shellAtT.bitmap, shellOffsetX, shellOffsetY, scaledW, scaledH);
@@ -607,10 +608,10 @@ export async function renderPreviewFrame(
 
   const dest = (useShell && shellAtT)
     ? {
-        x: shellOffsetX + shellAtT.canvasRect.x * shellCoverScale,
-        y: shellOffsetY + shellAtT.canvasRect.y * shellCoverScale,
-        width: shellAtT.canvasRect.width * shellCoverScale,
-        height: shellAtT.canvasRect.height * shellCoverScale,
+        x: shellOffsetX + shellAtT.canvasRect.x * shellRenderScale,
+        y: shellOffsetY + shellAtT.canvasRect.y * shellRenderScale,
+        width: shellAtT.canvasRect.width * shellRenderScale,
+        height: shellAtT.canvasRect.height * shellRenderScale,
       }
     : { x: 0, y: 0, width: target.width, height: target.height };
 
