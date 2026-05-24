@@ -3,6 +3,7 @@
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
 import {
+  cropRectForAspect,
   cropRectForSnapshot,
   computeContentBoundingBox,
   viewportFromAppState,
@@ -331,9 +332,12 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     })();
 
     const sceneSourceRect: SceneRect = (() => {
-      if (useShell && snap) {
-        // shell 模式：用户当时的视口（保证 scene 内容与 shell 内 canvas 区域对齐）
-        return viewportFromAppState(snap.appState) ?? cropRectForSnapshot(snap, cropCtx);
+      if (useShell && shellAtT) {
+        // shell 模式：scene 画进 mapped canvasRect（其 aspect = canvasRect.w/h），
+        // 所以 source 也按 canvasRect 的 aspect 裁；croppingMode 仍然生效，
+        // fit_all_content 在 shell 路径下也能正常套全部内容。
+        const canvasAspect = shellAtT.canvasRect.width / shellAtT.canvasRect.height;
+        return cropRectForAspect(snap, cropCtx, canvasAspect);
       }
       // 非 shell 模式：恒按 picker 比例裁场景，填满 target
       return cropRectForSnapshot(snap, cropCtx);
@@ -586,15 +590,20 @@ export async function renderPreviewFrame(
   const contentBox = computeContentBoundingBox(snapshots);
   const fallbackViewport = viewportFromAppState(snap.appState) ?? DEFAULT_FALLBACK_VIEWPORT;
 
-  // shell 模式：用用户的视口；否则按 ASPECT 裁切
-  const sceneSourceRect: SceneRect = useShell
-    ? (viewportFromAppState(snap.appState) ?? fallbackViewport)
-    : cropRectForSnapshot(snap, {
-        aspectRatio: config.aspectRatio,
-        croppingMode: config.croppingMode,
-        contentBox,
-        fallbackViewport,
-      });
+  // shell 模式：source 按 canvasRect 的 aspect 裁，croppingMode 仍生效；
+  // 非 shell 模式：按 picker preset 裁。
+  const sceneSourceRect: SceneRect = (() => {
+    if (useShell && shellAtT) {
+      const canvasAspect = shellAtT.canvasRect.width / shellAtT.canvasRect.height;
+      return cropRectForAspect(snap, { croppingMode: config.croppingMode, contentBox, fallbackViewport }, canvasAspect);
+    }
+    return cropRectForSnapshot(snap, {
+      aspectRatio: config.aspectRatio,
+      croppingMode: config.croppingMode,
+      contentBox,
+      fallbackViewport,
+    });
+  })();
 
   const dest = (useShell && shellAtT)
     ? {
