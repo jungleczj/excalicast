@@ -11,6 +11,7 @@ import {
 } from '@/services/cropping';
 import {
   ASPECT_PRESETS,
+  type CameraPositionEvent,
   type ExportConfig,
   type SceneRect,
   type WhiteboardSnapshot,
@@ -45,6 +46,95 @@ function snapshotAt(snapshots: WhiteboardSnapshot[], t: number): WhiteboardSnaps
     else hi = mid - 1;
   }
   return ans === -1 ? snapshots[0] : snapshots[ans];
+}
+
+/**
+ * 找到 timeMs 时刻的摄像头位置事件（≤ 当前 timestamp 的最后一个）。
+ * 没有事件时返回 null —— 调用方应回退到默认右下角。
+ */
+export function cameraPositionAt(
+  events: CameraPositionEvent[],
+  timeMs: number,
+): { rx: number; ry: number; rs: number } | null {
+  if (events.length === 0) return null;
+  let lo = 0, hi = events.length - 1, ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (events[mid].timestamp <= timeMs) { ans = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  const e = events[ans === -1 ? 0 : ans];
+  return { rx: e.rx, ry: e.ry, rs: e.rs };
+}
+
+export interface CameraSegment {
+  startMs: number;
+  endMs: number;
+  x: number;      // overlay 像素位置（output 分辨率）
+  y: number;
+  size: number;   // 边长（output 像素）
+}
+
+/**
+ * 把按时间排序的事件流转成 ffmpeg overlay 用的"区间"序列：
+ *  - 区间 i = [events[i].timestamp, events[i+1]?.timestamp ?? durationMs]
+ *  - 折叠像素相同的相邻区间（少量抖动 → 一段）
+ *  - 丢掉短于 50ms 的区间（不到一帧）
+ *  - 区间数超过 maxSegments 时按移动距离阈值再次合并（避免 ffmpeg 过滤链爆炸）
+ */
+export function buildCameraSegments(
+  events: CameraPositionEvent[],
+  durationMs: number,
+  outputW: number,
+  outputH: number,
+  maxSegments = 150,
+): CameraSegment[] {
+  if (events.length === 0 || durationMs <= 0) return [];
+  // 1) 朴素铺开区间
+  const raw: CameraSegment[] = [];
+  for (let i = 0; i < events.length; i++) {
+    const startMs = Math.max(0, events[i].timestamp);
+    const endMs = i + 1 < events.length ? events[i + 1].timestamp : durationMs;
+    if (endMs - startMs < 50) continue;
+    const sz = Math.round(events[i].rs * outputW);
+    const size = Math.max(16, sz);
+    raw.push({
+      startMs,
+      endMs,
+      x: Math.round(events[i].rx * outputW),
+      y: Math.round(events[i].ry * outputH),
+      size,
+    });
+  }
+  if (raw.length === 0) return [];
+
+  // 2) 合并相邻"像素相同"的段
+  const coalesced: CameraSegment[] = [];
+  for (const seg of raw) {
+    const last = coalesced[coalesced.length - 1];
+    if (last && last.x === seg.x && last.y === seg.y && last.size === seg.size) {
+      last.endMs = seg.endMs;
+    } else {
+      coalesced.push({ ...seg });
+    }
+  }
+
+  // 3) 如果还超 cap，按 12px 阈值再合并
+  if (coalesced.length <= maxSegments) return coalesced;
+  const aggressive: CameraSegment[] = [coalesced[0]];
+  for (let i = 1; i < coalesced.length; i++) {
+    const last = aggressive[aggressive.length - 1];
+    const seg = coalesced[i];
+    const dx = Math.abs(last.x - seg.x);
+    const dy = Math.abs(last.y - seg.y);
+    const dz = Math.abs(last.size - seg.size);
+    if (dx < 12 && dy < 12 && dz < 8) {
+      last.endMs = seg.endMs;
+    } else {
+      aggressive.push({ ...seg });
+    }
+  }
+  return aggressive.slice(0, maxSegments);
 }
 
 function shellAt(shells: WorkspaceShellRow[], t: number): WorkspaceShellRow | null {
@@ -152,7 +242,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   opts.onProgress?.(0.05);
   const { exportToCanvas } = await import('@excalidraw/excalidraw');
   opts.onProgress?.(0.07);
-  const { metadata, snapshots, audioBlob, cameraBlob, binaryFiles } = await loadFullRecording(opts.recordingId);
+  const { metadata, snapshots, audioBlob, cameraBlob, cameraEvents, binaryFiles } = await loadFullRecording(opts.recordingId);
   opts.onProgress?.(0.08);
 
   const preset = ASPECT_PRESETS[opts.aspectRatio];
@@ -340,13 +430,42 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 不能简单 burn 进 PNG —— 摄像头视频独立时间线）
   const filterParts: string[] = [];
   let curLabel = '[0:v]';
-  const camSize = Math.round(outputH * 0.22);
+  // 圆形 alpha mask 的 geq 表达式 —— 多段也复用同一段
+  const geqMask = `format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(pow(X-W/2,2)+pow(Y-H/2,2),pow(W/2-1,2)),0,255)'`;
+
   if (cameraIdx !== null) {
-    filterParts.push(
-      `[${cameraIdx}:v]scale=${camSize}:${camSize}:force_original_aspect_ratio=increase,crop=${camSize}:${camSize},hflip,format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(pow(X-W/2,2)+pow(Y-H/2,2),pow(W/2-1,2)),0,255)'[cam]`,
-    );
-    filterParts.push(`${curLabel}[cam]overlay=W-w-${Math.round(outputW * 0.025)}:H-h-${Math.round(outputH * 0.04)}[v_with_cam]`);
-    curLabel = '[v_with_cam]';
+    const segments = buildCameraSegments(cameraEvents, durationMs, outputW, outputH);
+
+    if (segments.length === 0) {
+      // Legacy / 没有位置事件：保留原有右下角静态布局
+      const camSize = Math.round(outputH * 0.22);
+      filterParts.push(
+        `[${cameraIdx}:v]scale=${camSize}:${camSize}:force_original_aspect_ratio=increase,crop=${camSize}:${camSize},hflip,${geqMask}[cam]`,
+      );
+      filterParts.push(`${curLabel}[cam]overlay=W-w-${Math.round(outputW * 0.025)}:H-h-${Math.round(outputH * 0.04)}[v_with_cam]`);
+      curLabel = '[v_with_cam]';
+    } else {
+      // 1 路摄像头 split=N → 每段 scale + crop + hflip + geq → enable=between 叠加
+      const labels = segments.map((_, i) => `[c${i}]`);
+      filterParts.push(`[${cameraIdx}:v]split=${segments.length}${labels.join('')}`);
+
+      segments.forEach((seg, i) => {
+        const s = seg.size;
+        // 钳制到画面内，避免负坐标
+        const ox = Math.max(0, Math.min(outputW - s, seg.x));
+        const oy = Math.max(0, Math.min(outputH - s, seg.y));
+        filterParts.push(
+          `[c${i}]scale=${s}:${s}:force_original_aspect_ratio=increase,crop=${s}:${s},hflip,${geqMask}[cs${i}]`,
+        );
+        const nextLabel = i === segments.length - 1 ? '[v_with_cam]' : `[v_cam_${i}]`;
+        const t0 = (seg.startMs / 1000).toFixed(3);
+        const t1 = (seg.endMs / 1000).toFixed(3);
+        filterParts.push(
+          `${curLabel}[cs${i}]overlay=${ox}:${oy}:enable='between(t,${t0},${t1})'${nextLabel}`,
+        );
+        curLabel = nextLabel;
+      });
+    }
   }
 
   const filter: string[] = [];

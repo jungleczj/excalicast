@@ -5,6 +5,7 @@ import type {
   AudioChunk,
   BinaryFileEntry,
   CameraChunk,
+  CameraPositionEvent,
   RecordingMetadata,
   ShellCanvasRect,
   ShellSize,
@@ -25,6 +26,10 @@ interface CameraChunkRow extends CameraChunk {
   id?: number;
 }
 
+interface CameraPositionRow extends CameraPositionEvent {
+  id?: number;
+}
+
 interface BinaryFileRow extends BinaryFileEntry {
   id?: number;
 }
@@ -34,6 +39,7 @@ class ExcalicastDB extends Dexie {
   snapshots!: Table<SnapshotRow, number>;
   audioChunks!: Table<AudioChunkRow, number>;
   cameraChunks!: Table<CameraChunkRow, number>;
+  cameraPositions!: Table<CameraPositionRow, number>;
   binaryFiles!: Table<BinaryFileRow, number>;
   workspaceShells!: Table<WorkspaceShellRow, number>;
 
@@ -97,6 +103,17 @@ class ExcalicastDB extends Dexie {
       binaryFiles: '++id, recordingId, fileId',
       workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
     });
+    // v6: cameraPositions 表（摄像头气泡随时间位置变化）。无 .upgrade —
+    // 老录制没有事件，回放/导出会回退到右下角静态位置。
+    this.version(6).stores({
+      recordings: 'id, startedAt, status',
+      snapshots: '++id, recordingId, timestamp',
+      audioChunks: '++id, recordingId, index',
+      cameraChunks: '++id, recordingId, index',
+      binaryFiles: '++id, recordingId, fileId',
+      workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
+      cameraPositions: '++id, recordingId, timestamp, [recordingId+timestamp]',
+    });
   }
 }
 
@@ -134,12 +151,13 @@ export async function deleteRecording(recordingId: string): Promise<void> {
   const db = getClientDb();
   await db.transaction(
     'rw',
-    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.binaryFiles, db.workspaceShells],
+    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.cameraPositions, db.binaryFiles, db.workspaceShells],
     async () => {
       await db.recordings.delete(recordingId);
       await db.snapshots.where('recordingId').equals(recordingId).delete();
       await db.audioChunks.where('recordingId').equals(recordingId).delete();
       await db.cameraChunks.where('recordingId').equals(recordingId).delete();
+      await db.cameraPositions.where('recordingId').equals(recordingId).delete();
       await db.binaryFiles.where('recordingId').equals(recordingId).delete();
       await db.workspaceShells.where('recordingId').equals(recordingId).delete();
     },
@@ -174,6 +192,7 @@ export async function loadFullRecording(recordingId: string): Promise<{
   snapshots: WhiteboardSnapshot[];
   audioBlob: Blob | null;
   cameraBlob: Blob | null;
+  cameraEvents: CameraPositionEvent[];
   binaryFiles: BinaryFileEntry[];
 }> {
   const db = getClientDb();
@@ -198,7 +217,37 @@ export async function loadFullRecording(recordingId: string): Promise<{
     ? new Blob(camRows.map((c) => c.blob), { type: camRows[0].blob.type || 'video/webm' })
     : null;
 
+  const camPosRows = await db.cameraPositions
+    .where('recordingId').equals(recordingId)
+    .sortBy('timestamp');
+  const cameraEvents: CameraPositionEvent[] = camPosRows.map((r) => ({
+    recordingId: r.recordingId,
+    timestamp: r.timestamp,
+    rx: r.rx,
+    ry: r.ry,
+    rs: r.rs,
+  }));
+
   const binaryFiles = await db.binaryFiles.where('recordingId').equals(recordingId).toArray();
 
-  return { metadata, snapshots, audioBlob, cameraBlob, binaryFiles };
+  return { metadata, snapshots, audioBlob, cameraBlob, cameraEvents, binaryFiles };
+}
+
+export async function listCameraEvents(recordingId: string): Promise<CameraPositionEvent[]> {
+  const db = getClientDb();
+  const rows = await db.cameraPositions
+    .where('recordingId').equals(recordingId)
+    .sortBy('timestamp');
+  return rows.map((r) => ({
+    recordingId: r.recordingId,
+    timestamp: r.timestamp,
+    rx: r.rx,
+    ry: r.ry,
+    rs: r.rs,
+  }));
+}
+
+export async function bulkAddCameraEvents(events: CameraPositionEvent[]): Promise<void> {
+  if (events.length === 0) return;
+  await getClientDb().cameraPositions.bulkAdd(events);
 }

@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { renderPreviewFrame } from '@/services/exportPipeline';
+import { cameraPositionAt, renderPreviewFrame } from '@/services/exportPipeline';
 import { loadFullRecording } from '@/lib/db-client';
-import type { ExportConfig, RecordingMetadata } from '@/types/recording';
+import type { CameraPositionEvent, ExportConfig, RecordingMetadata } from '@/types/recording';
 import { ASPECT_PRESETS } from '@/types/recording';
 import { I } from '@/components/icons';
 import type { ExportProgressState } from '@/components/ExportPanel';
@@ -31,6 +31,7 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
   const [error, setError] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [cameraUrl, setCameraUrl] = useState<string | null>(null);
+  const [cameraEvents, setCameraEvents] = useState<CameraPositionEvent[]>([]);
   const [playing, setPlaying] = useState(false);
   const renderToken = useRef(0);
   const rafRef = useRef<number | null>(null);
@@ -38,7 +39,7 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
   const lastDrawAtRef = useRef<number>(0);
   const lastDrawTimeMsRef = useRef<number>(-Infinity);
 
-  // 加载 audio / camera blob 用于预览播放
+  // 加载 audio / camera blob + 摄像头位置事件，用于预览播放
   useEffect(() => {
     let cancelled = false;
     let createdAudioUrl: string | null = null;
@@ -53,6 +54,7 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
         createdCameraUrl = URL.createObjectURL(r.cameraBlob);
         setCameraUrl(createdCameraUrl);
       }
+      setCameraEvents(r.cameraEvents);
     }).catch(() => { /* 静默：预览能不能渲染由 renderPreviewFrame 反馈 */ });
     return () => {
       cancelled = true;
@@ -60,6 +62,25 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
       if (createdCameraUrl) URL.revokeObjectURL(createdCameraUrl);
     };
   }, [recordingId]);
+
+  // 当前 timeMs 对应的摄像头位置（百分比）。无事件时回退到右下角默认值。
+  const cameraOverlayStyle = useMemo<React.CSSProperties>(() => {
+    const pos = cameraPositionAt(cameraEvents, timeMs);
+    if (pos) {
+      // 位置百分比（相对于预览框，预览框比例与导出输出一致），气泡用 aspect-ratio:1
+      return {
+        left: `${pos.rx * 100}%`,
+        top: `${pos.ry * 100}%`,
+        width: `${pos.rs * 100}%`,
+      };
+    }
+    // legacy fallback：右下角，宽度 18%
+    return {
+      right: `${0.18 * 0.18 * 100}%`,
+      bottom: `${0.18 * 0.22 * 100}%`,
+      width: '18%',
+    };
+  }, [cameraEvents, timeMs]);
 
   // 帧渲染：节流到 CANVAS_REDRAW_INTERVAL_MS。静态 scrub 时立即重绘。
   const drawFrame = useCallback((t: number, force: boolean) => {
@@ -181,9 +202,7 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
     }
   }, [exporting, phaseKey, t]);
 
-  // 摄像头气泡尺寸：跟随预览宽度按比例缩
-  // ffmpegExport 里气泡边长约为视频宽度的 18%，预览这里取相同比例。
-  const cameraSizePct = 0.18;
+  // 摄像头气泡位置/尺寸由 cameraOverlayStyle 计算（events → 动态；无事件 → 右下角 18% 宽度）
 
   return (
     <div className="space-y-3">
@@ -202,14 +221,12 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
           className="h-full w-full object-contain"
         />
 
-        {/* 摄像头气泡：右下角，按比例缩放 */}
+        {/* 摄像头气泡：位置/尺寸跟随 cameraEvents（无事件时回退右下角） */}
         {cameraUrl && (
           <div
-            className="pointer-events-none absolute z-30 overflow-hidden"
+            className="pointer-events-none absolute z-30 overflow-hidden transition-[left,top,width] duration-100"
             style={{
-              right: `${cameraSizePct * 0.18 * 100}%`,
-              bottom: `${cameraSizePct * 0.22 * 100}%`,
-              width: `${cameraSizePct * 100}%`,
+              ...cameraOverlayStyle,
               aspectRatio: '1 / 1',
               borderRadius: '50%',
               background: '#1f2937',

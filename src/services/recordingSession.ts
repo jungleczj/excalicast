@@ -18,6 +18,13 @@ export interface SessionHandle {
     appState: Record<string, unknown>,
     files: Record<string, unknown>,
   ) => void;
+  /**
+   * 记录摄像头气泡的位置变化（viewport 像素），节流后转换成 shell 比例存到
+   * cameraPositions 表。
+   *  - xPx/yPx：气泡左上角，相对于 workspaceRoot 的 viewport rect。
+   *  - sizePx：气泡边长（圆形即直径）。
+   */
+  recordCameraMove: (xPx: number, yPx: number, sizePx: number) => void;
   pause: () => void;
   resume: () => void;
   stop: () => Promise<RecordingMetadata>;
@@ -30,6 +37,7 @@ export interface StartOptions {
 }
 
 const SNAPSHOT_THROTTLE_MS = 50;
+const CAMERA_POS_THROTTLE_MS = 80;
 
 export async function startRecording(opts: StartOptions): Promise<SessionHandle> {
   const recordingId = uuidv4();
@@ -92,6 +100,34 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
     });
   };
 
+  // 摄像头气泡位置事件：节流写入 cameraPositions 表
+  let lastCameraEventAt = -Infinity;
+  let pendingCameraMove: { x: number; y: number; s: number } | null = null;
+  let cameraMoveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const flushCameraMove = async () => {
+    cameraMoveTimer = null;
+    const move = pendingCameraMove;
+    pendingCameraMove = null;
+    if (!move) return;
+    const root = opts.workspaceRoot;
+    if (!root) return;
+    const rect = root.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const t = elapsed();
+    lastCameraEventAt = t;
+    // 把 viewport 坐标转成相对于 workspaceRoot 的本地坐标，再除以 shell 尺寸
+    const localX = move.x - rect.left;
+    const localY = move.y - rect.top;
+    await db.cameraPositions.add({
+      recordingId,
+      timestamp: Math.max(0, t),
+      rx: localX / rect.width,
+      ry: localY / rect.height,
+      rs: move.s / rect.width,
+    });
+  };
+
   const elapsed = () => Date.now() - startedAt - pausedTotal - (paused ? Date.now() - pauseStartedAt : 0);
 
   return {
@@ -129,6 +165,20 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
       }
       void flushSnapshot();
     },
+    recordCameraMove(xPx, yPx, sizePx) {
+      if (paused) return;
+      pendingCameraMove = { x: xPx, y: yPx, s: sizePx };
+      const t = elapsed();
+      if (t - lastCameraEventAt >= CAMERA_POS_THROTTLE_MS) {
+        if (cameraMoveTimer !== null) {
+          clearTimeout(cameraMoveTimer);
+          cameraMoveTimer = null;
+        }
+        void flushCameraMove();
+      } else if (cameraMoveTimer === null) {
+        cameraMoveTimer = setTimeout(() => { void flushCameraMove(); }, CAMERA_POS_THROTTLE_MS);
+      }
+    },
     pause() {
       if (paused) return;
       paused = true;
@@ -149,6 +199,14 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
       if (pendingTimer !== null) {
         clearTimeout(pendingTimer);
         await flushSnapshot();
+      }
+      if (cameraMoveTimer !== null) {
+        clearTimeout(cameraMoveTimer);
+        cameraMoveTimer = null;
+      }
+      // 把 pending move 落盘，保证最后一次拖拽的落点不丢
+      if (pendingCameraMove) {
+        await flushCameraMove();
       }
       shellCapturer?.stop();
       if (audio) { try { await audio.stop(); } catch { /* ignore */ } }

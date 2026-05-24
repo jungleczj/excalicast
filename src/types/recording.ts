@@ -49,6 +49,18 @@ export interface CameraChunk {
   blob: Blob;
 }
 
+/**
+ * 摄像头气泡位置随录制时间的变化。坐标以工作区 shell 的当前尺寸为基准
+ * 存成 0..1 的比例，避免和窗口像素或导出分辨率耦合。
+ */
+export interface CameraPositionEvent {
+  recordingId: string;
+  timestamp: number;  // ms relative to recording start
+  rx: number;         // bubble top-left X as fraction of shell width
+  ry: number;         // bubble top-left Y as fraction of shell height
+  rs: number;         // bubble edge length as fraction of shell width
+}
+
 export interface BinaryFileEntry {
   recordingId: string;
   fileId: string;

@@ -10,6 +10,7 @@ import type {
   AudioChunk,
   BinaryFileEntry,
   CameraChunk,
+  CameraPositionEvent,
   RecordingMetadata,
   WhiteboardSnapshot,
 } from '@/types/recording';
@@ -33,7 +34,7 @@ export interface CloudRecording {
 }
 
 export interface UploadProgress {
-  step: 'metadata' | 'snapshots' | 'audio' | 'camera' | 'register' | 'done';
+  step: 'metadata' | 'snapshots' | 'audio' | 'camera' | 'cameraPositions' | 'register' | 'done';
   bytesUploaded: number;
   bytesTotal: number;
 }
@@ -104,7 +105,7 @@ export async function uploadRecording(
   onProgress?: (p: UploadProgress) => void,
 ): Promise<{ storagePrefix: string }> {
   const userId = await ensureUserId();
-  const { metadata, snapshots, audioBlob, cameraBlob, binaryFiles } =
+  const { metadata, snapshots, audioBlob, cameraBlob, cameraEvents, binaryFiles } =
     await loadFullRecording(recordingId);
 
   let bytesUploaded = 0;
@@ -148,6 +149,21 @@ export async function uploadRecording(
     onProgress?.({ step: 'camera', bytesUploaded, bytesTotal });
     const sizeCam = await uploadObject(userId, recordingId, 'camera.webm', cameraBlob, 'video/webm');
     bytesUploaded += sizeCam;
+  }
+
+  // 4b) cameraPositions.json.gz —— 摄像头气泡随时间的位置事件。可选；
+  // 老录制不会有这个文件，import 时按缺省 = [] 处理。
+  if (cameraEvents.length > 0) {
+    onProgress?.({ step: 'cameraPositions', bytesUploaded, bytesTotal });
+    const camPosBlob = await gzipString(JSON.stringify({
+      events: cameraEvents.map((e) => ({ timestamp: e.timestamp, rx: e.rx, ry: e.ry, rs: e.rs })),
+      schemaVersion: 1,
+    }));
+    const sizeCamPos = await uploadObject(
+      userId, recordingId, 'cameraPositions.json.gz', camPosBlob,
+      'application/gzip',
+    );
+    bytesUploaded += sizeCamPos;
   }
 
   // 5) Register the row server-side (server enforces Pro tier)
@@ -292,15 +308,33 @@ export async function importCloudRecording(
   onProgress?.({ step: 'camera', bytesUploaded: 0, bytesTotal: 0 });
   const cameraBlob = metaJson.hasCamera ? await fetchObj('camera.webm') : null;
 
+  // cameraPositions.json.gz —— 缺失时按空数组（老的云端录制没有这个文件）
+  onProgress?.({ step: 'cameraPositions', bytesUploaded: 0, bytesTotal: 0 });
+  let cameraEvents: Array<{ timestamp: number; rx: number; ry: number; rs: number }> = [];
+  const camPosBlob = await fetchObj('cameraPositions.json.gz');
+  if (camPosBlob) {
+    try {
+      const camPosText = await gunzipToString(camPosBlob);
+      const parsed = JSON.parse(camPosText) as {
+        events?: Array<{ timestamp: number; rx: number; ry: number; rs: number }>;
+      };
+      cameraEvents = parsed.events ?? [];
+    } catch {
+      // 兼容损坏文件 —— 当作没有
+      cameraEvents = [];
+    }
+  }
+
   await db.transaction(
     'rw',
-    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.binaryFiles],
+    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.cameraPositions, db.binaryFiles],
     async () => {
       // Clear any old local row with the same id so we start clean
       await db.recordings.delete(recordingId);
       await db.snapshots.where('recordingId').equals(recordingId).delete();
       await db.audioChunks.where('recordingId').equals(recordingId).delete();
       await db.cameraChunks.where('recordingId').equals(recordingId).delete();
+      await db.cameraPositions.where('recordingId').equals(recordingId).delete();
       await db.binaryFiles.where('recordingId').equals(recordingId).delete();
 
       const metaRow: RecordingMetadata = {
@@ -343,6 +377,18 @@ export async function importCloudRecording(
       if (cameraBlob) {
         const camRow: CameraChunk = { recordingId, index: 0, blob: cameraBlob };
         await db.cameraChunks.add(camRow);
+      }
+
+      // Camera position events
+      if (cameraEvents.length > 0) {
+        const posRows: CameraPositionEvent[] = cameraEvents.map((e) => ({
+          recordingId,
+          timestamp: e.timestamp,
+          rx: e.rx,
+          ry: e.ry,
+          rs: e.rs,
+        }));
+        await db.cameraPositions.bulkAdd(posRows);
       }
     },
   );

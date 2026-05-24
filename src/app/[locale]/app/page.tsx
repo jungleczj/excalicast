@@ -39,12 +39,32 @@ export default function HomePage(): JSX.Element {
   const changeRef = useRef<WhiteboardChangeFn | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const workspaceRootRef = useRef<HTMLDivElement | null>(null);
+  const cameraPosLsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 初始化摄像头位置（右下角，避开录制条）
+  // 初始化摄像头位置（优先 localStorage，否则右下角默认）
   useEffect(() => {
     const w = window.innerWidth;
     const h = window.innerHeight;
-    setCameraPos({ x: w - 200, y: h - 280 });
+
+    const savedCam = localStorage.getItem('excalicast.camera-pos');
+    if (savedCam) {
+      try {
+        const p = JSON.parse(savedCam);
+        if (typeof p?.x === 'number' && typeof p?.y === 'number') {
+          // 约束到当前视口内，防止上次窗口比这次大时跑到屏幕外
+          setCameraPos({
+            x: Math.max(0, Math.min(w - 160, p.x)),
+            y: Math.max(0, Math.min(h - 160, p.y)),
+          });
+        } else {
+          setCameraPos({ x: w - 200, y: h - 280 });
+        }
+      } catch {
+        setCameraPos({ x: w - 200, y: h - 280 });
+      }
+    } else {
+      setCameraPos({ x: w - 200, y: h - 280 });
+    }
 
     // 录制条默认位置：从 localStorage 读，否则放右下角靠左（避开 Excalidraw 的 toolbar）
     const saved = localStorage.getItem('excalicast.recording-bar-pos');
@@ -59,6 +79,21 @@ export default function HomePage(): JSX.Element {
     }
     // 默认底部居中（Excalidraw 的 toolbar 在顶部，避开它）
     setBarPos({ x: w / 2 - 200, y: h - 96 });
+  }, []);
+
+  // 摄像头位置变更：(1) 录制中转发给 session；(2) debounced 写 localStorage
+  const handleCameraPositionChange = useCallback((p: { x: number; y: number }) => {
+    setCameraPos(p);
+    // 录制中：把 viewport 坐标 + 当前 size 喂给 session，写到 cameraPositions 表
+    if (sessionRef.current) {
+      sessionRef.current.recordCameraMove(p.x, p.y, 160);
+    }
+    // UX：跨刷新记住位置（debounce 250ms 避免拖拽时写爆 localStorage）
+    if (cameraPosLsTimerRef.current !== null) clearTimeout(cameraPosLsTimerRef.current);
+    cameraPosLsTimerRef.current = setTimeout(() => {
+      try { localStorage.setItem('excalicast.camera-pos', JSON.stringify(p)); }
+      catch { /* quota / private mode */ }
+    }, 250);
   }, []);
 
   // 拖拽逻辑
@@ -155,10 +190,15 @@ export default function HomePage(): JSX.Element {
       setHasCamera(session.hasCamera);
       setCameraStream(session.cameraStream);
       setState('recording');
+      // 录制开始时种一颗 t=0 事件，保证回放/导出能定位到当前气泡位置，
+      // 而不是回退到默认右下角
+      if (session.hasCamera) {
+        session.recordCameraMove(cameraPos.x, cameraPos.y, 160);
+      }
     } catch (err) {
       alert(t('startFailed', { message: err instanceof Error ? err.message : 'unknown' }));
     }
-  }, [cameraEnabled, cameraStream, t]);
+  }, [cameraEnabled, cameraStream, cameraPos, t]);
 
   const handlePause = useCallback(() => {
     sessionRef.current?.pause();
@@ -225,7 +265,7 @@ export default function HomePage(): JSX.Element {
               size={160}
               shape="circle"
               position={cameraPos}
-              onPositionChange={setCameraPos}
+              onPositionChange={handleCameraPositionChange}
             />
           </div>
         )}

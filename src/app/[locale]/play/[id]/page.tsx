@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { useLocale, useTranslations } from 'next-intl';
@@ -8,7 +8,8 @@ import { AppHeader } from '@/components/AppHeader';
 import { I } from '@/components/icons';
 import { SubtitleOverlay } from '@/components/SubtitleOverlay';
 import { loadFullRecording, deleteRecording } from '@/lib/db-client';
-import type { RecordingMetadata, WhiteboardSnapshot } from '@/types/recording';
+import { cameraPositionAt } from '@/services/exportPipeline';
+import type { CameraPositionEvent, RecordingMetadata, WhiteboardSnapshot } from '@/types/recording';
 import { Link, useRouter } from '@/i18n/navigation';
 
 const Excalidraw = dynamic(
@@ -48,6 +49,7 @@ export default function PlayPage(): JSX.Element {
   const [snapshots, setSnapshots] = useState<WhiteboardSnapshot[]>([]);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [cameraUrl, setCameraUrl] = useState<string | null>(null);
+  const [cameraEvents, setCameraEvents] = useState<CameraPositionEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [timeMs, setTimeMs] = useState(0);
@@ -81,6 +83,7 @@ export default function PlayPage(): JSX.Element {
         createdCameraUrl = URL.createObjectURL(r.cameraBlob);
         setCameraUrl(createdCameraUrl);
       }
+      setCameraEvents(r.cameraEvents);
       setReady(true);
     }).catch((err) => {
       if (!cancelled) setError(err instanceof Error ? err.message : 'load_failed');
@@ -319,39 +322,13 @@ export default function PlayPage(): JSX.Element {
           />
           <SubtitleOverlay srt={meta?.subtitleSrt} timeMs={timeMs} />
           {cameraUrl && (
-            <div
-              className="pointer-events-none absolute z-40 overflow-hidden"
-              style={{
-                right: 24,
-                bottom: 24,
-                width: 160,
-                height: 160,
-                borderRadius: '50%',
-                background: '#1f2937',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.25), 0 0 0 3px rgba(255,255,255,0.9)',
-              }}
-            >
-              <video
-                ref={cameraRef}
-                src={cameraUrl}
-                muted
-                playsInline
-                preload="auto"
-                onLoadedMetadata={() => {
-                  // 强制画面解码出第一帧，避免播放前显示黑色占位
-                  const v = cameraRef.current;
-                  if (v && !playing) {
-                    try { v.currentTime = Math.min(0.05, (isFinite(v.duration) ? v.duration : 0.05)); } catch { /* ignore */ }
-                  }
-                }}
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'cover',
-                  transform: 'scaleX(-1)',
-                }}
-              />
-            </div>
+            <PlayCameraBubble
+              src={cameraUrl}
+              cameraEvents={cameraEvents}
+              timeMs={timeMs}
+              playing={playing}
+              videoRef={cameraRef}
+            />
           )}
           {audioUrl && (
             // 音频元素隐藏：用 timeMs/playing 控制。不挂 onEnded —
@@ -437,6 +414,70 @@ export default function PlayPage(): JSX.Element {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 录制库回放页的摄像头气泡 —— 位置/尺寸跟随 cameraEvents（按比例），
+ * 没有事件时回退到右下角 160px 静态布局（兼容老录制）。
+ */
+function PlayCameraBubble({
+  src,
+  cameraEvents,
+  timeMs,
+  playing,
+  videoRef,
+}: {
+  src: string;
+  cameraEvents: CameraPositionEvent[];
+  timeMs: number;
+  playing: boolean;
+  videoRef: React.RefObject<HTMLVideoElement>;
+}): JSX.Element {
+  const style = useMemo<React.CSSProperties>(() => {
+    const pos = cameraPositionAt(cameraEvents, timeMs);
+    if (pos) {
+      return {
+        left: `${pos.rx * 100}%`,
+        top: `${pos.ry * 100}%`,
+        width: `${pos.rs * 100}%`,
+        aspectRatio: '1 / 1',
+      };
+    }
+    return { right: 24, bottom: 24, width: 160, height: 160 };
+  }, [cameraEvents, timeMs]);
+
+  return (
+    <div
+      className="pointer-events-none absolute z-40 overflow-hidden transition-[left,top,width] duration-100"
+      style={{
+        ...style,
+        borderRadius: '50%',
+        background: '#1f2937',
+        boxShadow: '0 8px 24px rgba(0,0,0,0.25), 0 0 0 3px rgba(255,255,255,0.9)',
+      }}
+    >
+      <video
+        ref={videoRef}
+        src={src}
+        muted
+        playsInline
+        preload="auto"
+        onLoadedMetadata={() => {
+          // 强制画面解码出第一帧，避免播放前显示黑色占位
+          const v = videoRef.current;
+          if (v && !playing) {
+            try { v.currentTime = Math.min(0.05, (isFinite(v.duration) ? v.duration : 0.05)); } catch { /* ignore */ }
+          }
+        }}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          transform: 'scaleX(-1)',
+        }}
+      />
     </div>
   );
 }
