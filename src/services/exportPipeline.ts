@@ -77,17 +77,32 @@ export interface CameraSegment {
 }
 
 /**
+ * 摄像头气泡在输出画幅里的"有效边界"——shell off 就是整个 target，
+ * shell on 时是 letterbox 之后 shell 占据的矩形。
+ * 气泡的 rx/ry/rs 都相对这个边界（不再相对整个 target），所以 letterbox
+ * 之后气泡跟着 shell 一起缩放、位移，不会漂到留白上。
+ */
+export interface CameraBounds {
+  offX: number;
+  offY: number;
+  w: number;
+  h: number;
+}
+
+/**
  * 把按时间排序的事件流转成 ffmpeg overlay 用的"区间"序列：
  *  - 区间 i = [events[i].timestamp, events[i+1]?.timestamp ?? durationMs]
  *  - 折叠像素相同的相邻区间（少量抖动 → 一段）
  *  - 丢掉短于 50ms 的区间（不到一帧）
  *  - 区间数超过 maxSegments 时按移动距离阈值再次合并（避免 ffmpeg 过滤链爆炸）
+ *
+ *  - bounds：气泡定位的有效边界（见 CameraBounds 注释）。shell off 时传
+ *    `{ offX:0, offY:0, w:outputW, h:outputH }` 等价于旧行为。
  */
 export function buildCameraSegments(
   events: CameraPositionEvent[],
   durationMs: number,
-  outputW: number,
-  outputH: number,
+  bounds: CameraBounds,
   maxSegments = 150,
 ): CameraSegment[] {
   if (events.length === 0 || durationMs <= 0) return [];
@@ -97,13 +112,13 @@ export function buildCameraSegments(
     const startMs = Math.max(0, events[i].timestamp);
     const endMs = i + 1 < events.length ? events[i + 1].timestamp : durationMs;
     if (endMs - startMs < 50) continue;
-    const sz = Math.round(events[i].rs * outputW);
+    const sz = Math.round(events[i].rs * bounds.w);
     const size = Math.max(16, sz);
     raw.push({
       startMs,
       endMs,
-      x: Math.round(events[i].rx * outputW),
-      y: Math.round(events[i].ry * outputH),
+      x: Math.round(bounds.offX + events[i].rx * bounds.w),
+      y: Math.round(bounds.offY + events[i].ry * bounds.h),
       size,
     });
   }
@@ -449,15 +464,32 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const geqMask = `format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(pow(X-W/2,2)+pow(Y-H/2,2),pow(W/2-1,2)),0,255)'`;
 
   if (cameraIdx !== null) {
-    const segments = buildCameraSegments(cameraEvents, durationMs, outputW, outputH);
+    // 摄像头气泡的有效边界：shell on 时跟随 letterboxed shell（用首张 shell 做基准，
+    // 避免单帧 shell 尺寸变化导致 enable 区间 x/y 不连续）；shell off 时整张 target。
+    let camBounds: CameraBounds = { offX: 0, offY: 0, w: outputW, h: outputH };
+    if (useShell && decodedShells.length > 0) {
+      const first = decodedShells[0];
+      const s = Math.min(outputW / first.shellSize.width, outputH / first.shellSize.height);
+      const sw = first.shellSize.width * s;
+      const sh = first.shellSize.height * s;
+      camBounds = {
+        offX: (outputW - sw) / 2,
+        offY: (outputH - sh) / 2,
+        w: sw,
+        h: sh,
+      };
+    }
+    const segments = buildCameraSegments(cameraEvents, durationMs, camBounds);
 
     if (segments.length === 0) {
-      // Legacy / 没有位置事件：保留原有右下角静态布局
-      const camSize = Math.round(outputH * 0.22);
+      // Legacy / 没有位置事件：静态右下角，落在 camBounds 内（shell 时即落在 letterboxed shell 区内）。
+      const camSize = Math.max(16, Math.round(camBounds.h * 0.22));
+      const overlayX = Math.round(camBounds.offX + camBounds.w - camSize - camBounds.w * 0.025);
+      const overlayY = Math.round(camBounds.offY + camBounds.h - camSize - camBounds.h * 0.04);
       filterParts.push(
         `[${cameraIdx}:v]scale=${camSize}:${camSize}:force_original_aspect_ratio=increase,crop=${camSize}:${camSize},hflip,${geqMask}[cam]`,
       );
-      filterParts.push(`${curLabel}[cam]overlay=W-w-${Math.round(outputW * 0.025)}:H-h-${Math.round(outputH * 0.04)}[v_with_cam]`);
+      filterParts.push(`${curLabel}[cam]overlay=${overlayX}:${overlayY}[v_with_cam]`);
       curLabel = '[v_with_cam]';
     } else {
       // 1 路摄像头 split=N → 每段 scale + crop + hflip + geq → enable=between 叠加
