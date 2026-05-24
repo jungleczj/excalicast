@@ -687,8 +687,188 @@ export async function deleteCloudRecording(userId: string, id: string): Promise<
  */
 export async function removeCloudRecordingObjects(storagePrefix: string): Promise<void> {
   const client = requireSupabase();
-  const names = ['metadata.json', 'snapshots.json.gz', 'audio.webm', 'camera.webm']
+  const names = ['metadata.json', 'snapshots.json.gz', 'audio.webm', 'camera.webm', 'cameraPositions.json.gz']
     .map((n) => `${storagePrefix.replace(/\/$/, '')}/${n}`);
   const { error } = await client.storage.from('recordings').remove(names);
   if (error) throw new Error(`removeCloudRecordingObjects: ${error.message}`);
+}
+
+// ============================================================================
+// share_links —— Max tier 公开分享链接
+// ============================================================================
+
+export interface ShareLinkRow {
+  id: string;
+  shortCode: string;
+  recordingId: string;
+  userId: string;
+  createdAt: number;
+  expiresAt: number;
+  accessCount: number;
+}
+
+interface SupabaseShareLinkRow {
+  id: string;
+  short_code: string;
+  recording_id: string;
+  user_id: string;
+  created_at: string;
+  expires_at: string;
+  access_count: number;
+}
+
+function rowToShareLink(r: SupabaseShareLinkRow): ShareLinkRow {
+  return {
+    id: r.id,
+    shortCode: r.short_code,
+    recordingId: r.recording_id,
+    userId: r.user_id,
+    createdAt: new Date(r.created_at).getTime(),
+    expiresAt: new Date(r.expires_at).getTime(),
+    accessCount: r.access_count,
+  };
+}
+
+export async function insertShareLink(params: {
+  shortCode: string;
+  recordingId: string;
+  userId: string;
+  expiresAt: number;
+}): Promise<ShareLinkRow> {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from('share_links')
+    .insert({
+      short_code: params.shortCode,
+      recording_id: params.recordingId,
+      user_id: params.userId,
+      expires_at: new Date(params.expiresAt).toISOString(),
+    })
+    .select('*')
+    .single();
+  if (error) throw new Error(`insertShareLink: ${error.message}`);
+  return rowToShareLink(data as SupabaseShareLinkRow);
+}
+
+export async function getShareLinkByCode(shortCode: string): Promise<ShareLinkRow | null> {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from('share_links')
+    .select('*')
+    .eq('short_code', shortCode)
+    .maybeSingle();
+  if (error) throw new Error(`getShareLinkByCode: ${error.message}`);
+  return data ? rowToShareLink(data as SupabaseShareLinkRow) : null;
+}
+
+export async function bumpShareLinkAccessCount(id: string): Promise<void> {
+  const client = requireSupabase();
+  // 用 rpc 也行；这里 service role 下用两步：读 + 写
+  const { data, error } = await client
+    .from('share_links')
+    .select('access_count')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) return; // 静默：访问计数失败不阻塞响应
+  const cur = (data as { access_count: number } | null)?.access_count ?? 0;
+  await client.from('share_links').update({ access_count: cur + 1 }).eq('id', id);
+}
+
+export async function expireShareLink(id: string, userId: string): Promise<void> {
+  const client = requireSupabase();
+  const { error } = await client
+    .from('share_links')
+    .update({ expires_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('user_id', userId);
+  if (error) throw new Error(`expireShareLink: ${error.message}`);
+}
+
+// ============================================================================
+// handouts —— Max tier 讲义 / outline
+// ============================================================================
+
+export interface HandoutRow {
+  id: string;
+  recordingId: string;
+  userId: string;
+  outline: unknown;   // jsonb，由 routes 自己 cast
+  markdown: string;
+  model: string;
+  generatedAt: number;
+}
+
+interface SupabaseHandoutRow {
+  id: string;
+  recording_id: string;
+  user_id: string;
+  outline: unknown;
+  markdown: string;
+  model: string;
+  generated_at: string;
+}
+
+function rowToHandout(r: SupabaseHandoutRow): HandoutRow {
+  return {
+    id: r.id,
+    recordingId: r.recording_id,
+    userId: r.user_id,
+    outline: r.outline,
+    markdown: r.markdown,
+    model: r.model,
+    generatedAt: new Date(r.generated_at).getTime(),
+  };
+}
+
+export async function upsertHandout(params: {
+  recordingId: string;
+  userId: string;
+  outline: unknown;
+  markdown: string;
+  model: string;
+}): Promise<HandoutRow> {
+  const client = requireSupabase();
+  // recording_id 上有 UNIQUE 索引；用 upsert(onConflict: 'recording_id')
+  const { data, error } = await client
+    .from('handouts')
+    .upsert(
+      {
+        recording_id: params.recordingId,
+        user_id: params.userId,
+        outline: params.outline,
+        markdown: params.markdown,
+        model: params.model,
+        generated_at: new Date().toISOString(),
+      },
+      { onConflict: 'recording_id' },
+    )
+    .select('*')
+    .single();
+  if (error) throw new Error(`upsertHandout: ${error.message}`);
+  return rowToHandout(data as SupabaseHandoutRow);
+}
+
+export async function getHandoutByRecording(
+  userId: string,
+  recordingId: string,
+): Promise<HandoutRow | null> {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from('handouts')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('recording_id', recordingId)
+    .maybeSingle();
+  if (error) throw new Error(`getHandoutByRecording: ${error.message}`);
+  return data ? rowToHandout(data as SupabaseHandoutRow) : null;
+}
+
+export async function deleteHandout(userId: string, recordingId: string): Promise<void> {
+  const client = requireSupabase();
+  const { error } = await client
+    .from('handouts')
+    .delete()
+    .eq('user_id', userId)
+    .eq('recording_id', recordingId);
+  if (error) throw new Error(`deleteHandout: ${error.message}`);
 }

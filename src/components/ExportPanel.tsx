@@ -8,6 +8,8 @@ import { I } from '@/components/icons';
 import { PaywallModal } from '@/components/PaywallModal';
 import { ProUpgradeModal } from '@/components/ProUpgradeModal';
 import { SubtitlePanel } from '@/components/SubtitlePanel';
+import { HandoutPanel } from '@/components/HandoutPanel';
+import { ShareLinkModal } from '@/components/ShareLinkModal';
 import { useSubscription } from '@/hooks/useSubscription';
 import { ProBadge } from '@/components/ProBadge';
 import type { ExportConfig } from '@/types/recording';
@@ -37,6 +39,43 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
   const [subtitlePanelOpen, setSubtitlePanelOpen] = useState<boolean>(false);
   const [pendingExport, setPendingExport] = useState<boolean>(false);
   const [bgPolling, setBgPolling] = useState<boolean>(false);
+  // Max-only: handout + share
+  const [handoutOpen, setHandoutOpen] = useState<boolean>(false);
+  const [shareBusy, setShareBusy] = useState<boolean>(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareExpiresAt, setShareExpiresAt] = useState<number>(0);
+  const [shareModalOpen, setShareModalOpen] = useState<boolean>(false);
+  const [maxFeatureMsg, setMaxFeatureMsg] = useState<string | null>(null);
+
+  const maxUnlocked = subscription.permissions.handout && subscription.permissions.shareLink;
+
+  const handleCreateShareLink = useCallback(async () => {
+    setShareBusy(true);
+    setMaxFeatureMsg(null);
+    try {
+      const res = await fetch('/api/share/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordingId }),
+      });
+      const j = (await res.json().catch(() => ({}))) as { url?: string; expiresAt?: number; error?: string; message?: string };
+      if (!res.ok || !j.url) {
+        if (j.error === 'cloud_recording_required') {
+          setMaxFeatureMsg(j.message ?? 'cloud required');
+        } else {
+          setMaxFeatureMsg(j.message ?? j.error ?? `share ${res.status}`);
+        }
+        return;
+      }
+      setShareUrl(j.url);
+      setShareExpiresAt(j.expiresAt ?? 0);
+      setShareModalOpen(true);
+    } catch (err) {
+      setMaxFeatureMsg(err instanceof Error ? err.message : 'unknown');
+    } finally {
+      setShareBusy(false);
+    }
+  }, [recordingId]);
 
   const proUnlocked = subscription.permissions.exportWithoutWatermark;
   const effectivelyUnlocked = paid || proUnlocked;
@@ -249,7 +288,14 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
             desc={t('handoutDesc')}
             tier="Max"
             highlight
-            unlocked={false}
+            unlocked={subscription.permissions.handout}
+            actionLabel={subscription.permissions.handout
+              ? (handoutOpen ? t('handoutTitle') : t('handoutGenerate'))
+              : t('upgrade')}
+            onAction={() => {
+              if (subscription.permissions.handout) setHandoutOpen((v) => !v);
+              else setProUpgradeOpen(true);
+            }}
             useLabel={t('use')}
             upgradeLabel={t('upgrade')}
           />
@@ -259,12 +305,50 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
             desc={t('shareDesc')}
             tier="Max"
             highlight
-            unlocked={false}
+            unlocked={subscription.permissions.shareLink}
+            actionLabel={shareBusy
+              ? t('shareCreating')
+              : subscription.permissions.shareLink ? t('shareCreate') : t('upgrade')}
+            onAction={() => {
+              if (!subscription.permissions.shareLink) {
+                setProUpgradeOpen(true);
+                return;
+              }
+              void handleCreateShareLink();
+            }}
             useLabel={t('use')}
             upgradeLabel={t('upgrade')}
           />
         </div>
+
+        {maxUnlocked && handoutOpen && (
+          <HandoutPanel recordingId={recordingId} />
+        )}
+        {maxFeatureMsg && (
+          <div
+            className="mt-3 px-3 py-2"
+            style={{
+              background: 'var(--rec-soft)',
+              border: '1.4px solid var(--rec)',
+              borderRadius: 3,
+              fontSize: 12,
+              color: 'var(--rec)',
+              fontFamily: 'var(--font-mono)',
+            }}
+          >
+            {maxFeatureMsg}
+          </div>
+        )}
       </div>
+
+      {shareUrl && (
+        <ShareLinkModal
+          open={shareModalOpen}
+          url={shareUrl}
+          expiresAt={shareExpiresAt}
+          onClose={() => setShareModalOpen(false)}
+        />
+      )}
 
       {(statusMsg || error || bgPolling) && (
         <div

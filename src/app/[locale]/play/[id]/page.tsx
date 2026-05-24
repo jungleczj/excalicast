@@ -1,42 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import dynamic from 'next/dynamic';
 import { useLocale, useTranslations } from 'next-intl';
 import { AppHeader } from '@/components/AppHeader';
 import { I } from '@/components/icons';
-import { SubtitleOverlay } from '@/components/SubtitleOverlay';
+import { SharedPlayer } from '@/components/SharedPlayer';
 import { loadFullRecording, deleteRecording } from '@/lib/db-client';
-import { cameraPositionAt } from '@/services/exportPipeline';
 import type { CameraPositionEvent, RecordingMetadata, WhiteboardSnapshot } from '@/types/recording';
 import { Link, useRouter } from '@/i18n/navigation';
-
-const Excalidraw = dynamic(
-  async () => (await import('@excalidraw/excalidraw')).Excalidraw,
-  { ssr: false, loading: () => <div className="grid h-full place-items-center text-text-tertiary">…</div> },
-);
-
-function snapshotAt(snaps: WhiteboardSnapshot[], t: number): WhiteboardSnapshot | null {
-  if (snaps.length === 0) return null;
-  let lo = 0, hi = snaps.length - 1, ans = -1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (snaps[mid].timestamp <= t) { ans = mid; lo = mid + 1; }
-    else hi = mid - 1;
-  }
-  return ans === -1 ? snaps[0] : snaps[ans];
-}
-
-function fmt(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  const mm = Math.floor(s / 60);
-  const ss = s % 60;
-  return `${mm}:${String(ss).padStart(2, '0')}`;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ExcalidrawAPI = any;
 
 export default function PlayPage(): JSX.Element {
   const params = useParams<{ id: string }>();
@@ -51,21 +23,7 @@ export default function PlayPage(): JSX.Element {
   const [cameraUrl, setCameraUrl] = useState<string | null>(null);
   const [cameraEvents, setCameraEvents] = useState<CameraPositionEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [timeMs, setTimeMs] = useState(0);
-  const [ready, setReady] = useState(false);
 
-  const apiRef = useRef<ExcalidrawAPI | null>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const cameraRef = useRef<HTMLVideoElement>(null);
-  const rafRef = useRef<number | null>(null);
-  const lastAppliedTsRef = useRef<number>(-1);
-  // 用 performance.now() 推进时间。
-  // 注意：MediaRecorder 分片产出的 webm 的 duration / currentTime 不可信
-  // （EBML 缺少 Duration 字段），不要把 audio.currentTime 当时间源用。
-  const clockRef = useRef<{ perfStart: number; baseTime: number } | null>(null);
-
-  // 加载录制
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
@@ -84,7 +42,6 @@ export default function PlayPage(): JSX.Element {
         setCameraUrl(createdCameraUrl);
       }
       setCameraEvents(r.cameraEvents);
-      setReady(true);
     }).catch((err) => {
       if (!cancelled) setError(err instanceof Error ? err.message : 'load_failed');
     });
@@ -94,134 +51,6 @@ export default function PlayPage(): JSX.Element {
       if (createdCameraUrl) URL.revokeObjectURL(createdCameraUrl);
     };
   }, [id]);
-
-  // 把指定时刻对应的快照应用到 Excalidraw
-  const applySnapshot = useCallback((t: number) => {
-    if (!apiRef.current) return;
-    const snap = snapshotAt(snapshots, t);
-    if (!snap) return;
-    if (snap.timestamp === lastAppliedTsRef.current) return;
-    lastAppliedTsRef.current = snap.timestamp;
-    try {
-      // 剥离会与 viewMode 打架的字段
-      const appState = { ...(snap.appState as Record<string, unknown>) };
-      delete appState.collaborators;
-      delete appState.activeTool;
-      delete appState.viewModeEnabled;
-      delete appState.zenModeEnabled;
-      apiRef.current.updateScene({
-        elements: snap.elements,
-        appState,
-      });
-    } catch (e) {
-      // updateScene 失败时仅打日志，不打断播放
-      console.error('updateScene_failed', e);
-    }
-  }, [snapshots]);
-
-  // 首次有 API 且 snapshots 就绪时，渲染第 0 帧
-  useEffect(() => {
-    if (apiRef.current && snapshots.length > 0) {
-      lastAppliedTsRef.current = -1;
-      applySnapshot(0);
-    }
-  }, [snapshots, applySnapshot]);
-
-  // 播放循环：始终以 performance.now() 为时间源，meta.durationMs 为终点判断依据。
-  // 不用 audio.currentTime — 分片 webm duration 不可信，会导致播放卡住。
-  useEffect(() => {
-    if (!playing) {
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-      clockRef.current = null;
-      return;
-    }
-    clockRef.current = { perfStart: performance.now(), baseTime: timeMs };
-    const audio = audioRef.current;
-    const camera = cameraRef.current;
-    const tick = () => {
-      const ref = clockRef.current;
-      if (!ref) return;
-      const t = ref.baseTime + (performance.now() - ref.perfStart);
-      const dur = meta?.durationMs ?? 0;
-      if (dur > 0 && t >= dur) {
-        setTimeMs(dur);
-        applySnapshot(dur);
-        setPlaying(false);
-        if (audio) { try { audio.pause(); } catch { /* ignore */ } }
-        if (camera) { try { camera.pause(); } catch { /* ignore */ } }
-        return;
-      }
-      setTimeMs(t);
-      applySnapshot(t);
-      // 媒体漂移修正：每帧检查 audio/camera 是否漂离主时钟 > 0.3s
-      const tSec = t / 1000;
-      if (audio && isFinite(audio.currentTime) && Math.abs(audio.currentTime - tSec) > 0.3) {
-        try { audio.currentTime = tSec; } catch { /* ignore */ }
-      }
-      if (camera && isFinite(camera.currentTime) && Math.abs(camera.currentTime - tSec) > 0.3) {
-        try { camera.currentTime = tSec; } catch { /* ignore */ }
-      }
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, applySnapshot, meta]);
-
-  const togglePlay = useCallback(() => {
-    setPlaying((prev) => {
-      const next = !prev;
-      const audio = audioRef.current;
-      const camera = cameraRef.current;
-      const dur = meta?.durationMs ?? 0;
-      if (next) {
-        // 已播完则从头来；否则保持在当前 timeMs（但要把 audio/camera 同步过去，
-        // 防止它们卡在 "ended" 状态）。
-        const restart = dur > 0 && timeMs >= dur - 50;
-        const startT = restart ? 0 : timeMs;
-        if (restart) {
-          setTimeMs(0);
-          lastAppliedTsRef.current = -1;
-        }
-        if (audio) {
-          try { audio.currentTime = startT / 1000; } catch { /* ignore */ }
-          void audio.play().catch(() => { /* user-gesture lost */ });
-        }
-        if (camera) {
-          try { camera.currentTime = startT / 1000; } catch { /* ignore */ }
-          void camera.play().catch(() => { /* ignore */ });
-        }
-      } else {
-        if (audio) audio.pause();
-        if (camera) camera.pause();
-      }
-      return next;
-    });
-  }, [meta, timeMs]);
-
-  const handleSeek = useCallback((t: number) => {
-    setTimeMs(t);
-    lastAppliedTsRef.current = -1;
-    applySnapshot(t);
-    const audio = audioRef.current;
-    const camera = cameraRef.current;
-    if (audio) { try { audio.currentTime = t / 1000; } catch { /* ignore */ } }
-    if (camera) { try { camera.currentTime = t / 1000; } catch { /* ignore */ } }
-    if (playing) {
-      clockRef.current = { perfStart: performance.now(), baseTime: t };
-    }
-  }, [applySnapshot, playing]);
-
-  const onApi = useCallback((api: ExcalidrawAPI) => {
-    apiRef.current = api;
-    if (snapshots.length > 0) {
-      lastAppliedTsRef.current = -1;
-      applySnapshot(0);
-    }
-  }, [snapshots, applySnapshot]);
 
   const handleDelete = useCallback(async () => {
     const msg = locale === 'en' ? 'Delete this recording? Cannot be undone.' : '删除这条录制？此操作不可恢复。';
@@ -262,220 +91,46 @@ export default function PlayPage(): JSX.Element {
   const title = meta?.title?.trim() || titleFallback;
   const downloadLabel = locale === 'en' ? 'Download video' : '下载视频';
   const deleteLabel = locale === 'en' ? 'Delete' : '删除';
-  const backLabel = locale === 'en' ? 'Back' : '返回';
+
+  const rightActions = (
+    <>
+      <Link
+        href={`/export/${id}` as never}
+        className="btn-sketch btn-sketch-primary"
+        style={{ padding: '7px 12px', fontSize: 10.5 }}
+      >
+        <I.Download size={12} /> {downloadLabel}
+      </Link>
+      <button
+        onClick={handleDelete}
+        className="btn-sketch"
+        style={{ padding: '7px 12px', fontSize: 10.5, color: 'var(--rec)', borderColor: 'var(--rec)' }}
+      >
+        <I.Trash size={12} /> {deleteLabel}
+      </button>
+    </>
+  );
 
   return (
     <div className="flex h-full flex-col" style={{ background: 'var(--paper-2)' }}>
       <AppHeader tier="free" />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <div
-          className="flex items-center gap-3 px-6 py-3"
-          style={{ background: 'var(--paper)', borderBottom: '1.5px solid var(--ink)' }}
-        >
-          <Link
-            href="/library"
-            aria-label={backLabel}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 30,
-              height: 30,
-              border: '1.4px solid var(--ink)',
-              background: 'var(--paper)',
-              borderRadius: 3,
-              color: 'var(--ink)',
-            }}
-          >
-            <I.ChevronLeft size={14} />
-          </Link>
-          <div
-            className="truncate"
-            style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink)', letterSpacing: '-0.01em' }}
-          >
-            {title}
-          </div>
-          <div className="flex-1" />
-          <Link
-            href={`/export/${id}` as never}
-            className="btn-sketch btn-sketch-primary"
-            style={{ padding: '7px 12px', fontSize: 10.5 }}
-          >
-            <I.Download size={12} /> {downloadLabel}
-          </Link>
-          <button
-            onClick={handleDelete}
-            className="btn-sketch"
-            style={{ padding: '7px 12px', fontSize: 10.5, color: 'var(--rec)', borderColor: 'var(--rec)' }}
-          >
-            <I.Trash size={12} /> {deleteLabel}
-          </button>
-        </div>
-
-        {/* 画布 */}
-        <div className="relative flex-1 bg-canvas-bg">
-          <Excalidraw
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            excalidrawAPI={onApi as any}
-            viewModeEnabled
-            zenModeEnabled
-          />
-          <SubtitleOverlay srt={meta?.subtitleSrt} timeMs={timeMs} />
-          {cameraUrl && (
-            <PlayCameraBubble
-              src={cameraUrl}
-              cameraEvents={cameraEvents}
-              timeMs={timeMs}
-              playing={playing}
-              videoRef={cameraRef}
-            />
-          )}
-          {audioUrl && (
-            // 音频元素隐藏：用 timeMs/playing 控制。不挂 onEnded —
-            // MediaRecorder 分片 webm 缺 Duration，onEnded 会在真正播完之前
-            // 误触发，让播放半途卡住。改由主时钟 (clockRef) 判断终点。
-            <audio
-              ref={audioRef}
-              src={audioUrl}
-              preload="auto"
-              hidden
-            />
-          )}
-          {!ready && (
-            <div
-              className="absolute inset-0 grid place-items-center"
-              style={{
-                background: 'rgba(26,26,26,0.05)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 12,
-                color: 'var(--ink-3)',
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
-              }}
-            >
-              {t('loading')}
-            </div>
-          )}
-        </div>
-
-        <div
-          className="px-6 py-4"
-          style={{ background: 'var(--paper)', borderTop: '1.5px solid var(--ink)' }}
-        >
-          <div className="flex items-center gap-3">
-            <button
-              onClick={togglePlay}
-              disabled={!ready || (meta?.durationMs ?? 0) === 0}
-              className="grid place-items-center transition"
-              style={{
-                width: 40,
-                height: 40,
-                background: 'var(--ink)',
-                color: 'var(--paper)',
-                border: '1.6px solid var(--ink)',
-                boxShadow: '3px 3px 0 var(--hi)',
-                borderRadius: 999,
-                cursor: !ready || (meta?.durationMs ?? 0) === 0 ? 'not-allowed' : 'pointer',
-                opacity: !ready || (meta?.durationMs ?? 0) === 0 ? 0.4 : 1,
-              }}
-              aria-label={playing ? t('pause') : t('play')}
-            >
-              {playing ? <I.Pause size={15} /> : <I.Play size={15} />}
-            </button>
-            <span
-              style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--ink)', fontWeight: 600 }}
-            >
-              {fmt(timeMs)}
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={meta?.durationMs ?? 0}
-              step={Math.max(1, Math.round((meta?.durationMs ?? 1) / 400))}
-              value={Math.min(timeMs, meta?.durationMs ?? 0)}
-              onChange={(e) => handleSeek(Number(e.target.value))}
-              disabled={!ready || (meta?.durationMs ?? 0) === 0}
-              className="h-1.5 flex-1"
-              style={{ accentColor: 'var(--ink)' }}
-            />
-            <span
-              style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontVariantNumeric: 'tabular-nums', color: 'var(--ink-3)' }}
-            >
-              {fmt(meta?.durationMs ?? 0)}
-            </span>
-            <div
-              className="ml-2 flex items-center gap-3"
-              style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.04em', textTransform: 'uppercase' }}
-            >
-              {meta?.hasAudio && <span className="flex items-center gap-1"><I.Mic size={12} /> {locale === 'en' ? 'Audio' : '音频'}</span>}
-              {meta?.hasCamera && <span className="flex items-center gap-1"><I.Camera size={12} /> {locale === 'en' ? 'Camera' : '摄像头'}</span>}
-              {!meta?.hasAudio && !meta?.hasCamera && <span>{locale === 'en' ? 'Whiteboard only' : '仅画板'}</span>}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * 录制库回放页的摄像头气泡 —— 位置/尺寸跟随 cameraEvents（按比例），
- * 没有事件时回退到右下角 160px 静态布局（兼容老录制）。
- */
-function PlayCameraBubble({
-  src,
-  cameraEvents,
-  timeMs,
-  playing,
-  videoRef,
-}: {
-  src: string;
-  cameraEvents: CameraPositionEvent[];
-  timeMs: number;
-  playing: boolean;
-  videoRef: React.RefObject<HTMLVideoElement>;
-}): JSX.Element {
-  const style = useMemo<React.CSSProperties>(() => {
-    const pos = cameraPositionAt(cameraEvents, timeMs);
-    if (pos) {
-      return {
-        left: `${pos.rx * 100}%`,
-        top: `${pos.ry * 100}%`,
-        width: `${pos.rs * 100}%`,
-        aspectRatio: '1 / 1',
-      };
-    }
-    return { right: 24, bottom: 24, width: 160, height: 160 };
-  }, [cameraEvents, timeMs]);
-
-  return (
-    <div
-      className="pointer-events-none absolute z-40 overflow-hidden transition-[left,top,width] duration-100"
-      style={{
-        ...style,
-        borderRadius: '50%',
-        background: '#1f2937',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.25), 0 0 0 3px rgba(255,255,255,0.9)',
-      }}
-    >
-      <video
-        ref={videoRef}
-        src={src}
-        muted
-        playsInline
-        preload="auto"
-        onLoadedMetadata={() => {
-          // 强制画面解码出第一帧，避免播放前显示黑色占位
-          const v = videoRef.current;
-          if (v && !playing) {
-            try { v.currentTime = Math.min(0.05, (isFinite(v.duration) ? v.duration : 0.05)); } catch { /* ignore */ }
-          }
-        }}
-        style={{
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-          transform: 'scaleX(-1)',
+      <SharedPlayer
+        durationMs={meta?.durationMs ?? 0}
+        subtitleSrt={meta?.subtitleSrt}
+        snapshots={snapshots}
+        audioSrc={audioUrl}
+        cameraSrc={cameraUrl}
+        cameraEvents={cameraEvents}
+        title={title}
+        rightActions={rightActions}
+        hasAudio={!!meta?.hasAudio}
+        hasCamera={!!meta?.hasCamera}
+        i18n={{
+          play: t('play'),
+          pause: t('pause'),
+          audio: locale === 'en' ? 'Audio' : '音频',
+          camera: locale === 'en' ? 'Camera' : '摄像头',
+          whiteboardOnly: locale === 'en' ? 'Whiteboard only' : '仅画板',
         }}
       />
     </div>
