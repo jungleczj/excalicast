@@ -147,10 +147,15 @@ export interface CropContext {
   fallbackViewport: SceneRect;
 }
 
-export function cropRectForSnapshot(snap: WhiteboardSnapshot | null, ctx: CropContext): SceneRect {
-  const preset = ASPECT_PRESETS[ctx.aspectRatio];
-  const targetAspect = preset.width / preset.height;
-
+/**
+ * 给一个任意 target aspect（不限于 ASPECT_PRESETS）的 scene crop。
+ * shell 模式需要按 canvasRect 的实际 aspect 裁场景，所以单拎一层。
+ */
+export function cropRectForAspect(
+  snap: WhiteboardSnapshot | null,
+  ctx: Omit<CropContext, 'aspectRatio'>,
+  targetAspect: number,
+): SceneRect {
   if (ctx.croppingMode === 'fit_all_content') {
     const base = ctx.contentBox ?? ctx.fallbackViewport;
     return containExpand(base, targetAspect);
@@ -158,6 +163,11 @@ export function cropRectForSnapshot(snap: WhiteboardSnapshot | null, ctx: CropCo
   // follow_viewport
   const vp = (snap && viewportFromAppState(snap.appState)) ?? ctx.fallbackViewport;
   return coverCrop(vp, targetAspect);
+}
+
+export function cropRectForSnapshot(snap: WhiteboardSnapshot | null, ctx: CropContext): SceneRect {
+  const preset = ASPECT_PRESETS[ctx.aspectRatio];
+  return cropRectForAspect(snap, ctx, preset.width / preset.height);
 }
 
 /**
