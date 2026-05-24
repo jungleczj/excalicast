@@ -13,11 +13,3 @@ export async function isPaid(recordingId: string): Promise<boolean> {
   return data.paid;
 }
 
-export async function simulatePayment(recordingId: string): Promise<void> {
-  const res = await fetch('/api/dev/simulate-payment', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ recordingId }),
-  });
-  if (!res.ok) throw new Error(`simulate-payment ${res.status}`);
-}

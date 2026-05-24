@@ -149,32 +149,6 @@ export function ProUpgradeModal({ open, onClose, onUpgraded }: Props): JSX.Eleme
     void openCheckoutForProvider();
   };
 
-  const handleDevGrantPro = async () => {
-    setError(null);
-    setStatusMsg(null);
-    if (!user) {
-      setResumeUpgradeAfterLogin(true);
-      setLoginOpen(true);
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await fetch('/api/dev/grant-pro', { method: 'POST' });
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(j.error ?? `grant-pro failed: ${res.status}`);
-      }
-      setStatusMsg(t('devGranted'));
-      await refreshTier();
-      onUpgraded?.();
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'dev_grant_failed');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const isPaddleSandbox = process.env.NEXT_PUBLIC_PADDLE_ENV === 'sandbox';
   const subscriptionEnvLabel = isPaddleSandbox ? t('sandbox') : t('secure');
   const features = t.raw('features') as string[];
@@ -350,18 +324,6 @@ export function ProUpgradeModal({ open, onClose, onUpgraded }: Props): JSX.Eleme
                 ? t('footnoteSandbox')
                 : t('footnotePaddle')}
           </p>
-
-          {process.env.NEXT_PUBLIC_DEV_MODE === 'true' && (
-            <button
-              type="button"
-              onClick={() => void handleDevGrantPro()}
-              disabled={busy}
-              className="btn-sketch mt-3 w-full"
-              style={{ justifyContent: 'center', borderStyle: 'dashed', fontSize: 10, padding: '8px 12px' }}
-            >
-              {t('devGrant')}
-            </button>
-          )}
         </div>
       </div>
 

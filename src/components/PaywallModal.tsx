@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
-import { isPaid, simulatePayment } from '@/services/paymentClient';
+import { isPaid } from '@/services/paymentClient';
 import { openCheckout, closeCheckout } from '@/services/paddleClient';
 import { usePaddle } from '@/components/providers/PaddleProvider';
 import { usePaymentConfig, formatPrice } from '@/hooks/usePaymentConfig';
@@ -117,23 +117,6 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
       setBusy(false);
     }
   };
-
-  const handleDevSimulate = async () => {
-    setError(null);
-    setStatusMsg(t('simulating'));
-    setBusy(true);
-    try {
-      await simulatePayment(recordingId);
-      onPaid?.();
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'simulate_failed');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const showDevLink = process.env.NEXT_PUBLIC_DEV_MODE === 'true';
 
   return (
     <div
@@ -297,28 +280,6 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
               style={{ justifyContent: 'center' }}
             >
               {t('upgradeAlt', { price: proPriceLabel })}
-            </button>
-          )}
-
-          {showDevLink && (
-            <button
-              onClick={handleDevSimulate}
-              disabled={busy}
-              className="mt-3 w-full text-center"
-              style={{
-                fontSize: 10,
-                color: 'var(--ink-3)',
-                fontFamily: 'var(--font-mono)',
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-                background: 'none',
-                border: 'none',
-                borderBottom: '1px dashed var(--ink-3)',
-                paddingBottom: 2,
-                cursor: 'pointer',
-              }}
-            >
-              {t('devSkip')}
             </button>
           )}
 
