@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { cameraPositionAt, renderPreviewFrame } from '@/services/exportPipeline';
-import { loadFullRecording } from '@/lib/db-client';
-import type { CameraPositionEvent, ExportConfig, RecordingMetadata } from '@/types/recording';
+import { getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
+import type { CameraPositionEvent, ExportConfig, RecordingMetadata, ShellCanvasRect, ShellSize } from '@/types/recording';
 import { ASPECT_PRESETS } from '@/types/recording';
 import { I } from '@/components/icons';
 import type { ExportProgressState } from '@/components/ExportPanel';
@@ -32,6 +32,7 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [cameraUrl, setCameraUrl] = useState<string | null>(null);
   const [cameraEvents, setCameraEvents] = useState<CameraPositionEvent[]>([]);
+  const [firstShell, setFirstShell] = useState<{ shellSize: ShellSize; canvasRect: ShellCanvasRect } | null>(null);
   const [playing, setPlaying] = useState(false);
   const renderToken = useRef(0);
   const rafRef = useRef<number | null>(null);
@@ -44,18 +45,23 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
     let cancelled = false;
     let createdAudioUrl: string | null = null;
     let createdCameraUrl: string | null = null;
-    loadFullRecording(recordingId).then((r) => {
-      if (cancelled) return;
-      if (r.audioBlob) {
-        createdAudioUrl = URL.createObjectURL(r.audioBlob);
-        setAudioUrl(createdAudioUrl);
-      }
-      if (r.cameraBlob) {
-        createdCameraUrl = URL.createObjectURL(r.cameraBlob);
-        setCameraUrl(createdCameraUrl);
-      }
-      setCameraEvents(r.cameraEvents);
-    }).catch(() => { /* 静默：预览能不能渲染由 renderPreviewFrame 反馈 */ });
+    Promise.all([loadFullRecording(recordingId), getWorkspaceShells(recordingId)])
+      .then(([r, shells]) => {
+        if (cancelled) return;
+        if (r.audioBlob) {
+          createdAudioUrl = URL.createObjectURL(r.audioBlob);
+          setAudioUrl(createdAudioUrl);
+        }
+        if (r.cameraBlob) {
+          createdCameraUrl = URL.createObjectURL(r.cameraBlob);
+          setCameraUrl(createdCameraUrl);
+        }
+        setCameraEvents(r.cameraEvents);
+        if (shells.length > 0) {
+          setFirstShell({ shellSize: shells[0].shellSize, canvasRect: shells[0].canvasRect });
+        }
+      })
+      .catch(() => { /* 静默：预览能不能渲染由 renderPreviewFrame 反馈 */ });
     return () => {
       cancelled = true;
       if (createdAudioUrl) URL.revokeObjectURL(createdAudioUrl);
@@ -63,24 +69,43 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
     };
   }, [recordingId]);
 
-  // 当前 timeMs 对应的摄像头位置（百分比）。无事件时回退到右下角默认值。
+  // 当前 timeMs 对应的摄像头位置（百分比）。
+  // shell on 时，气泡定位用 letterboxed shell 区作为坐标系（跟导出 pipeline 一致）；
+  // shell off / 无 shell 时，整张预览框作为坐标系。
   const cameraOverlayStyle = useMemo<React.CSSProperties>(() => {
-    const pos = cameraPositionAt(cameraEvents, timeMs);
-    if (pos) {
-      // 位置百分比（相对于预览框，预览框比例与导出输出一致），气泡用 aspect-ratio:1
-      return {
-        left: `${pos.rx * 100}%`,
-        top: `${pos.ry * 100}%`,
-        width: `${pos.rs * 100}%`,
+    const preset = ASPECT_PRESETS[config.aspectRatio];
+    const useShell = !!firstShell && (config.includeWorkspaceShell ?? true);
+
+    // 把 camBounds 表达成"占整张预览框的比例"，方便用 % 写 CSS。
+    let bounds = { offFracX: 0, offFracY: 0, fracW: 1, fracH: 1 };
+    if (useShell && firstShell) {
+      const s = Math.min(preset.width / firstShell.shellSize.width, preset.height / firstShell.shellSize.height);
+      const scaledW = firstShell.shellSize.width * s;
+      const scaledH = firstShell.shellSize.height * s;
+      bounds = {
+        offFracX: (preset.width - scaledW) / 2 / preset.width,
+        offFracY: (preset.height - scaledH) / 2 / preset.height,
+        fracW: scaledW / preset.width,
+        fracH: scaledH / preset.height,
       };
     }
-    // legacy fallback：右下角，宽度 18%
+
+    const pos = cameraPositionAt(cameraEvents, timeMs);
+    if (pos) {
+      return {
+        left: `${(bounds.offFracX + pos.rx * bounds.fracW) * 100}%`,
+        top: `${(bounds.offFracY + pos.ry * bounds.fracH) * 100}%`,
+        width: `${pos.rs * bounds.fracW * 100}%`,
+      };
+    }
+    // legacy fallback：camBounds 右下角，宽度约 18% of bounds
+    const w = bounds.fracW * 0.18;
     return {
-      right: `${0.18 * 0.18 * 100}%`,
-      bottom: `${0.18 * 0.22 * 100}%`,
-      width: '18%',
+      left: `${(bounds.offFracX + bounds.fracW * (1 - 0.18) - bounds.fracW * 0.025) * 100}%`,
+      top: `${(bounds.offFracY + bounds.fracH * (1 - 0.18) - bounds.fracH * 0.04) * 100}%`,
+      width: `${w * 100}%`,
     };
-  }, [cameraEvents, timeMs]);
+  }, [cameraEvents, timeMs, firstShell, config.aspectRatio, config.includeWorkspaceShell]);
 
   // 帧渲染：节流到 CANVAS_REDRAW_INTERVAL_MS。静态 scrub 时立即重绘。
   const drawFrame = useCallback((t: number, force: boolean) => {
