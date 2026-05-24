@@ -259,12 +259,13 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 水印开启 + 摄像头存在时，水印改放左下角避免与人像气泡视觉打架
   const watermarkPos: 'bottom-right' | 'bottom-left' = cameraBlob ? 'bottom-left' : 'bottom-right';
 
-  // 工作区 UI 外壳 —— 若录制时捕获到了 shell 且 toggle 开启，按 shellSize 输出
+  // 工作区 UI 外壳 —— 若录制时捕获到了 shell 且 toggle 开启，叠加到画幅上方。
+  // 注意：输出尺寸恒为 picker 选定的比例。shell 与画幅比例不一致时按 cover 缩放裁切。
   const rawShells = await getWorkspaceShells(opts.recordingId);
   const useShell = rawShells.length > 0 && (opts.includeWorkspaceShell ?? true);
   const decodedShells = useShell ? await decodeShells(rawShells) : [];
-  const outputW = useShell ? decodedShells[0].shellSize.width : preset.width;
-  const outputH = useShell ? decodedShells[0].shellSize.height : preset.height;
+  const outputW = preset.width;
+  const outputH = preset.height;
 
   const contentBox = computeContentBoundingBox(snapshots);
   const fallbackViewport = (() => {
@@ -294,28 +295,36 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     targetCtx.fillStyle = '#ffffff';
     targetCtx.fillRect(0, 0, target.width, target.height);
 
-    // shell 模式：先画工作区外壳铺满 target，再把 scene 画进 canvasRect
-    // 否则：scene 直接铺满 target（旧路径）
+    // shell 模式：先按 cover 把工作区外壳画到 target，再把 scene 画进映射后的 canvasRect。
+    // 否则：scene 直接铺满 target（picker 比例 == target 比例）。
     let shellAtT: DecodedShell | null = null;
+    let shellCoverScale = 1;
+    let shellOffsetX = 0;
+    let shellOffsetY = 0;
     if (useShell) {
       shellAtT = shellAt(decodedShells, t) as DecodedShell | null;
       if (shellAtT) {
-        // shell 尺寸可能与首张 shell 不同（极少见，例如窗口大小变了），按 target 拉伸
-        targetCtx.drawImage(shellAtT.bitmap, 0, 0, target.width, target.height);
+        const shellW = shellAtT.shellSize.width;
+        const shellH = shellAtT.shellSize.height;
+        // cover：取较大缩放比，让 shell 在 target 上始终撑满，溢出的部分被裁。
+        shellCoverScale = Math.max(target.width / shellW, target.height / shellH);
+        const scaledW = shellW * shellCoverScale;
+        const scaledH = shellH * shellCoverScale;
+        shellOffsetX = (target.width - scaledW) / 2;
+        shellOffsetY = (target.height - scaledH) / 2;
+        targetCtx.drawImage(shellAtT.bitmap, shellOffsetX, shellOffsetY, scaledW, scaledH);
       }
     }
 
     // 决定本帧 scene 渲染的目标区域 + 源 crop rect
     const dest = (() => {
       if (useShell && shellAtT) {
-        // dest 缩放到当前 target（首张 shellSize → target；shellAtT 自身的 canvasRect 在它原始尺寸里）
-        const sx = target.width / shellAtT.shellSize.width;
-        const sy = target.height / shellAtT.shellSize.height;
+        // canvasRect 在 shell 原始坐标里 → 通过 cover 变换映射到 target 坐标
         return {
-          x: shellAtT.canvasRect.x * sx,
-          y: shellAtT.canvasRect.y * sy,
-          width: shellAtT.canvasRect.width * sx,
-          height: shellAtT.canvasRect.height * sy,
+          x: shellOffsetX + shellAtT.canvasRect.x * shellCoverScale,
+          y: shellOffsetY + shellAtT.canvasRect.y * shellCoverScale,
+          width: shellAtT.canvasRect.width * shellCoverScale,
+          height: shellAtT.canvasRect.height * shellCoverScale,
         };
       }
       return { x: 0, y: 0, width: target.width, height: target.height };
@@ -323,9 +332,10 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
 
     const sceneSourceRect: SceneRect = (() => {
       if (useShell && snap) {
-        // shell 模式：用户当时的视口
+        // shell 模式：用户当时的视口（保证 scene 内容与 shell 内 canvas 区域对齐）
         return viewportFromAppState(snap.appState) ?? cropRectForSnapshot(snap, cropCtx);
       }
+      // 非 shell 模式：恒按 picker 比例裁场景，填满 target
       return cropRectForSnapshot(snap, cropCtx);
     })();
 
@@ -522,8 +532,9 @@ export async function renderPreviewFrame(
   const useShell = rawShells.length > 0 && (config.includeWorkspaceShell ?? true);
   const decodedShells = useShell ? await decodeShells(rawShells) : [];
 
-  const outputW = useShell ? decodedShells[0].shellSize.width : preset.width;
-  const outputH = useShell ? decodedShells[0].shellSize.height : preset.height;
+  // 输出尺寸恒为 picker 比例；shell 按 cover 缩放后绘制
+  const outputW = preset.width;
+  const outputH = preset.height;
 
   target.width = outputW;
   target.height = outputH;
@@ -536,12 +547,22 @@ export async function renderPreviewFrame(
     ? compileSubtitles(metadata.subtitleSrt)
     : [];
 
-  // shell 先铺底
+  // shell 先铺底（cover 缩放居中）
   let shellAtT: DecodedShell | null = null;
+  let shellCoverScale = 1;
+  let shellOffsetX = 0;
+  let shellOffsetY = 0;
   if (useShell) {
     shellAtT = shellAt(decodedShells, timeMs) as DecodedShell | null;
     if (shellAtT) {
-      ctx.drawImage(shellAtT.bitmap, 0, 0, target.width, target.height);
+      const shellW = shellAtT.shellSize.width;
+      const shellH = shellAtT.shellSize.height;
+      shellCoverScale = Math.max(target.width / shellW, target.height / shellH);
+      const scaledW = shellW * shellCoverScale;
+      const scaledH = shellH * shellCoverScale;
+      shellOffsetX = (target.width - scaledW) / 2;
+      shellOffsetY = (target.height - scaledH) / 2;
+      ctx.drawImage(shellAtT.bitmap, shellOffsetX, shellOffsetY, scaledW, scaledH);
     }
   }
 
@@ -576,16 +597,12 @@ export async function renderPreviewFrame(
       });
 
   const dest = (useShell && shellAtT)
-    ? (() => {
-        const sx = target.width / shellAtT.shellSize.width;
-        const sy = target.height / shellAtT.shellSize.height;
-        return {
-          x: shellAtT.canvasRect.x * sx,
-          y: shellAtT.canvasRect.y * sy,
-          width: shellAtT.canvasRect.width * sx,
-          height: shellAtT.canvasRect.height * sy,
-        };
-      })()
+    ? {
+        x: shellOffsetX + shellAtT.canvasRect.x * shellCoverScale,
+        y: shellOffsetY + shellAtT.canvasRect.y * shellCoverScale,
+        width: shellAtT.canvasRect.width * shellCoverScale,
+        height: shellAtT.canvasRect.height * shellCoverScale,
+      }
     : { x: 0, y: 0, width: target.width, height: target.height };
 
   const ghost = buildGhostRect(sceneSourceRect);
