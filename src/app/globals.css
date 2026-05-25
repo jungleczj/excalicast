@@ -220,6 +220,13 @@ body {
 }
 .fade-in { animation: fade-in 200ms cubic-bezier(0, 0, 0.2, 1); }
 
+/* 摄像头气泡待命占位的轻呼吸 —— 在 stream 还没准备好时给图标加 "活着" 的感觉 */
+@keyframes camera-idle-pulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 0.85; }
+}
+.camera-idle-pulse { animation: camera-idle-pulse 1.6s ease-in-out infinite; }
+
 /* Excalidraw 的工具栏 / 容器在浅色画布上保持原样 */
 .excalicast-board .excalidraw {
   background: var(--paper);

@@ -62,7 +62,9 @@ export function CameraBubble({ stream, size = 160, shape = 'circle', position, o
         height: size,
         borderRadius: shape === 'circle' ? '50%' : 14,
         boxShadow: '0 8px 24px rgba(0,0,0,0.25), 0 0 0 3px rgba(255,255,255,0.9)',
-        background: stream ? '#1f2937' : 'linear-gradient(135deg, #fde68a, #fbbf24)',
+        // 不论是否有 stream 都用深色 ink-2 —— 跟有流时的暗色 video placeholder 衔接，
+        // 避免颜色突变给用户"在切换什么东西"的错觉。
+        background: '#1f2937',
         cursor: dragging ? 'grabbing' : 'grab',
       }}
     >
@@ -81,7 +83,7 @@ export function CameraBubble({ stream, size = 160, shape = 'circle', position, o
           }}
         />
       ) : (
-        <FacePlaceholder />
+        <CameraIdlePlaceholder size={size} />
       )}
 
       <div
@@ -94,22 +96,20 @@ export function CameraBubble({ stream, size = 160, shape = 'circle', position, o
   );
 }
 
-function FacePlaceholder(): JSX.Element {
+/**
+ * stream 尚未就绪时的中性占位：深色背景里居中一个摄像头图标，配 1.6 s 慢呼吸动效。
+ * 出现窗口很短 —— 主要在点击开始 / 停止录制的过渡期。
+ */
+function CameraIdlePlaceholder({ size }: { size: number }): JSX.Element {
+  const iconSize = Math.max(20, Math.round(size * 0.3));
   return (
-    <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
-      <defs>
-        <radialGradient id="faceBg" cx="50%" cy="40%" r="60%">
-          <stop offset="0%" stopColor="#fef3c7" />
-          <stop offset="100%" stopColor="#f59e0b" />
-        </radialGradient>
-      </defs>
-      <rect width="100" height="100" fill="url(#faceBg)" />
-      <ellipse cx="50" cy="105" rx="45" ry="30" fill="#1e3a8a" />
-      <circle cx="50" cy="55" r="22" fill="#fcd9b6" />
-      <path d="M 28 50 Q 30 35 50 32 Q 70 35 72 50 Q 68 42 50 42 Q 32 42 28 50" fill="#3f2e1e" />
-      <path d="M 42 62 Q 50 68 58 62" stroke="#7c2d12" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-      <circle cx="42" cy="55" r="1.5" fill="#1f2937" />
-      <circle cx="58" cy="55" r="1.5" fill="#1f2937" />
-    </svg>
+    <div
+      className="flex h-full w-full items-center justify-center"
+      style={{ color: 'rgba(255,255,255,0.7)' }}
+    >
+      <div className="camera-idle-pulse">
+        <I.Camera size={iconSize} sw={1.6} />
+      </div>
+    </div>
   );
 }
