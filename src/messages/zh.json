@@ -300,7 +300,10 @@
     "shareExpires": "过期：{date}",
     "shareClose": "关闭",
     "use": "使用",
-    "upgrade": "升级"
+    "upgrade": "升级",
+    "maxBundleTitle": "Max 功能",
+    "maxBundleDesc": "AI 讲义 + 公开分享链接",
+    "maxBundleUnlock": "升级到 Max"
   },
   "library": {
     "title": "录制库",

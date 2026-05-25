@@ -282,42 +282,25 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
             useLabel={t('use')}
             upgradeLabel={t('upgrade')}
           />
-          <FeatureRow
-            icon={<I.Sparkles size={16} />}
-            title={t('handoutTitle')}
-            desc={t('handoutDesc')}
-            tier="Max"
-            highlight
-            unlocked={subscription.permissions.handout}
-            actionLabel={subscription.permissions.handout
-              ? (handoutOpen ? t('handoutTitle') : t('handoutGenerate'))
-              : t('upgrade')}
-            onAction={() => {
-              if (subscription.permissions.handout) setHandoutOpen((v) => !v);
-              else setProUpgradeOpen(true);
+          <MaxBundleCard
+            title={t('maxBundleTitle')}
+            desc={t('maxBundleDesc')}
+            unlockLabel={t('maxBundleUnlock')}
+            unlocked={maxUnlocked}
+            onUpgrade={() => setProUpgradeOpen(true)}
+            handout={{
+              title: t('handoutTitle'),
+              desc: t('handoutDesc'),
+              actionLabel: handoutOpen ? t('handoutTitle') : t('handoutGenerate'),
+              onAction: () => setHandoutOpen((v) => !v),
             }}
-            useLabel={t('use')}
-            upgradeLabel={t('upgrade')}
-          />
-          <FeatureRow
-            icon={<I.Share size={16} />}
-            title={t('shareTitle')}
-            desc={t('shareDesc')}
-            tier="Max"
-            highlight
-            unlocked={subscription.permissions.shareLink}
-            actionLabel={shareBusy
-              ? t('shareCreating')
-              : subscription.permissions.shareLink ? t('shareCreate') : t('upgrade')}
-            onAction={() => {
-              if (!subscription.permissions.shareLink) {
-                setProUpgradeOpen(true);
-                return;
-              }
-              void handleCreateShareLink();
+            share={{
+              title: t('shareTitle'),
+              desc: t('shareDesc'),
+              actionLabel: shareBusy ? t('shareCreating') : t('shareCreate'),
+              onAction: () => { void handleCreateShareLink(); },
+              busy: shareBusy,
             }}
-            useLabel={t('use')}
-            upgradeLabel={t('upgrade')}
           />
         </div>
 
@@ -552,6 +535,187 @@ function FeatureRow({ icon, title, desc, tier, highlight, unlocked, actionLabel,
         <div className="mt-0.5" style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.4 }}>{desc}</div>
       </div>
       {button}
+    </div>
+  );
+}
+
+interface MaxBundleAction {
+  title: string;
+  desc: string;
+  actionLabel: string;
+  onAction: () => void;
+  busy?: boolean;
+}
+
+/**
+ * Max 套件卡片 —— 把 handout + share 两个 Max 行合并到一个边框里。
+ * 锁定（非 Max）状态：单个"升级到 Max"CTA 灰显两个子项；
+ * 解锁状态：两个子项各自独立可点。
+ */
+function MaxBundleCard({
+  title,
+  desc,
+  unlockLabel,
+  unlocked,
+  onUpgrade,
+  handout,
+  share,
+}: {
+  title: string;
+  desc: string;
+  unlockLabel: string;
+  unlocked: boolean;
+  onUpgrade: () => void;
+  handout: MaxBundleAction;
+  share: MaxBundleAction;
+}): JSX.Element {
+  return (
+    <div
+      style={{
+        background: 'var(--paper)',
+        border: '1.4px solid var(--ink)',
+        borderRadius: 3,
+      }}
+    >
+      {/* Header band */}
+      <div
+        className="flex items-center gap-3 px-3 py-3"
+        style={{
+          background: 'var(--max)',
+          borderBottom: '1.4px solid var(--ink)',
+          borderTopLeftRadius: 3,
+          borderTopRightRadius: 3,
+        }}
+      >
+        <div
+          className="grid h-8 w-8 flex-shrink-0 place-items-center"
+          style={{
+            background: 'var(--paper)',
+            border: '1.4px solid var(--ink)',
+            borderRadius: 3,
+            color: 'var(--ink)',
+          }}
+        >
+          <I.Sparkles size={16} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink)' }}>{title}</span>
+            <span
+              style={{
+                padding: '1px 6px',
+                background: 'var(--paper)',
+                border: '1px solid var(--ink)',
+                borderRadius: 999,
+                fontFamily: 'var(--font-mono)',
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                color: 'var(--ink)',
+              }}
+            >
+              MAX
+            </span>
+          </div>
+          <div className="mt-0.5" style={{ fontSize: 11, color: 'var(--ink-2)', lineHeight: 1.4 }}>{desc}</div>
+        </div>
+        {!unlocked && (
+          <button
+            type="button"
+            onClick={onUpgrade}
+            className="flex items-center gap-1"
+            style={{
+              padding: '5px 10px',
+              background: 'var(--ink)',
+              color: 'var(--paper)',
+              border: '1.3px solid var(--ink)',
+              borderRadius: 3,
+              fontFamily: 'var(--font-mono)',
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              cursor: 'pointer',
+            }}
+          >
+            <I.Lock size={10} />
+            {unlockLabel}
+          </button>
+        )}
+      </div>
+
+      {/* Two action rows */}
+      <MaxBundleRow
+        icon={<I.Sparkles size={14} />}
+        action={handout}
+        unlocked={unlocked}
+        onLockedClick={onUpgrade}
+      />
+      <div style={{ height: 1, background: 'var(--rule-faint)' }} />
+      <MaxBundleRow
+        icon={<I.Share size={14} />}
+        action={share}
+        unlocked={unlocked}
+        onLockedClick={onUpgrade}
+      />
+    </div>
+  );
+}
+
+function MaxBundleRow({
+  icon,
+  action,
+  unlocked,
+  onLockedClick,
+}: {
+  icon: React.ReactNode;
+  action: MaxBundleAction;
+  unlocked: boolean;
+  onLockedClick: () => void;
+}): JSX.Element {
+  return (
+    <div
+      className="flex items-center gap-3 px-3 py-2.5"
+      style={{ opacity: unlocked ? 1 : 0.55 }}
+    >
+      <div
+        className="grid h-6 w-6 flex-shrink-0 place-items-center"
+        style={{
+          background: 'var(--paper-2)',
+          border: '1.2px solid var(--ink)',
+          borderRadius: 3,
+          color: 'var(--ink)',
+        }}
+      >
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>{action.title}</div>
+        <div style={{ fontSize: 10.5, color: 'var(--ink-3)', lineHeight: 1.4 }}>{action.desc}</div>
+      </div>
+      <button
+        type="button"
+        onClick={() => (unlocked ? action.onAction() : onLockedClick())}
+        disabled={action.busy}
+        className="flex items-center gap-1"
+        style={{
+          padding: '4px 9px',
+          background: unlocked ? 'var(--ink)' : 'var(--paper)',
+          color: unlocked ? 'var(--paper)' : 'var(--ink)',
+          border: '1.3px solid var(--ink)',
+          borderRadius: 3,
+          fontFamily: 'var(--font-mono)',
+          fontSize: 9.5,
+          fontWeight: 600,
+          letterSpacing: '0.06em',
+          textTransform: 'uppercase',
+          cursor: action.busy ? 'not-allowed' : 'pointer',
+          flexShrink: 0,
+        }}
+      >
+        {!unlocked && <I.Lock size={10} />}
+        {action.actionLabel}
+      </button>
     </div>
   );
 }

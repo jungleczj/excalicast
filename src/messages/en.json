@@ -300,7 +300,10 @@
     "shareExpires": "Expires {date}",
     "shareClose": "Close",
     "use": "Use",
-    "upgrade": "Upgrade"
+    "upgrade": "Upgrade",
+    "maxBundleTitle": "Max features",
+    "maxBundleDesc": "AI handout + public share link",
+    "maxBundleUnlock": "Upgrade to Max"
   },
   "library": {
     "title": "Library",
