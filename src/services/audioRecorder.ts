@@ -3,7 +3,11 @@
 import { getClientDb } from '@/lib/db-client';
 
 export interface AudioRecorderHandle {
+  /** 麦克风 MediaStream —— 给上层做软静音（track.enabled toggle）用。 */
+  stream: MediaStream;
   stop: () => Promise<void>;
+  pause: () => void;
+  resume: () => void;
   getMimeType: () => string;
 }
 
@@ -45,10 +49,17 @@ export async function startAudioRecorder(recordingId: string): Promise<AudioReco
   recorder.start(1000);
 
   return {
+    stream,
     async stop() {
       if (recorder.state !== 'inactive') recorder.stop();
       await stopped;
       stream.getTracks().forEach((t) => t.stop());
+    },
+    pause() {
+      if (recorder.state === 'recording') recorder.pause();
+    },
+    resume() {
+      if (recorder.state === 'paused') recorder.resume();
     },
     getMimeType() {
       return mimeType;
