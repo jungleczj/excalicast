@@ -69,8 +69,18 @@ export async function GET(req: Request): Promise<NextResponse<StatusResponse>> {
       if (job.audio_token) await deleteAudio(job.audio_token);
       return NextResponse.json({ status: 'done', srt });
     }
+    if (poll.status === 'NO_SPEECH') {
+      // DashScope 已经明确"任务完成 + 无语音"。用稳定业务码代替中文，
+      // 让客户端 i18n 决定如何呈现给用户。
+      console.warn(`[asr] no_speech_detected jobId=${jobId} recordingId=${job.recording_id}`);
+      await updateSubtitleJob(jobId, { status: 'failed', error: 'no_speech_detected' });
+      if (job.audio_token) await deleteAudio(job.audio_token);
+      return NextResponse.json({ status: 'failed', error: 'no_speech_detected' });
+    }
     if (poll.status === 'FAILED' || poll.status === 'CANCELED') {
-      const err = poll.errorMessage ?? poll.status;
+      // 剥掉上游可能自带的 "字幕生成失败：" 前缀，避免与客户端 i18n 标题双重前缀
+      const rawErr = poll.errorMessage ?? poll.status;
+      const err = rawErr.replace(/^字幕生成失败[：:]\s*/, '').trim() || rawErr;
       await updateSubtitleJob(jobId, { status: 'failed', error: err });
       if (job.audio_token) await deleteAudio(job.audio_token);
       return NextResponse.json({ status: 'failed', error: err });

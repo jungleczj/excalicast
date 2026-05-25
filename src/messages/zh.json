@@ -220,7 +220,13 @@
     "retry": "重试",
     "timeout": "字幕生成超时（10 分钟），请重试",
     "footer": "录制音频仅在生成字幕时临时上传到本应用服务器，作业完成后自动删除",
-    "mockReason": "使用 mock SRT"
+    "mockReason": "使用 mock SRT",
+    "errors": {
+      "noSpeechDetected": "录音里没有检测到语音。请确认麦克风已开启、说话清晰，且录制时长足够（建议 ≥ 3 秒）。",
+      "noAudio": "本次录制没有音频轨道，请先开启麦克风再录制。",
+      "tooShort": "录音太短，无法识别。请确保至少有 1 秒以上的语音。",
+      "unknown": "未知错误，可以重试。"
+    }
   },
   "workspaceShell": {
     "title": "包含工作区界面",

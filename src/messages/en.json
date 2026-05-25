@@ -220,7 +220,13 @@
     "retry": "Retry",
     "timeout": "Subtitle generation timed out (10 min). Please retry.",
     "footer": "Audio is temporarily uploaded only while generating subtitles. Deleted automatically once the job completes.",
-    "mockReason": "Using mock SRT"
+    "mockReason": "Using mock SRT",
+    "errors": {
+      "noSpeechDetected": "No speech detected in the recording. Make sure the microphone was on, the audio is clear, and the take is at least a few seconds long.",
+      "noAudio": "This recording has no audio track. Enable the microphone before recording.",
+      "tooShort": "Recording is too short for transcription. Aim for at least 1 second of speech.",
+      "unknown": "Unknown error. You can retry."
+    }
   },
   "workspaceShell": {
     "title": "Include workspace UI",

@@ -4,7 +4,31 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
 import { downloadSrt, pollSubtitleJob, submitSubtitleJob } from '@/services/subtitleClient';
-import { clearSubtitleSrt, getRecording, saveSubtitleSrt } from '@/lib/db-client';
+import { clearSubtitleSrt, getRecording, loadFullRecording, saveSubtitleSrt } from '@/lib/db-client';
+
+/**
+ * 客户端预检阈值：低于此值的音频几乎肯定无法被 ASR 识别。
+ *  - Opus 32 kbps（4 KB/s）静音文件常 <4 KB；正常语音每秒 ~4 KB。
+ *  - 2000 字节大约 0.5 s 真正语音的量级，做相对宽松的兜底。
+ */
+const AUDIO_MIN_BYTES = 2000;
+const AUDIO_MIN_DURATION_MS = 500;
+
+/**
+ * 把后端 / 本地预检产生的错误码翻译成给用户看的文案。
+ * 命中 i18n 键的归 i18n；其它（包括上游 DashScope 任意中文）做剥前缀处理后透传。
+ */
+function describeError(
+  err: string | null | undefined,
+  t: (key: string) => string,
+): string {
+  if (!err) return t('errors.unknown');
+  if (err === 'no_speech_detected') return t('errors.noSpeechDetected');
+  if (err === 'no_audio_track') return t('errors.noAudio');
+  if (err === 'audio_too_short') return t('errors.tooShort');
+  // 兜底：剥掉历史/上游已经带过的 "字幕生成失败：" 前缀，避免与 failedTitle 双重前缀
+  return err.replace(/^字幕生成失败[：:]\s*/, '').trim() || err;
+}
 
 interface Props {
   open: boolean;
@@ -56,6 +80,28 @@ export function SubtitlePanel({ open, recordingId, onClose, onSaved }: Props): J
   const startJob = async () => {
     setError(null);
     setPhase('uploading');
+    // 客户端预检：避免给 DashScope 扔肯定识别不了的样本
+    try {
+      const full = await loadFullRecording(recordingId);
+      if (!full.audioBlob) {
+        setPhase('failed');
+        setError('no_audio_track');
+        return;
+      }
+      if ((full.metadata?.durationMs ?? 0) < AUDIO_MIN_DURATION_MS) {
+        setPhase('failed');
+        setError('audio_too_short');
+        return;
+      }
+      if (full.audioBlob.size < AUDIO_MIN_BYTES) {
+        setPhase('failed');
+        setError('no_speech_detected');
+        return;
+      }
+    } catch {
+      // 预检本身出错就不阻塞，继续走线上识别
+    }
+
     try {
       const r = await submitSubtitleJob(recordingId);
       setJobId(r.jobId);
@@ -224,7 +270,7 @@ export function SubtitlePanel({ open, recordingId, onClose, onSaved }: Props): J
         {phase === 'failed' && (
           <div className="mt-2 rounded-md border border-recording-strong bg-red-50 p-3 text-[12px] text-recording-strong">
             <div className="font-semibold mb-1">{t('failedTitle')}</div>
-            <div>{error}</div>
+            <div>{describeError(error, t as (key: string) => string)}</div>
             <button
               onClick={() => void startJob()}
               className="mt-3 rounded-md border border-current px-3 py-1 text-[11px] font-semibold"

@@ -86,8 +86,15 @@ export async function submitTranscriptionTask(opts: SubmitOptions): Promise<Subm
 }
 
 export interface PollResult {
-  status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELED' | 'UNKNOWN';
+  /**
+   * 业务化的轮询状态：
+   *  - NO_SPEECH 表示 DashScope 返回 SUCCESS_WITH_NO_VALID_FRAGMENT
+   *    （音频里没有可识别语音）。这是 DashScope 的"成功完成但无结果"语义，
+   *    我们把它从 UNKNOWN 单独拎出来，下游可以按业务错误处理。
+   */
+  status: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELED' | 'NO_SPEECH' | 'UNKNOWN';
   transcriptionUrl: string | null;
+  /** 上游原始 message（可能含中文）。NO_SPEECH 时收敛为 null，让上层用业务码翻译。 */
   errorMessage: string | null;
 }
 
@@ -109,15 +116,37 @@ export async function pollTranscriptionTaskOnce(taskId: string): Promise<PollRes
       message?: string;
     };
   };
-  const status = (json.output?.task_status ?? 'UNKNOWN') as PollResult['status'];
+  const taskStatus = json.output?.task_status ?? 'UNKNOWN';
+  const subtaskStatus = json.output?.results?.[0]?.subtask_status;
   const url =
     json.output?.result?.transcription_url ??
     json.output?.results?.[0]?.transcription_url ??
     null;
+  const message = json.output?.message ?? null;
+
+  // 任一信号都判 NO_SPEECH：
+  //  (1) task_status 直接是 SUCCESS_WITH_NO_VALID_FRAGMENT（实测出现）
+  //  (2) 子任务 subtask_status 是同一码
+  //  (3) message / task_status 字符串包含 NO_VALID_FRAGMENT（兜底，覆盖 message-only 情况）
+  //  (4) task_status 是 SUCCEEDED 但完全没有 transcription_url（兜底，模型差异）
+  const matchesNoFragment = (s: string | undefined | null): boolean =>
+    !!s && s.includes('NO_VALID_FRAGMENT');
+  const isNoSpeech =
+    taskStatus === 'SUCCESS_WITH_NO_VALID_FRAGMENT' ||
+    subtaskStatus === 'SUCCESS_WITH_NO_VALID_FRAGMENT' ||
+    matchesNoFragment(taskStatus) ||
+    matchesNoFragment(message) ||
+    (taskStatus === 'SUCCEEDED' && !url);
+
+  if (isNoSpeech) {
+    return { status: 'NO_SPEECH', transcriptionUrl: null, errorMessage: null };
+  }
+
+  const status = taskStatus as PollResult['status'];
   return {
     status,
     transcriptionUrl: url,
-    errorMessage: json.output?.message ?? null,
+    errorMessage: message,
   };
 }
 
@@ -133,6 +162,9 @@ export async function generateSrtFromUrl(fileUrl: string, opts?: { model?: strin
     if (poll.status === 'SUCCEEDED' && poll.transcriptionUrl) {
       const sentences = await fetchTranscriptionResult(poll.transcriptionUrl);
       return sentencesToSrt(sentences);
+    }
+    if (poll.status === 'NO_SPEECH') {
+      throw new Error('no_speech_detected');
     }
     if (poll.status === 'FAILED' || poll.status === 'CANCELED') {
       throw new Error(`DashScope task ${poll.status}: ${poll.errorMessage ?? 'unknown'}`);
