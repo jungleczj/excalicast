@@ -42,6 +42,7 @@ class ExcalicastDB extends Dexie {
   cameraPositions!: Table<CameraPositionRow, number>;
   binaryFiles!: Table<BinaryFileRow, number>;
   workspaceShells!: Table<WorkspaceShellRow, number>;
+  libraryItems!: Table<LibraryItemRow, string>;
 
   constructor() {
     super('excalicast');
@@ -113,6 +114,18 @@ class ExcalicastDB extends Dexie {
       binaryFiles: '++id, recordingId, fileId',
       workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
       cameraPositions: '++id, recordingId, timestamp, [recordingId+timestamp]',
+    });
+    // v7: libraryItems 表 —— mirror Excalidraw 自家 library state，
+    // 跨浏览器 / 清缓存不丢，全部录制共用一份。
+    this.version(7).stores({
+      recordings: 'id, startedAt, status',
+      snapshots: '++id, recordingId, timestamp',
+      audioChunks: '++id, recordingId, index',
+      cameraChunks: '++id, recordingId, index',
+      binaryFiles: '++id, recordingId, fileId',
+      workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
+      cameraPositions: '++id, recordingId, timestamp, [recordingId+timestamp]',
+      libraryItems: 'id, status, created',
     });
   }
 }
@@ -250,4 +263,34 @@ export async function listCameraEvents(recordingId: string): Promise<CameraPosit
 export async function bulkAddCameraEvents(events: CameraPositionEvent[]): Promise<void> {
   if (events.length === 0) return;
   await getClientDb().cameraPositions.bulkAdd(events);
+}
+
+// ----------------------------------------------------------------------------
+// Excalidraw library 持久化
+// 跟 @excalidraw/excalidraw 的 LibraryItem 类型对应（用 unknown[] 装 elements
+// 避免在这里硬绑死 Excalidraw 内部类型，减少 import 链）。
+// ----------------------------------------------------------------------------
+
+export interface LibraryItemRow {
+  id: string;
+  status: 'published' | 'unpublished';
+  elements: unknown[];
+  created: number;
+  name?: string;
+}
+
+export async function getAllLibraryItems(): Promise<LibraryItemRow[]> {
+  return getClientDb().libraryItems.orderBy('created').toArray();
+}
+
+/**
+ * 用 Excalidraw 当前 library 全量覆盖 IDB —— Excalidraw 的 onLibraryChange 也是
+ * 全量回调，没有增删粒度。直接 clear + bulkAdd 最干净。
+ */
+export async function replaceLibraryItems(items: LibraryItemRow[]): Promise<void> {
+  const db = getClientDb();
+  await db.transaction('rw', db.libraryItems, async () => {
+    await db.libraryItems.clear();
+    if (items.length > 0) await db.libraryItems.bulkAdd(items);
+  });
 }
