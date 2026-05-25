@@ -21,6 +21,10 @@ interface Props {
 // 这里把它限到 ~5fps，足以让用户感知白板进度，又不会卡 UI。
 const CANVAS_REDRAW_INTERVAL_MS = 200;
 
+// 预览盒子尺寸约束 —— 跟 export 页 mx-auto + max-w-760 父容器对齐
+const PREVIEW_PARENT_MAX_W = 760;
+const PREVIEW_VH_PCT = 0.52;
+
 export function ExportPreview({ recordingId, metadata, config, progress }: Props): JSX.Element {
   const t = useTranslations('exportPreview');
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -34,6 +38,17 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
   const [cameraEvents, setCameraEvents] = useState<CameraPositionEvent[]>([]);
   const [firstShell, setFirstShell] = useState<{ shellSize: ShellSize; canvasRect: ShellCanvasRect } | null>(null);
   const [playing, setPlaying] = useState(false);
+  // 视口高度 —— 用来 JS 算盒子尺寸，避免 CSS aspect-ratio + max-* 在部分浏览器不收 width 的坑
+  const [viewportH, setViewportH] = useState<number>(() =>
+    typeof window === 'undefined' ? 800 : window.innerHeight,
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onResize = () => setViewportH(window.innerHeight);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   const renderToken = useRef(0);
   const rafRef = useRef<number | null>(null);
   const clockRef = useRef<{ perfStart: number; baseTime: number } | null>(null);
@@ -215,6 +230,16 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
   const preset = ASPECT_PRESETS[config.aspectRatio];
   const aspect = preset.width / preset.height;
 
+  // contain-fit 计算盒子像素尺寸 —— 优先吃 maxW，溢出高度再退到 maxH。
+  const previewBox = useMemo(() => {
+    const maxH = viewportH * PREVIEW_VH_PCT;
+    const maxW = PREVIEW_PARENT_MAX_W;
+    if (maxW / aspect <= maxH) {
+      return { w: maxW, h: maxW / aspect };
+    }
+    return { w: maxH * aspect, h: maxH };
+  }, [aspect, viewportH]);
+
   const exporting = progress != null;
   const pct = exporting ? Math.round((progress?.ratio ?? 0) * 100) : 0;
   const phaseKey = progress?.phase ?? '';
@@ -234,12 +259,11 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
       <div
         className="relative mx-auto overflow-hidden"
         style={{
-          aspectRatio: `${aspect}`,
-          maxHeight: '52vh',
-          // CSS aspect-ratio 在 max-height 截断后不会自动同步缩 max-width，
-          // 不显式补一条 max-width 的话，竖屏 picker 下 box 会被父容器宽度强行拉宽
-          // 变成 ~4:3 而不是真正的 9:16，进度条 / canvas / 摄像头叠加层也跟着错配。
-          maxWidth: `calc(52vh * ${aspect})`,
+          // 直接用 JS 算出来的像素尺寸，绕开 CSS aspect-ratio + max-* 三件套
+          // 在某些浏览器下不能同步收 width 的坑 —— 进度条、canvas、摄像头叠加层
+          // 都跟这个盒子尺寸走。
+          width: previewBox.w,
+          height: previewBox.h,
           background: 'var(--paper)',
           border: '1.5px solid var(--ink)',
           borderRadius: 3,
