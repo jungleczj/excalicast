@@ -111,6 +111,8 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
         left: `${(bounds.offFracX + pos.rx * bounds.fracW) * 100}%`,
         top: `${(bounds.offFracY + pos.ry * bounds.fracH) * 100}%`,
         width: `${pos.rs * bounds.fracW * 100}%`,
+        // hidden=true（录制时用户软关闭过摄像头）期间不画气泡 —— 跟导出 MP4 一致
+        display: pos.hidden ? 'none' : undefined,
       };
     }
     // legacy fallback：camBounds 右下角，宽度约 18% of bounds

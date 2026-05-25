@@ -239,6 +239,7 @@ export async function loadFullRecording(recordingId: string): Promise<{
     rx: r.rx,
     ry: r.ry,
     rs: r.rs,
+    ...(r.hidden ? { hidden: true } : {}),
   }));
 
   const binaryFiles = await db.binaryFiles.where('recordingId').equals(recordingId).toArray();
@@ -257,6 +258,7 @@ export async function listCameraEvents(recordingId: string): Promise<CameraPosit
     rx: r.rx,
     ry: r.ry,
     rs: r.rs,
+    ...(r.hidden ? { hidden: true } : {}),
   }));
 }
 

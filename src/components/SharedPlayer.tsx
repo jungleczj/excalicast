@@ -364,24 +364,31 @@ function SharedCameraBubble({
   playing: boolean;
   videoRef: React.RefObject<HTMLVideoElement>;
 }): JSX.Element {
-  const style = useMemo<React.CSSProperties>(() => {
+  const styleAndHidden = useMemo<{ style: React.CSSProperties; hidden: boolean }>(() => {
     const pos = cameraPositionAt(cameraEvents, timeMs);
     if (pos) {
       return {
-        left: `${pos.rx * 100}%`,
-        top: `${pos.ry * 100}%`,
-        width: `${pos.rs * 100}%`,
-        aspectRatio: '1 / 1',
+        style: {
+          left: `${pos.rx * 100}%`,
+          top: `${pos.ry * 100}%`,
+          width: `${pos.rs * 100}%`,
+          aspectRatio: '1 / 1',
+        },
+        hidden: pos.hidden,
       };
     }
-    return { right: 24, bottom: 24, width: 160, height: 160 };
+    return {
+      style: { right: 24, bottom: 24, width: 160, height: 160 },
+      hidden: false,
+    };
   }, [cameraEvents, timeMs]);
 
   return (
     <div
       className="pointer-events-none absolute z-40 overflow-hidden transition-[left,top,width] duration-100"
       style={{
-        ...style,
+        ...styleAndHidden.style,
+        display: styleAndHidden.hidden ? 'none' : undefined,
         borderRadius: '50%',
         background: '#1f2937',
         boxShadow: '0 8px 24px rgba(0,0,0,0.25), 0 0 0 3px rgba(255,255,255,0.9)',

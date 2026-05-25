@@ -52,11 +52,12 @@ function snapshotAt(snapshots: WhiteboardSnapshot[], t: number): WhiteboardSnaps
 /**
  * 找到 timeMs 时刻的摄像头位置事件（≤ 当前 timestamp 的最后一个）。
  * 没有事件时返回 null —— 调用方应回退到默认右下角。
+ * 命中事件带 hidden=true 时一并透传，调用方应不渲染气泡。
  */
 export function cameraPositionAt(
   events: CameraPositionEvent[],
   timeMs: number,
-): { rx: number; ry: number; rs: number } | null {
+): { rx: number; ry: number; rs: number; hidden: boolean } | null {
   if (events.length === 0) return null;
   let lo = 0, hi = events.length - 1, ans = -1;
   while (lo <= hi) {
@@ -65,7 +66,7 @@ export function cameraPositionAt(
     else hi = mid - 1;
   }
   const e = events[ans === -1 ? 0 : ans];
-  return { rx: e.rx, ry: e.ry, rs: e.rs };
+  return { rx: e.rx, ry: e.ry, rs: e.rs, hidden: !!e.hidden };
 }
 
 export interface CameraSegment {
@@ -106,9 +107,11 @@ export function buildCameraSegments(
   maxSegments = 150,
 ): CameraSegment[] {
   if (events.length === 0 || durationMs <= 0) return [];
-  // 1) 朴素铺开区间
+  // 1) 朴素铺开区间。hidden=true 的事件不生成 overlay segment——它把"从此刻起到下一个非
+  //    hidden 事件之间"的区间从结果里挖掉，ffmpeg 自然就不会画气泡。
   const raw: CameraSegment[] = [];
   for (let i = 0; i < events.length; i++) {
+    if (events[i].hidden) continue;
     const startMs = Math.max(0, events[i].timestamp);
     const endMs = i + 1 < events.length ? events[i + 1].timestamp : durationMs;
     if (endMs - startMs < 50) continue;

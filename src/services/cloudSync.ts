@@ -153,11 +153,18 @@ export async function uploadRecording(
 
   // 4b) cameraPositions.json.gz —— 摄像头气泡随时间的位置事件。可选；
   // 老录制不会有这个文件，import 时按缺省 = [] 处理。
+  // hidden 字段（v2，软静音支持）也一并上云。
   if (cameraEvents.length > 0) {
     onProgress?.({ step: 'cameraPositions', bytesUploaded, bytesTotal });
     const camPosBlob = await gzipString(JSON.stringify({
-      events: cameraEvents.map((e) => ({ timestamp: e.timestamp, rx: e.rx, ry: e.ry, rs: e.rs })),
-      schemaVersion: 1,
+      events: cameraEvents.map((e) => ({
+        timestamp: e.timestamp,
+        rx: e.rx,
+        ry: e.ry,
+        rs: e.rs,
+        ...(e.hidden ? { hidden: true } : {}),
+      })),
+      schemaVersion: 2,
     }));
     const sizeCamPos = await uploadObject(
       userId, recordingId, 'cameraPositions.json.gz', camPosBlob,
@@ -309,14 +316,15 @@ export async function importCloudRecording(
   const cameraBlob = metaJson.hasCamera ? await fetchObj('camera.webm') : null;
 
   // cameraPositions.json.gz —— 缺失时按空数组（老的云端录制没有这个文件）
+  // schemaVersion 1: 无 hidden 字段；schemaVersion 2: 有 hidden（软静音）。
   onProgress?.({ step: 'cameraPositions', bytesUploaded: 0, bytesTotal: 0 });
-  let cameraEvents: Array<{ timestamp: number; rx: number; ry: number; rs: number }> = [];
+  let cameraEvents: Array<{ timestamp: number; rx: number; ry: number; rs: number; hidden?: boolean }> = [];
   const camPosBlob = await fetchObj('cameraPositions.json.gz');
   if (camPosBlob) {
     try {
       const camPosText = await gunzipToString(camPosBlob);
       const parsed = JSON.parse(camPosText) as {
-        events?: Array<{ timestamp: number; rx: number; ry: number; rs: number }>;
+        events?: Array<{ timestamp: number; rx: number; ry: number; rs: number; hidden?: boolean }>;
       };
       cameraEvents = parsed.events ?? [];
     } catch {
@@ -379,7 +387,7 @@ export async function importCloudRecording(
         await db.cameraChunks.add(camRow);
       }
 
-      // Camera position events
+      // Camera position events（含 v2 的 hidden 字段）
       if (cameraEvents.length > 0) {
         const posRows: CameraPositionEvent[] = cameraEvents.map((e) => ({
           recordingId,
@@ -387,6 +395,7 @@ export async function importCloudRecording(
           rx: e.rx,
           ry: e.ry,
           rs: e.rs,
+          ...(e.hidden ? { hidden: true } : {}),
         }));
         await db.cameraPositions.bulkAdd(posRows);
       }
