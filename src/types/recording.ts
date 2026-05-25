@@ -52,6 +52,8 @@ export interface CameraChunk {
 /**
  * 摄像头气泡位置随录制时间的变化。坐标以工作区 shell 的当前尺寸为基准
  * 存成 0..1 的比例，避免和窗口像素或导出分辨率耦合。
+ *
+ * hidden=true 表示这段时间气泡被用户软关闭（mute）—— 回放和导出都不画。
  */
 export interface CameraPositionEvent {
   recordingId: string;
@@ -59,6 +61,7 @@ export interface CameraPositionEvent {
   rx: number;         // bubble top-left X as fraction of shell width
   ry: number;         // bubble top-left Y as fraction of shell height
   rs: number;         // bubble edge length as fraction of shell width
+  hidden?: boolean;   // 软关闭标记；缺省视为 false
 }
 
 export interface BinaryFileEntry {
