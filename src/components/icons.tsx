@@ -40,6 +40,17 @@ export const I = {
       <path d="M9 21 h6" />
     </Base>
   ),
+  MicOff: (p: IconProps) => (
+    <Base {...p}>
+      <line x1="3" y1="3" x2="21" y2="21" />
+      <path d="M9 9 V6 a3 3 0 0 1 6 0 v5" />
+      <path d="M15 14 a3 3 0 0 1 -5.6 -1.5" />
+      <path d="M5.5 11 a6.5 6.5 0 0 0 10.8 4.4" />
+      <path d="M18.5 11 a6.5 6.5 0 0 1 -0.6 2.6" />
+      <path d="M12 17.5 v3.5" />
+      <path d="M9 21 h6" />
+    </Base>
+  ),
   Camera: (p: IconProps) => (
     <Base {...p}>
       <rect x="3" y="6" width="18" height="13" rx="2" />

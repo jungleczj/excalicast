@@ -276,7 +276,7 @@ export default function HomePage(): JSX.Element {
         <Whiteboard onChangeRef={changeRef} />
 
         {/* 摄像头浮窗：idle 期间用预览流；录制态如启用则用 session stream */}
-        {(cameraEnabled || (isRecording && hasCamera)) && (
+        {(cameraEnabled || (isRecording && hasCamera)) && !cameraMuted && (
           <div className="rb-no-record">
             <CameraBubble
               stream={cameraStream}

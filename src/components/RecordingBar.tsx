@@ -183,14 +183,16 @@ export function RecordingBar(props: Props): JSX.Element {
       <Divider />
 
       <SrcToggle
-        Icon={I.Mic}
+        IconOn={I.Mic}
+        IconOff={I.MicOff}
         present={hasAudio}
         muted={!!audioMuted}
         title={!hasAudio ? t('micTooltip') : audioMuted ? t('unmuteAudio') : t('muteAudio')}
         onClick={hasAudio ? onToggleAudioMute : undefined}
       />
       <SrcToggle
-        Icon={I.Camera}
+        IconOn={I.Camera}
+        IconOff={I.CameraOff}
         present={hasCamera}
         muted={!!cameraMuted}
         title={!hasCamera ? t('cameraTooltip') : cameraMuted ? t('unmuteCamera') : t('muteCamera')}
@@ -243,29 +245,29 @@ function CtrlBtn({
 }
 
 /**
- * 录制中可点击的来源开关。三种态：
- *  - present=false：来源没拿到（权限拒绝 / 未启用）—— 灰底，不可点。
- *  - present=true, muted=false：正在录入 —— 绿底。
- *  - present=true, muted=true：软静音 —— 红底，提示用户已暂时关闭。
+ * 录制中可点击的来源开关。三种态 + 两套图标：
+ *  - present=false（设备未启用）：灰底，IconOn，不可点。
+ *  - present=true, muted=false（正在录入）：绿底，IconOn。
+ *  - present=true, muted=true（软静音）：灰底，IconOff（带斜杠）。
  */
 function SrcToggle({
-  Icon,
+  IconOn,
+  IconOff,
   present,
   muted,
   title,
   onClick,
 }: {
-  Icon: (p: { size?: number; sw?: number }) => JSX.Element;
+  IconOn: (p: { size?: number; sw?: number }) => JSX.Element;
+  IconOff: (p: { size?: number; sw?: number }) => JSX.Element;
   present: boolean;
   muted: boolean;
   title: string;
   onClick?: () => void;
 }) {
-  const bg = !present
-    ? 'rgba(255,255,255,0.06)'
-    : muted
-      ? 'var(--rec)'
-      : 'var(--ok)';
+  const greyBg = 'rgba(255,255,255,0.06)';
+  const bg = present && !muted ? 'var(--ok)' : greyBg;
+  const Icon = present && muted ? IconOff : IconOn;
   const clickable = present && !!onClick;
   return (
     <button
