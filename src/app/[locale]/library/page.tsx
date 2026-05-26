@@ -20,6 +20,16 @@ export default function LibraryPage(): JSX.Element {
     }).catch(() => { /* ignore */ });
   }, []);
 
+  // 兜底：万一 libraries.excalidraw.com 市集把 addLibrary hash 甩到了 /library（理论
+  // 上不该，但用户实测出现过），立刻转发到 /app 让 Whiteboard 完成 import。
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const h = window.location.hash;
+    if (h && h.includes('addLibrary=')) {
+      window.location.replace(`/${locale}/app${h}`);
+    }
+  }, [locale]);
+
   const totalMin = Math.round(stats.totalMs / 60_000);
   const heading = locale === 'en' ? 'Library' : '录制库';
   const subline = locale === 'en'
