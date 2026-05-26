@@ -180,7 +180,11 @@
     "rec": "REC",
     "paused": "PAUSED",
     "micTooltip": "麦克风",
-    "cameraTooltip": "摄像头"
+    "cameraTooltip": "摄像头",
+    "muteAudio": "静音麦克风（录制继续，仅这段无声）",
+    "unmuteAudio": "取消静音",
+    "muteCamera": "暂时隐藏摄像头气泡（录制继续，仅这段不显示）",
+    "unmuteCamera": "重新显示摄像头气泡"
   },
   "whiteboard": {
     "loadingCore": "加载白板内核…"

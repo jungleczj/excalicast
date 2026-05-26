@@ -9,7 +9,15 @@ interface Props {
   hasAudio: boolean;
   hasCamera: boolean;
   cameraEnabled: boolean;
+  /** 录制中麦克风是否被软静音（hasAudio=true 时才有意义） */
+  audioMuted?: boolean;
+  /** 录制中摄像头是否被软关闭（hasCamera=true 时才有意义） */
+  cameraMuted?: boolean;
   onToggleCamera: () => void;
+  /** 录制中点 mic 图标 —— 翻转软静音 */
+  onToggleAudioMute?: () => void;
+  /** 录制中点 camera 图标 —— 翻转软关闭 */
+  onToggleCameraMute?: () => void;
   onStart: () => void;
   onStop: () => void;
   onDiscard?: () => void;
@@ -42,7 +50,12 @@ const BAR_STYLE: React.CSSProperties = {
 
 export function RecordingBar(props: Props): JSX.Element {
   const t = useTranslations('recordingBar');
-  const { state, elapsedMs, hasAudio, hasCamera, cameraEnabled, onToggleCamera, onStart, onStop, onDiscard, onPause, onResume } = props;
+  const {
+    state, elapsedMs, hasAudio, hasCamera, cameraEnabled,
+    audioMuted, cameraMuted,
+    onToggleCamera, onToggleAudioMute, onToggleCameraMute,
+    onStart, onStop, onDiscard, onPause, onResume,
+  } = props;
 
   if (state === 'idle') {
     return (
@@ -169,8 +182,20 @@ export function RecordingBar(props: Props): JSX.Element {
 
       <Divider />
 
-      <SrcDot Icon={I.Mic} on={hasAudio} title={t('micTooltip')} />
-      <SrcDot Icon={I.Camera} on={hasCamera} title={t('cameraTooltip')} />
+      <SrcToggle
+        Icon={I.Mic}
+        present={hasAudio}
+        muted={!!audioMuted}
+        title={!hasAudio ? t('micTooltip') : audioMuted ? t('unmuteAudio') : t('muteAudio')}
+        onClick={hasAudio ? onToggleAudioMute : undefined}
+      />
+      <SrcToggle
+        Icon={I.Camera}
+        present={hasCamera}
+        muted={!!cameraMuted}
+        title={!hasCamera ? t('cameraTooltip') : cameraMuted ? t('unmuteCamera') : t('muteCamera')}
+        onClick={hasCamera ? onToggleCameraMute : undefined}
+      />
     </div>
   );
 }
@@ -217,31 +242,52 @@ function CtrlBtn({
   );
 }
 
-function SrcDot({
+/**
+ * 录制中可点击的来源开关。三种态：
+ *  - present=false：来源没拿到（权限拒绝 / 未启用）—— 灰底，不可点。
+ *  - present=true, muted=false：正在录入 —— 绿底。
+ *  - present=true, muted=true：软静音 —— 红底，提示用户已暂时关闭。
+ */
+function SrcToggle({
   Icon,
-  on,
+  present,
+  muted,
   title,
+  onClick,
 }: {
   Icon: (p: { size?: number; sw?: number }) => JSX.Element;
-  on: boolean;
+  present: boolean;
+  muted: boolean;
   title: string;
+  onClick?: () => void;
 }) {
+  const bg = !present
+    ? 'rgba(255,255,255,0.06)'
+    : muted
+      ? 'var(--rec)'
+      : 'var(--ok)';
+  const clickable = present && !!onClick;
   return (
-    <div
+    <button
+      type="button"
+      onClick={clickable ? onClick : undefined}
+      disabled={!clickable}
       title={title}
       style={{
         width: 26,
         height: 26,
         borderRadius: 999,
-        background: on ? 'var(--ok)' : 'rgba(255,255,255,0.06)',
+        background: bg,
         border: '1px solid rgba(255,255,255,0.2)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         color: 'white',
+        cursor: clickable ? 'pointer' : 'default',
+        padding: 0,
       }}
     >
       <Icon size={12} />
-    </div>
+    </button>
   );
 }

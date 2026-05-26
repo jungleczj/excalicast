@@ -180,7 +180,11 @@
     "rec": "REC",
     "paused": "PAUSED",
     "micTooltip": "Microphone",
-    "cameraTooltip": "Camera"
+    "cameraTooltip": "Camera",
+    "muteAudio": "Mute mic (recording continues silent)",
+    "unmuteAudio": "Unmute mic",
+    "muteCamera": "Hide camera (recording continues without bubble)",
+    "unmuteCamera": "Show camera again"
   },
   "whiteboard": {
     "loadingCore": "Loading whiteboard…"

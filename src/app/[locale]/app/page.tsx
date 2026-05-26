@@ -210,6 +210,22 @@ export default function HomePage(): JSX.Element {
     setState('recording');
   }, []);
 
+  // 录制中麦克风 / 摄像头软静音状态（独立于 hasAudio / hasCamera —— 那两个表示设备是否启用）
+  const [audioMuted, setAudioMuted] = useState(false);
+  const [cameraMuted, setCameraMuted] = useState(false);
+
+  const handleToggleAudioMute = useCallback(() => {
+    const next = !audioMuted;
+    sessionRef.current?.setAudioMuted(next);
+    setAudioMuted(next);
+  }, [audioMuted]);
+
+  const handleToggleCameraMute = useCallback(() => {
+    const next = !cameraMuted;
+    sessionRef.current?.setCameraMuted(next);
+    setCameraMuted(next);
+  }, [cameraMuted]);
+
   const handleStop = useCallback(async () => {
     const s = sessionRef.current;
     if (!s) return;
@@ -221,6 +237,8 @@ export default function HomePage(): JSX.Element {
       setCameraStream(null);
       setHasCamera(false);
       setHasAudio(false);
+      setAudioMuted(false);
+      setCameraMuted(false);
       setState('idle');
       router.push(`/export/${meta.id}` as never);
     } catch (err) {
@@ -288,7 +306,11 @@ export default function HomePage(): JSX.Element {
               hasAudio={hasAudio}
               hasCamera={hasCamera || cameraEnabled}
               cameraEnabled={cameraEnabled}
+              audioMuted={audioMuted}
+              cameraMuted={cameraMuted}
               onToggleCamera={handleToggleCamera}
+              onToggleAudioMute={handleToggleAudioMute}
+              onToggleCameraMute={handleToggleCameraMute}
               onStart={handleStart}
               onStop={handleStop}
               onDiscard={handleDiscard}
