@@ -21,8 +21,7 @@ interface Props {
 // 这里把它限到 ~5fps，足以让用户感知白板进度，又不会卡 UI。
 const CANVAS_REDRAW_INTERVAL_MS = 200;
 
-// 预览盒子尺寸约束 —— 跟 export 页 mx-auto + max-w-760 父容器对齐
-const PREVIEW_PARENT_MAX_W = 760;
+// 预览盒子高度约束。宽度上限走 ResizeObserver 测量的真实父宽，不再硬编码。
 const PREVIEW_VH_PCT = 0.52;
 
 export function ExportPreview({ recordingId, metadata, config, progress }: Props): JSX.Element {
@@ -38,16 +37,34 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
   const [cameraEvents, setCameraEvents] = useState<CameraPositionEvent[]>([]);
   const [firstShell, setFirstShell] = useState<{ shellSize: ShellSize; canvasRect: ShellCanvasRect } | null>(null);
   const [playing, setPlaying] = useState(false);
-  // 视口高度 —— 用来 JS 算盒子尺寸，避免 CSS aspect-ratio + max-* 在部分浏览器不收 width 的坑
+  // 视口高度 —— 用来 JS 算盒子高度上限
   const [viewportH, setViewportH] = useState<number>(() =>
     typeof window === 'undefined' ? 800 : window.innerHeight,
   );
+  // 真实父容器宽度 —— 由 ResizeObserver 实时测量，picker 改变时盒子才有可见的窄/宽对比
+  const parentRef = useRef<HTMLDivElement>(null);
+  const [parentW, setParentW] = useState(0);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const onResize = () => setViewportH(window.innerHeight);
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') {
+      if (el) setParentW(el.clientWidth);
+      return;
+    }
+    setParentW(el.clientWidth);
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? el.clientWidth;
+      setParentW(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
   const renderToken = useRef(0);
   const rafRef = useRef<number | null>(null);
@@ -232,15 +249,14 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
   const preset = ASPECT_PRESETS[config.aspectRatio];
   const aspect = preset.width / preset.height;
 
-  // contain-fit 计算盒子像素尺寸 —— 优先吃 maxW，溢出高度再退到 maxH。
+  // contain-fit 计算盒子像素尺寸 —— maxW 来自 ResizeObserver 实测的父容器宽度。
+  // parentW 为 0（首次 mount、SSR）时返回 0×0 占位，避免初始闪一下大宽。
   const previewBox = useMemo(() => {
+    if (parentW <= 0) return { w: 0, h: 0 };
     const maxH = viewportH * PREVIEW_VH_PCT;
-    const maxW = PREVIEW_PARENT_MAX_W;
-    if (maxW / aspect <= maxH) {
-      return { w: maxW, h: maxW / aspect };
-    }
+    if (parentW / aspect <= maxH) return { w: parentW, h: parentW / aspect };
     return { w: maxH * aspect, h: maxH };
-  }, [aspect, viewportH]);
+  }, [aspect, viewportH, parentW]);
 
   const exporting = progress != null;
   const pct = exporting ? Math.round((progress?.ratio ?? 0) * 100) : 0;
@@ -258,6 +274,8 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
 
   return (
     <div className="space-y-3">
+      {/* 外层 wrapper 用 ref + ResizeObserver 实时拿父容器宽度，picker 切换时 previewBox 才会跟着变 */}
+      <div ref={parentRef} className="w-full">
       <div
         className="relative mx-auto overflow-hidden"
         style={{
@@ -496,6 +514,7 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
             </div>
           </div>
         )}
+      </div>
       </div>
 
       <p
