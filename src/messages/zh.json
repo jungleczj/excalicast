@@ -172,8 +172,8 @@
   "libraryDrawer": {
     "title": "模板库",
     "marketTitle": "模板市场",
-    "addSelected": "添加选中",
-    "addSelectedDisabled": "先在画布选中元素",
+    "addSelected": "保存选中图形",
+    "addSelectedHint": "先在画布上框选图形，再点「保存选中图形」存为模板。",
     "browse": "浏览模板市场",
     "empty": "还没有模板。先在画布选中元素后点「+ 添加选中」，或浏览模板市场。",
     "deleteTooltip": "删除此模板",

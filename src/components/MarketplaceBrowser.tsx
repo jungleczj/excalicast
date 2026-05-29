@@ -98,9 +98,11 @@ export function MarketplaceBrowser({ onImported }: Props): JSX.Element {
           </div>
         )}
         {!loading && !error && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          // 单列：每条占满抽屉宽度，预览更大更清晰；minWidth:0 防止子内容撑破溢出。
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {filtered.map((entry, i) => {
               const busy = importingId === entry.id;
+              const author = entry.authors?.[0]?.name;
               return (
                 <button
                   key={`${entry.source ?? entry.id ?? 'lib'}-${i}`}
@@ -110,10 +112,12 @@ export function MarketplaceBrowser({ onImported }: Props): JSX.Element {
                   title={entry.name}
                   className="group relative text-left"
                   style={{
+                    minWidth: 0,
+                    width: '100%',
                     background: 'var(--paper)',
                     border: '1.5px solid var(--ink)',
                     borderRadius: 3,
-                    padding: 6,
+                    padding: 8,
                     cursor: importingId ? 'wait' : 'pointer',
                     opacity: importingId && !busy ? 0.5 : 1,
                   }}
@@ -124,25 +128,43 @@ export function MarketplaceBrowser({ onImported }: Props): JSX.Element {
                       src={`${MARKET_BASE}${entry.preview}`}
                       alt={entry.name}
                       loading="lazy"
-                      style={{ width: '100%', aspectRatio: '4 / 3', objectFit: 'contain', display: 'block', background: '#fff' }}
+                      style={{ width: '100%', aspectRatio: '16 / 10', objectFit: 'contain', display: 'block', background: '#fff' }}
                     />
                   ) : (
-                    <div style={{ width: '100%', aspectRatio: '4 / 3', background: 'var(--paper-2,#f3f3f0)' }} />
+                    <div style={{ width: '100%', aspectRatio: '16 / 10', background: 'var(--paper-2,#f3f3f0)' }} />
                   )}
                   <div
                     style={{
-                      marginTop: 4,
-                      fontSize: 10,
+                      marginTop: 6,
+                      fontSize: 12,
+                      fontWeight: 700,
                       lineHeight: 1.3,
                       color: 'var(--ink)',
                       fontFamily: 'var(--font-mono)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
+                      minWidth: 0,
                     }}
                   >
                     {busy ? t('importing') : entry.name}
                   </div>
+                  {author && !busy && (
+                    <div
+                      style={{
+                        marginTop: 1,
+                        fontSize: 10,
+                        color: 'var(--ink-3)',
+                        fontFamily: 'var(--font-mono)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        minWidth: 0,
+                      }}
+                    >
+                      {author}
+                    </div>
+                  )}
                 </button>
               );
             })}

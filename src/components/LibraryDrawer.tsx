@@ -13,6 +13,9 @@ import {
   type LibraryItemRow,
 } from '@/lib/db-client';
 import { invalidateThumbnail } from '@/utils/libraryThumbnail';
+import { useAuth } from '@/hooks/useAuth';
+import { useSubscription } from '@/hooks/useSubscription';
+import { pullAndMergeLibrary, pushLibraryItems, removeLibraryItemCloud } from '@/services/libraryCloudSync';
 
 const BROADCAST_CHANNEL = 'excalicast-library';
 const SAME_TAB_EVENT = 'excalicast-library-updated';
@@ -26,11 +29,15 @@ interface Props {
 
 export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.Element | null {
   const t = useTranslations('libraryDrawer');
+  const { user } = useAuth();
+  const { permissions } = useSubscription();
+  const canCloud = !!user && permissions.cloudBackup; // pro/max 登录
   const [items, setItems] = useState<LibraryItemRow[]>([]);
   const [view, setView] = useState<'mine' | 'market'>('mine');
   // 用 tick 强制重渲：getAppState().selectedElementIds 没有 React 订阅，按需 polling
   const [, setTick] = useState(0);
   const channelRef = useRef<BroadcastChannel | null>(null);
+  const pulledForRef = useRef<string | null>(null);
 
   // 首次打开 / 任何时刻：拉一次 IDB
   useEffect(() => {
@@ -69,6 +76,15 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
     window.addEventListener(SAME_TAB_EVENT, handler);
     return () => window.removeEventListener(SAME_TAB_EVENT, handler);
   }, []);
+
+  // pro/max 登录后：拉云端模板并与本地合并（每个 userId 只拉一次）。
+  // pullAndMergeLibrary 内部会 notifyLibraryUpdated → 上面的监听器把抽屉刷新。
+  useEffect(() => {
+    if (!canCloud || !user) return;
+    if (pulledForRef.current === user.id) return;
+    pulledForRef.current = user.id;
+    void pullAndMergeLibrary();
+  }, [canCloud, user]);
 
   // 打开抽屉时每 500ms 探一下选区，决定「+添加选中」是否 disabled
   useEffect(() => {
@@ -115,6 +131,7 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
       await addLibraryItem(item);
       setItems((prev) => [...prev, item]);
       broadcastUpdated();
+      void pushLibraryItems([item]); // pro/max 才生效，非 pro API 403 静默
     } catch (err) {
       console.error('add_to_library_failed', err);
     }
@@ -125,6 +142,7 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
     invalidateThumbnail(id);
     setItems((prev) => prev.filter((x) => x.id !== id));
     broadcastUpdated();
+    void removeLibraryItemCloud(id);
   }, [broadcastUpdated]);
 
   // 导入完成后：刷新自家列表并切回"我的模板"
@@ -140,8 +158,10 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
 
   return (
     <div
-      className="rb-no-record fixed right-0 top-0 z-40 flex h-full flex-col"
+      className="rb-no-record fixed right-0 z-40 flex flex-col"
       style={{
+        top: 56, // 对齐到 AppHeader（h-14=56px）底部黑线之下，不盖导航栏
+        bottom: 0,
         width: 320,
         background: 'var(--paper)',
         borderLeft: '1.5px solid var(--ink)',
@@ -204,7 +224,7 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
               type="button"
               onClick={handleAddSelected}
               disabled={!canAdd}
-              title={canAdd ? t('addSelected') : t('addSelectedDisabled')}
+              title={canAdd ? t('addSelected') : t('addSelectedHint')}
               className="flex items-center justify-center gap-2"
               style={{
                 padding: '7px 10px',
@@ -224,7 +244,7 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
             >
               <I.Plus size={13} />
               {t('addSelected')}
-              {canAdd && <span style={{ opacity: 0.7 }}>· {selectionCount}</span>}
+              {canAdd && <span style={{ opacity: 0.7 }}>（{selectionCount}）</span>}
             </button>
             <button
               type="button"
@@ -248,6 +268,18 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
               <I.Sparkles size={13} />
               {t('browse')}
             </button>
+            {!canAdd && (
+              <div
+                style={{
+                  fontSize: 10.5,
+                  lineHeight: 1.5,
+                  color: 'var(--ink-3)',
+                  fontFamily: 'var(--font-mono)',
+                }}
+              >
+                {t('addSelectedHint')}
+              </div>
+            )}
           </div>
 
           {/* List */}

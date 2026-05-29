@@ -172,8 +172,8 @@
   "libraryDrawer": {
     "title": "Library",
     "marketTitle": "Library marketplace",
-    "addSelected": "Add selected",
-    "addSelectedDisabled": "Select elements on canvas first",
+    "addSelected": "Save selection",
+    "addSelectedHint": "Select shapes on the canvas first, then click \"Save selection\" to store them as a template.",
     "browse": "Browse libraries",
     "empty": "No templates yet. Select elements on the canvas and click \"+ Add selected\", or browse the marketplace.",
     "deleteTooltip": "Delete this template",

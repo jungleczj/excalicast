@@ -107,6 +107,8 @@ export async function importLibraryFromUrl(libUrl: string): Promise<number> {
   const merged = mergeById(current, incoming);
   await replaceLibraryItems(merged);
   notifyLibraryUpdated();
+  // 上行到云端（pro/max 才生效；非 pro 时 API 403 被静默吞掉）。动态 import 避免循环依赖。
+  void import('@/services/libraryCloudSync').then((m) => m.pushLibraryItems(incoming)).catch(() => { /* ignore */ });
   return merged.length - before;
 }
 

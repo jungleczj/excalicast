@@ -694,6 +694,65 @@ export async function removeCloudRecordingObjects(storagePrefix: string): Promis
 }
 
 // ============================================================================
+// library_items_cloud —— pro/max 模板库跨设备同步（小 JSON，直接存 jsonb）
+// ============================================================================
+
+export interface LibraryItemCloudRow {
+  id: string;
+  status: 'published' | 'unpublished';
+  elements: unknown[];
+  name?: string;
+  created: number;
+}
+
+export async function listUserLibrary(userId: string): Promise<LibraryItemCloudRow[]> {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from('library_items_cloud')
+    .select('id, status, elements, name, created')
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: false });
+  if (error) throw new Error(`listUserLibrary: ${error.message}`);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (data as any[]).map((r) => ({
+    id: String(r.id),
+    status: r.status === 'published' ? 'published' : 'unpublished',
+    elements: Array.isArray(r.elements) ? r.elements : [],
+    name: typeof r.name === 'string' ? r.name : undefined,
+    created: typeof r.created === 'number' ? r.created : Number(r.created) || Date.now(),
+  }));
+}
+
+export async function upsertUserLibrary(userId: string, items: LibraryItemCloudRow[]): Promise<void> {
+  if (items.length === 0) return;
+  const client = requireSupabase();
+  const now = new Date().toISOString();
+  const rows = items.map((it) => ({
+    user_id: userId,
+    id: String(it.id),
+    status: it.status === 'published' ? 'published' : 'unpublished',
+    elements: Array.isArray(it.elements) ? it.elements : [],
+    name: it.name ?? null,
+    created: it.created,
+    updated_at: now,
+  }));
+  const { error } = await client
+    .from('library_items_cloud')
+    .upsert(rows, { onConflict: 'user_id,id' });
+  if (error) throw new Error(`upsertUserLibrary: ${error.message}`);
+}
+
+export async function deleteUserLibraryItem(userId: string, id: string): Promise<void> {
+  const client = requireSupabase();
+  const { error } = await client
+    .from('library_items_cloud')
+    .delete()
+    .eq('user_id', userId)
+    .eq('id', id);
+  if (error) throw new Error(`deleteUserLibraryItem: ${error.message}`);
+}
+
+// ============================================================================
 // share_links —— Max tier 公开分享链接
 // ============================================================================
 
