@@ -32,10 +32,10 @@ export async function GET(): Promise<NextResponse> {
   const { userId, entitled } = await authAndTier();
   if (!userId || !entitled) {
     // 未登录 / 非 pro：返回空，客户端只用本地。
-    return NextResponse.json({ items: [] });
+    return NextResponse.json({ items: [], deletedIds: [] });
   }
-  const items = await listUserLibrary(userId);
-  return NextResponse.json({ items });
+  const { items, deletedIds } = await listUserLibrary(userId);
+  return NextResponse.json({ items, deletedIds });
 }
 
 export async function POST(req: Request): Promise<NextResponse> {

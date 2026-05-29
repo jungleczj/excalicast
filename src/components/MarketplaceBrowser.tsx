@@ -12,12 +12,14 @@ import {
 interface Props {
   /** 导入成功后回调（上层切回"我的模板"视图并刷新）。 */
   onImported: (count: number) => void;
+  /** 仅 pro/max（登录）才把导入内容上云；非 pro 时模板数据不离开浏览器。 */
+  canCloud: boolean;
 }
 
 // 模块级缓存：抽屉反复开关不重复拉 229 条索引。
 let indexCache: MarketLibraryEntry[] | null = null;
 
-export function MarketplaceBrowser({ onImported }: Props): JSX.Element {
+export function MarketplaceBrowser({ onImported, canCloud }: Props): JSX.Element {
   const t = useTranslations('marketplace');
   const [entries, setEntries] = useState<MarketLibraryEntry[]>(indexCache ?? []);
   const [loading, setLoading] = useState(!indexCache);
@@ -56,7 +58,7 @@ export function MarketplaceBrowser({ onImported }: Props): JSX.Element {
     if (importingId) return;
     setImportingId(entry.id);
     try {
-      const n = await importLibraryFromUrl(`${MARKET_BASE}${entry.source}`);
+      const n = await importLibraryFromUrl(`${MARKET_BASE}${entry.source}`, { pushToCloud: canCloud });
       onImported(n);
     } finally {
       if (mounted.current) setImportingId(null);

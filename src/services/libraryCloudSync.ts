@@ -5,7 +5,7 @@ import {
   replaceLibraryItems,
   type LibraryItemRow,
 } from '@/lib/db-client';
-import { mergeById, notifyLibraryUpdated } from '@/utils/libraryImport';
+import { addTombstones, getTombstones, mergeById, notifyLibraryUpdated } from '@/utils/libraryImport';
 
 // 模板库云同步（pro/max）。所有函数对"未登录 / 非 pro"都安全降级：
 // API 返回空或 403，这里静默吞掉，不影响本地使用。
@@ -28,23 +28,30 @@ function toRow(r: any): LibraryItemRow {
  */
 export async function pullAndMergeLibrary(): Promise<boolean> {
   let cloudItems: LibraryItemRow[];
+  let deletedIds: string[];
   try {
     const res = await fetch('/api/library', { cache: 'no-store' });
     if (!res.ok) return false;
-    const json = (await res.json()) as { items?: unknown[] };
+    const json = (await res.json()) as { items?: unknown[]; deletedIds?: unknown[] };
     cloudItems = Array.isArray(json.items) ? json.items.map(toRow) : [];
+    deletedIds = Array.isArray(json.deletedIds) ? json.deletedIds.map(String) : [];
   } catch {
     return false;
   }
 
+  // 云端坠牌（别的设备删的）→ 记入本地坠牌，让删除传播到本设备。
+  addTombstones(deletedIds);
+  const tombstones = getTombstones();
+
   const local = await getAllLibraryItems().catch(() => [] as LibraryItemRow[]);
-  const merged = mergeById(local, cloudItems);
+  // 并集后剔除所有坠牌 id —— 已删除的不重建。
+  const merged = mergeById(local, cloudItems).filter((it) => !tombstones.has(it.id));
   await replaceLibraryItems(merged);
   notifyLibraryUpdated();
 
-  // 本地独有的（云端没有）→ 补传上云
+  // 本地独有（云端活跃项没有、且非坠牌）→ 补传上云（覆盖登出期间本地新增）。
   const cloudIds = new Set(cloudItems.map((it) => it.id));
-  const localOnly = merged.filter((it) => !cloudIds.has(it.id));
+  const localOnly = merged.filter((it) => !cloudIds.has(it.id) && !tombstones.has(it.id));
   if (localOnly.length > 0) {
     void pushLibraryItems(localOnly);
   }

@@ -705,22 +705,34 @@ export interface LibraryItemCloudRow {
   created: number;
 }
 
-export async function listUserLibrary(userId: string): Promise<LibraryItemCloudRow[]> {
+// 返回活跃项 + 已删除（坠牌）id 列表 —— 让其它设备拉取时能得知删除并本地同步移除。
+export async function listUserLibrary(
+  userId: string,
+): Promise<{ items: LibraryItemCloudRow[]; deletedIds: string[] }> {
   const client = requireSupabase();
   const { data, error } = await client
     .from('library_items_cloud')
-    .select('id, status, elements, name, created')
+    .select('id, status, elements, name, created, deleted')
     .eq('user_id', userId)
     .order('updated_at', { ascending: false });
   if (error) throw new Error(`listUserLibrary: ${error.message}`);
+  const items: LibraryItemCloudRow[] = [];
+  const deletedIds: string[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (data as any[]).map((r) => ({
-    id: String(r.id),
-    status: r.status === 'published' ? 'published' : 'unpublished',
-    elements: Array.isArray(r.elements) ? r.elements : [],
-    name: typeof r.name === 'string' ? r.name : undefined,
-    created: typeof r.created === 'number' ? r.created : Number(r.created) || Date.now(),
-  }));
+  for (const r of data as any[]) {
+    if (r.deleted) {
+      deletedIds.push(String(r.id));
+      continue;
+    }
+    items.push({
+      id: String(r.id),
+      status: r.status === 'published' ? 'published' : 'unpublished',
+      elements: Array.isArray(r.elements) ? r.elements : [],
+      name: typeof r.name === 'string' ? r.name : undefined,
+      created: typeof r.created === 'number' ? r.created : Number(r.created) || Date.now(),
+    });
+  }
+  return { items, deletedIds };
 }
 
 export async function upsertUserLibrary(userId: string, items: LibraryItemCloudRow[]): Promise<void> {
@@ -733,7 +745,8 @@ export async function upsertUserLibrary(userId: string, items: LibraryItemCloudR
     status: it.status === 'published' ? 'published' : 'unpublished',
     elements: Array.isArray(it.elements) ? it.elements : [],
     name: it.name ?? null,
-    created: it.created,
+    created: it.created ?? Date.now(),
+    deleted: false, // (重新)新增/导入 ＝ 取消删除
     updated_at: now,
   }));
   const { error } = await client
@@ -742,11 +755,12 @@ export async function upsertUserLibrary(userId: string, items: LibraryItemCloudR
   if (error) throw new Error(`upsertUserLibrary: ${error.message}`);
 }
 
+// 软删除：保留行作云端坠牌（deleted=true），其它设备拉取时据此移除本地副本。
 export async function deleteUserLibraryItem(userId: string, id: string): Promise<void> {
   const client = requireSupabase();
   const { error } = await client
     .from('library_items_cloud')
-    .delete()
+    .update({ deleted: true, updated_at: new Date().toISOString() })
     .eq('user_id', userId)
     .eq('id', id);
   if (error) throw new Error(`deleteUserLibraryItem: ${error.message}`);

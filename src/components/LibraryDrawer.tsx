@@ -16,6 +16,7 @@ import { invalidateThumbnail } from '@/utils/libraryThumbnail';
 import { useAuth } from '@/hooks/useAuth';
 import { useSubscription } from '@/hooks/useSubscription';
 import { pullAndMergeLibrary, pushLibraryItems, removeLibraryItemCloud } from '@/services/libraryCloudSync';
+import { addTombstones, removeTombstones } from '@/utils/libraryImport';
 
 const BROADCAST_CHANNEL = 'excalicast-library';
 const SAME_TAB_EVENT = 'excalicast-library-updated';
@@ -128,22 +129,24 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
         elements,
         created: Date.now(),
       };
+      removeTombstones([item.id]); // 新增 ＝ 复活，清坠牌
       await addLibraryItem(item);
       setItems((prev) => [...prev, item]);
       broadcastUpdated();
-      void pushLibraryItems([item]); // pro/max 才生效，非 pro API 403 静默
+      if (canCloud) void pushLibraryItems([item]); // 仅 pro/max 上传，非 pro 数据不离开浏览器
     } catch (err) {
       console.error('add_to_library_failed', err);
     }
-  }, [excalidrawApiRef, broadcastUpdated]);
+  }, [excalidrawApiRef, broadcastUpdated, canCloud]);
 
   const handleDelete = useCallback(async (id: string) => {
+    addTombstones([id]); // 本地坠牌，防止下次 pull 把它重建
     await removeLibraryItem(id);
     invalidateThumbnail(id);
     setItems((prev) => prev.filter((x) => x.id !== id));
     broadcastUpdated();
-    void removeLibraryItemCloud(id);
-  }, [broadcastUpdated]);
+    if (canCloud) void removeLibraryItemCloud(id); // 仅 pro/max 软删除云端坠牌
+  }, [broadcastUpdated, canCloud]);
 
   // 导入完成后：刷新自家列表并切回"我的模板"
   const handleImported = useCallback(async () => {
@@ -215,7 +218,7 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
       </div>
 
       {view === 'market' ? (
-        <MarketplaceBrowser onImported={handleImported} />
+        <MarketplaceBrowser onImported={handleImported} canCloud={canCloud} />
       ) : (
         <>
           {/* Actions */}

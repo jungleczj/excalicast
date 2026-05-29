@@ -7,6 +7,7 @@ import {
   buildHandoutPrompt,
   extractBoardSummary,
   parseHandoutJson,
+  SYSTEM_PROMPT,
   type HandoutResult,
 } from '@/services/handout';
 import type { WhiteboardSnapshot } from '@/types/recording';
@@ -95,7 +96,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   let result: HandoutResult;
   let modelUsed = '';
   try {
-    const chat = await deepseekChat({ prompt, systemPrompt: undefined, jsonMode: true });
+    const chat = await deepseekChat({ prompt, systemPrompt: SYSTEM_PROMPT, jsonMode: true });
     modelUsed = chat.modelUsed;
     result = parseHandoutJson(chat.text, cloud.durationMs);
   } catch (err) {

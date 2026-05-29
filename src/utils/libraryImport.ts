@@ -9,6 +9,46 @@ export const SAME_TAB_EVENT = 'excalicast-library-updated';
 export const MARKET_BASE = 'https://libraries.excalidraw.com/libraries/';
 export const MARKET_INDEX = 'https://libraries.excalidraw.com/libraries.json';
 
+// ---------------------------------------------------------------------------
+// 本地坠牌：已删除模板 id 的本地镜像（localStorage）。
+// 云端用软删除行作权威坠牌让删除跨设备传播；本地这份用于：拉取时剔除、
+// localOnly 不重新上推、防止竞态把刚删的项又写回。
+// ---------------------------------------------------------------------------
+const TOMBSTONE_KEY = 'excalicast-library-tombstones';
+
+export function getTombstones(): Set<string> {
+  if (typeof localStorage === 'undefined') return new Set();
+  try {
+    const raw = localStorage.getItem(TOMBSTONE_KEY);
+    const arr = raw ? (JSON.parse(raw) as unknown) : [];
+    return new Set(Array.isArray(arr) ? arr.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeTombstones(set: Set<string>): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(TOMBSTONE_KEY, JSON.stringify(Array.from(set)));
+  } catch { /* ignore quota/SSR */ }
+}
+
+export function addTombstones(ids: string[]): void {
+  if (ids.length === 0) return;
+  const set = getTombstones();
+  for (const id of ids) set.add(id);
+  writeTombstones(set);
+}
+
+export function removeTombstones(ids: string[]): void {
+  if (ids.length === 0) return;
+  const set = getTombstones();
+  let changed = false;
+  for (const id of ids) changed = set.delete(id) || changed;
+  if (changed) writeTombstones(set);
+}
+
 // 通知所有 LibraryDrawer（同 tab window 事件 + 跨 tab BroadcastChannel）刷新自己。
 export function notifyLibraryUpdated(): void {
   try {
@@ -79,9 +119,13 @@ export function parseExcalidrawLib(lib: unknown): LibraryItemRow[] {
 
 /**
  * 从一个 .excalidrawlib URL 直接导入到本项目 IDB，并通知所有抽屉刷新。
- * 返回导入的新条目数（0 表示空 / 失败）。整个过程在本浏览器，不经任何服务端。
+ * 返回导入的新条目数（0 表示空 / 失败）。整个过程在本浏览器。
+ * 仅 `opts.pushToCloud` 为真才把内容上行到云端 —— 非 pro 用户的模板数据不离开浏览器。
  */
-export async function importLibraryFromUrl(libUrl: string): Promise<number> {
+export async function importLibraryFromUrl(
+  libUrl: string,
+  opts?: { pushToCloud?: boolean },
+): Promise<number> {
   let resp: Response;
   try {
     resp = await fetch(libUrl);
@@ -102,13 +146,17 @@ export async function importLibraryFromUrl(libUrl: string): Promise<number> {
   }
   const incoming = parseExcalidrawLib(lib);
   if (incoming.length === 0) return 0;
+  // 重新导入 ＝ 复活：清掉这些 id 的坠牌，避免下次拉取又把它们移除。
+  removeTombstones(incoming.map((it) => it.id));
   const current = await getAllLibraryItems().catch(() => [] as LibraryItemRow[]);
   const before = current.length;
   const merged = mergeById(current, incoming);
   await replaceLibraryItems(merged);
   notifyLibraryUpdated();
-  // 上行到云端（pro/max 才生效；非 pro 时 API 403 被静默吞掉）。动态 import 避免循环依赖。
-  void import('@/services/libraryCloudSync').then((m) => m.pushLibraryItems(incoming)).catch(() => { /* ignore */ });
+  // 上行到云端（仅 pro/max 调用点会传 pushToCloud:true）。动态 import 避免循环依赖。
+  if (opts?.pushToCloud) {
+    void import('@/services/libraryCloudSync').then((m) => m.pushLibraryItems(incoming)).catch(() => { /* ignore */ });
+  }
   return merged.length - before;
 }
 

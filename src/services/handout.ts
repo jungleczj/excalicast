@@ -75,7 +75,7 @@ export function extractBoardSummary(
 // 2) Prompt 构造
 // ---------------------------------------------------------------------------
 
-const SYSTEM_PROMPT = `你是一名中文/英文双语技术文档编辑。基于一段白板录制的事件流和语音字幕，
+export const SYSTEM_PROMPT = `你是一名中文/英文双语技术文档编辑。基于一段白板录制的事件流和语音字幕，
 生成结构化讲义（outline + Markdown）。语言保持与字幕主要语言一致。
 严格按 JSON schema 输出：
 {
