@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { SubtitleOverlay } from '@/components/SubtitleOverlay';
 import { I } from '@/components/icons';
 import { cameraPositionAt } from '@/services/exportPipeline';
-import type { CameraPositionEvent, WhiteboardSnapshot } from '@/types/recording';
+import { drawLaserOverlay } from '@/utils/laserRender';
+import type { CameraPositionEvent, LaserEvent, WhiteboardSnapshot } from '@/types/recording';
 
 const Excalidraw = dynamic(
   async () => (await import('@excalidraw/excalidraw')).Excalidraw,
@@ -40,6 +41,8 @@ export interface SharedPlayerProps {
   audioSrc: string | null;
   cameraSrc: string | null;
   cameraEvents: CameraPositionEvent[];
+  /** 录制时采集的激光笔轨迹；为空表示该录制没用过激光，不画 overlay。 */
+  laserEvents?: LaserEvent[];
   /** 顶部右侧自定义额外按钮（如 download / delete / dismiss） */
   rightActions?: React.ReactNode;
   /** 标签栏标题 */
@@ -71,6 +74,7 @@ export function SharedPlayer({
   audioSrc,
   cameraSrc,
   cameraEvents,
+  laserEvents,
   rightActions,
   title,
   backHref,
@@ -92,6 +96,10 @@ export function SharedPlayer({
   const rafRef = useRef<number | null>(null);
   const lastAppliedTsRef = useRef<number>(-1);
   const clockRef = useRef<{ perfStart: number; baseTime: number } | null>(null);
+
+  // 激光 overlay：和 Excalidraw 容器同尺寸的 absolute canvas，pointer-events: none
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const laserCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [playing, setPlaying] = useState(false);
   const [timeMs, setTimeMs] = useState(0);
@@ -213,6 +221,54 @@ export function SharedPlayer({
     }
   }, [snapshots, applySnapshot]);
 
+  // 激光 overlay：把 canvas 像素尺寸同步到 stage（CSS px × devicePixelRatio）
+  useEffect(() => {
+    const stage = stageRef.current;
+    const canvas = laserCanvasRef.current;
+    if (!stage || !canvas) return;
+    const sync = () => {
+      const rect = stage.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.round(rect.width * dpr));
+      canvas.height = Math.max(1, Math.round(rect.height * dpr));
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
+      const ctx = canvas.getContext('2d');
+      if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    sync();
+    const obs = new ResizeObserver(sync);
+    obs.observe(stage);
+    return () => obs.disconnect();
+  }, []);
+
+  // 激光 overlay：每次 timeMs 变化（含 RAF 推动、seek、暂停）重画一次
+  useLayoutEffect(() => {
+    const canvas = laserCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const cssW = canvas.clientWidth;
+    const cssH = canvas.clientHeight;
+    ctx.clearRect(0, 0, cssW, cssH);
+    if (!laserEvents || laserEvents.length === 0) return;
+    // 用当前 snapshot 的 appState 算 scene → screen
+    const snap = snapshotAt(snapshots, timeMs);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ast = (snap?.appState ?? {}) as any;
+    const zoomVal = (typeof ast.zoom === 'object' && ast.zoom && typeof ast.zoom.value === 'number')
+      ? ast.zoom.value
+      : (typeof ast.zoom === 'number' ? ast.zoom : 1);
+    const scrollX = typeof ast.scrollX === 'number' ? ast.scrollX : 0;
+    const scrollY = typeof ast.scrollY === 'number' ? ast.scrollY : 0;
+    drawLaserOverlay(ctx, laserEvents, timeMs, {
+      sceneToScreen: (sx: number, sy: number) => ({
+        x: (sx + scrollX) * zoomVal,
+        y: (sy + scrollY) * zoomVal,
+      }),
+    });
+  }, [timeMs, laserEvents, snapshots]);
+
   const ready = snapshots.length > 0 || durationMs > 0;
 
   return (
@@ -254,12 +310,17 @@ export function SharedPlayer({
         </div>
       )}
 
-      <div className="relative flex-1 bg-canvas-bg">
+      <div ref={stageRef} className="relative flex-1 bg-canvas-bg">
         <Excalidraw
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           excalidrawAPI={onApi as any}
           viewModeEnabled
           zenModeEnabled
+        />
+        <canvas
+          ref={laserCanvasRef}
+          className="pointer-events-none absolute inset-0 z-30"
+          aria-hidden
         />
         <SubtitleOverlay srt={subtitleSrt} timeMs={timeMs} />
         {cameraSrc && (

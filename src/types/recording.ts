@@ -70,6 +70,20 @@ export interface BinaryFileEntry {
   data: unknown;
 }
 
+/**
+ * 激光笔轨迹事件。坐标用 scene 坐标系（不是 viewport / screen），
+ * 渲染时按导出的 sceneSourceRect→dest 或回放的 (x+scroll)*zoom 变换。
+ * button=='down' 表示用户正在按住绘制；'up' 表示松手。
+ * 跨"up→down"的两段不连线，画一段独立 polyline。
+ */
+export interface LaserEvent {
+  recordingId: string;
+  timestamp: number;   // ms relative to recording start
+  x: number;           // scene X
+  y: number;           // scene Y
+  button: 'down' | 'up';
+}
+
 // ----- 导出配置 -----
 
 export type AspectRatio = '16:9' | '9:16' | '1:1' | '4:5';

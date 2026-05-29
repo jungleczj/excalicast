@@ -166,7 +166,25 @@
     "stopFailed": "停止录制失败：{message}",
     "discardConfirm": "丢弃当前录制？所有数据将被删除。",
     "dragToMove": "拖动以移动",
-    "loadingWhiteboard": "加载白板…"
+    "loadingWhiteboard": "加载白板…",
+    "libraryToggle": "模板库"
+  },
+  "libraryDrawer": {
+    "title": "模板库",
+    "marketTitle": "模板市场",
+    "addSelected": "添加选中",
+    "addSelectedDisabled": "先在画布选中元素",
+    "browse": "浏览模板市场",
+    "empty": "还没有模板。先在画布选中元素后点「+ 添加选中」，或浏览模板市场。",
+    "deleteTooltip": "删除此模板",
+    "close": "关闭",
+    "back": "返回"
+  },
+  "marketplace": {
+    "searchPlaceholder": "搜索模板…",
+    "loading": "正在加载模板市场…",
+    "loadError": "加载失败，请检查网络后重试。",
+    "importing": "导入中…"
   },
   "recordingBar": {
     "cameraOnTooltip": "摄像头已开启 · 点击关闭",
@@ -184,7 +202,10 @@
     "muteAudio": "静音麦克风（录制继续，仅这段无声）",
     "unmuteAudio": "取消静音",
     "muteCamera": "暂时隐藏摄像头气泡（录制继续，仅这段不显示）",
-    "unmuteCamera": "重新显示摄像头气泡"
+    "unmuteCamera": "重新显示摄像头气泡",
+    "enableCameraNow": "录制中开启摄像头",
+    "laserOn": "激光笔已开启 · 点击关闭",
+    "laserOff": "激光笔（K）· 点击开启"
   },
   "whiteboard": {
     "loadingCore": "加载白板内核…"

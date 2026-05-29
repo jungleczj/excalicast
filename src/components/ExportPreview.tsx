@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { cameraPositionAt, renderPreviewFrame } from '@/services/exportPipeline';
 import { getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
@@ -52,20 +52,22 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  useEffect(() => {
+  // useLayoutEffect：挂载/重渲染后、浏览器 paint 前同步读宽度，避免首帧 0 宽闪烁
+  // 把 config.aspectRatio 放进依赖：每次切换比例都强制重新测量一次父宽（兜底
+  // ResizeObserver 在内容尺寸"等于上次值"时部分浏览器跳过的边界 case）。
+  useLayoutEffect(() => {
     const el = parentRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') {
-      if (el) setParentW(el.clientWidth);
-      return;
-    }
-    setParentW(el.clientWidth);
+    if (!el) return;
+    const measure = () => setParentW(el.clientWidth);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width ?? el.clientWidth;
-      setParentW(w);
+      if (w > 0) setParentW(w);
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [config.aspectRatio]);
   const renderToken = useRef(0);
   const rafRef = useRef<number | null>(null);
   const clockRef = useRef<{ perfStart: number; baseTime: number } | null>(null);
@@ -249,12 +251,14 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
   const preset = ASPECT_PRESETS[config.aspectRatio];
   const aspect = preset.width / preset.height;
 
-  // contain-fit 计算盒子像素尺寸 —— maxW 来自 ResizeObserver 实测的父容器宽度。
-  // parentW 为 0（首次 mount、SSR）时返回 0×0 占位，避免初始闪一下大宽。
+  // contain-fit 计算盒子像素尺寸 —— maxW 来自 useLayoutEffect 实测的父容器宽度。
+  // parentW 还没拿到时用一个保守的 viewport fallback，避免首帧返回 0×0 让后续的
+  // 高度 transition 卡住（9:16 高 ≈ viewportH*0.52 一旦先被定为 0，某些浏览器后续
+  // 不再触发 ResizeObserver 通知）。
   const previewBox = useMemo(() => {
-    if (parentW <= 0) return { w: 0, h: 0 };
     const maxH = viewportH * PREVIEW_VH_PCT;
-    if (parentW / aspect <= maxH) return { w: parentW, h: parentW / aspect };
+    const effectiveW = parentW > 0 ? parentW : Math.min(640, viewportH * 0.6);
+    if (effectiveW / aspect <= maxH) return { w: effectiveW, h: effectiveW / aspect };
     return { w: maxH * aspect, h: maxH };
   }, [aspect, viewportH, parentW]);
 
@@ -281,9 +285,10 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
         style={{
           // 直接用 JS 算出来的像素尺寸，绕开 CSS aspect-ratio + max-* 三件套
           // 在某些浏览器下不能同步收 width 的坑 —— 进度条、canvas、摄像头叠加层
-          // 都跟这个盒子尺寸走。
+          // 都跟这个盒子尺寸走。maxWidth: 100% 是硬保险：祖先永远不会被撑爆。
           width: previewBox.w,
           height: previewBox.h,
+          maxWidth: '100%',
           background: 'var(--paper)',
           border: '1.5px solid var(--ink)',
           borderRadius: 3,
@@ -398,6 +403,8 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
               padding: '6px 10px 6px 6px',
               borderRadius: 3,
               border: '1.3px solid var(--ink)',
+              // 自身 overflow-hidden 防 input 极窄时 second-order 溢出把右 span 推出
+              overflow: 'hidden',
             }}
           >
             <button
@@ -439,7 +446,9 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
               value={Math.min(timeMs, metadata.durationMs)}
               onChange={(e) => handleSeek(Number(e.target.value))}
               className="h-1 flex-1"
-              style={{ accentColor: 'var(--hi)' }}
+              // minWidth: 0 关键 —— input[type=range] 浏览器内在 min-width ~150-200px，
+              // 默认 flex `min-width: auto` 会顶住 flex shrink，9:16 窄盒下滑块就不会缩。
+              style={{ accentColor: 'var(--hi)', minWidth: 0 }}
             />
             <span
               style={{

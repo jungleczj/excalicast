@@ -19,6 +19,7 @@ import {
   type WorkspaceShellRow,
 } from '@/types/recording';
 import { compileSubtitles, drawFrostedWatermark, drawSubtitle } from '@/utils/frameOverlays';
+import { drawLaserOverlay } from '@/utils/laserRender';
 
 export interface ExportOptions extends ExportConfig {
   recordingId: string;
@@ -261,7 +262,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   opts.onProgress?.(0.05);
   const { exportToCanvas } = await import('@excalidraw/excalidraw');
   opts.onProgress?.(0.07);
-  const { metadata, snapshots, audioBlob, cameraBlob, cameraEvents, binaryFiles } = await loadFullRecording(opts.recordingId);
+  const { metadata, snapshots, audioBlob, cameraBlob, cameraEvents, laserEvents, binaryFiles } = await loadFullRecording(opts.recordingId);
   opts.onProgress?.(0.08);
 
   const preset = ASPECT_PRESETS[opts.aspectRatio];
@@ -408,6 +409,17 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       } catch {
         targetCtx.drawImage(sceneCanvas, dest.x, dest.y, dest.width, dest.height);
       }
+    }
+
+    // 激光笔轨迹叠加 —— scene 坐标按 sceneSourceRect→dest 映射到 target 像素
+    if (laserEvents.length > 0) {
+      const ssr = sceneSourceRect;
+      drawLaserOverlay(targetCtx, laserEvents, t, {
+        sceneToScreen: (sx: number, sy: number) => ({
+          x: dest.x + ((sx - ssr.x) / ssr.width) * dest.width,
+          y: dest.y + ((sy - ssr.y) / ssr.height) * dest.height,
+        }),
+      });
     }
 
     // 毛玻璃水印（在字幕之前画 — 字幕居中位置可能与水印边角重叠，字幕在上更可读）
@@ -564,7 +576,7 @@ export async function renderPreviewFrame(
   target: HTMLCanvasElement,
 ): Promise<void> {
   const { exportToCanvas } = await import('@excalidraw/excalidraw');
-  const { metadata, snapshots, binaryFiles, cameraBlob } = await loadFullRecording(recordingId);
+  const { metadata, snapshots, binaryFiles, cameraBlob, laserEvents } = await loadFullRecording(recordingId);
   const preset = ASPECT_PRESETS[config.aspectRatio];
 
   // 预览也要走 shell-aware 路径
@@ -694,6 +706,16 @@ export async function renderPreviewFrame(
     );
   } catch {
     ctx.drawImage(sceneCanvas, dest.x, dest.y, dest.width, dest.height);
+  }
+
+  // 激光笔轨迹叠加（预览也需要）
+  if (laserEvents.length > 0) {
+    drawLaserOverlay(ctx, laserEvents, timeMs, {
+      sceneToScreen: (vx: number, vy: number) => ({
+        x: dest.x + ((vx - sceneSourceRect.x) / sceneSourceRect.width) * dest.width,
+        y: dest.y + ((vy - sceneSourceRect.y) / sceneSourceRect.height) * dest.height,
+      }),
+    });
   }
 
   disposeShells(decodedShells);

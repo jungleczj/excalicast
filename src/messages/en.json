@@ -166,7 +166,25 @@
     "stopFailed": "Could not stop recording: {message}",
     "discardConfirm": "Discard this recording? All data will be deleted.",
     "dragToMove": "Drag to move",
-    "loadingWhiteboard": "Loading whiteboard…"
+    "loadingWhiteboard": "Loading whiteboard…",
+    "libraryToggle": "Library"
+  },
+  "libraryDrawer": {
+    "title": "Library",
+    "marketTitle": "Library marketplace",
+    "addSelected": "Add selected",
+    "addSelectedDisabled": "Select elements on canvas first",
+    "browse": "Browse libraries",
+    "empty": "No templates yet. Select elements on the canvas and click \"+ Add selected\", or browse the marketplace.",
+    "deleteTooltip": "Delete this template",
+    "close": "Close",
+    "back": "Back"
+  },
+  "marketplace": {
+    "searchPlaceholder": "Search libraries…",
+    "loading": "Loading marketplace…",
+    "loadError": "Failed to load. Check your connection and retry.",
+    "importing": "Importing…"
   },
   "recordingBar": {
     "cameraOnTooltip": "Camera on · click to turn off",
@@ -184,7 +202,10 @@
     "muteAudio": "Mute mic (recording continues silent)",
     "unmuteAudio": "Unmute mic",
     "muteCamera": "Hide camera (recording continues without bubble)",
-    "unmuteCamera": "Show camera again"
+    "unmuteCamera": "Show camera again",
+    "enableCameraNow": "Turn on camera now",
+    "laserOn": "Laser pointer on · click to turn off",
+    "laserOff": "Laser pointer (K) · click to turn on"
   },
   "whiteboard": {
     "loadingCore": "Loading whiteboard…"

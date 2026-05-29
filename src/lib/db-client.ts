@@ -6,6 +6,7 @@ import type {
   BinaryFileEntry,
   CameraChunk,
   CameraPositionEvent,
+  LaserEvent,
   RecordingMetadata,
   ShellCanvasRect,
   ShellSize,
@@ -30,6 +31,10 @@ interface CameraPositionRow extends CameraPositionEvent {
   id?: number;
 }
 
+interface LaserEventRow extends LaserEvent {
+  id?: number;
+}
+
 interface BinaryFileRow extends BinaryFileEntry {
   id?: number;
 }
@@ -43,6 +48,7 @@ class ExcalicastDB extends Dexie {
   binaryFiles!: Table<BinaryFileRow, number>;
   workspaceShells!: Table<WorkspaceShellRow, number>;
   libraryItems!: Table<LibraryItemRow, string>;
+  laserEvents!: Table<LaserEventRow, number>;
 
   constructor() {
     super('excalicast');
@@ -115,7 +121,7 @@ class ExcalicastDB extends Dexie {
       workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
       cameraPositions: '++id, recordingId, timestamp, [recordingId+timestamp]',
     });
-    // v7: libraryItems 表 —— mirror Excalidraw 自家 library state，
+    // v7: libraryItems 表 —— 项目自家 library 持久化，
     // 跨浏览器 / 清缓存不丢，全部录制共用一份。
     this.version(7).stores({
       recordings: 'id, startedAt, status',
@@ -126,6 +132,19 @@ class ExcalicastDB extends Dexie {
       workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
       cameraPositions: '++id, recordingId, timestamp, [recordingId+timestamp]',
       libraryItems: 'id, status, created',
+    });
+    // v8: laserEvents 表（激光笔轨迹随时间事件）。无 .upgrade —— 老录制空表，
+    // 导出/回放都按"无激光"处理。
+    this.version(8).stores({
+      recordings: 'id, startedAt, status',
+      snapshots: '++id, recordingId, timestamp',
+      audioChunks: '++id, recordingId, index',
+      cameraChunks: '++id, recordingId, index',
+      binaryFiles: '++id, recordingId, fileId',
+      workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
+      cameraPositions: '++id, recordingId, timestamp, [recordingId+timestamp]',
+      libraryItems: 'id, status, created',
+      laserEvents: '++id, recordingId, timestamp, [recordingId+timestamp]',
     });
   }
 }
@@ -164,7 +183,7 @@ export async function deleteRecording(recordingId: string): Promise<void> {
   const db = getClientDb();
   await db.transaction(
     'rw',
-    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.cameraPositions, db.binaryFiles, db.workspaceShells],
+    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.cameraPositions, db.binaryFiles, db.workspaceShells, db.laserEvents],
     async () => {
       await db.recordings.delete(recordingId);
       await db.snapshots.where('recordingId').equals(recordingId).delete();
@@ -173,6 +192,7 @@ export async function deleteRecording(recordingId: string): Promise<void> {
       await db.cameraPositions.where('recordingId').equals(recordingId).delete();
       await db.binaryFiles.where('recordingId').equals(recordingId).delete();
       await db.workspaceShells.where('recordingId').equals(recordingId).delete();
+      await db.laserEvents.where('recordingId').equals(recordingId).delete();
     },
   );
 }
@@ -206,6 +226,7 @@ export async function loadFullRecording(recordingId: string): Promise<{
   audioBlob: Blob | null;
   cameraBlob: Blob | null;
   cameraEvents: CameraPositionEvent[];
+  laserEvents: LaserEvent[];
   binaryFiles: BinaryFileEntry[];
 }> {
   const db = getClientDb();
@@ -242,9 +263,39 @@ export async function loadFullRecording(recordingId: string): Promise<{
     ...(r.hidden ? { hidden: true } : {}),
   }));
 
+  const laserRows = await db.laserEvents
+    .where('recordingId').equals(recordingId)
+    .sortBy('timestamp');
+  const laserEvents: LaserEvent[] = laserRows.map((r) => ({
+    recordingId: r.recordingId,
+    timestamp: r.timestamp,
+    x: r.x,
+    y: r.y,
+    button: r.button,
+  }));
+
   const binaryFiles = await db.binaryFiles.where('recordingId').equals(recordingId).toArray();
 
-  return { metadata, snapshots, audioBlob, cameraBlob, cameraEvents, binaryFiles };
+  return { metadata, snapshots, audioBlob, cameraBlob, cameraEvents, laserEvents, binaryFiles };
+}
+
+export async function listLaserEvents(recordingId: string): Promise<LaserEvent[]> {
+  const db = getClientDb();
+  const rows = await db.laserEvents
+    .where('recordingId').equals(recordingId)
+    .sortBy('timestamp');
+  return rows.map((r) => ({
+    recordingId: r.recordingId,
+    timestamp: r.timestamp,
+    x: r.x,
+    y: r.y,
+    button: r.button,
+  }));
+}
+
+export async function bulkAddLaserEvents(events: LaserEvent[]): Promise<void> {
+  if (events.length === 0) return;
+  await getClientDb().laserEvents.bulkAdd(events);
 }
 
 export async function listCameraEvents(recordingId: string): Promise<CameraPositionEvent[]> {
@@ -295,4 +346,12 @@ export async function replaceLibraryItems(items: LibraryItemRow[]): Promise<void
     await db.libraryItems.clear();
     if (items.length > 0) await db.libraryItems.bulkAdd(items);
   });
+}
+
+export async function addLibraryItem(item: LibraryItemRow): Promise<void> {
+  await getClientDb().libraryItems.put(item);
+}
+
+export async function removeLibraryItem(id: string): Promise<void> {
+  await getClientDb().libraryItems.delete(id);
 }

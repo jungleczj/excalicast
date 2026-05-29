@@ -303,3 +303,20 @@ body {
   border-radius: 3px;
   border: 1px solid var(--rule-soft);
 }
+
+/* 隐藏 Excalidraw 自带的 library / sidebar 控件 —— 本项目用自制 LibraryDrawer 替代。
+   scope 在 .excalidraw 根容器下，覆盖任何页面的任何 Excalidraw 实例（录制 /app、回放 /play、/s），
+   且只影响 Excalidraw 自身 DOM，不碰我们自己的 UI。类名按 @excalidraw/excalidraw v0.17.6 实测。 */
+.excalidraw .sidebar-triggers,
+.excalidraw .default-sidebar-trigger,
+.excalidraw .sidebar-trigger,
+.excalidraw .default-sidebar,
+.excalidraw .sidebar,
+.excalidraw .layer-ui__library,
+.excalidraw .layer-ui__library-message,
+.excalidraw .library-menu,
+.excalidraw .library-menu-items-container,
+.excalidraw .publish-library,
+.excalidraw .publish-library-success {
+  display: none !important;
+}

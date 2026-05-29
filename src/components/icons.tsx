@@ -94,6 +94,22 @@ export const I = {
       <path d="M18.5 16 l0.7 1.8 l1.8 0.7 l-1.8 0.7 l-0.7 1.8 l-0.7 -1.8 l-1.8 -0.7 l1.8 -0.7 Z" />
     </Base>
   ),
+  Laser: (p: IconProps) => (
+    <Base {...p}>
+      <circle cx="12" cy="12" r="2.2" />
+      <path d="M12 3 v3 M12 18 v3 M3 12 h3 M18 12 h3" />
+      <path d="M5.6 5.6 l1.8 1.8 M16.6 16.6 l1.8 1.8 M5.6 18.4 l1.8 -1.8 M16.6 7.4 l1.8 -1.8" />
+    </Base>
+  ),
+  Library: (p: IconProps) => (
+    <Base {...p}>
+      {/* 三本书并排：左 / 中 / 右，最右本斜 */}
+      <rect x="3.5" y="4.5" width="3" height="15" rx="0.6" />
+      <rect x="8" y="4.5" width="3" height="15" rx="0.6" />
+      <path d="M14.5 6.2 l3 -0.8 l3 14.4 l-3 0.8 Z" />
+      <path d="M3.5 9 h3 M8 9 h3 M14.9 8.4 l2.9 -0.7" />
+    </Base>
+  ),
   Subtitles: (p: IconProps) => (
     <Base {...p}>
       <rect x="3" y="5" width="18" height="14" rx="1.5" />

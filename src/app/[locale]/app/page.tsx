@@ -6,6 +6,8 @@ import { useTranslations } from 'next-intl';
 import { AppHeader } from '@/components/AppHeader';
 import { RecordingBar } from '@/components/RecordingBar';
 import { CameraBubble } from '@/components/CameraBubble';
+import { LibraryDrawer } from '@/components/LibraryDrawer';
+import { I } from '@/components/icons';
 import { ProUpgradeModal } from '@/components/ProUpgradeModal';
 import { useSubscription } from '@/hooks/useSubscription';
 import { startRecording, type SessionHandle } from '@/services/recordingSession';
@@ -40,6 +42,11 @@ export default function HomePage(): JSX.Element {
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const workspaceRootRef = useRef<HTMLDivElement | null>(null);
   const cameraPosLsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const excalidrawApiRef = useRef<any>(null);
+  const laserPointRef = useRef<((x: number, y: number, button: 'down' | 'up') => void) | null>(null);
+  const [laserActive, setLaserActive] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   // 初始化摄像头位置（优先 localStorage，否则右下角默认）
   useEffect(() => {
@@ -186,6 +193,7 @@ export default function HomePage(): JSX.Element {
       });
       sessionRef.current = session;
       changeRef.current = session.onWhiteboardChange;
+      laserPointRef.current = session.recordLaserPoint;
       setHasAudio(session.hasAudio);
       setHasCamera(session.hasCamera);
       setCameraStream(session.cameraStream);
@@ -220,11 +228,44 @@ export default function HomePage(): JSX.Element {
     setAudioMuted(next);
   }, [audioMuted]);
 
-  const handleToggleCameraMute = useCallback(() => {
+  const handleToggleCameraMute = useCallback(async () => {
+    // 三态循环（录制中）：off → on → muted → on …
+    // off：开始录制时没勾摄像头 → 懒 acquire
+    if (!hasCamera) {
+      try {
+        const ok = await sessionRef.current?.enableCamera();
+        if (ok) {
+          setHasCamera(true);
+          setCameraMuted(false);
+          setCameraStream(sessionRef.current?.cameraStream ?? null);
+        }
+      } catch (err) {
+        alert(t('cameraOpenFailed', { message: err instanceof Error ? err.message : 'unknown' }));
+      }
+      return;
+    }
+    // on ↔ muted（既有路径）
     const next = !cameraMuted;
-    sessionRef.current?.setCameraMuted(next);
     setCameraMuted(next);
-  }, [cameraMuted]);
+    if (next) setCameraStream(null);
+    try {
+      await sessionRef.current?.setCameraMuted(next);
+    } catch { /* ignore：UI 状态已经反映 mute */ }
+    if (!next) setCameraStream(sessionRef.current?.cameraStream ?? null);
+  }, [hasCamera, cameraMuted, t]);
+
+  // 激光笔：调 Excalidraw setActiveTool 切到 laser；再点切回 selection
+  const handleToggleLaser = useCallback(() => {
+    const api = excalidrawApiRef.current;
+    if (!api) return;
+    if (laserActive) {
+      api.setActiveTool({ type: 'selection' });
+      setLaserActive(false);
+    } else {
+      api.setActiveTool({ type: 'laser' });
+      setLaserActive(true);
+    }
+  }, [laserActive]);
 
   const handleStop = useCallback(async () => {
     const s = sessionRef.current;
@@ -234,6 +275,7 @@ export default function HomePage(): JSX.Element {
       const meta = await s.stop();
       sessionRef.current = null;
       changeRef.current = null;
+      laserPointRef.current = null;
       setCameraStream(null);
       setHasCamera(false);
       setHasAudio(false);
@@ -245,6 +287,7 @@ export default function HomePage(): JSX.Element {
       alert(t('stopFailed', { message: err instanceof Error ? err.message : 'unknown' }));
       sessionRef.current = null;
       changeRef.current = null;
+      laserPointRef.current = null;
       setState('idle');
     }
   }, [router, t]);
@@ -260,6 +303,7 @@ export default function HomePage(): JSX.Element {
     } catch { /* ignore */ }
     sessionRef.current = null;
     changeRef.current = null;
+    laserPointRef.current = null;
     setCameraStream(null);
     setHasCamera(false);
     setHasAudio(false);
@@ -273,7 +317,11 @@ export default function HomePage(): JSX.Element {
       {/* AppHeader 全程可见，以便录制时被 shell capturer 抓到（之前会在录制时隐藏） */}
       <AppHeader tier={subscription.tier} onUpgradePro={() => setProUpgradeOpen(true)} />
       <div className="relative flex-1 overflow-hidden">
-        <Whiteboard onChangeRef={changeRef} />
+        <Whiteboard
+          onChangeRef={changeRef}
+          onApiReady={(api) => { excalidrawApiRef.current = api; }}
+          laserPointRef={laserPointRef}
+        />
 
         {/* 摄像头浮窗：idle 期间用预览流；录制态如启用则用 session stream */}
         {(cameraEnabled || (isRecording && hasCamera)) && !cameraMuted && (
@@ -308,9 +356,11 @@ export default function HomePage(): JSX.Element {
               cameraEnabled={cameraEnabled}
               audioMuted={audioMuted}
               cameraMuted={cameraMuted}
+              laserActive={laserActive}
               onToggleCamera={handleToggleCamera}
               onToggleAudioMute={handleToggleAudioMute}
               onToggleCameraMute={handleToggleCameraMute}
+              onToggleLaser={handleToggleLaser}
               onStart={handleStart}
               onStop={handleStop}
               onDiscard={handleDiscard}
@@ -319,6 +369,33 @@ export default function HomePage(): JSX.Element {
             />
           </div>
         )}
+
+        {/* 自制 library 抽屉切换按钮：右上角浮动，独立于 Excalidraw 自带工具栏。
+           对应的 LibraryDrawer 也独立挂在这一层 fixed 容器里。 */}
+        <button
+          type="button"
+          onClick={() => setLibraryOpen((o) => !o)}
+          title={t('libraryToggle')}
+          className="rb-no-record fixed right-3 top-16 z-30 grid place-items-center"
+          style={{
+            width: 34,
+            height: 34,
+            background: libraryOpen ? 'var(--hi)' : 'var(--paper)',
+            border: '1.5px solid var(--ink)',
+            borderRadius: 3,
+            boxShadow: libraryOpen ? '2px 2px 0 var(--ink)' : 'none',
+            color: 'var(--ink)',
+            cursor: 'pointer',
+            padding: 0,
+          }}
+        >
+          <I.Library size={16} />
+        </button>
+        <LibraryDrawer
+          open={libraryOpen}
+          onClose={() => setLibraryOpen(false)}
+          excalidrawApiRef={excalidrawApiRef}
+        />
 
         <ProUpgradeModal
           open={proUpgradeOpen}

@@ -7,7 +7,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { I } from '@/components/icons';
 import { SharedPlayer } from '@/components/SharedPlayer';
 import { loadFullRecording, deleteRecording } from '@/lib/db-client';
-import type { CameraPositionEvent, RecordingMetadata, WhiteboardSnapshot } from '@/types/recording';
+import type { CameraPositionEvent, LaserEvent, RecordingMetadata, WhiteboardSnapshot } from '@/types/recording';
 import { Link, useRouter } from '@/i18n/navigation';
 
 export default function PlayPage(): JSX.Element {
@@ -22,6 +22,7 @@ export default function PlayPage(): JSX.Element {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [cameraUrl, setCameraUrl] = useState<string | null>(null);
   const [cameraEvents, setCameraEvents] = useState<CameraPositionEvent[]>([]);
+  const [laserEvents, setLaserEvents] = useState<LaserEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -42,6 +43,7 @@ export default function PlayPage(): JSX.Element {
         setCameraUrl(createdCameraUrl);
       }
       setCameraEvents(r.cameraEvents);
+      setLaserEvents(r.laserEvents);
     }).catch((err) => {
       if (!cancelled) setError(err instanceof Error ? err.message : 'load_failed');
     });
@@ -121,6 +123,7 @@ export default function PlayPage(): JSX.Element {
         audioSrc={audioUrl}
         cameraSrc={cameraUrl}
         cameraEvents={cameraEvents}
+        laserEvents={laserEvents}
         title={title}
         rightActions={rightActions}
         hasAudio={!!meta?.hasAudio}

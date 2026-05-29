@@ -13,11 +13,20 @@ interface Props {
   audioMuted?: boolean;
   /** 录制中摄像头是否被软关闭（hasCamera=true 时才有意义） */
   cameraMuted?: boolean;
+  /** 激光笔（Excalidraw laser tool）是否激活 */
+  laserActive?: boolean;
   onToggleCamera: () => void;
   /** 录制中点 mic 图标 —— 翻转软静音 */
   onToggleAudioMute?: () => void;
-  /** 录制中点 camera 图标 —— 翻转软关闭 */
+  /**
+   * 点 camera 图标 —— 三态循环（仅录制中）：
+   *  off（hasCamera=false）→ on（懒 acquire）；
+   *  on（hasCamera=true && !muted）→ muted；
+   *  muted → on（重新 acquire）。
+   */
   onToggleCameraMute?: () => void;
+  /** 切换激光笔工具 */
+  onToggleLaser?: () => void;
   onStart: () => void;
   onStop: () => void;
   onDiscard?: () => void;
@@ -52,8 +61,8 @@ export function RecordingBar(props: Props): JSX.Element {
   const t = useTranslations('recordingBar');
   const {
     state, elapsedMs, hasAudio, hasCamera, cameraEnabled,
-    audioMuted, cameraMuted,
-    onToggleCamera, onToggleAudioMute, onToggleCameraMute,
+    audioMuted, cameraMuted, laserActive,
+    onToggleCamera, onToggleAudioMute, onToggleCameraMute, onToggleLaser,
     onStart, onStop, onDiscard, onPause, onResume,
   } = props;
 
@@ -75,6 +84,23 @@ export function RecordingBar(props: Props): JSX.Element {
         >
           {cameraEnabled ? <I.Camera size={13} /> : <I.CameraOff size={13} />}
         </button>
+        {onToggleLaser && (
+          <button
+            type="button"
+            onClick={onToggleLaser}
+            className="grid h-7 w-7 place-items-center"
+            style={{
+              background: laserActive ? 'var(--ok)' : 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: 3,
+              color: 'var(--paper)',
+              cursor: 'pointer',
+            }}
+            title={laserActive ? t('laserOn') : t('laserOff')}
+          >
+            <I.Laser size={13} />
+          </button>
+        )}
         <button
           type="button"
           onClick={onStart}
@@ -193,11 +219,22 @@ export function RecordingBar(props: Props): JSX.Element {
       <SrcToggle
         IconOn={I.Camera}
         IconOff={I.CameraOff}
-        present={hasCamera}
-        muted={!!cameraMuted}
-        title={!hasCamera ? t('cameraTooltip') : cameraMuted ? t('unmuteCamera') : t('muteCamera')}
-        onClick={hasCamera ? onToggleCameraMute : undefined}
+        // 录制中 camera 按钮始终可点：未启用时点击触发懒激活；已启用时切 mute
+        present={true}
+        muted={!hasCamera || !!cameraMuted}
+        title={!hasCamera ? t('enableCameraNow') : cameraMuted ? t('unmuteCamera') : t('muteCamera')}
+        onClick={onToggleCameraMute}
       />
+      {onToggleLaser && (
+        <SrcToggle
+          IconOn={I.Laser}
+          IconOff={I.Laser}
+          present={true}
+          muted={!laserActive}
+          title={laserActive ? t('laserOn') : t('laserOff')}
+          onClick={onToggleLaser}
+        />
+      )}
     </div>
   );
 }

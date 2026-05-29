@@ -3,52 +3,103 @@
 import { getClientDb } from '@/lib/db-client';
 
 export interface CameraHandle {
-  stream: MediaStream;
+  /**
+   * 当前持有的 stream（mute 期间为 null，硬件已释放）。每次访问拿最新值，
+   * 上层 React 在 mute/unmute 后用它重新绑定 `<video srcObject>`。
+   */
+  readonly stream: MediaStream | null;
   stop: () => Promise<void>;
   pause: () => void;
   resume: () => void;
+  /**
+   * 硬关 / 重开摄像头：
+   *  - muted=true：停 MediaRecorder + track.stop() —— LED 立即灭，硬件释放。
+   *  - muted=false：重新 getUserMedia + 新建 MediaRecorder，继续累加 chunkIndex。
+   *
+   * 失败抛错由调用方决定如何处理（一般是吞掉，UI 显示气泡保持关闭状态）。
+   */
+  setMuted: (muted: boolean) => Promise<void>;
   getMimeType: () => string;
 }
 
-/**
- * 启动摄像头：拿到 stream 用于实时预览（绑到 <video>），同时录制为 webm 写入 IndexedDB cameraChunks 表。
- * 失败抛错（区别于 audioRecorder 的 silent fail），由调用方决定如何降级。
- */
-export async function startCameraRecorder(recordingId: string): Promise<CameraHandle> {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { width: { ideal: 480 }, height: { ideal: 480 }, facingMode: 'user' },
-    audio: false, // 音频独立采集，避免双流
-  });
-
-  const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+function pickMimeType(): string {
+  return MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
     ? 'video/webm;codecs=vp9'
     : MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
       ? 'video/webm;codecs=vp8'
       : 'video/webm';
+}
 
-  const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 800_000 });
-  let chunkIndex = 0;
+/**
+ * 启动摄像头：拿到 stream 用于实时预览（绑到 <video>），同时录制为 webm 写入 IndexedDB cameraChunks 表。
+ * 初次失败抛错（区别于 audioRecorder 的 silent fail），由调用方决定如何降级。
+ *
+ * 重要：返回的 handle 支持 setMuted —— mute 时真正释放硬件（LED 灭），unmute
+ * 时重新 acquire 并继续录制（chunkIndex 单调累加，导出会按 index 正确串接所有
+ * 分段；中间断开的时间段无视频，配合 cameraPositions 表的 hidden 事件，导出/
+ * 回放管线已知如何跳过气泡）。
+ */
+export async function startCameraRecorder(recordingId: string): Promise<CameraHandle> {
   const db = getClientDb();
-  recorder.ondataavailable = async (e) => {
-    if (e.data && e.data.size > 0) {
-      await db.cameraChunks.add({ recordingId, index: chunkIndex++, blob: e.data });
+  const mimeType = pickMimeType();
+  let chunkIndex = 0;
+  let currentStream: MediaStream | null = null;
+  let currentRecorder: MediaRecorder | null = null;
+  let stoppedPromise: Promise<void> = Promise.resolve();
+
+  const acquire = async (): Promise<void> => {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 480 }, height: { ideal: 480 }, facingMode: 'user' },
+      audio: false, // 音频独立采集，避免双流
+    });
+    const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 800_000 });
+    recorder.ondataavailable = async (e) => {
+      if (e.data && e.data.size > 0) {
+        await db.cameraChunks.add({ recordingId, index: chunkIndex++, blob: e.data });
+      }
+    };
+    stoppedPromise = new Promise<void>((resolve) => {
+      recorder.onstop = () => resolve();
+    });
+    recorder.start(1000);
+    currentStream = stream;
+    currentRecorder = recorder;
+  };
+
+  const release = async (): Promise<void> => {
+    const recorder = currentRecorder;
+    const stream = currentStream;
+    currentRecorder = null;
+    currentStream = null;
+    if (recorder && recorder.state !== 'inactive') {
+      try { recorder.stop(); } catch { /* ignore */ }
+      try { await stoppedPromise; } catch { /* ignore */ }
+    }
+    if (stream) {
+      stream.getTracks().forEach((t) => { try { t.stop(); } catch { /* ignore */ } });
     }
   };
 
-  const stopped = new Promise<void>((resolve) => {
-    recorder.onstop = () => resolve();
-  });
-  recorder.start(1000);
+  await acquire();
 
   return {
-    stream,
+    get stream() { return currentStream; },
     async stop() {
-      if (recorder.state !== 'inactive') recorder.stop();
-      await stopped;
-      stream.getTracks().forEach((t) => t.stop());
+      await release();
     },
-    pause() { if (recorder.state === 'recording') recorder.pause(); },
-    resume() { if (recorder.state === 'paused') recorder.resume(); },
+    pause() {
+      if (currentRecorder?.state === 'recording') currentRecorder.pause();
+    },
+    resume() {
+      if (currentRecorder?.state === 'paused') currentRecorder.resume();
+    },
+    async setMuted(muted: boolean) {
+      if (muted) {
+        if (currentStream || currentRecorder) await release();
+      } else {
+        if (!currentStream) await acquire();
+      }
+    },
     getMimeType() { return mimeType; },
   };
 }
