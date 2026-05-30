@@ -912,6 +912,10 @@ Pro/Max 导出（订阅状态验证）：
 
 ### 11.2 变更记录（按时间倒序）
 
+- **2026-05-30｜第五轮（修复第四轮回归）**：
+  1. 导出报错 `ArrayBuffer already detached`：帧去重复用 buffer 被 `ffmpeg.writeFile` transfer detach；改为写入传 `buf.slice()` 副本、保留 `lastBuf`。
+  2. 字幕不再截断：单行固定高度 + **长句分页**（`frameOverlays` 新增 `subtitleLayout`/`chunkByWidth`/`subtitlePageIndex`，导出与 `SubtitleOverlay` 共用，按时间翻页）；导出去重签名并入字幕页索引以免翻页卡住。
+  3. 口水词全面过滤（`srtParser.cleanSubtitleText`）：第 1 档全局删迟疑音（呃/嗯/唔/呣、um/uh/erm/er/hmm/mm），第 2 档边界删感叹词（啊/哦/噢/唉/诶/呢/嘛/额/哼、ah/eh/oh/huh）；第 3 档话语标记（那个/就是/well/like 等）按需保留不动。
 - **2026-05-30｜第四轮迭代（代码已实现，构建通过；运维项见下）**：
   1. 讲义：报 `cloud_recording_required` 时就地「保存到云端并重试」（`HandoutPanel`/`ExportPanel` 复用 `uploadRecording`）。**运维**：线上需应用迁移 `20260524120000_max_features`（建 `handouts`/`share_links`，修复生成讲义 500）。
   2. 录制性能：elapsed 计时 250→1000ms（`app/page.tsx`）；DOM 截屏 `workspaceShellCapture` 降频（periodic 3→5s、gap 800→1500ms、debounce 250→1000ms）+ 指纹延后到防抖回调；`CameraBubble` 拖拽 rAF 节流。

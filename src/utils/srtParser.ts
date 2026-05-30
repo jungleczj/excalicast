@@ -1,24 +1,48 @@
 import type { SubtitleCue } from '@/types/recording';
 
-// 独立语气词/口水词（仅去开头或整段，避免误删句中有意义的词如「就是/那个」）
-const FILLER_RE = /^(?:嗯+|呃+|啊+|哦+|唉+|呐+|嗯呐|um+|uh+|erm+|er+)(?:[，,。．.、\s]+|$)/i;
+// ---------------------------------------------------------------------------
+// 口水词词表（分组，便于增删）。仅做第 1、2 档，保守不动「就是/那个/then/like」等可能有实义的词。
+// ---------------------------------------------------------------------------
+
+// 第 1 档 · 纯迟疑音：无词汇意义，任意位置都删（含重复/叠字）。
+// 中文：呃 嗯 唔 呣（及连写）；英文：um/uh/uhm/erm/er/hmm/mm/mhm（及叠写）。
+const TIER1_CJK = /[呃嗯唔呣]+/gu;
+const TIER1_EN = /\b(?:u+m+|u+h+|uh+m+|e+rm+|er|h+m+|mm+|mhm)\b/gi;
+
+// 第 2 档 · 语气词/感叹词：仅当作"独立 token"（被空白/标点/首尾包裹）时删，避免误删句中实义用法。
+// 用前导分隔符捕获组 + 后向断言（不使用后向否定 lookbehind，兼容旧 Safari）。
+const SEP = '\\s，,。．.、！？!?；;：:…';
+const TIER2_CJK = new RegExp(`(^|[${SEP}])[啊哦噢喔唉诶欸呢嘛哈额哼]+(?=$|[${SEP}])`, 'gu');
+const TIER2_EN = /\b(?:ah+|eh+|oh+|huh|hah)\b/gi;
 
 /**
  * 字幕文本清洗（显示与导出共用，单点处理，不改存储的原始 SRT）：
- *  - 去句末标点（。．.！？!?…，,；;、 等）
- *  - 去开头/整段的语气词口水词（保守）
+ *  - 去口水词（第 1 档全局迟疑音 + 第 2 档独立语气词，中英）
+ *  - 清理残留的多余空格/重复标点 + 去句末标点
+ * 整段被清空（纯口水词/标点）时返回 ''，调用方据此跳过该 cue。
  */
 export function cleanSubtitleText(raw: string): string {
   let s = raw.trim();
-  // 反复剥离开头语气词（如「嗯，那个…」剥一次「嗯，」）
-  let prev: string;
-  do {
-    prev = s;
-    s = s.replace(FILLER_RE, '').trim();
-  } while (s !== prev && s.length > 0);
-  // 去句末标点（含全角/半角）
-  s = s.replace(/[。．.!！?？…,，;；、\s]+$/u, '').trim();
-  return s;
+
+  // 第 1 档：全局删迟疑音
+  s = s.replace(TIER1_CJK, '').replace(TIER1_EN, '');
+
+  // 第 2 档：独立语气词（反复跑两遍，处理「啊，哦，」相邻两个的情况）
+  for (let i = 0; i < 2; i++) {
+    s = s.replace(TIER2_CJK, '$1').replace(TIER2_EN, '');
+  }
+
+  // 清理：英文多余空格、重复标点、标点前的多余空格、逗号紧接句末标点
+  s = s
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\s+([，,。．.、！？!?；;：:])/gu, '$1')
+    .replace(/([，,。．.、！？!?；;：:])\1+/gu, '$1')
+    .replace(/[，,、]+([。．.！？!?])/gu, '$1');
+
+  // 去首尾标点/空白
+  s = s.replace(/^[\s，,。．.、！？!?；;：:…]+/u, '');
+  s = s.replace(/[。．.!！?？…,，;；、:：\s]+$/u, '');
+  return s.trim();
 }
 
 function parseTimestamp(ts: string): number {

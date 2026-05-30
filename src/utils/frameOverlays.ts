@@ -5,18 +5,48 @@ export function compileSubtitles(srt: string | null | undefined): SubtitleCue[] 
   return srt ? parseSrt(srt) : [];
 }
 
-/** 单行截断：超过 maxWidth 时尾部用省略号（CJK + 拉丁混排按字符贪心）。 */
-function truncateToWidth(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+// ---------------------------------------------------------------------------
+// 字幕：单行固定高度 + 长句"分页"（不截断）。显示与导出共用这套切页逻辑。
+// ---------------------------------------------------------------------------
+
+const SUBTITLE_FONT_STACK = 'ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans", "Noto Sans CJK SC", sans-serif';
+
+/** 字幕排版参数（导出/预览统一来源），保证切页一致。 */
+export function subtitleLayout(videoW: number, videoH: number, reservedRightFraction = 0): {
+  fontSize: number; fontSpec: string; maxTextWidth: number;
+} {
+  const fontSize = Math.max(18, Math.round(videoH * 0.034));
+  const usableFraction = 1 - reservedRightFraction;
+  const maxTextWidth = Math.round(videoW * 0.84 * usableFraction);
+  return { fontSize, fontSpec: `600 ${fontSize}px ${SUBTITLE_FONT_STACK}`, maxTextWidth };
+}
+
+/** 把一句字幕按可用宽度切成多张单行（CJK + 拉丁混排按字符贪心，留 5% 余量）。 */
+export function chunkByWidth(measure: (s: string) => number, text: string, maxWidth: number): string[] {
   const oneLine = text.replace(/\s*\n\s*/g, ' ').trim();
-  if (ctx.measureText(oneLine).width <= maxWidth) return oneLine;
-  const ell = '…';
-  const ellW = ctx.measureText(ell).width;
-  let acc = '';
+  if (!oneLine) return [];
+  const limit = maxWidth * 0.95;
+  if (measure(oneLine) <= limit) return [oneLine];
+  const chunks: string[] = [];
+  let cur = '';
   for (const ch of oneLine) {
-    if (ctx.measureText(acc + ch).width + ellW > maxWidth) break;
-    acc += ch;
+    if (cur && measure(cur + ch) > limit) {
+      chunks.push(cur);
+      cur = ch === ' ' ? '' : ch;
+    } else {
+      cur += ch;
+    }
   }
-  return (acc.trim() || oneLine.slice(0, 1)) + ell;
+  if (cur.trim()) chunks.push(cur);
+  return chunks.map((c) => c.trim()).filter(Boolean);
+}
+
+/** 在 cue 时间区间内按时间均分，选当前应显示的分页索引。 */
+export function subtitlePageIndex(pageCount: number, startMs: number, endMs: number, t: number): number {
+  if (pageCount <= 1) return 0;
+  const dur = Math.max(1, endMs - startMs);
+  const frac = Math.min(0.99999, Math.max(0, (t - startMs) / dur));
+  return Math.min(pageCount - 1, Math.floor(frac * pageCount));
 }
 
 export function drawSubtitle(
@@ -31,23 +61,21 @@ export function drawSubtitle(
   const cue = cueAt(cues, timeMs);
   if (!cue) return;
 
-  const fontSize = Math.max(18, Math.round(videoH * 0.034));
+  const { fontSize, fontSpec, maxTextWidth } = subtitleLayout(videoW, videoH, options?.reservedRightFraction ?? 0);
   const padX = Math.round(fontSize * 0.75);
   const padY = Math.round(fontSize * 0.45);
-  // 摄像头气泡在右下角时为字幕预留出空间，避免被遮住
-  const usableFraction = 1 - (options?.reservedRightFraction ?? 0);
-  const maxTextWidth = Math.round(videoW * 0.84 * usableFraction);
 
   ctx.save();
-  ctx.font = `600 ${fontSize}px ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans", "Noto Sans CJK SC", sans-serif`;
+  ctx.font = fontSpec;
   ctx.textBaseline = 'top';
 
-  // 单行固定高度：截断为一行，背景框高度恒定（不随文字长度抖动）
-  const line = truncateToWidth(ctx, cue.text, maxTextWidth);
-  if (!line) {
+  // 单行固定高度 + 长句分页：按可用宽度切页，按时间选当前页（不截断、不省略号）
+  const pages = chunkByWidth((s) => ctx.measureText(s).width, cue.text, maxTextWidth);
+  if (pages.length === 0) {
     ctx.restore();
     return;
   }
+  const line = pages[subtitlePageIndex(pages.length, cue.startMs, cue.endMs, timeMs)];
 
   const blockH = fontSize + padY * 2;
   const lineW = ctx.measureText(line).width;

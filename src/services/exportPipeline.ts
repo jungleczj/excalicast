@@ -18,7 +18,7 @@ import {
   type WhiteboardSnapshot,
   type WorkspaceShellRow,
 } from '@/types/recording';
-import { compileSubtitles, drawFrostedWatermark, drawSubtitle } from '@/utils/frameOverlays';
+import { compileSubtitles, drawFrostedWatermark, drawSubtitle, subtitleLayout, chunkByWidth, subtitlePageIndex } from '@/utils/frameOverlays';
 import { cueAt } from '@/utils/srtParser';
 import { drawLaserOverlay } from '@/utils/laserRender';
 
@@ -313,6 +313,22 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   let lastBaseSig: string | null = null;
   let baseCanvas: HTMLCanvasElement | null = null;
 
+  // 字幕分页：用常驻测量 ctx（导出字体/尺寸恒定）算当前页索引，供去重签名使用，
+  // 否则同一 cue 内不同分页的相邻帧会被误判相同而复用 → 分页卡住不翻页。
+  const subLayout = subtitleLayout(outputW, outputH, cameraBlob ? 0.3 : 0);
+  const subMeasureCtx = document.createElement('canvas').getContext('2d');
+  if (subMeasureCtx) subMeasureCtx.font = subLayout.fontSpec;
+  const subPagesCache = new Map<number, number>(); // cue.startMs → pageCount
+  const subtitlePageAt = (cue: { startMs: number; endMs: number; text: string }, t: number): number => {
+    if (!subMeasureCtx) return 0;
+    let pageCount = subPagesCache.get(cue.startMs);
+    if (pageCount === undefined) {
+      pageCount = chunkByWidth((s) => subMeasureCtx.measureText(s).width, cue.text, subLayout.maxTextWidth).length || 1;
+      subPagesCache.set(cue.startMs, pageCount);
+    }
+    return subtitlePageIndex(pageCount, cue.startMs, cue.endMs, t);
+  };
+
   for (let i = 0; i < totalFrames; i++) {
     const t = (i / fps) * 1000;
     const snap = snapshotAt(snapshots, t);
@@ -321,9 +337,11 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
 
     // 帧签名：决定本帧像素的全部时变因素（场景快照 + 外壳 + 当前字幕）。
     const name = `f_${String(i).padStart(6, '0')}.png`;
-    const sig = `${snap?.timestamp ?? -1}|${shellAtTframe?.timestamp ?? -1}|${cueAtT ? `${cueAtT.startMs}-${cueAtT.endMs}` : -1}`;
+    const sig = `${snap?.timestamp ?? -1}|${shellAtTframe?.timestamp ?? -1}|${cueAtT ? `${cueAtT.startMs}-${cueAtT.endMs}#${subtitlePageAt(cueAtT, t)}` : -1}`;
     if (dedupEnabled && sig === lastSig && lastBuf) {
-      await ffmpeg.writeFile(name, lastBuf);
+      // 传副本：writeFile 以 transfer 方式 postMessage 会 detach 传入 buffer，
+      // 必须用 slice() 给一份新 ArrayBuffer，保留 lastBuf 供后续复用。
+      await ffmpeg.writeFile(name, lastBuf.slice());
       opts.onProgress?.(0.08 + ((i + 1) / totalFrames) * 0.64);
       continue;
     }
@@ -473,7 +491,8 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       target.toBlob((b) => b ? resolve(b) : reject(new Error('toBlob_failed')), 'image/png');
     });
     const buf = new Uint8Array(await blob.arrayBuffer());
-    await ffmpeg.writeFile(name, buf);
+    // 写副本以免 detach 掉要保留作 lastBuf 的 buf
+    await ffmpeg.writeFile(name, buf.slice());
     lastBuf = buf;
     lastSig = sig;
 
