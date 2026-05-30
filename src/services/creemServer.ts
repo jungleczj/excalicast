@@ -17,6 +17,7 @@
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import type { SubscriptionTier } from '@/types/user';
 
 export interface CreemCreds {
   apiKey: string;
@@ -323,6 +324,7 @@ export interface CreemOneTimePaid {
 export interface CreemSubscriptionEvent {
   kind: 'subscription';
   status: 'active' | 'cancelled' | 'paused' | 'past_due';
+  tier: SubscriptionTier;
   userId: string;
   subscriptionId: string;
   customerId: string | null;
@@ -381,6 +383,9 @@ export function extractSubscriptionEvent(ev: CreemEvent): CreemSubscriptionEvent
   const userId = ev.metadata.userId;
   if (!userId) return null;
 
+  const tier: SubscriptionTier =
+    ev.metadata.tier === 'max' || ev.metadata.kind === 'max_subscription' ? 'max' : 'pro';
+
   const sub =
     (ev.object.subscription as Record<string, unknown> | undefined) ??
     ev.object;
@@ -414,6 +419,7 @@ export function extractSubscriptionEvent(ev: CreemEvent): CreemSubscriptionEvent
   return {
     kind: 'subscription',
     status,
+    tier,
     userId,
     subscriptionId,
     customerId,

@@ -36,6 +36,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
   const [statusMsg, setStatusMsg] = useState<string>('');
   const [paywallOpen, setPaywallOpen] = useState<boolean>(false);
   const [proUpgradeOpen, setProUpgradeOpen] = useState<boolean>(false);
+  const [upgradeTier, setUpgradeTier] = useState<'pro' | 'max'>('pro');
   const [subtitlePanelOpen, setSubtitlePanelOpen] = useState<boolean>(false);
   const [pendingExport, setPendingExport] = useState<boolean>(false);
   const [bgPolling, setBgPolling] = useState<boolean>(false);
@@ -48,6 +49,11 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
   const [maxFeatureMsg, setMaxFeatureMsg] = useState<string | null>(null);
 
   const maxUnlocked = subscription.permissions.handout && subscription.permissions.shareLink;
+
+  const openUpgrade = useCallback((tier: 'pro' | 'max') => {
+    setUpgradeTier(tier);
+    setProUpgradeOpen(true);
+  }, []);
 
   const handleCreateShareLink = useCallback(async () => {
     setShareBusy(true);
@@ -258,7 +264,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
           {!proUnlocked && (
             <button
               type="button"
-              onClick={() => setProUpgradeOpen(true)}
+              onClick={() => openUpgrade('pro')}
               className="ml-auto btn-sketch btn-sketch-hi"
               style={{ padding: '5px 10px', fontSize: 10 }}
             >
@@ -277,7 +283,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
             actionLabel={subscription.permissions.subtitle ? t('subtitleAction') : t('subtitleActionLocked')}
             onAction={() => {
               if (subscription.permissions.subtitle) setSubtitlePanelOpen(true);
-              else setProUpgradeOpen(true);
+              else openUpgrade('pro');
             }}
             useLabel={t('use')}
             upgradeLabel={t('upgrade')}
@@ -287,7 +293,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
             desc={t('maxBundleDesc')}
             unlockLabel={t('maxBundleUnlock')}
             unlocked={maxUnlocked}
-            onUpgrade={() => setProUpgradeOpen(true)}
+            onUpgrade={() => openUpgrade('max')}
             handout={{
               title: t('handoutTitle'),
               desc: t('handoutDesc'),
@@ -369,11 +375,12 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
         }}
         onUpgradePro={() => {
           setPaywallOpen(false);
-          setProUpgradeOpen(true);
+          openUpgrade('pro');
         }}
       />
       <ProUpgradeModal
         open={proUpgradeOpen}
+        tier={upgradeTier}
         onClose={() => setProUpgradeOpen(false)}
         onUpgraded={() => {
           setStatusMsg(t('proActivatedStatus'));

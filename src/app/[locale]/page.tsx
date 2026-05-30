@@ -8,6 +8,9 @@ interface Props {
   params: Promise<{ locale: string }>;
 }
 
+// 价格随 payment_config 实时变化：按请求渲染，避免静态预渲染把旧价烤进 HTML。
+export const dynamic = 'force-dynamic';
+
 export async function generateMetadata({ params }: Props) {
   const { locale } = await params;
   const t = await getTranslations({ locale, namespace: 'landing.meta' });
@@ -18,11 +21,13 @@ export default async function LandingPage({ params }: Props): Promise<JSX.Elemen
   const { locale } = await params;
   setRequestLocale(locale);
   const cfg = await getActiveConfig();
-  const oneTimePrice = cfg ? formatPrice(cfg.oneTimePriceCents, cfg.currency) : '$9.99';
-  return <LandingContent oneTimePrice={oneTimePrice} />;
+  const oneTimePrice = cfg ? formatPrice(cfg.oneTimePriceCents, cfg.currency) : '$4.99';
+  const proPrice = cfg ? formatPrice(cfg.proMonthlyPriceCents, cfg.currency) : '$9.99';
+  const maxPrice = cfg ? formatPrice(cfg.maxMonthlyPriceCents, cfg.currency) : '$15.99';
+  return <LandingContent oneTimePrice={oneTimePrice} proPrice={proPrice} maxPrice={maxPrice} />;
 }
 
-function LandingContent({ oneTimePrice }: { oneTimePrice: string }): JSX.Element {
+function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: string; proPrice: string; maxPrice: string }): JSX.Element {
   const t = useTranslations('landing');
   return (
     <div className="flex h-full flex-col" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
@@ -288,7 +293,7 @@ function LandingContent({ oneTimePrice }: { oneTimePrice: string }): JSX.Element
             </p>
           </div>
 
-          <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(2, 1fr)', maxWidth: 900, margin: '0 auto' }}>
+          <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(4, 1fr)', maxWidth: 1240, margin: '0 auto' }}>
             {/* Free tier */}
             <div
               style={{
@@ -375,6 +380,77 @@ function LandingContent({ oneTimePrice }: { oneTimePrice: string }): JSX.Element
 
               <Link href="/app" className="btn-sketch btn-sketch-primary w-full" style={{ justifyContent: 'center' }}>
                 {t('pricing.oneTime.cta')}
+              </Link>
+            </div>
+
+            {/* Pro tier */}
+            <div
+              style={{
+                background: 'var(--pro)',
+                border: '1.8px solid var(--ink)',
+                borderRadius: 4,
+                boxShadow: '3px 3px 0 var(--ink)',
+                padding: 28,
+              }}
+            >
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>
+                {t('pricing.pro.label')}
+              </div>
+              <div className="mt-3 mb-3 flex items-baseline">
+                <span style={{ fontFamily: 'var(--font-display)', fontSize: 44, fontWeight: 700, letterSpacing: '-0.025em' }}>
+                  {proPrice}
+                </span>
+                <span className="ml-2" style={{ fontSize: 13, color: 'var(--ink-2)' }}>{t('pricing.pro.unit')}</span>
+              </div>
+              <p style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 18 }}>
+                {t('pricing.pro.tagline')}
+              </p>
+
+              <ul className="space-y-2" style={{ marginBottom: 24 }}>
+                <Bullet>{t('pricing.pro.bullet1')}</Bullet>
+                <Bullet>{t('pricing.pro.bullet2')}</Bullet>
+                <Bullet>{t('pricing.pro.bullet3')}</Bullet>
+                <Bullet>{t('pricing.pro.bullet4')}</Bullet>
+                <Bullet>{t('pricing.pro.bullet5')}</Bullet>
+              </ul>
+
+              <Link href="/app" className="btn-sketch w-full" style={{ justifyContent: 'center' }}>
+                {t('pricing.pro.cta')}
+              </Link>
+            </div>
+
+            {/* Max tier */}
+            <div
+              style={{
+                background: 'var(--max)',
+                border: '1.8px solid var(--ink)',
+                borderRadius: 4,
+                boxShadow: '3px 3px 0 var(--ink)',
+                padding: 28,
+              }}
+            >
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>
+                {t('pricing.max.label')}
+              </div>
+              <div className="mt-3 mb-3 flex items-baseline">
+                <span style={{ fontFamily: 'var(--font-display)', fontSize: 44, fontWeight: 700, letterSpacing: '-0.025em' }}>
+                  {maxPrice}
+                </span>
+                <span className="ml-2" style={{ fontSize: 13, color: 'var(--ink-2)' }}>{t('pricing.max.unit')}</span>
+              </div>
+              <p style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, marginBottom: 18 }}>
+                {t('pricing.max.tagline')}
+              </p>
+
+              <ul className="space-y-2" style={{ marginBottom: 24 }}>
+                <Bullet>{t('pricing.max.bullet1')}</Bullet>
+                <Bullet>{t('pricing.max.bullet2')}</Bullet>
+                <Bullet>{t('pricing.max.bullet3')}</Bullet>
+                <Bullet>{t('pricing.max.bullet4')}</Bullet>
+              </ul>
+
+              <Link href="/app" className="btn-sketch w-full" style={{ justifyContent: 'center' }}>
+                {t('pricing.max.cta')}
               </Link>
             </div>
           </div>

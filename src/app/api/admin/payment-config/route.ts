@@ -59,11 +59,13 @@ interface PostBody {
   currency?: string;
   oneTimePriceCents?: number;
   proMonthlyPriceCents?: number;
+  maxMonthlyPriceCents?: number;
   apiKey?: string | null;
   webhookSecret?: string | null;
   apiBase?: string | null;
   oneTimeProductId?: string | null;
   proProductId?: string | null;
+  maxProductId?: string | null;
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
@@ -83,7 +85,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (body.mode !== 'live' && body.mode !== 'test') {
     return NextResponse.json({ error: 'invalid_mode', hint: "mode must be 'live' or 'test'" }, { status: 400 });
   }
-  for (const k of ['oneTimePriceCents', 'proMonthlyPriceCents'] as const) {
+  for (const k of ['oneTimePriceCents', 'proMonthlyPriceCents', 'maxMonthlyPriceCents'] as const) {
     if (body[k] != null && (typeof body[k] !== 'number' || body[k]! < 0)) {
       return NextResponse.json({ error: `invalid_${k}` }, { status: 400 });
     }
@@ -98,11 +100,13 @@ export async function POST(req: Request): Promise<NextResponse> {
     currency: body.currency,
     oneTimePriceCents: body.oneTimePriceCents,
     proMonthlyPriceCents: body.proMonthlyPriceCents,
+    maxMonthlyPriceCents: body.maxMonthlyPriceCents,
     apiKey: body.apiKey,
     webhookSecret: body.webhookSecret,
     apiBase: body.apiBase,
     oneTimeProductId: body.oneTimeProductId,
     proProductId: body.proProductId,
+    maxProductId: body.maxProductId,
   };
 
   // Merge against current to know the final-effective state for validation
@@ -110,18 +114,26 @@ export async function POST(req: Request): Promise<NextResponse> {
   const effective = {
     apiKey: patch.apiKey !== undefined ? patch.apiKey : existing?.apiKey ?? null,
     apiBase: patch.apiBase !== undefined ? patch.apiBase : existing?.apiBase ?? null,
-    oneTimePriceCents: patch.oneTimePriceCents ?? existing?.oneTimePriceCents ?? 300,
-    proMonthlyPriceCents: patch.proMonthlyPriceCents ?? existing?.proMonthlyPriceCents ?? 900,
+    oneTimePriceCents: patch.oneTimePriceCents ?? existing?.oneTimePriceCents ?? 499,
+    proMonthlyPriceCents: patch.proMonthlyPriceCents ?? existing?.proMonthlyPriceCents ?? 999,
+    maxMonthlyPriceCents: patch.maxMonthlyPriceCents ?? existing?.maxMonthlyPriceCents ?? 1599,
     currency: (patch.currency ?? existing?.currency ?? 'usd').toLowerCase(),
     oneTimeProductId: patch.oneTimeProductId !== undefined ? patch.oneTimeProductId : existing?.oneTimeProductId ?? null,
     proProductId: patch.proProductId !== undefined ? patch.proProductId : existing?.proProductId ?? null,
+    maxProductId: patch.maxProductId !== undefined ? patch.maxProductId : existing?.maxProductId ?? null,
   };
 
   // Creem write-time validation —— call Creem to confirm price/currency match.
   if (patch.provider === 'creem' && effective.apiKey && effective.apiBase) {
-    for (const slot of ['one_time', 'pro'] as const) {
-      const productId = slot === 'one_time' ? effective.oneTimeProductId : effective.proProductId;
-      const expectedCents = slot === 'one_time' ? effective.oneTimePriceCents : effective.proMonthlyPriceCents;
+    for (const slot of ['one_time', 'pro', 'max'] as const) {
+      const productId =
+        slot === 'one_time' ? effective.oneTimeProductId
+        : slot === 'pro' ? effective.proProductId
+        : effective.maxProductId;
+      const expectedCents =
+        slot === 'one_time' ? effective.oneTimePriceCents
+        : slot === 'pro' ? effective.proMonthlyPriceCents
+        : effective.maxMonthlyPriceCents;
       if (!productId) continue;
       try {
         const cp = await fetchCreemProduct(productId, { apiKey: effective.apiKey, apiBase: effective.apiBase });
@@ -129,7 +141,7 @@ export async function POST(req: Request): Promise<NextResponse> {
           return NextResponse.json({
             error: 'creem_price_mismatch',
             slot,
-            field: slot === 'one_time' ? 'oneTimePriceCents' : 'proMonthlyPriceCents',
+            field: slot === 'one_time' ? 'oneTimePriceCents' : slot === 'pro' ? 'proMonthlyPriceCents' : 'maxMonthlyPriceCents',
             dbValue: expectedCents,
             creemValue: cp.priceCents,
             productId,

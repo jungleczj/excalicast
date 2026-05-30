@@ -8,13 +8,15 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * 创建 Pro 订阅 checkout。
+ * 创建 Pro / Max 订阅 checkout。
+ *
+ * 入参（可选 body）：{ tier?: 'pro' | 'max' }，默认 'pro'。
  *
  * 出参：
- *   - Paddle：{ provider:'paddle', priceId, userId } —— 走 Paddle SDK overlay
+ *   - Paddle：{ provider:'paddle', priceId, userId, tier } —— 走 Paddle SDK overlay
  *   - Creem： { provider:'creem',  redirectUrl, checkoutId }
  *
- * 必须已登录（Pro 订阅必须能绑定 Supabase userId）。
+ * 必须已登录（订阅必须能绑定 Supabase userId）。
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const supabase = await createSupabaseServerClient();
@@ -23,32 +25,42 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
   }
 
+  let tier: 'pro' | 'max' = 'pro';
+  try {
+    const body = (await req.json().catch(() => ({}))) as { tier?: string };
+    if (body.tier === 'max') tier = 'max';
+  } catch {
+    // 无 body → 默认 pro
+  }
+
   const cfg = await getActiveConfig();
   if (!cfg) {
     return NextResponse.json({ error: 'no_active_payment_config' }, { status: 500 });
   }
+  const productId = tier === 'max' ? cfg.maxProductId : cfg.proProductId;
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '') || 'http://localhost:3005';
   const cookieLocale = req.cookies.get(LOCALE_COOKIE)?.value;
   const locale = cookieLocale && (locales as readonly string[]).includes(cookieLocale) ? cookieLocale : defaultLocale;
 
   if (cfg.provider === 'creem') {
-    if (!cfg.proProductId || !cfg.apiKey || !cfg.apiBase) {
+    if (!productId || !cfg.apiKey || !cfg.apiBase) {
       return NextResponse.json(
-        { error: 'creem_creds_missing', mode: cfg.mode },
+        { error: 'creem_creds_missing', mode: cfg.mode, tier },
         { status: 500 },
       );
     }
     try {
       const result = await createCreemCheckout({
         creds: { apiKey: cfg.apiKey, apiBase: cfg.apiBase },
-        productId: cfg.proProductId,
-        successUrl: `${appUrl}/${locale}/app?creem_purchase=pro`,
+        productId,
+        successUrl: `${appUrl}/${locale}/app?creem_purchase=${tier}`,
         customerEmail: user.email ?? undefined,
         metadata: {
-          kind: 'pro_subscription',
+          kind: tier === 'max' ? 'max_subscription' : 'pro_subscription',
+          tier,
           userId: user.id,
         },
-        requestId: `pro_${user.id}_${Date.now()}`,
+        requestId: `${tier}_${user.id}_${Date.now()}`,
       });
       return NextResponse.json({
         provider: 'creem',
@@ -63,13 +75,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  if (!cfg.proProductId) {
-    return NextResponse.json({ error: 'paddle_pro_price_id_missing' }, { status: 500 });
+  if (!productId) {
+    return NextResponse.json({ error: 'paddle_price_id_missing', tier }, { status: 500 });
   }
   return NextResponse.json({
     provider: 'paddle',
-    priceId: cfg.proProductId,
+    priceId: productId,
     userId: user.id,
     email: user.email ?? null,
+    tier,
   });
 }

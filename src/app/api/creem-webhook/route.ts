@@ -62,7 +62,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (sub) {
     await upsertSubscription({
       userId: sub.userId,
-      tier: 'pro',
+      tier: sub.tier,
       status: sub.status,
       paddleSubscriptionId: `creem:${sub.subscriptionId}`,
       paddleCustomerId: sub.customerId ? `creem:${sub.customerId}` : null,

@@ -51,6 +51,27 @@
         "bullet5": "Recording data stays in your browser. Server only stores payment status.",
         "cta": "Record first to unlock"
       },
+      "pro": {
+        "label": "Pro",
+        "unit": "/mo",
+        "tagline": "For regular creators. Subscribe monthly, cancel anytime.",
+        "bullet1": "Watermark-free export on every recording",
+        "bullet2": "AI subtitles (auto SRT timeline)",
+        "bullet3": "Cloud backup + unlimited recording length",
+        "bullet4": "Cross-device cloud template library",
+        "bullet5": "Priority support",
+        "cta": "Upgrade in app"
+      },
+      "max": {
+        "label": "Max",
+        "unit": "/mo",
+        "tagline": "Everything in Pro, plus AI handouts and public sharing.",
+        "bullet1": "Everything in Pro",
+        "bullet2": "AI structured handout (Markdown + transcript)",
+        "bullet3": "Public share link (web playback · 30-day TTL)",
+        "bullet4": "Priority support",
+        "cta": "Upgrade in app"
+      },
       "methods": "Accepted payment methods: Visa · Mastercard · American Express · Apple Pay · Google Pay",
       "processedBy": "All transactions are processed by <paddle>Paddle</paddle>. Excalicast never sees your payment details."
     },
@@ -303,7 +324,7 @@
     "bgPolling": "Waiting for payment confirmation… Download will start automatically once the webhook arrives. You can close this tab. (waits up to 5 min)",
     "bgTimeout": "Payment confirmation timed out (no webhook in 5 min). Please refresh and retry.",
     "advancedHeading": "Advanced",
-    "advancedLede": "Turn this recording into reusable knowledge.",
+    "advancedLede": "Turn this recording into reusable knowledge. Pro also syncs your template library across devices via the cloud.",
     "upgradePro": "Upgrade Pro",
     "subtitleTitle": "Voice subtitles",
     "subtitleDesc": "Audio transcription · auto zh/en · embedded SRT",
@@ -396,6 +417,7 @@
   "proUpgrade": {
     "title": "Upgrade to Pro",
     "subtitle": "Unlock all advanced capabilities. Billed monthly, cancel anytime.",
+    "perMonth": "/mo",
     "subscriptionTag": "Subscription · {provider} {env}",
     "sandbox": "sandbox",
     "secure": "secure checkout",
@@ -403,6 +425,7 @@
       "✅ Permanent watermark removal (every recording, no per-recording payment)",
       "✅ AI subtitles (auto-generated SRT timeline)",
       "✅ Cloud backup of recordings (multi-device access)",
+      "✅ Cross-device cloud template library (synced across devices)",
       "✅ Priority support"
     ],
     "needLogin": "Sign in to upgrade to Pro.",
@@ -417,6 +440,34 @@
     "syncing": "Subscription syncing. You can close this window and check back shortly.",
     "paymentDone": "Payment complete. Waiting for subscription activation…",
     "creemRedirected": "Creem checkout opened in a new tab. Pro will activate automatically once payment completes.",
+    "errorPaddleNotInit": "Paddle isn't ready yet. Please retry or check your network.",
+    "errorPrefix": "Error: {message}"
+  },
+  "maxUpgrade": {
+    "title": "Upgrade to Max",
+    "subtitle": "Everything in Pro, plus AI handouts and public share links. Billed monthly, cancel anytime.",
+    "perMonth": "/mo",
+    "subscriptionTag": "Subscription · {provider} {env}",
+    "sandbox": "sandbox",
+    "secure": "secure checkout",
+    "features": [
+      "✅ Everything in Pro (watermark-free export, AI subtitles, cloud backup, cloud template library)",
+      "✅ AI structured handout (Markdown outline + transcript)",
+      "✅ Public share link (web playback · 30-day TTL)",
+      "✅ Priority support"
+    ],
+    "needLogin": "Sign in to upgrade to Max.",
+    "loginFirst": "Sign in to upgrade",
+    "openingCheckout": "Opening {provider}…",
+    "ctaUpgrade": "Upgrade · {price}",
+    "ctaCancel": "Not now",
+    "footnoteCreem": "Secure Creem checkout · cancel anytime",
+    "footnoteSandbox": "Paddle sandbox — use test card numbers",
+    "footnotePaddle": "Secure Paddle checkout · cancel anytime",
+    "synced": "Max is now active!",
+    "syncing": "Subscription syncing. You can close this window and check back shortly.",
+    "paymentDone": "Payment complete. Waiting for subscription activation…",
+    "creemRedirected": "Creem checkout opened in a new tab. Max will activate automatically once payment completes.",
     "errorPaddleNotInit": "Paddle isn't ready yet. Please retry or check your network.",
     "errorPrefix": "Error: {message}"
   }

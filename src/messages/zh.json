@@ -51,6 +51,27 @@
         "bullet5": "录制数据全程留在你浏览器，服务端只存付费状态",
         "cta": "录制后即可解锁"
       },
+      "pro": {
+        "label": "Pro",
+        "unit": "/月",
+        "tagline": "适合常态创作者。按月订阅，可随时取消。",
+        "bullet1": "所有录制导出永久无水印",
+        "bullet2": "AI 语音字幕（自动 SRT 时间轴）",
+        "bullet3": "云端备份 + 无限录制时长",
+        "bullet4": "跨设备云端保存模板（多端同步素材库）",
+        "bullet5": "优先客服支持",
+        "cta": "进入应用升级"
+      },
+      "max": {
+        "label": "Max",
+        "unit": "/月",
+        "tagline": "包含 Pro 全部，另加 AI 讲义与公开分享。",
+        "bullet1": "包含 Pro 全部功能",
+        "bullet2": "AI 结构化讲义（Markdown + 文字稿）",
+        "bullet3": "公开分享链接（网页回放 · 30 天有效）",
+        "bullet4": "优先客服支持",
+        "cta": "进入应用升级"
+      },
       "methods": "支持的支付方式：Visa · Mastercard · American Express · Apple Pay · Google Pay",
       "processedBy": "所有交易由 <paddle>Paddle</paddle> 处理。Excalicast 不接触你的支付信息。"
     },
@@ -303,7 +324,7 @@
     "bgPolling": "支付确认中…收到 webhook 后将自动开始下载，可关闭此页（最多等待 5 分钟）",
     "bgTimeout": "支付确认超时（5 分钟未收到 webhook），请刷新页面重试。",
     "advancedHeading": "进阶服务",
-    "advancedLede": "把这次录制变成可复用的知识。",
+    "advancedLede": "把这次录制变成可复用的知识。Pro 还支持跨设备云端保存模板（多端同步素材库）。",
     "upgradePro": "升级 Pro",
     "subtitleTitle": "语音字幕",
     "subtitleDesc": "音频转写 · 中英自动 · 内嵌 SRT",
@@ -396,6 +417,7 @@
   "proUpgrade": {
     "title": "升级到 Pro",
     "subtitle": "解锁全部高阶能力。订阅按月计费，可随时取消。",
+    "perMonth": "/月",
     "subscriptionTag": "订阅 · {provider} {env}",
     "sandbox": "沙盒可测",
     "secure": "安全支付",
@@ -403,6 +425,7 @@
       "✅ 导出永久无水印（所有录制，不再单次付费）",
       "✅ 语音字幕生成（自动转 SRT 时间轴）",
       "✅ 云端备份录制（防丢失，多设备访问）",
+      "✅ 跨设备云端保存模板（多端同步素材库）",
       "✅ 优先客服支持"
     ],
     "needLogin": "升级 Pro 需要先登录账户。",
@@ -417,6 +440,34 @@
     "syncing": "订阅同步中，可关闭窗口稍后查看…",
     "paymentDone": "支付完成，正在等待订阅生效…",
     "creemRedirected": "已在新标签页打开 Creem 支付页面，完成后会自动开通 Pro…",
+    "errorPaddleNotInit": "Paddle 尚未初始化，请稍后重试或检查网络。",
+    "errorPrefix": "错误：{message}"
+  },
+  "maxUpgrade": {
+    "title": "升级到 Max",
+    "subtitle": "包含 Pro 全部能力，另加 AI 讲义与公开分享链接。订阅按月计费，可随时取消。",
+    "perMonth": "/月",
+    "subscriptionTag": "订阅 · {provider} {env}",
+    "sandbox": "沙盒可测",
+    "secure": "安全支付",
+    "features": [
+      "✅ 包含 Pro 全部（导出无水印、AI 字幕、云端备份、云端模板库）",
+      "✅ AI 结构化讲义（Markdown 大纲 + 文字稿）",
+      "✅ 公开分享链接（网页回放 · 30 天有效）",
+      "✅ 优先客服支持"
+    ],
+    "needLogin": "升级 Max 需要先登录账户。",
+    "loginFirst": "先登录后再升级",
+    "openingCheckout": "正在打开 {provider}…",
+    "ctaUpgrade": "立即升级 · {price}",
+    "ctaCancel": "暂不升级",
+    "footnoteCreem": "Creem 安全支付 · 随时取消",
+    "footnoteSandbox": "当前为 Paddle 沙盒环境，可使用测试卡号支付",
+    "footnotePaddle": "Paddle 安全支付 · 随时取消",
+    "synced": "Max 已开通！",
+    "syncing": "订阅同步中，可关闭窗口稍后查看…",
+    "paymentDone": "支付完成，正在等待订阅生效…",
+    "creemRedirected": "已在新标签页打开 Creem 支付页面，完成后会自动开通 Max…",
     "errorPaddleNotInit": "Paddle 尚未初始化，请稍后重试或检查网络。",
     "errorPrefix": "错误：{message}"
   }

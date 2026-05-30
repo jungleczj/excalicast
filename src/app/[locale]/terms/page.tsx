@@ -8,6 +8,9 @@ interface Props {
   params: Promise<{ locale: string }>;
 }
 
+// 价格随 payment_config 实时变化：按请求渲染，避免静态预渲染把旧价烤进 HTML。
+export const dynamic = 'force-dynamic';
+
 export async function generateMetadata({ params }: Props) {
   const { locale } = await params;
   const t = await getTranslations({ locale, namespace: 'terms.meta' });
@@ -19,7 +22,7 @@ export default async function TermsPage({ params }: Props): Promise<JSX.Element>
   setRequestLocale(locale);
   const t = await getTranslations({ locale, namespace: 'terms' });
   const cfg = await getActiveConfig();
-  const oneTimePrice = cfg ? formatPrice(cfg.oneTimePriceCents, cfg.currency) : '$9.99';
+  const oneTimePrice = cfg ? formatPrice(cfg.oneTimePriceCents, cfg.currency) : '$4.99';
   return (
     <LegalLayout title={t('title')} lastUpdated="2026-05-08">
       {locale === 'en' ? <TermsEn oneTimePrice={oneTimePrice} /> : <TermsZh oneTimePrice={oneTimePrice} />}

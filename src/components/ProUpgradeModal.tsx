@@ -14,13 +14,15 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onUpgraded?: () => void;
+  tier?: 'pro' | 'max';
 }
 
 const POLL_INTERVAL_MS = 1500;
 const POLL_MAX_ATTEMPTS = 40;
 
-export function ProUpgradeModal({ open, onClose, onUpgraded }: Props): JSX.Element | null {
-  const t = useTranslations('proUpgrade');
+export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Props): JSX.Element | null {
+  const isMax = tier === 'max';
+  const t = useTranslations(isMax ? 'maxUpgrade' : 'proUpgrade');
   const { paddle, subscribe } = usePaddle();
   const { user, loading: authLoading } = useAuth();
   const { refresh: refreshTier } = useSubscription();
@@ -35,7 +37,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded }: Props): JSX.Eleme
   const provider = paymentCfg?.provider ?? 'paddle';
   const providerLabel = provider === 'creem' ? 'Creem' : 'Paddle';
   const priceLabel = paymentCfg
-    ? `${formatPrice(paymentCfg.proMonthlyPriceCents, paymentCfg.currency)}/mo`
+    ? `${formatPrice(isMax ? paymentCfg.maxMonthlyPriceCents : paymentCfg.proMonthlyPriceCents, paymentCfg.currency)}${t('perMonth')}`
     : '…';
 
   const pollUntilPro = async () => {
@@ -48,7 +50,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded }: Props): JSX.Eleme
           const r = await fetch('/api/me/tier', { cache: 'no-store' });
           if (r.ok) {
             const j = await r.json();
-            if (j.tier === 'pro' || j.tier === 'max') {
+            if (isMax ? j.tier === 'max' : (j.tier === 'pro' || j.tier === 'max')) {
               setStatusMsg(t('synced'));
               await refreshTier();
               onUpgraded?.();
@@ -75,7 +77,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded }: Props): JSX.Eleme
     }
     setBusy(true);
     try {
-      openProSubscriptionCheckout({ paddle, userId: u.id, email: u.email });
+      openProSubscriptionCheckout({ paddle, userId: u.id, email: u.email, tier });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'unknown');
       setBusy(false);
@@ -85,7 +87,11 @@ export function ProUpgradeModal({ open, onClose, onUpgraded }: Props): JSX.Eleme
   const openCheckoutForProvider = async () => {
     setBusy(true);
     try {
-      const res = await fetch('/api/checkout/pro', { method: 'POST' });
+      const res = await fetch('/api/checkout/pro', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ tier }),
+      });
       const j = (await res.json().catch(() => ({}))) as {
         provider?: 'paddle' | 'creem';
         priceId?: string;
@@ -174,13 +180,13 @@ export function ProUpgradeModal({ open, onClose, onUpgraded }: Props): JSX.Eleme
         <div
           style={{
             padding: 24,
-            background: 'var(--pro)',
+            background: isMax ? 'var(--max)' : 'var(--pro)',
             borderBottom: '1.6px solid var(--ink)',
             position: 'relative',
           }}
         >
           <div className="flex items-start justify-between">
-            <span className="tag-mono tag-mono-pro">PRO · {priceLabel}</span>
+            <span className={`tag-mono ${isMax ? 'tag-mono-max' : 'tag-mono-pro'}`}>{isMax ? 'MAX' : 'PRO'} · {priceLabel}</span>
             <button
               onClick={onClose}
               className="grid place-items-center"

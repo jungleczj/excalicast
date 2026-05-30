@@ -47,27 +47,32 @@ export interface OpenProSubscriptionOptions {
   paddle: Paddle;
   userId: string;
   email?: string;
+  tier?: 'pro' | 'max';
 }
 
 /**
- * Open Paddle Overlay Checkout for the Pro recurring subscription.
+ * Open Paddle Overlay Checkout for the Pro / Max recurring subscription.
  * Customer pays via Paddle Sandbox or live env. After successful payment,
  * Paddle pushes `subscription.activated` → /api/paddle-webhook → user_subscriptions
- * row gets upserted with tier='pro'. Client side then re-fetches /api/me/tier.
+ * row gets upserted with the tier carried in custom_data.tier. Client side then
+ * re-fetches /api/me/tier.
  *
  * Important: userId is forwarded as customData.userId so the webhook can
- * identify which app user owns the subscription.
+ * identify which app user owns the subscription; tier tells it which plan.
  */
-export function openProSubscriptionCheckout({ paddle, userId, email }: OpenProSubscriptionOptions): void {
-  const priceId = process.env.NEXT_PUBLIC_PADDLE_PRO_PRICE_ID;
+export function openProSubscriptionCheckout({ paddle, userId, email, tier = 'pro' }: OpenProSubscriptionOptions): void {
+  const priceId = tier === 'max'
+    ? process.env.NEXT_PUBLIC_PADDLE_MAX_PRICE_ID
+    : process.env.NEXT_PUBLIC_PADDLE_PRO_PRICE_ID;
   if (!priceId) {
+    const envName = tier === 'max' ? 'NEXT_PUBLIC_PADDLE_MAX_PRICE_ID' : 'NEXT_PUBLIC_PADDLE_PRO_PRICE_ID';
     throw new Error(
-      'NEXT_PUBLIC_PADDLE_PRO_PRICE_ID is not set. Create a Pro recurring product in Paddle dashboard and put its priceId in .env.local',
+      `${envName} is not set. Create the ${tier} recurring product in Paddle dashboard and put its priceId in .env.local`,
     );
   }
   paddle.Checkout.open({
     items: [{ priceId, quantity: 1 }],
-    customData: { userId, tier: 'pro' },
+    customData: { userId, tier },
     customer: email ? { email } : undefined,
     settings: {
       displayMode: 'overlay',

@@ -26,11 +26,13 @@ export interface PaymentConfigRow {
   currency: string;
   oneTimePriceCents: number;
   proMonthlyPriceCents: number;
+  maxMonthlyPriceCents: number;
   apiKey: string | null;
   webhookSecret: string | null;
   apiBase: string | null;
   oneTimeProductId: string | null;
   proProductId: string | null;
+  maxProductId: string | null;
   updatedAt: number;
 }
 
@@ -41,6 +43,7 @@ export interface PublicPaymentConfig {
   currency: string;
   oneTimePriceCents: number;
   proMonthlyPriceCents: number;
+  maxMonthlyPriceCents: number;
 }
 
 export function toPublic(cfg: PaymentConfigRow): PublicPaymentConfig {
@@ -50,6 +53,7 @@ export function toPublic(cfg: PaymentConfigRow): PublicPaymentConfig {
     currency: cfg.currency,
     oneTimePriceCents: cfg.oneTimePriceCents,
     proMonthlyPriceCents: cfg.proMonthlyPriceCents,
+    maxMonthlyPriceCents: cfg.maxMonthlyPriceCents,
   };
 }
 
@@ -90,16 +94,31 @@ function getDb(): Database.Database {
       currency TEXT NOT NULL DEFAULT 'usd',
       one_time_price_cents INTEGER NOT NULL CHECK (one_time_price_cents >= 0),
       pro_monthly_price_cents INTEGER NOT NULL CHECK (pro_monthly_price_cents >= 0),
+      max_monthly_price_cents INTEGER NOT NULL DEFAULT 1599 CHECK (max_monthly_price_cents >= 0),
       api_key TEXT,
       webhook_secret TEXT,
       api_base TEXT,
       one_time_product_id TEXT,
       pro_product_id TEXT,
+      max_product_id TEXT,
       updated_at INTEGER NOT NULL,
       UNIQUE (provider, mode)
     );
     CREATE UNIQUE INDEX IF NOT EXISTS one_active_config
       ON payment_config (is_active) WHERE is_active = 1;
+  `);
+  // 兼容旧的本地库：补加 Max 字段（SQLite 无 ADD COLUMN IF NOT EXISTS）
+  for (const ddl of [
+    'ALTER TABLE payment_config ADD COLUMN max_monthly_price_cents INTEGER NOT NULL DEFAULT 1599',
+    'ALTER TABLE payment_config ADD COLUMN max_product_id TEXT',
+  ]) {
+    try { db.exec(ddl); } catch { /* 列已存在 */ }
+  }
+  // 旧本地库价格归一到当前发布价（镜像 Supabase 迁移；保守：仅老默认值才改，
+  // 不动用户自定义价；改完后 WHERE 不再命中，等同 no-op）。
+  db.exec(`
+    UPDATE payment_config SET one_time_price_cents = 499 WHERE one_time_price_cents = 300;
+    UPDATE payment_config SET pro_monthly_price_cents = 999 WHERE pro_monthly_price_cents = 900;
   `);
   // seed 4 行（首次启动时）
   const count = (db.prepare('SELECT COUNT(*) as n FROM payment_config').get() as { n: number }).n;
@@ -107,8 +126,8 @@ function getDb(): Database.Database {
     const now = Date.now();
     const seedRow = db.prepare(`
       INSERT OR IGNORE INTO payment_config
-        (is_active, provider, mode, currency, one_time_price_cents, pro_monthly_price_cents, api_base, updated_at)
-      VALUES (?, ?, ?, 'usd', 300, 900, ?, ?)
+        (is_active, provider, mode, currency, one_time_price_cents, pro_monthly_price_cents, max_monthly_price_cents, api_base, updated_at)
+      VALUES (?, ?, ?, 'usd', 499, 999, 1599, ?, ?)
     `);
     seedRow.run(1, 'creem', 'live', 'https://api.creem.io/v1', now);
     seedRow.run(0, 'creem', 'test', 'https://test-api.creem.io/v1', now);
@@ -131,11 +150,13 @@ interface SqliteRow {
   currency: string;
   one_time_price_cents: number;
   pro_monthly_price_cents: number;
+  max_monthly_price_cents: number;
   api_key: string | null;
   webhook_secret: string | null;
   api_base: string | null;
   one_time_product_id: string | null;
   pro_product_id: string | null;
+  max_product_id: string | null;
   updated_at: number;
 }
 
@@ -153,11 +174,13 @@ function fromSqliteRow(r: SqliteRow): PaymentConfigRow {
     currency: r.currency,
     oneTimePriceCents: r.one_time_price_cents,
     proMonthlyPriceCents: r.pro_monthly_price_cents,
+    maxMonthlyPriceCents: r.max_monthly_price_cents,
     apiKey: r.api_key,
     webhookSecret: r.webhook_secret,
     apiBase: r.api_base,
     oneTimeProductId: r.one_time_product_id,
     proProductId: r.pro_product_id,
+    maxProductId: r.max_product_id,
     updatedAt: r.updated_at,
   };
 }
@@ -171,11 +194,13 @@ function fromSupabaseRow(r: SupabaseRow): PaymentConfigRow {
     currency: r.currency,
     oneTimePriceCents: r.one_time_price_cents,
     proMonthlyPriceCents: r.pro_monthly_price_cents,
+    maxMonthlyPriceCents: r.max_monthly_price_cents,
     apiKey: r.api_key,
     webhookSecret: r.webhook_secret,
     apiBase: r.api_base,
     oneTimeProductId: r.one_time_product_id,
     proProductId: r.pro_product_id,
+    maxProductId: r.max_product_id,
     updatedAt: new Date(r.updated_at).getTime(),
   };
 }
@@ -202,6 +227,8 @@ function applyEnvFallback(row: PaymentConfigRow): PaymentConfigRow {
         ?? (row.mode === 'live' ? (process.env.CREEM_ONE_TIME_PRODUCT_ID ?? null) : null),
       proProductId: row.proProductId
         ?? (row.mode === 'live' ? (process.env.CREEM_PRO_PRODUCT_ID ?? null) : null),
+      maxProductId: row.maxProductId
+        ?? (row.mode === 'live' ? (process.env.CREEM_MAX_PRODUCT_ID ?? null) : null),
     };
   }
   // paddle: 价格 ID 走 env 兜底
@@ -211,6 +238,8 @@ function applyEnvFallback(row: PaymentConfigRow): PaymentConfigRow {
       ?? (row.mode === 'live' ? (process.env.NEXT_PUBLIC_PADDLE_PRICE_ID ?? null) : null),
     proProductId: row.proProductId
       ?? (row.mode === 'live' ? (process.env.NEXT_PUBLIC_PADDLE_PRO_PRICE_ID ?? null) : null),
+    maxProductId: row.maxProductId
+      ?? (row.mode === 'live' ? (process.env.NEXT_PUBLIC_PADDLE_MAX_PRICE_ID ?? null) : null),
   };
 }
 
@@ -311,11 +340,13 @@ export interface PaymentConfigPatch {
   currency?: string;
   oneTimePriceCents?: number;
   proMonthlyPriceCents?: number;
+  maxMonthlyPriceCents?: number;
   apiKey?: string | null;
   webhookSecret?: string | null;
   apiBase?: string | null;
   oneTimeProductId?: string | null;
   proProductId?: string | null;
+  maxProductId?: string | null;
 }
 
 /**
@@ -336,13 +367,15 @@ export async function upsertConfigRow(patch: PaymentConfigPatch): Promise<Paymen
     provider: patch.provider,
     mode: patch.mode,
     currency: merge(patch.currency, existing?.currency ?? 'usd'),
-    oneTimePriceCents: merge(patch.oneTimePriceCents, existing?.oneTimePriceCents ?? 300),
-    proMonthlyPriceCents: merge(patch.proMonthlyPriceCents, existing?.proMonthlyPriceCents ?? 900),
+    oneTimePriceCents: merge(patch.oneTimePriceCents, existing?.oneTimePriceCents ?? 499),
+    proMonthlyPriceCents: merge(patch.proMonthlyPriceCents, existing?.proMonthlyPriceCents ?? 999),
+    maxMonthlyPriceCents: merge(patch.maxMonthlyPriceCents, existing?.maxMonthlyPriceCents ?? 1599),
     apiKey: merge(patch.apiKey, existing?.apiKey ?? null),
     webhookSecret: merge(patch.webhookSecret, existing?.webhookSecret ?? null),
     apiBase: merge(patch.apiBase, existing?.apiBase ?? null),
     oneTimeProductId: merge(patch.oneTimeProductId, existing?.oneTimeProductId ?? null),
     proProductId: merge(patch.proProductId, existing?.proProductId ?? null),
+    maxProductId: merge(patch.maxProductId, existing?.maxProductId ?? null),
   };
 
   if (isSupabase()) {
@@ -355,11 +388,13 @@ export async function upsertConfigRow(patch: PaymentConfigPatch): Promise<Paymen
           currency: next.currency,
           one_time_price_cents: next.oneTimePriceCents,
           pro_monthly_price_cents: next.proMonthlyPriceCents,
+          max_monthly_price_cents: next.maxMonthlyPriceCents,
           api_key: next.apiKey,
           webhook_secret: next.webhookSecret,
           api_base: next.apiBase,
           one_time_product_id: next.oneTimeProductId,
           pro_product_id: next.proProductId,
+          max_product_id: next.maxProductId,
         },
         { onConflict: 'provider,mode' },
       )
@@ -372,19 +407,21 @@ export async function upsertConfigRow(patch: PaymentConfigPatch): Promise<Paymen
   getDb()
     .prepare(
       `INSERT INTO payment_config
-         (is_active, provider, mode, currency, one_time_price_cents, pro_monthly_price_cents,
-          api_key, webhook_secret, api_base, one_time_product_id, pro_product_id, updated_at)
-       VALUES (0, @provider, @mode, @currency, @oneTime, @proMonthly,
-               @apiKey, @webhookSecret, @apiBase, @oneTimeProductId, @proProductId, @updatedAt)
+         (is_active, provider, mode, currency, one_time_price_cents, pro_monthly_price_cents, max_monthly_price_cents,
+          api_key, webhook_secret, api_base, one_time_product_id, pro_product_id, max_product_id, updated_at)
+       VALUES (0, @provider, @mode, @currency, @oneTime, @proMonthly, @maxMonthly,
+               @apiKey, @webhookSecret, @apiBase, @oneTimeProductId, @proProductId, @maxProductId, @updatedAt)
        ON CONFLICT (provider, mode) DO UPDATE SET
          currency = excluded.currency,
          one_time_price_cents = excluded.one_time_price_cents,
          pro_monthly_price_cents = excluded.pro_monthly_price_cents,
+         max_monthly_price_cents = excluded.max_monthly_price_cents,
          api_key = excluded.api_key,
          webhook_secret = excluded.webhook_secret,
          api_base = excluded.api_base,
          one_time_product_id = excluded.one_time_product_id,
          pro_product_id = excluded.pro_product_id,
+         max_product_id = excluded.max_product_id,
          updated_at = excluded.updated_at`,
     )
     .run({
@@ -393,11 +430,13 @@ export async function upsertConfigRow(patch: PaymentConfigPatch): Promise<Paymen
       currency: next.currency,
       oneTime: next.oneTimePriceCents,
       proMonthly: next.proMonthlyPriceCents,
+      maxMonthly: next.maxMonthlyPriceCents,
       apiKey: next.apiKey,
       webhookSecret: next.webhookSecret,
       apiBase: next.apiBase,
       oneTimeProductId: next.oneTimeProductId,
       proProductId: next.proProductId,
+      maxProductId: next.maxProductId,
       updatedAt: now,
     });
 

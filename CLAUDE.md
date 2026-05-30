@@ -1083,14 +1083,16 @@ Chrome 默认允许使用磁盘空间的 60%。录制完成后提示用户及时
 
 数据库表 `public.payment_config` 是全站价格 + provider 凭证的**唯一来源**。最多 4 行，每行对应一个 (provider, mode) 组合：
 
-| id | is_active | provider | mode | currency | one_time / pro prices | api_key | webhook_secret | api_base | one_time_product_id | pro_product_id |
-|----|-----------|----------|------|----------|----------------------|---------|----------------|----------|---------------------|---------------|
-| 1  | TRUE      | creem    | live | usd      | 300 / 900 cents      | creem_LIVE_*  | whsec_LIVE_*  | https://api.creem.io/v1      | prod_LIVE_*  | prod_LIVE_*  |
-| 2  | FALSE     | creem    | test | usd      | 300 / 900 cents      | creem_TEST_*  | whsec_TEST_*  | https://test-api.creem.io/v1 | prod_TEST_*  | prod_TEST_*  |
-| 3  | FALSE     | paddle   | live | usd      | 300 / 900 cents      | NULL          | NULL          | NULL                          | pri_LIVE_*   | pri_LIVE_*   |
-| 4  | FALSE     | paddle   | test | usd      | 300 / 900 cents      | NULL          | NULL          | NULL                          | pri_TEST_*   | pri_TEST_*   |
+| id | is_active | provider | mode | currency | one_time / pro / max prices | api_key | webhook_secret | api_base | one_time_product_id | pro_product_id | max_product_id |
+|----|-----------|----------|------|----------|----------------------------|---------|----------------|----------|---------------------|---------------|----------------|
+| 1  | TRUE      | creem    | live | usd      | 499 / 999 / 1599 cents      | creem_LIVE_*  | whsec_LIVE_*  | https://api.creem.io/v1      | prod_LIVE_*  | prod_LIVE_*  | prod_LIVE_*  |
+| 2  | FALSE     | creem    | test | usd      | 499 / 999 / 1599 cents      | creem_TEST_*  | whsec_TEST_*  | https://test-api.creem.io/v1 | prod_TEST_*  | prod_TEST_*  | prod_TEST_*  |
+| 3  | FALSE     | paddle   | live | usd      | 499 / 999 / 1599 cents      | NULL          | NULL          | NULL                          | pri_LIVE_*   | pri_LIVE_*   | pri_LIVE_*   |
+| 4  | FALSE     | paddle   | test | usd      | 499 / 999 / 1599 cents      | NULL          | NULL          | NULL                          | pri_TEST_*   | pri_TEST_*   | pri_TEST_*   |
 
-`is_active = true` 全表唯一（partial unique index 保底）。读取链路: `getActiveConfig()` 一行；webhook 验签拿所有 creem 行的 webhook_secret 当候选。`toPublic()` 严格白名单，凭证永远不暴露给前端。
+价格列：`one_time_price_cents`(499) / `pro_monthly_price_cents`(999) / `max_monthly_price_cents`(1599)；对应三个 product id 列 `one_time_product_id` / `pro_product_id` / `max_product_id`。Max 订阅经 `/api/checkout/pro` 传 `{tier:'max'}` 走通，Creem webhook 按 metadata.kind / tier 解析授予 `tier:'max'`。
+
+`is_active = true` 全表唯一（partial unique index 保底）。读取链路: `getActiveConfig()` 一行；webhook 验签拿所有 creem 行的 webhook_secret 当候选。`toPublic()` 严格白名单（含三档价格，product id 不暴露），凭证永远不暴露给前端。
 
 ### 改价（不切 mode）
 
