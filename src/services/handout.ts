@@ -16,11 +16,20 @@ export interface HandoutChapter {
   summary: string;
 }
 
+/** AI 从字幕里识别的"值得配图的关键时刻"（强调/操作指示处），客户端据此截图。 */
+export interface HandoutKeyframe {
+  timeMs: number;
+  label: string;
+}
+
 export interface HandoutResult {
   title: string;
   chapters: HandoutChapter[];
+  keyframes: HandoutKeyframe[];
   markdown: string;
 }
+
+const MAX_KEYFRAMES = 8;
 
 // ---------------------------------------------------------------------------
 // 1) Board summary —— 从 snapshots 抽出"有意思的事件"
@@ -83,11 +92,15 @@ export const SYSTEM_PROMPT = `你是一名中文/英文双语技术文档编辑�
   "chapters": [
     { "startMs": 0, "endMs": 60000, "title": "章节标题", "summary": "200 字以内摘要" }
   ],
+  "keyframes": [
+    { "timeMs": 32000, "label": "一句话说明这一处为什么是关键点" }
+  ],
   "markdown": "# 标题\\n\\n## 章节标题\\n\\n章节正文..."
 }
 要求：
 - 3-7 个章节，时间区间互不重叠且按时间顺序排列；
 - 每章 summary 200 字以内；
+- keyframes：仅在字幕中出现"强调或操作指示"语义的位置挑选（例如"这里是重点 / 注意 / 需要关注 / 这里怎么操作 / 关键在于 / 记住 / 第一步…"等），**不是每章都要**，没有这类表达就少给或不给；最多 8 个；timeMs 必须落在录制时长内、尽量对齐字幕时间戳；label 用一句话点明该处看点。无字幕时 keyframes 返回空数组 []。
 - markdown 包含完整讲义（标题 + 章节正文 + 关键要点）；
 - 直接返回 JSON，不要添加任何额外说明或 markdown 围栏。`;
 
@@ -145,5 +158,22 @@ export function parseHandoutJson(text: string, durationMs: number): HandoutResul
   if (chapters.length === 0) {
     chapters.push({ startMs: 0, endMs: durationMs, title, summary: '' });
   }
-  return { title, chapters, markdown };
+
+  // keyframes：AI 挑的关键时刻（可空），clamp 到时长内、按时间排序、去重、限量
+  const keyframes: HandoutKeyframe[] = [];
+  const rawKeyframes = Array.isArray(obj.keyframes) ? obj.keyframes : [];
+  const seenMs = new Set<number>();
+  for (const k of rawKeyframes) {
+    if (!k || typeof k !== 'object') continue;
+    const kf = k as Record<string, unknown>;
+    const timeMsNum = typeof kf.timeMs === 'number' ? kf.timeMs : Number(kf.timeMs);
+    if (!isFinite(timeMsNum)) continue;
+    const timeMs = Math.max(0, Math.min(durationMs, Math.round(timeMsNum)));
+    if (seenMs.has(timeMs)) continue;
+    seenMs.add(timeMs);
+    keyframes.push({ timeMs, label: typeof kf.label === 'string' ? kf.label.slice(0, 120) : '' });
+  }
+  keyframes.sort((a, b) => a.timeMs - b.timeMs);
+
+  return { title, chapters, keyframes: keyframes.slice(0, MAX_KEYFRAMES), markdown };
 }

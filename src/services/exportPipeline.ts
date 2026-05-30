@@ -19,6 +19,7 @@ import {
   type WorkspaceShellRow,
 } from '@/types/recording';
 import { compileSubtitles, drawFrostedWatermark, drawSubtitle } from '@/utils/frameOverlays';
+import { cueAt } from '@/utils/srtParser';
 import { drawLaserOverlay } from '@/utils/laserRender';
 
 export interface ExportOptions extends ExportConfig {
@@ -303,9 +304,29 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
 
   opts.onPhase?.('rendering_frames');
 
+  // 相同帧去重：静止段（场景/外壳/字幕都没变）直接复用上一帧 PNG，跳过最贵的
+  // exportToCanvas + 合成 + toBlob。有激光轨迹时逐帧不同，保守关闭去重以保正确。
+  const dedupEnabled = laserEvents.length === 0;
+  let lastSig: string | null = null;
+  let lastBuf: Uint8Array | null = null;
+  // 基帧缓存：场景+外壳+水印只随 snapshot/shell 变化（与字幕无关）
+  let lastBaseSig: string | null = null;
+  let baseCanvas: HTMLCanvasElement | null = null;
+
   for (let i = 0; i < totalFrames; i++) {
     const t = (i / fps) * 1000;
     const snap = snapshotAt(snapshots, t);
+    const shellAtTframe = useShell ? (shellAt(decodedShells, t) as DecodedShell | null) : null;
+    const cueAtT = cues.length > 0 ? cueAt(cues, t) : null;
+
+    // 帧签名：决定本帧像素的全部时变因素（场景快照 + 外壳 + 当前字幕）。
+    const name = `f_${String(i).padStart(6, '0')}.png`;
+    const sig = `${snap?.timestamp ?? -1}|${shellAtTframe?.timestamp ?? -1}|${cueAtT ? `${cueAtT.startMs}-${cueAtT.endMs}` : -1}`;
+    if (dedupEnabled && sig === lastSig && lastBuf) {
+      await ffmpeg.writeFile(name, lastBuf);
+      opts.onProgress?.(0.08 + ((i + 1) / totalFrames) * 0.64);
+      continue;
+    }
 
     // 渲染目标尺寸
     const target = document.createElement('canvas');
@@ -315,14 +336,19 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     targetCtx.fillStyle = '#ffffff';
     targetCtx.fillRect(0, 0, target.width, target.height);
 
+    // 基帧缓存：旁白讲解时画面静止、仅字幕在变 → 复用上次合成好的基帧（含水印），只重画字幕。
+    const baseSig = `${snap?.timestamp ?? -1}|${shellAtTframe?.timestamp ?? -1}`;
+    const reuseBase = dedupEnabled && baseSig === lastBaseSig && baseCanvas !== null;
+    if (reuseBase) {
+      targetCtx.drawImage(baseCanvas as HTMLCanvasElement, 0, 0);
+    } else {
     // shell 模式：先按 cover 把工作区外壳画到 target，再把 scene 画进映射后的 canvasRect。
     // 否则：scene 直接铺满 target（picker 比例 == target 比例）。
-    let shellAtT: DecodedShell | null = null;
+    let shellAtT: DecodedShell | null = shellAtTframe;
     let shellRenderScale = 1;
     let shellOffsetX = 0;
     let shellOffsetY = 0;
     if (useShell) {
-      shellAtT = shellAt(decodedShells, t) as DecodedShell | null;
       if (shellAtT) {
         const shellW = shellAtT.shellSize.width;
         const shellH = shellAtT.shellSize.height;
@@ -422,11 +448,21 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       });
     }
 
-    // 毛玻璃水印（在字幕之前画 — 字幕居中位置可能与水印边角重叠，字幕在上更可读）
+    // 毛玻璃水印（属于基帧；在字幕之前画 — 字幕居中位置可能与水印边角重叠，字幕在上更可读）
     if (opts.withWatermark) {
       drawFrostedWatermark(targetCtx, target.width, target.height, watermarkPos);
     }
-    // 字幕硬嵌入（摄像头在右下角时为其预留空间）
+    // 缓存这帧基底（场景+外壳+水印），供后续仅字幕变化的帧复用
+    if (dedupEnabled) {
+      if (!baseCanvas) baseCanvas = document.createElement('canvas');
+      baseCanvas.width = target.width;
+      baseCanvas.height = target.height;
+      baseCanvas.getContext('2d')!.drawImage(target, 0, 0);
+      lastBaseSig = baseSig;
+    }
+    } // end else（基帧渲染）
+
+    // 字幕硬嵌入（每帧都画，不入基帧缓存；摄像头在右下角时为其预留空间）
     if (cues.length > 0) {
       drawSubtitle(targetCtx, target.width, target.height, cues, t, {
         reservedRightFraction: cameraBlob ? 0.3 : 0,
@@ -437,8 +473,9 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       target.toBlob((b) => b ? resolve(b) : reject(new Error('toBlob_failed')), 'image/png');
     });
     const buf = new Uint8Array(await blob.arrayBuffer());
-    const name = `f_${String(i).padStart(6, '0')}.png`;
     await ffmpeg.writeFile(name, buf);
+    lastBuf = buf;
+    lastSig = sig;
 
     // 帧渲染占 8% → 72% 区间（0.64 宽）
     opts.onProgress?.(0.08 + ((i + 1) / totalFrames) * 0.64);
@@ -541,7 +578,8 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     filter.push('-map', '0:v');
   }
 
-  const codec = ['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'];
+  // veryfast + crf 23：相比 ultrafast 体积显著更小、清晰度更好，编码耗时相近（单线程核）。
+  const codec = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p'];
   const audioCodec = audioFile ? ['-c:a', 'aac', '-shortest'] : [];
 
   await ffmpeg.exec([...inputs, ...filter, ...codec, ...audioCodec, 'output.mp4']);

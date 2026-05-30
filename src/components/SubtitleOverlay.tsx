@@ -20,12 +20,17 @@ export function SubtitleOverlay({ srt, timeMs }: Props): JSX.Element | null {
       style={{ bottom: '8%' }}
     >
       <div
-        className="max-w-[80%] rounded-md px-4 py-2 text-center text-[16px] font-medium leading-snug text-white"
+        className="max-w-[80%] rounded-md px-4 text-center text-[16px] font-medium text-white"
         style={{
           background: 'rgba(0,0,0,0.65)',
           textShadow: '0 1px 3px rgba(0,0,0,0.7)',
           backdropFilter: 'blur(2px)',
-          whiteSpace: 'pre-line',
+          // 单行固定高度：超长省略，不换行、不抖动
+          height: 36,
+          lineHeight: '36px',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
         }}
       >
         {cue.text}

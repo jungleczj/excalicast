@@ -6,9 +6,10 @@ import type { ShellCanvasRect, ShellSize } from '@/types/recording';
 
 const NO_RECORD_CLASS = 'rb-no-record';
 
-const PERIODIC_INTERVAL_MS = 3000;
+const PERIODIC_INTERVAL_MS = 5000;
 const CAPTURE_TIMEOUT_MS = 1200;
-const MIN_CAPTURE_GAP_MS = 800;        // 两次抓取至少间隔，防止 chrome 抖动连击
+const MIN_CAPTURE_GAP_MS = 1500;       // 两次抓取至少间隔，防止 chrome 抖动连击 + 降低录制中主线程占用
+const APPSTATE_DEBOUNCE_MS = 1000;     // appState 连续变化停止后再抓（也把指纹计算推迟到此刻）
 const SCROLL_ZOOM_DEDUP_EPS = 0.04;    // zoom 差 < 4%、scroll 差 < 4% 视为同一帧
 
 const CHROME_KEYS = [
@@ -137,15 +138,22 @@ export class ShellCapturer {
 
   onAppStateChange(appState: Record<string, unknown>): void {
     if (this.stopped || this.opts.isPaused()) return;
-    const fp = chromeFingerprint(appState);
-    if (fp === this.lastFingerprint) return;
-    this.lastFingerprint = fp;
-    // 防抖：连续变化只在变化停止 250ms 后才抓
+    // 不在每次 onChange 同步算指纹（chromeFingerprint 含 JSON.stringify，频繁调用拖慢绘制）；
+    // 先防抖，等连续变化停止后只算一次指纹再决定是否抓图。
+    this.pendingAppState = appState;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
-    this.debounceTimer = setTimeout(() => { void this.captureNow(); }, 250);
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      if (this.stopped || this.opts.isPaused() || !this.pendingAppState) return;
+      const fp = chromeFingerprint(this.pendingAppState);
+      if (fp === this.lastFingerprint) return;
+      this.lastFingerprint = fp;
+      void this.captureNow();
+    }, APPSTATE_DEBOUNCE_MS);
   }
 
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingAppState: Record<string, unknown> | null = null;
 
   stop(): void {
     this.stopped = true;

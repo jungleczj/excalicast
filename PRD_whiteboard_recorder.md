@@ -1,9 +1,10 @@
 # PRD：白板录制工具
-**版本**：v0.4  
-**状态**：草稿  
+**版本**：v0.5  
+**状态**：开发中  
 **作者**：—  
-**最后更新**：2026-05-01  
-**变更**：v0.4 - 录制方案锁定 B（事件流重放）；单次购买改为 paid_recordings 表（去令牌）；所有外部 LLM/Whisper 调用必须经服务端 BFF；所有层级录制时长无上限；支付服务统一 Creem；新增数据生命周期 / 合规告知 / 退款政策 / 录制恢复 / 分享链接管理 / PoC 清单六个章节
+**最后更新**：2026-05-30  
+**变更**：v0.5 - 新增「## 十一、实现进展与变更记录（持续同步）」，沉淀已落地实现（定价四档 + Max 可购买、素材库云同步/市场、分享链接、AI 讲义、激光笔、品牌标识等）与第四轮迭代（讲义智能配图/多格式导出、录制与导出性能、分享加载与移动端自适应、字幕清洗单行）。本 PRD 自此为产品需求唯一来源，新增内容须同步更新（见 CLAUDE.md「PRD 同步要求」）。  
+**历史**：v0.4 - 录制方案锁定 B（事件流重放）；单次购买改为 paid_recordings 表（去令牌）；所有外部 LLM/Whisper 调用必须经服务端 BFF；所有层级录制时长无上限；支付服务统一 Creem；新增数据生命周期 / 合规告知 / 退款政策 / 录制恢复 / 分享链接管理 / PoC 清单六个章节
 
 ---
 
@@ -878,4 +879,48 @@ Pro/Max 导出（订阅状态验证）：
 | AI 能力 | 无（提词器辅助录制） | 字幕 + AI 讲义（核心差异） |
 | 分享 | 导出视频 | 操作流回放链接 + 讲义 |
 | 付费模型 | 未知 | 免费水印 / 单次 / Pro / Max |
+
+---
+
+## 十一、实现进展与变更记录（持续同步）
+
+> 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
+
+### 11.1 已落地能力概览（截至 2026-05-30）
+
+**定价与会员（四档：free / one_time / pro / max）**
+- 价格唯一来源 = `payment_config`（多行表，creem/paddle × live/test，`is_active` 切换）。当前价：one-time **$4.99 (499)** / Pro **$9.99 (999)/mo** / Max **$15.99 (1599)/mo**。
+- 价格全站单一来源：服务端页面 `getActiveConfig()`、客户端 `usePaymentConfig()`（`/api/payment/provider`，`force-dynamic + no-store` + Supabase Realtime 广播即时刷新）。落地页/条款页 `force-dynamic`，改库即更新。月费后缀统一：en `/mo`、zh `/月`。
+- **Max 可购买（两渠道）**：`payment_config` 含 `max_monthly_price_cents` / `max_product_id`；`/api/checkout/pro` 按 `{tier:'pro'|'max'}` 选品；Paddle 客户端与 Creem metadata 透传 tier；Creem/Paddle webhook 按 metadata/custom_data 解析真实 tier 入 `user_subscriptions`。
+- 升级弹窗 `ProUpgradeModal` 参数化 `tier`（Pro/Max 品牌、价格、文案、轮询）；落地页定价区四档卡片。
+- 权限门控 `TIER_PERMISSIONS`；服务端 `requireTier()` 守卫 `/api/share/*`、`/api/handout/*`（Max）。
+
+**素材库 / 模板（library）**
+- 录制库 + 模板库/模板市场（marketplace）；Pro/Max 登录后模板**跨设备云端同步**（`library_items_cloud`，软删 tombstone）。免费档上传门控。
+
+**录制增强**
+- 多画幅比例 + 裁切框；人脸气泡（可拖拽/缩放/双击隐藏，录制中可调）；激光笔（laser pointer）；录制中切换摄像头；离屏渲染隔离（不录屏幕像素）。
+
+**导出 / 回放 / 分享**
+- ffmpeg.wasm 本地导出 MP4（含人像叠加、字幕烧录、免费档水印）；操作流 Web 回放；**分享链接**（Max，`share_links`，仅事件流+音频，30 天 TTL，公开页 `/s/[short]` 客户端重渲染）。
+
+**字幕 / 讲义（AI）**
+- 字幕：阿里千问/Paraformer（DashScope，`subtitle_jobs`），SRT，Pro。
+- AI 讲义：Deepseek 生成结构化讲义（`handouts` 表，Max），章节 + markdown。
+
+**品牌**：浏览器 favicon + apple touch icon。
+
+### 11.2 变更记录（按时间倒序）
+
+- **2026-05-30｜第四轮迭代（代码已实现，构建通过；运维项见下）**：
+  1. 讲义：报 `cloud_recording_required` 时就地「保存到云端并重试」（`HandoutPanel`/`ExportPanel` 复用 `uploadRecording`）。**运维**：线上需应用迁移 `20260524120000_max_features`（建 `handouts`/`share_links`，修复生成讲义 500）。
+  2. 录制性能：elapsed 计时 250→1000ms（`app/page.tsx`）；DOM 截屏 `workspaceShellCapture` 降频（periodic 3→5s、gap 800→1500ms、debounce 250→1000ms）+ 指纹延后到防抖回调；`CameraBubble` 拖拽 rAF 节流。
+  3. 分享移动端：`SharedPlayer` 改为**按容器实测尺寸 fit 裁切区/内容**（`computeContentBounds`+`fitView`，弃用录制时桌面 scroll/zoom）+ ResizeObserver；激光层共用同一变换；`[locale]/layout.tsx` 加 `viewport`（viewport-fit=cover）。
+  4. 导出提速（`exportPipeline.ts`）：全等帧去重 + **基帧缓存**（场景静止仅字幕变时只重画字幕）；ffmpeg `ultrafast`→`veryfast -crf 23`。（水印为实时毛玻璃取样，未做静态缓存以保观感。）
+  5. 价格线上不更新：代码已正确（provider API 全动态、落地页 `force-dynamic`、无静态导出）。**运维**：把本分支部署到生产 + 确认线上库价。
+  6. 字幕：`srtParser.cleanSubtitleText` 单点清洗（去句末标点 + 保守去开头语气词，纯口水词段丢弃）；`SubtitleOverlay` 与导出 `drawSubtitle` 均**单行固定高度**（超长省略号）。
+  7. **讲义智能配图**：`handout.ts` schema 增 `keyframes`（AI 仅在字幕强调/操作处挑点，≤8）；`HandoutPanel` 加「带配图」开关，客户端 `renderPreviewFrame` 渲染缩略图归入对应章节，导出 **Markdown / HTML / PDF**（新增依赖 `marked`；PDF=打印另存）。
+  8. 分享加载（`s/[short]/page.tsx`）：画布只等 snapshots 即渲染，音/画改签名 URL 直接 `src` 流式、逐资源容错（修复加载慢/加载不出来）。
+- **2026-05-29｜定价四档 + Max 可购买 + 价格一致性**（commit 2311273）：见 11.1「定价与会员」。
+- **2026-05-29 前｜素材库市场 + 云同步、激光笔、录制中切摄像头、品牌 favicon、Pro/Max 云备份**（见 git 历史 c61a1d5 / ab91766 / e461644 / 1157429 / cd77850）。
 

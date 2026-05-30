@@ -16,6 +16,54 @@ const Excalidraw = dynamic(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type ExcalidrawAPI = any;
 
+interface SceneBounds { minX: number; minY: number; maxX: number; maxY: number; }
+
+/**
+ * 录制全程所有元素的并集包围盒（最多采样 ~40 帧以控成本）。用于回放时把内容
+ * fit 进任意尺寸的容器 —— 设备无关，桌面/平板/手机统一适配。
+ */
+function computeContentBounds(snaps: WhiteboardSnapshot[]): SceneBounds | null {
+  if (snaps.length === 0) return null;
+  const step = Math.max(1, Math.floor(snaps.length / 40));
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const consider = (snap: WhiteboardSnapshot) => {
+    for (const el of (snap.elements as Array<Record<string, unknown>>)) {
+      if ((el as { isDeleted?: boolean }).isDeleted) continue;
+      const x = Number(el.x), y = Number(el.y);
+      const w = Number(el.width) || 0, h = Number(el.height) || 0;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x + w > maxX) maxX = x + w;
+      if (y + h > maxY) maxY = y + h;
+    }
+  };
+  for (let i = 0; i < snaps.length; i += step) consider(snaps[i]);
+  consider(snaps[snaps.length - 1]);
+  if (!Number.isFinite(minX) || maxX <= minX || maxY <= minY) return null;
+  return { minX, minY, maxX, maxY };
+}
+
+/** 把内容包围盒按容器尺寸 contain-fit，返回 Excalidraw 的 {zoom, scrollX, scrollY}。 */
+function fitView(
+  bounds: SceneBounds,
+  containerW: number,
+  containerH: number,
+): { zoom: number; scrollX: number; scrollY: number } | null {
+  const pad = 32;
+  const bw = bounds.maxX - bounds.minX;
+  const bh = bounds.maxY - bounds.minY;
+  if (bw <= 0 || bh <= 0 || containerW <= 0 || containerH <= 0) return null;
+  let zoom = Math.min((containerW - pad * 2) / bw, (containerH - pad * 2) / bh);
+  zoom = Math.max(0.05, Math.min(zoom, 2));
+  const bcx = bounds.minX + bw / 2;
+  const bcy = bounds.minY + bh / 2;
+  // screen = (scene + scroll) * zoom（与 laser overlay 的换算一致）
+  const scrollX = containerW / (2 * zoom) - bcx;
+  const scrollY = containerH / (2 * zoom) - bcy;
+  return { zoom, scrollX, scrollY };
+}
+
 function snapshotAt(snaps: WhiteboardSnapshot[], t: number): WhiteboardSnapshot | null {
   if (snaps.length === 0) return null;
   let lo = 0, hi = snaps.length - 1, ans = -1;
@@ -103,6 +151,19 @@ export function SharedPlayer({
 
   const [playing, setPlaying] = useState(false);
   const [timeMs, setTimeMs] = useState(0);
+  const timeMsRef = useRef(0);
+  timeMsRef.current = timeMs;
+
+  // 设备无关自适应：用内容包围盒 + 容器实测尺寸算出固定的回放视图变换，
+  // 丢弃录制时的桌面 scrollX/scrollY/zoom（否则小屏内容会被推到屏外 → 空白）。
+  const [stageSize, setStageSize] = useState<{ w: number; h: number } | null>(null);
+  const contentBounds = useMemo(() => computeContentBounds(snapshots), [snapshots]);
+  const view = useMemo(
+    () => (contentBounds && stageSize ? fitView(contentBounds, stageSize.w, stageSize.h) : null),
+    [contentBounds, stageSize],
+  );
+  const viewRef = useRef(view);
+  viewRef.current = view;
 
   const applySnapshot = useCallback((t: number) => {
     if (!apiRef.current) return;
@@ -116,6 +177,13 @@ export function SharedPlayer({
       delete appState.activeTool;
       delete appState.viewModeEnabled;
       delete appState.zenModeEnabled;
+      // 覆盖为自适应视图（保证任意尺寸下都能看到内容且回放中不抖动）
+      const v = viewRef.current;
+      if (v) {
+        appState.scrollX = v.scrollX;
+        appState.scrollY = v.scrollY;
+        appState.zoom = { value: v.zoom };
+      }
       apiRef.current.updateScene({
         elements: snap.elements,
         appState,
@@ -124,6 +192,13 @@ export function SharedPlayer({
       console.error('updateScene_failed', e);
     }
   }, [snapshots]);
+
+  // 视图变换变化（容器尺寸变化 / 内容就绪）→ 重新套用当前帧
+  useEffect(() => {
+    if (!view || !apiRef.current) return;
+    lastAppliedTsRef.current = -1;
+    applySnapshot(timeMsRef.current);
+  }, [view, applySnapshot]);
 
   useEffect(() => {
     if (apiRef.current && snapshots.length > 0) {
@@ -235,6 +310,12 @@ export function SharedPlayer({
       canvas.style.height = `${rect.height}px`;
       const ctx = canvas.getContext('2d');
       if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // 把容器尺寸喂给自适应视图（旋转屏幕/改窗口/地址栏收起都会触发）
+      setStageSize((prev) =>
+        prev && prev.w === rect.width && prev.h === rect.height
+          ? prev
+          : { w: rect.width, h: rect.height },
+      );
     };
     sync();
     const obs = new ResizeObserver(sync);
@@ -252,15 +333,21 @@ export function SharedPlayer({
     const cssH = canvas.clientHeight;
     ctx.clearRect(0, 0, cssW, cssH);
     if (!laserEvents || laserEvents.length === 0) return;
-    // 用当前 snapshot 的 appState 算 scene → screen
-    const snap = snapshotAt(snapshots, timeMs);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ast = (snap?.appState ?? {}) as any;
-    const zoomVal = (typeof ast.zoom === 'object' && ast.zoom && typeof ast.zoom.value === 'number')
-      ? ast.zoom.value
-      : (typeof ast.zoom === 'number' ? ast.zoom : 1);
-    const scrollX = typeof ast.scrollX === 'number' ? ast.scrollX : 0;
-    const scrollY = typeof ast.scrollY === 'number' ? ast.scrollY : 0;
+    // 与画布同一套自适应视图变换（fit-to-container），保证激光轨迹对齐
+    const v = viewRef.current;
+    let zoomVal: number, scrollX: number, scrollY: number;
+    if (v) {
+      zoomVal = v.zoom; scrollX = v.scrollX; scrollY = v.scrollY;
+    } else {
+      const snap = snapshotAt(snapshots, timeMs);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ast = (snap?.appState ?? {}) as any;
+      zoomVal = (typeof ast.zoom === 'object' && ast.zoom && typeof ast.zoom.value === 'number')
+        ? ast.zoom.value
+        : (typeof ast.zoom === 'number' ? ast.zoom : 1);
+      scrollX = typeof ast.scrollX === 'number' ? ast.scrollX : 0;
+      scrollY = typeof ast.scrollY === 'number' ? ast.scrollY : 0;
+    }
     drawLaserOverlay(ctx, laserEvents, timeMs, {
       sceneToScreen: (sx: number, sy: number) => ({
         x: (sx + scrollX) * zoomVal,

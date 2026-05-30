@@ -5,28 +5,18 @@ export function compileSubtitles(srt: string | null | undefined): SubtitleCue[] 
   return srt ? parseSrt(srt) : [];
 }
 
-function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
-  const lines: string[] = [];
-  for (const paragraph of text.split('\n')) {
-    if (paragraph.trim() === '') {
-      lines.push('');
-      continue;
-    }
-    // For CJK + Latin mix: greedy by character so it works for Chinese too.
-    let current = '';
-    for (const ch of paragraph) {
-      const trial = current + ch;
-      const w = ctx.measureText(trial).width;
-      if (w > maxWidth && current.length > 0) {
-        lines.push(current);
-        current = ch;
-      } else {
-        current = trial;
-      }
-    }
-    if (current.length > 0) lines.push(current);
+/** 单行截断：超过 maxWidth 时尾部用省略号（CJK + 拉丁混排按字符贪心）。 */
+function truncateToWidth(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  const oneLine = text.replace(/\s*\n\s*/g, ' ').trim();
+  if (ctx.measureText(oneLine).width <= maxWidth) return oneLine;
+  const ell = '…';
+  const ellW = ctx.measureText(ell).width;
+  let acc = '';
+  for (const ch of oneLine) {
+    if (ctx.measureText(acc + ch).width + ellW > maxWidth) break;
+    acc += ch;
   }
-  return lines;
+  return (acc.trim() || oneLine.slice(0, 1)) + ell;
 }
 
 export function drawSubtitle(
@@ -42,7 +32,6 @@ export function drawSubtitle(
   if (!cue) return;
 
   const fontSize = Math.max(18, Math.round(videoH * 0.034));
-  const lineHeight = Math.round(fontSize * 1.35);
   const padX = Math.round(fontSize * 0.75);
   const padY = Math.round(fontSize * 0.45);
   // 摄像头气泡在右下角时为字幕预留出空间，避免被遮住
@@ -53,22 +42,16 @@ export function drawSubtitle(
   ctx.font = `600 ${fontSize}px ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans", "Noto Sans CJK SC", sans-serif`;
   ctx.textBaseline = 'top';
 
-  const lines = wrapText(ctx, cue.text, maxTextWidth);
-  if (lines.length === 0) {
+  // 单行固定高度：截断为一行，背景框高度恒定（不随文字长度抖动）
+  const line = truncateToWidth(ctx, cue.text, maxTextWidth);
+  if (!line) {
     ctx.restore();
     return;
   }
 
-  const textBlockH = lines.length * lineHeight - (lineHeight - fontSize);
-  const blockH = textBlockH + padY * 2;
-
-  // 测最大行宽以决定背景框宽度
-  let maxLineW = 0;
-  for (const l of lines) {
-    const w = ctx.measureText(l).width;
-    if (w > maxLineW) maxLineW = w;
-  }
-  const blockW = Math.min(videoW * 0.92, maxLineW + padX * 2);
+  const blockH = fontSize + padY * 2;
+  const lineW = ctx.measureText(line).width;
+  const blockW = Math.min(videoW * 0.92, lineW + padX * 2);
 
   // 底部 8% 高度的位置
   const cx = videoW / 2;
@@ -99,11 +82,7 @@ export function drawSubtitle(
   ctx.shadowBlur = 4;
   ctx.shadowOffsetX = 0;
   ctx.shadowOffsetY = 1;
-  let y = blockTop + padY;
-  for (const line of lines) {
-    ctx.fillText(line, cx, y);
-    y += lineHeight;
-  }
+  ctx.fillText(line, cx, blockTop + padY);
 
   ctx.restore();
 }

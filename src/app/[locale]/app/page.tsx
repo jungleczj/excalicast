@@ -148,9 +148,10 @@ export default function HomePage(): JSX.Element {
 
   useEffect(() => {
     if (state === 'recording') {
+      // 秒级时钟即可，1s 一跳避免录制中 4Hz 全量重渲染造成的卡顿
       tickRef.current = setInterval(() => {
         if (sessionRef.current) setElapsed(sessionRef.current.getElapsedMs());
-      }, 250);
+      }, 1000);
       return () => { if (tickRef.current) clearInterval(tickRef.current); };
     }
     if (state === 'idle') {

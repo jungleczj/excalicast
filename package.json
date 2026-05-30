@@ -20,6 +20,7 @@
     "better-sqlite3": "^11.3.0",
     "dexie": "^4.4.2",
     "html-to-image": "^1.11.13",
+    "marked": "^14.1.4",
     "next": "^14.2.15",
     "next-intl": "^3.26.5",
     "react": "^18.3.1",

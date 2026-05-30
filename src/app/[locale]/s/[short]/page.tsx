@@ -49,11 +49,6 @@ async function fetchTextGz(url: string): Promise<string> {
   return blob.text();
 }
 
-async function fetchBlob(url: string): Promise<Blob> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`fetch ${url} → ${res.status}`);
-  return res.blob();
-}
 
 export default function PublicSharePage(): JSX.Element {
   const params = useParams<{ short: string }>();
@@ -74,8 +69,6 @@ export default function PublicSharePage(): JSX.Element {
   const loadShare = useCallback(async () => {
     setStage('loading');
     setErrorMsg('');
-    let createdAudio: string | null = null;
-    let createdCamera: string | null = null;
     try {
       const res = await fetch(`/api/share/${encodeURIComponent(short)}`);
       if (res.status === 404) { setErrorMsg(i18nText.notFound); setStage('error'); return; }
@@ -89,50 +82,37 @@ export default function PublicSharePage(): JSX.Element {
       const json = (await res.json()) as ShareApiResponse;
       setMeta(json);
 
-      // 并发下载 5 个对象
-      const [snapsText, audioBlob, cameraBlob, camPosText] = await Promise.all([
-        fetchTextGz(json.urls.snapshots),
-        json.urls.audio ? fetchBlob(json.urls.audio) : Promise.resolve(null),
-        json.urls.camera ? fetchBlob(json.urls.camera) : Promise.resolve(null),
-        json.urls.cameraPositions ? fetchTextGz(json.urls.cameraPositions).catch(() => '{}') : Promise.resolve('{}'),
-      ]);
+      // 音/画不预下载整段：直接把签名 URL 交给 <audio>/<video> 流式加载。
+      // 某轨 URL 失效也只影响该轨，不致整页空白。
+      setAudioUrl(json.urls.audio ?? null);
+      setCameraUrl(json.urls.camera ?? null);
 
+      // 画布只等 snapshots —— 下完即渲染，不被音视频拖慢。
+      const snapsText = await fetchTextGz(json.urls.snapshots);
       const snapsObj = JSON.parse(snapsText) as SnapshotsBundle;
       setSnapshots(snapsObj.snapshots ?? []);
-
-      if (audioBlob) {
-        createdAudio = URL.createObjectURL(audioBlob);
-        setAudioUrl(createdAudio);
-      }
-      if (cameraBlob) {
-        createdCamera = URL.createObjectURL(cameraBlob);
-        setCameraUrl(createdCamera);
-      }
-
-      try {
-        const camPosObj = JSON.parse(camPosText) as CameraEventsBundle;
-        const events: CameraPositionEvent[] = (camPosObj.events ?? []).map((e) => ({
-          recordingId: json.recordingId,
-          timestamp: e.timestamp,
-          rx: e.rx,
-          ry: e.ry,
-          rs: e.rs,
-        }));
-        setCameraEvents(events);
-      } catch {
-        setCameraEvents([]);
-      }
-
       setStage('ready');
+
+      // 摄像头位置（小文件）后台拉，到了再补，失败忽略。
+      if (json.urls.cameraPositions) {
+        void fetchTextGz(json.urls.cameraPositions)
+          .then((camPosText) => {
+            const camPosObj = JSON.parse(camPosText) as CameraEventsBundle;
+            const events: CameraPositionEvent[] = (camPosObj.events ?? []).map((e) => ({
+              recordingId: json.recordingId,
+              timestamp: e.timestamp,
+              rx: e.rx,
+              ry: e.ry,
+              rs: e.rs,
+            }));
+            setCameraEvents(events);
+          })
+          .catch(() => setCameraEvents([]));
+      }
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : i18nText.generic);
       setStage('error');
     }
-
-    return () => {
-      if (createdAudio) URL.revokeObjectURL(createdAudio);
-      if (createdCamera) URL.revokeObjectURL(createdCamera);
-    };
   }, [short, i18nText.expired, i18nText.notFound, i18nText.generic]);
 
   useEffect(() => { void loadShare(); }, [loadShare]);

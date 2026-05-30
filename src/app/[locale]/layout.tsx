@@ -16,6 +16,13 @@ export const metadata = {
   description: 'Whiteboard recording — one take, every aspect ratio',
 };
 
+// 移动端：device-width + 适配刘海屏（分享页等全屏内容）
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover' as const,
+};
+
 export function generateStaticParams() {
   return locales.map((locale) => ({ locale }));
 }

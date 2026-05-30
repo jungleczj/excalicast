@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { exportRecording, downloadBlob } from '@/services/exportPipeline';
 import { isPaid } from '@/services/paymentClient';
+import { uploadRecording } from '@/services/cloudSync';
 import { I } from '@/components/icons';
 import { PaywallModal } from '@/components/PaywallModal';
 import { ProUpgradeModal } from '@/components/ProUpgradeModal';
@@ -47,6 +48,8 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
   const [shareExpiresAt, setShareExpiresAt] = useState<number>(0);
   const [shareModalOpen, setShareModalOpen] = useState<boolean>(false);
   const [maxFeatureMsg, setMaxFeatureMsg] = useState<string | null>(null);
+  const [shareNeedsCloud, setShareNeedsCloud] = useState<boolean>(false);
+  const [savingCloud, setSavingCloud] = useState<boolean>(false);
 
   const maxUnlocked = subscription.permissions.handout && subscription.permissions.shareLink;
 
@@ -67,12 +70,14 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
       const j = (await res.json().catch(() => ({}))) as { url?: string; expiresAt?: number; error?: string; message?: string };
       if (!res.ok || !j.url) {
         if (j.error === 'cloud_recording_required') {
+          setShareNeedsCloud(true);
           setMaxFeatureMsg(j.message ?? 'cloud required');
         } else {
           setMaxFeatureMsg(j.message ?? j.error ?? `share ${res.status}`);
         }
         return;
       }
+      setShareNeedsCloud(false);
       setShareUrl(j.url);
       setShareExpiresAt(j.expiresAt ?? 0);
       setShareModalOpen(true);
@@ -82,6 +87,21 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
       setShareBusy(false);
     }
   }, [recordingId]);
+
+  // 「保存到云端并重试」：就地上云后自动重试创建分享，免去回录制库
+  const handleSaveCloudThenShare = useCallback(async () => {
+    setSavingCloud(true);
+    setMaxFeatureMsg(null);
+    try {
+      await uploadRecording(recordingId);
+      setShareNeedsCloud(false);
+      await handleCreateShareLink();
+    } catch (err) {
+      setMaxFeatureMsg(err instanceof Error ? err.message : 'upload_failed');
+    } finally {
+      setSavingCloud(false);
+    }
+  }, [recordingId, handleCreateShareLink]);
 
   const proUnlocked = subscription.permissions.exportWithoutWatermark;
   const effectivelyUnlocked = paid || proUnlocked;
@@ -311,21 +331,34 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
         </div>
 
         {maxUnlocked && handoutOpen && (
-          <HandoutPanel recordingId={recordingId} />
+          <HandoutPanel recordingId={recordingId} config={config} />
         )}
         {maxFeatureMsg && (
-          <div
-            className="mt-3 px-3 py-2"
-            style={{
-              background: 'var(--rec-soft)',
-              border: '1.4px solid var(--rec)',
-              borderRadius: 3,
-              fontSize: 12,
-              color: 'var(--rec)',
-              fontFamily: 'var(--font-mono)',
-            }}
-          >
-            {maxFeatureMsg}
+          <div className="mt-3 space-y-2">
+            <div
+              className="px-3 py-2"
+              style={{
+                background: 'var(--rec-soft)',
+                border: '1.4px solid var(--rec)',
+                borderRadius: 3,
+                fontSize: 12,
+                color: 'var(--rec)',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              {maxFeatureMsg}
+            </div>
+            {shareNeedsCloud && (
+              <button
+                type="button"
+                onClick={() => { void handleSaveCloudThenShare(); }}
+                disabled={savingCloud}
+                className="btn-sketch btn-sketch-primary w-full"
+                style={{ justifyContent: 'center' }}
+              >
+                {savingCloud ? t('savingToCloud') : t('saveToCloudAndRetry')}
+              </button>
+            )}
           </div>
         )}
       </div>

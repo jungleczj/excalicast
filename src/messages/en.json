@@ -355,7 +355,15 @@
     "upgrade": "Upgrade",
     "maxBundleTitle": "Max features",
     "maxBundleDesc": "AI handout + public share link",
-    "maxBundleUnlock": "Upgrade to Max"
+    "maxBundleUnlock": "Upgrade to Max",
+    "saveToCloudAndRetry": "Save to cloud & retry",
+    "savingToCloud": "Saving to cloud…",
+    "handoutWithImages": "Include screenshots",
+    "handoutRenderingShots": "rendering…",
+    "handoutKeyScreenshots": "Key screenshots",
+    "handoutExportMd": "Markdown",
+    "handoutExportHtml": "HTML",
+    "handoutExportPdf": "PDF"
   },
   "library": {
     "title": "Library",

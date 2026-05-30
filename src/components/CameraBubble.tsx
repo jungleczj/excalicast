@@ -31,11 +31,20 @@ export function CameraBubble({ stream, size = 160, shape = 'circle', position, o
 
   useEffect(() => {
     if (!dragging) return;
+    // rAF 节流：mousemove 可达 60-120Hz，合并到每帧最多回调一次，
+    // 避免每个 mousemove 都触发父级 setState 重渲染造成拖拽卡顿。
+    let raf: number | null = null;
+    let pending: { x: number; y: number } | null = null;
+    const flush = () => {
+      raf = null;
+      if (pending) { onPositionChange(pending); pending = null; }
+    };
     const onMove = (e: MouseEvent) => {
-      onPositionChange({
+      pending = {
         x: e.clientX - dragOffset.current.x,
         y: e.clientY - dragOffset.current.y,
-      });
+      };
+      if (raf === null) raf = requestAnimationFrame(flush);
     };
     const onUp = () => setDragging(false);
     window.addEventListener('mousemove', onMove);
@@ -43,6 +52,7 @@ export function CameraBubble({ stream, size = 160, shape = 'circle', position, o
     return () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
+      if (raf !== null) cancelAnimationFrame(raf);
     };
   }, [dragging, onPositionChange]);
 

@@ -110,7 +110,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     await upsertHandout({
       recordingId,
       userId: guard.userId,
-      outline: { title: result.title, chapters: result.chapters },
+      outline: { title: result.title, chapters: result.chapters, keyframes: result.keyframes },
       markdown: result.markdown,
       model: modelUsed,
     });
@@ -124,6 +124,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   return NextResponse.json({
     title: result.title,
     chapters: result.chapters,
+    keyframes: result.keyframes,
     markdown: result.markdown,
     model: modelUsed,
   });

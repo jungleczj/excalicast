@@ -355,7 +355,15 @@
     "upgrade": "升级",
     "maxBundleTitle": "Max 功能",
     "maxBundleDesc": "AI 讲义 + 公开分享链接",
-    "maxBundleUnlock": "升级到 Max"
+    "maxBundleUnlock": "升级到 Max",
+    "saveToCloudAndRetry": "保存到云端并重试",
+    "savingToCloud": "正在保存到云端…",
+    "handoutWithImages": "带配图",
+    "handoutRenderingShots": "截图渲染中…",
+    "handoutKeyScreenshots": "关键截图",
+    "handoutExportMd": "Markdown",
+    "handoutExportHtml": "HTML",
+    "handoutExportPdf": "PDF"
   },
   "library": {
     "title": "录制库",
