@@ -912,6 +912,16 @@ Pro/Max 导出（订阅状态验证）：
 
 ### 11.2 变更记录（按时间倒序）
 
+- **2026-05-30｜第七轮 · 定价卡对齐 + 摄像头导出提速 + 摄像头存储压缩**：
+  1. 生产定价不更新**根因**（非代码）：active 行是 `creem/test`，页面只读 active 行；改的是别的行。修复=改 active 行或 `activate` 切 live。同步机制：落地页 force-dynamic 刷新即生效；弹窗经 admin API 改才有 Realtime 推送（直接改库需刷新）。
+  2. 定价页四卡 CTA 按钮底部对齐（卡片 flex column + bullets `flex-grow`）。
+  3. **含摄像头导出也走 WebCodecs**：新增 `webmCameraFrames.ts`（极简 WebM 解复用 + `VideoDecoder` 流式出帧），`exportPipeline.composeFrame` 在画布内合成摄像头气泡（镜像/圆形/定位与 ffmpeg overlay 对齐）；解码不可用/失败 → 回退 ffmpeg(JPEG)。
+  4. 摄像头存储压缩：采集端 `cameraRecorder` 800k→300kbps、480→360、24fps（项4）；上传前 `transcodeCameraForUpload`（VideoDecoder 解 → VP9 ~220k/15fps 重编码 → `webm-muxer` 同名 camera.webm），失败原样上传（项5）。新增依赖 `webm-muxer`。
+  5. Supabase 500MB 容量预估：无摄像头 ~0.3MB/min；含摄像头原 800k ~6.3MB/min（压缩后大幅下降）。
+- **2026-05-30｜第六轮 · 导出大幅提速**：瓶颈是每帧 JPEG/PNG 编码 + ffmpeg 单线程 libx264。两条腿：
+  1. **兜底（ffmpeg 路径，全浏览器）**：中间帧 PNG→**JPEG**(Q0.92)，`toBlob`/MemFS/解码均更快。
+  2. **主路径（WebCodecs，硬件编码）**：新增 `src/services/webCodecsExport.ts`（依赖 `mp4-muxer`）——`VideoEncoder`(H.264，优先硬件) 直接吃 canvas 帧 + `AudioEncoder`(AAC) + mp4-muxer 混流，去掉 PNG 序列与 ffmpeg 软编。`exportPipeline` 抽出 `frameInputs`/`composeFrame` 供两路共用；当 `VideoEncoder/AudioEncoder` 可用且**无摄像头**时走 WebCodecs，否则/异常自动回退 ffmpeg(JPEG)。
+  - 已知取舍：**有摄像头的导出仍走 ffmpeg(JPEG) 路径**（WebCodecs 无容器解复用，摄像头逐帧合成需 webm demux + VideoDecoder，列为后续增强）。
 - **2026-05-30｜定价页/退款政策微调**：定价页「推荐」徽标从「单次解锁」卡移到 **Pro 卡**（Pro 成为主推：6px 阴影 + 徽标）；单次/Pro 价格仍由 `payment_config` 驱动（落地页兜底 $4.99/$9.99/$15.99）。**退款政策改为：单次无水印导出为即时交付的数字商品、不退款，唯一例外为已扣款未解锁**（更新 landing `refund.body`、`/refund` 页 `RefundEn/Zh`、`terms` §4，中英同步）。
 - **2026-05-30｜第五轮（修复第四轮回归）**：
   1. 导出报错 `ArrayBuffer already detached`：帧去重复用 buffer 被 `ffmpeg.writeFile` transfer detach；改为写入传 `buf.slice()` 副本、保留 `lastBuf`。

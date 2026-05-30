@@ -20,6 +20,7 @@ import {
 } from '@/types/recording';
 import { compileSubtitles, drawFrostedWatermark, drawSubtitle, subtitleLayout, chunkByWidth, subtitlePageIndex } from '@/utils/frameOverlays';
 import { cueAt } from '@/utils/srtParser';
+import { createCameraFrameSource, type CameraFrameSource } from './webmCameraFrames';
 import { drawLaserOverlay } from '@/utils/laserRender';
 
 export interface ExportOptions extends ExportConfig {
@@ -158,6 +159,29 @@ export function buildCameraSegments(
   return aggressive.slice(0, maxSegments);
 }
 
+/** 在画布上把摄像头帧画成镜像圆形气泡（与 ffmpeg overlay 观感一致）。 */
+function drawCameraBubble(
+  ctx: CanvasRenderingContext2D,
+  frame: { displayWidth?: number; displayHeight?: number; codedWidth?: number; codedHeight?: number },
+  x: number, y: number, size: number,
+): void {
+  const fw = frame.displayWidth ?? frame.codedWidth ?? size;
+  const fh = frame.displayHeight ?? frame.codedHeight ?? size;
+  const s = Math.min(fw, fh);            // cover-crop 成正方形
+  const sx = (fw - s) / 2;
+  const sy = (fh - s) / 2;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
+  ctx.closePath();
+  ctx.clip();
+  ctx.translate(x + size, y);            // 水平镜像（hflip）
+  ctx.scale(-1, 1);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ctx.drawImage(frame as any, sx, sy, s, s, 0, 0, size, size);
+  ctx.restore();
+}
+
 function shellAt(shells: WorkspaceShellRow[], t: number): WorkspaceShellRow | null {
   if (shells.length === 0) return null;
   let lo = 0, hi = shells.length - 1, ans = -1;
@@ -257,14 +281,13 @@ function buildGhostRect(crop: SceneRect): Record<string, unknown> {
 
 export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   opts.onPhase?.('loading');
-  // 立即上报 1%，让用户看到进度条「在动」，避免 ffmpeg.load() 期间卡 0% 的体感
+  // 立即上报 1%，让用户看到进度条「在动」
   opts.onProgress?.(0.01);
-  const ffmpeg = await getFfmpeg(opts.onLog);
-  opts.onProgress?.(0.05);
   const { exportToCanvas } = await import('@excalidraw/excalidraw');
-  opts.onProgress?.(0.07);
+  opts.onProgress?.(0.05);
   const { metadata, snapshots, audioBlob, cameraBlob, cameraEvents, laserEvents, binaryFiles } = await loadFullRecording(opts.recordingId);
   opts.onProgress?.(0.08);
+  // ffmpeg 仅在兜底路径才加载（WebCodecs 快路径不需要）。
 
   const preset = ASPECT_PRESETS[opts.aspectRatio];
   const fps = opts.fps;
@@ -313,6 +336,21 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   let lastBaseSig: string | null = null;
   let baseCanvas: HTMLCanvasElement | null = null;
 
+  // 摄像头画布内合成（仅 WebCodecs 路径启用；ffmpeg 路径仍用 overlay 滤镜）
+  let compositeCamera = false;
+  let cameraSource: CameraFrameSource | null = null;
+  // 摄像头气泡有效边界（shell-aware，与 ffmpeg 路径同一套换算）
+  const camBounds: CameraBounds = (() => {
+    if (useShell && decodedShells.length > 0) {
+      const first = decodedShells[0];
+      const s = Math.min(outputW / first.shellSize.width, outputH / first.shellSize.height);
+      const sw = first.shellSize.width * s;
+      const sh = first.shellSize.height * s;
+      return { offX: (outputW - sw) / 2, offY: (outputH - sh) / 2, w: sw, h: sh };
+    }
+    return { offX: 0, offY: 0, w: outputW, h: outputH };
+  })();
+
   // 字幕分页：用常驻测量 ctx（导出字体/尺寸恒定）算当前页索引，供去重签名使用，
   // 否则同一 cue 内不同分页的相邻帧会被误判相同而复用 → 分页卡住不翻页。
   const subLayout = subtitleLayout(outputW, outputH, cameraBlob ? 0.3 : 0);
@@ -329,24 +367,19 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     return subtitlePageIndex(pageCount, cue.startMs, cue.endMs, t);
   };
 
-  for (let i = 0; i < totalFrames; i++) {
+  // 单帧时变输入（便宜，可在去重前算）
+  const frameInputs = (i: number) => {
     const t = (i / fps) * 1000;
     const snap = snapshotAt(snapshots, t);
     const shellAtTframe = useShell ? (shellAt(decodedShells, t) as DecodedShell | null) : null;
     const cueAtT = cues.length > 0 ? cueAt(cues, t) : null;
-
-    // 帧签名：决定本帧像素的全部时变因素（场景快照 + 外壳 + 当前字幕）。
-    const name = `f_${String(i).padStart(6, '0')}.png`;
     const sig = `${snap?.timestamp ?? -1}|${shellAtTframe?.timestamp ?? -1}|${cueAtT ? `${cueAtT.startMs}-${cueAtT.endMs}#${subtitlePageAt(cueAtT, t)}` : -1}`;
-    if (dedupEnabled && sig === lastSig && lastBuf) {
-      // 传副本：writeFile 以 transfer 方式 postMessage 会 detach 传入 buffer，
-      // 必须用 slice() 给一份新 ArrayBuffer，保留 lastBuf 供后续复用。
-      await ffmpeg.writeFile(name, lastBuf.slice());
-      opts.onProgress?.(0.08 + ((i + 1) / totalFrames) * 0.64);
-      continue;
-    }
+    return { t, snap, shellAtTframe, sig };
+  };
 
-    // 渲染目标尺寸
+  // 合成一帧到独立 canvas（场景+外壳+水印+字幕），含基帧缓存。ffmpeg / WebCodecs 两路径共用。
+  const composeFrame = async (inp: ReturnType<typeof frameInputs>): Promise<HTMLCanvasElement> => {
+    const { t, snap, shellAtTframe } = inp;
     const target = document.createElement('canvas');
     target.width = outputW;
     target.height = outputH;
@@ -360,18 +393,14 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     if (reuseBase) {
       targetCtx.drawImage(baseCanvas as HTMLCanvasElement, 0, 0);
     } else {
-    // shell 模式：先按 cover 把工作区外壳画到 target，再把 scene 画进映射后的 canvasRect。
-    // 否则：scene 直接铺满 target（picker 比例 == target 比例）。
-    let shellAtT: DecodedShell | null = shellAtTframe;
-    let shellRenderScale = 1;
-    let shellOffsetX = 0;
-    let shellOffsetY = 0;
-    if (useShell) {
-      if (shellAtT) {
+      // shell 模式：先按 contain 把工作区外壳画到 target，再把 scene 画进映射后的 canvasRect。
+      let shellAtT: DecodedShell | null = shellAtTframe;
+      let shellRenderScale = 1;
+      let shellOffsetX = 0;
+      let shellOffsetY = 0;
+      if (useShell && shellAtT) {
         const shellW = shellAtT.shellSize.width;
         const shellH = shellAtT.shellSize.height;
-        // contain（letterbox）：取较小缩放比，让整张 shell 完整落在 target 内、四周可能留白。
-        // 这是用户期望的"整体缩放画面，包括 workspace UI"行为。
         shellRenderScale = Math.min(target.width / shellW, target.height / shellH);
         const scaledW = shellW * shellRenderScale;
         const scaledH = shellH * shellRenderScale;
@@ -379,124 +408,181 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         shellOffsetY = (target.height - scaledH) / 2;
         targetCtx.drawImage(shellAtT.bitmap, shellOffsetX, shellOffsetY, scaledW, scaledH);
       }
-    }
 
-    // 决定本帧 scene 渲染的目标区域 + 源 crop rect
-    const dest = (() => {
-      if (useShell && shellAtT) {
-        // canvasRect 在 shell 原始坐标里 → 通过 contain 变换映射到 target 坐标
-        return {
-          x: shellOffsetX + shellAtT.canvasRect.x * shellRenderScale,
-          y: shellOffsetY + shellAtT.canvasRect.y * shellRenderScale,
-          width: shellAtT.canvasRect.width * shellRenderScale,
-          height: shellAtT.canvasRect.height * shellRenderScale,
-        };
-      }
-      return { x: 0, y: 0, width: target.width, height: target.height };
-    })();
+      const dest = (() => {
+        if (useShell && shellAtT) {
+          return {
+            x: shellOffsetX + shellAtT.canvasRect.x * shellRenderScale,
+            y: shellOffsetY + shellAtT.canvasRect.y * shellRenderScale,
+            width: shellAtT.canvasRect.width * shellRenderScale,
+            height: shellAtT.canvasRect.height * shellRenderScale,
+          };
+        }
+        return { x: 0, y: 0, width: target.width, height: target.height };
+      })();
 
-    const sceneSourceRect: SceneRect = (() => {
-      if (useShell && shellAtT) {
-        // shell 模式：scene 画进 mapped canvasRect（其 aspect = canvasRect.w/h），
-        // 所以 source 也按 canvasRect 的 aspect 裁；croppingMode 仍然生效，
-        // fit_all_content 在 shell 路径下也能正常套全部内容。
-        const canvasAspect = shellAtT.canvasRect.width / shellAtT.canvasRect.height;
-        return cropRectForAspect(snap, cropCtx, canvasAspect);
-      }
-      // 非 shell 模式：恒按 picker 比例裁场景，填满 target
-      return cropRectForSnapshot(snap, cropCtx);
-    })();
+      const sceneSourceRect: SceneRect = (() => {
+        if (useShell && shellAtT) {
+          const canvasAspect = shellAtT.canvasRect.width / shellAtT.canvasRect.height;
+          return cropRectForAspect(snap, cropCtx, canvasAspect);
+        }
+        return cropRectForSnapshot(snap, cropCtx);
+      })();
 
-    if (snap && (snap.elements as unknown[]).length > 0) {
-      const ghost = buildGhostRect(sceneSourceRect);
-      const elementsForRender = [ghost, ...(snap.elements as unknown[])];
+      if (snap && (snap.elements as unknown[]).length > 0) {
+        const ghost = buildGhostRect(sceneSourceRect);
+        const elementsForRender = [ghost, ...(snap.elements as unknown[])];
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sceneCanvas: HTMLCanvasElement = await exportToCanvas({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        elements: elementsForRender as any,
-        appState: {
+        const sceneCanvas: HTMLCanvasElement = await exportToCanvas({
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ...(snap.appState as any),
-          exportBackground: true,
-          viewBackgroundColor: '#ffffff',
-          exportWithDarkMode: false,
-          exportPadding: 0,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        files: filesForExport as any,
-        getDimensions: (w, h) => ({ width: w, height: h, scale: 1 }),
-      });
+          elements: elementsForRender as any,
+          appState: {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ...(snap.appState as any),
+            exportBackground: true,
+            viewBackgroundColor: '#ffffff',
+            exportWithDarkMode: false,
+            exportPadding: 0,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          } as any,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          files: filesForExport as any,
+          getDimensions: (w, h) => ({ width: w, height: h, scale: 1 }),
+        });
 
-      const realBBox = elementBoundsUnion(snap.elements as unknown[]);
-      const renderedSceneRect: SceneRect = realBBox
-        ? unionRect(realBBox, sceneSourceRect)
-        : sceneSourceRect;
+        const realBBox = elementBoundsUnion(snap.elements as unknown[]);
+        const renderedSceneRect: SceneRect = realBBox
+          ? unionRect(realBBox, sceneSourceRect)
+          : sceneSourceRect;
 
-      const scale = sceneCanvas.width / renderedSceneRect.width;
-      const sx = (sceneSourceRect.x - renderedSceneRect.x) * scale;
-      const scaleY = sceneCanvas.height / renderedSceneRect.height;
-      const sy2 = (sceneSourceRect.y - renderedSceneRect.y) * scaleY;
-      const sw = sceneSourceRect.width * scale;
-      const sh2 = sceneSourceRect.height * scaleY;
+        const scale = sceneCanvas.width / renderedSceneRect.width;
+        const sx = (sceneSourceRect.x - renderedSceneRect.x) * scale;
+        const scaleY = sceneCanvas.height / renderedSceneRect.height;
+        const sy2 = (sceneSourceRect.y - renderedSceneRect.y) * scaleY;
+        const sw = sceneSourceRect.width * scale;
+        const sh2 = sceneSourceRect.height * scaleY;
 
-      try {
-        targetCtx.drawImage(
-          sceneCanvas,
-          Math.max(0, sx),
-          Math.max(0, sy2),
-          Math.min(sw, sceneCanvas.width - sx),
-          Math.min(sh2, sceneCanvas.height - sy2),
-          dest.x, dest.y, dest.width, dest.height,
-        );
-      } catch {
-        targetCtx.drawImage(sceneCanvas, dest.x, dest.y, dest.width, dest.height);
+        try {
+          targetCtx.drawImage(
+            sceneCanvas,
+            Math.max(0, sx),
+            Math.max(0, sy2),
+            Math.min(sw, sceneCanvas.width - sx),
+            Math.min(sh2, sceneCanvas.height - sy2),
+            dest.x, dest.y, dest.width, dest.height,
+          );
+        } catch {
+          targetCtx.drawImage(sceneCanvas, dest.x, dest.y, dest.width, dest.height);
+        }
       }
-    }
 
-    // 激光笔轨迹叠加 —— scene 坐标按 sceneSourceRect→dest 映射到 target 像素
-    if (laserEvents.length > 0) {
-      const ssr = sceneSourceRect;
-      drawLaserOverlay(targetCtx, laserEvents, t, {
-        sceneToScreen: (sx: number, sy: number) => ({
-          x: dest.x + ((sx - ssr.x) / ssr.width) * dest.width,
-          y: dest.y + ((sy - ssr.y) / ssr.height) * dest.height,
-        }),
-      });
-    }
+      if (laserEvents.length > 0) {
+        const ssr = sceneSourceRect;
+        drawLaserOverlay(targetCtx, laserEvents, t, {
+          sceneToScreen: (sx: number, sy: number) => ({
+            x: dest.x + ((sx - ssr.x) / ssr.width) * dest.width,
+            y: dest.y + ((sy - ssr.y) / ssr.height) * dest.height,
+          }),
+        });
+      }
 
-    // 毛玻璃水印（属于基帧；在字幕之前画 — 字幕居中位置可能与水印边角重叠，字幕在上更可读）
-    if (opts.withWatermark) {
-      drawFrostedWatermark(targetCtx, target.width, target.height, watermarkPos);
-    }
-    // 缓存这帧基底（场景+外壳+水印），供后续仅字幕变化的帧复用
-    if (dedupEnabled) {
-      if (!baseCanvas) baseCanvas = document.createElement('canvas');
-      baseCanvas.width = target.width;
-      baseCanvas.height = target.height;
-      baseCanvas.getContext('2d')!.drawImage(target, 0, 0);
-      lastBaseSig = baseSig;
-    }
+      if (opts.withWatermark) {
+        drawFrostedWatermark(targetCtx, target.width, target.height, watermarkPos);
+      }
+      if (dedupEnabled) {
+        if (!baseCanvas) baseCanvas = document.createElement('canvas');
+        baseCanvas.width = target.width;
+        baseCanvas.height = target.height;
+        baseCanvas.getContext('2d')!.drawImage(target, 0, 0);
+        lastBaseSig = baseSig;
+      }
     } // end else（基帧渲染）
 
-    // 字幕硬嵌入（每帧都画，不入基帧缓存；摄像头在右下角时为其预留空间）
+    // 字幕硬嵌入（每帧都画，不入基帧缓存）
     if (cues.length > 0) {
       drawSubtitle(targetCtx, target.width, target.height, cues, t, {
         reservedRightFraction: cameraBlob ? 0.3 : 0,
       });
     }
 
+    // 摄像头气泡（仅 WebCodecs 路径在画布内合成；位置/镜像/隐藏与 ffmpeg overlay 对齐）
+    if (compositeCamera && cameraSource) {
+      const frame = await cameraSource.getFrameAt(t);
+      if (frame) {
+        const pos = cameraPositionAt(cameraEvents, t);
+        if (!pos) {
+          const size = Math.max(16, Math.round(camBounds.h * 0.22));
+          const x = Math.round(camBounds.offX + camBounds.w - size - camBounds.w * 0.025);
+          const y = Math.round(camBounds.offY + camBounds.h - size - camBounds.h * 0.04);
+          drawCameraBubble(targetCtx, frame, x, y, size);
+        } else if (!pos.hidden) {
+          const size = Math.max(16, Math.round(pos.rs * camBounds.w));
+          const x = Math.round(camBounds.offX + pos.rx * camBounds.w);
+          const y = Math.round(camBounds.offY + pos.ry * camBounds.h);
+          drawCameraBubble(targetCtx, frame, x, y, size);
+        }
+      }
+    }
+    return target;
+  };
+
+  // —— WebCodecs 硬件编码主路径：浏览器支持时启用，失败自动回退 ffmpeg ——
+  // 含摄像头时尝试用 VideoDecoder+webm 解复用把摄像头帧在画布内合成；解码不可用/失败 → 回退。
+  if ('VideoEncoder' in globalThis && 'AudioEncoder' in globalThis) {
+    try {
+      if (cameraBlob) {
+        cameraSource = await createCameraFrameSource(cameraBlob); // 失败抛错 → 回退 ffmpeg
+        compositeCamera = true;
+      }
+      const { encodeWebCodecsMp4 } = await import('./webCodecsExport');
+      const blob = await encodeWebCodecsMp4({
+        totalFrames,
+        fps,
+        width: outputW,
+        height: outputH,
+        audioBlob: audioBlob ?? null,
+        renderFrame: async (i) => composeFrame(frameInputs(i)),
+        onProgress: (p) => opts.onProgress?.(0.08 + p * 0.9),
+      });
+      cameraSource?.close();
+      opts.onPhase?.('done');
+      opts.onProgress?.(1);
+      return blob;
+    } catch (err) {
+      // 回退前清理摄像头解码资源 + 复位标志（ffmpeg 路径用 overlay 自己处理摄像头）
+      try { cameraSource?.close(); } catch { /* */ }
+      cameraSource = null;
+      compositeCamera = false;
+      // 基帧缓存可能已含半帧状态，复位以免污染 ffmpeg 路径
+      lastBaseSig = null;
+      baseCanvas = null;
+      lastSig = null;
+      lastBuf = null;
+      // eslint-disable-next-line no-console
+      console.warn('[export] WebCodecs path failed, falling back to ffmpeg:', err);
+    }
+  }
+
+  // —— ffmpeg 兜底路径（JPEG 中间帧）——
+  const ffmpeg = await getFfmpeg(opts.onLog);
+  for (let i = 0; i < totalFrames; i++) {
+    const inp = frameInputs(i);
+    const name = `f_${String(i).padStart(6, '0')}.jpg`;
+    if (dedupEnabled && inp.sig === lastSig && lastBuf) {
+      // 传副本：writeFile 以 transfer 方式会 detach 传入 buffer，slice() 保留 lastBuf。
+      await ffmpeg.writeFile(name, lastBuf.slice());
+      opts.onProgress?.(0.08 + ((i + 1) / totalFrames) * 0.64);
+      continue;
+    }
+    const target = await composeFrame(inp);
     const blob: Blob = await new Promise<Blob>((resolve, reject) => {
-      target.toBlob((b) => b ? resolve(b) : reject(new Error('toBlob_failed')), 'image/png');
+      target.toBlob((b) => b ? resolve(b) : reject(new Error('toBlob_failed')), 'image/jpeg', 0.92);
     });
     const buf = new Uint8Array(await blob.arrayBuffer());
-    // 写副本以免 detach 掉要保留作 lastBuf 的 buf
     await ffmpeg.writeFile(name, buf.slice());
     lastBuf = buf;
-    lastSig = sig;
-
-    // 帧渲染占 8% → 72% 区间（0.64 宽）
+    lastSig = inp.sig;
     opts.onProgress?.(0.08 + ((i + 1) / totalFrames) * 0.64);
   }
 
@@ -520,7 +606,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
 
   // 输入顺序：[0] 帧序列 [1] 音频?  [2] 摄像头?
   // 注意：水印和字幕已在帧画布层画进 PNG，这里不再有水印 input
-  const inputs: string[] = ['-framerate', String(fps), '-i', 'f_%06d.png'];
+  const inputs: string[] = ['-framerate', String(fps), '-i', 'f_%06d.jpg'];
   let nextIdx = 1;
   let audioIdx: number | null = null;
   let cameraIdx: number | null = null;
@@ -607,7 +693,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const arr = data instanceof Uint8Array ? data : new TextEncoder().encode(String(data));
 
   for (let i = 0; i < totalFrames; i++) {
-    try { await ffmpeg.deleteFile(`f_${String(i).padStart(6, '0')}.png`); } catch { /* ignore */ }
+    try { await ffmpeg.deleteFile(`f_${String(i).padStart(6, '0')}.jpg`); } catch { /* ignore */ }
   }
   try { await ffmpeg.deleteFile('output.mp4'); } catch { /* ignore */ }
   if (audioFile) { try { await ffmpeg.deleteFile(audioFile); } catch { /* ignore */ } }

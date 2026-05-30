@@ -144,10 +144,20 @@ export async function uploadRecording(
     bytesUploaded += sizeAudio;
   }
 
-  // 4) camera.webm
+  // 4) camera.webm —— 上传前尝试 WebCodecs 转码为更小代理（VP9 低码率），
+  //    省云端存储；不支持/失败则原样上传。
   if (cameraBlob) {
     onProgress?.({ step: 'camera', bytesUploaded, bytesTotal });
-    const sizeCam = await uploadObject(userId, recordingId, 'camera.webm', cameraBlob, 'video/webm');
+    let camUpload = cameraBlob;
+    try {
+      const { transcodeCameraForUpload } = await import('./webCodecsExport');
+      const proxy = await transcodeCameraForUpload(cameraBlob);
+      // 仅当代理确实更小才用它
+      if (proxy.size > 0 && proxy.size < cameraBlob.size) camUpload = proxy;
+    } catch {
+      camUpload = cameraBlob; // 回退原始
+    }
+    const sizeCam = await uploadObject(userId, recordingId, 'camera.webm', camUpload, 'video/webm');
     bytesUploaded += sizeCam;
   }
 

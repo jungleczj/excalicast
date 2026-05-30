@@ -297,6 +297,9 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: st
             {/* Free tier */}
             <div
               style={{
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%',
                 background: 'var(--paper)',
                 border: '1.8px solid var(--ink)',
                 borderRadius: 4,
@@ -315,7 +318,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: st
                 {t('pricing.free.tagline')}
               </p>
 
-              <ul className="space-y-2" style={{ marginBottom: 24 }}>
+              <ul className="space-y-2" style={{ marginBottom: 24, flexGrow: 1 }}>
                 <Bullet>{t('pricing.free.bullet1')}</Bullet>
                 <Bullet>{t('pricing.free.bullet2')}</Bullet>
                 <Bullet>{t('pricing.free.bullet3')}</Bullet>
@@ -330,6 +333,9 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: st
             {/* One-time tier */}
             <div
               style={{
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%',
                 background: 'var(--hi)',
                 border: '1.8px solid var(--ink)',
                 borderRadius: 4,
@@ -350,7 +356,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: st
                 {t('pricing.oneTime.tagline')}
               </p>
 
-              <ul className="space-y-2" style={{ marginBottom: 24 }}>
+              <ul className="space-y-2" style={{ marginBottom: 24, flexGrow: 1 }}>
                 <Bullet>{t('pricing.oneTime.bullet1')}</Bullet>
                 <Bullet>{t('pricing.oneTime.bullet2')}</Bullet>
                 <Bullet>{t('pricing.oneTime.bullet3')}</Bullet>
@@ -367,6 +373,9 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: st
             <div
               style={{
                 position: 'relative',
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%',
                 background: 'var(--pro)',
                 border: '1.8px solid var(--ink)',
                 borderRadius: 4,
@@ -406,7 +415,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: st
                 {t('pricing.pro.tagline')}
               </p>
 
-              <ul className="space-y-2" style={{ marginBottom: 24 }}>
+              <ul className="space-y-2" style={{ marginBottom: 24, flexGrow: 1 }}>
                 <Bullet>{t('pricing.pro.bullet1')}</Bullet>
                 <Bullet>{t('pricing.pro.bullet2')}</Bullet>
                 <Bullet>{t('pricing.pro.bullet3')}</Bullet>
@@ -422,6 +431,9 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: st
             {/* Max tier */}
             <div
               style={{
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%',
                 background: 'var(--max)',
                 border: '1.8px solid var(--ink)',
                 borderRadius: 4,
@@ -442,7 +454,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: st
                 {t('pricing.max.tagline')}
               </p>
 
-              <ul className="space-y-2" style={{ marginBottom: 24 }}>
+              <ul className="space-y-2" style={{ marginBottom: 24, flexGrow: 1 }}>
                 <Bullet>{t('pricing.max.bullet1')}</Bullet>
                 <Bullet>{t('pricing.max.bullet2')}</Bullet>
                 <Bullet>{t('pricing.max.bullet3')}</Bullet>

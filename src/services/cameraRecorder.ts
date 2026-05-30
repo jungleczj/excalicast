@@ -49,10 +49,11 @@ export async function startCameraRecorder(recordingId: string): Promise<CameraHa
 
   const acquire = async (): Promise<void> => {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 480 }, height: { ideal: 480 }, facingMode: 'user' },
+      // 人头气泡：360p + 24fps 足够，显著降低云端存储（配合 VP9 + 300kbps）
+      video: { width: { ideal: 360 }, height: { ideal: 360 }, frameRate: { ideal: 24 }, facingMode: 'user' },
       audio: false, // 音频独立采集，避免双流
     });
-    const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 800_000 });
+    const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 300_000 });
     recorder.ondataavailable = async (e) => {
       if (e.data && e.data.size > 0) {
         await db.cameraChunks.add({ recordingId, index: chunkIndex++, blob: e.data });
