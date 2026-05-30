@@ -912,6 +912,7 @@ Pro/Max 导出（订阅状态验证）：
 
 ### 11.2 变更记录（按时间倒序）
 
+- **2026-05-30｜定价页/退款政策微调**：定价页「推荐」徽标从「单次解锁」卡移到 **Pro 卡**（Pro 成为主推：6px 阴影 + 徽标）；单次/Pro 价格仍由 `payment_config` 驱动（落地页兜底 $4.99/$9.99/$15.99）。**退款政策改为：单次无水印导出为即时交付的数字商品、不退款，唯一例外为已扣款未解锁**（更新 landing `refund.body`、`/refund` 页 `RefundEn/Zh`、`terms` §4，中英同步）。
 - **2026-05-30｜第五轮（修复第四轮回归）**：
   1. 导出报错 `ArrayBuffer already detached`：帧去重复用 buffer 被 `ffmpeg.writeFile` transfer detach；改为写入传 `buf.slice()` 副本、保留 `lastBuf`。
   2. 字幕不再截断：单行固定高度 + **长句分页**（`frameOverlays` 新增 `subtitleLayout`/`chunkByWidth`/`subtitlePageIndex`，导出与 `SubtitleOverlay` 共用，按时间翻页）；导出去重签名并入字幕页索引以免翻页卡住。

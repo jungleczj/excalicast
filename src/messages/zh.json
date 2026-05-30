@@ -53,6 +53,7 @@
       },
       "pro": {
         "label": "Pro",
+        "recommended": "推荐",
         "unit": "/月",
         "tagline": "适合常态创作者。按月订阅，可随时取消。",
         "bullet1": "所有录制导出永久无水印",
@@ -83,7 +84,7 @@
     },
     "refund": {
       "heading": "退款政策",
-      "body": "如果支付后无法成功导出无水印 MP4，或对服务不满意，可在<strong>支付后 14 天内</strong>申请全额退款。发邮件到 <mail>support@excalicast.cn</mail>，我们会在 2 个工作日内回复处理。",
+      "body": "「单次无水印导出」是付款后即时解锁的数字商品，<strong>不支持退款</strong>。唯一例外：已扣款但始终未成功解锁，请发邮件到 <mail>support@excalicast.cn</mail>，我们核实后在 2 个工作日内全额退款。",
       "viewFull": "查看完整退款政策 →"
     },
     "contact": {

@@ -32,7 +32,7 @@ export function TermsZh({ oneTimePrice }: { oneTimePrice: string }): JSX.Element
       <p>
         详细退款政策见{' '}
         <a href="/refund">退款政策页面</a>
-        。简要说明：14 天内可申请全额退款，需联系{' '}
+        。简要说明：单次无水印导出为即时交付的数字商品，不支持退款；唯一例外是已扣款但始终未解锁。如有问题请联系{' '}
         <a href="mailto:support@excalicast.cn">support@excalicast.cn</a>。
       </p>
 

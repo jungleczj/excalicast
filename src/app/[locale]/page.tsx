@@ -330,33 +330,13 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: st
             {/* One-time tier */}
             <div
               style={{
-                position: 'relative',
                 background: 'var(--hi)',
                 border: '1.8px solid var(--ink)',
                 borderRadius: 4,
-                boxShadow: '6px 6px 0 var(--ink)',
+                boxShadow: '3px 3px 0 var(--ink)',
                 padding: 28,
               }}
             >
-              <div
-                style={{
-                  position: 'absolute',
-                  top: -14,
-                  right: 18,
-                  padding: '5px 12px',
-                  background: 'var(--ink)',
-                  color: 'var(--paper)',
-                  border: '1.4px solid var(--ink)',
-                  fontFamily: 'var(--font-hand)',
-                  fontWeight: 600,
-                  fontSize: 15,
-                  transform: 'rotate(5deg)',
-                  boxShadow: '2px 2px 0 0 rgba(0,0,0,0.12)',
-                  borderRadius: 2,
-                }}
-              >
-                ★ {t('pricing.oneTime.recommended')}
-              </div>
               <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>
                 {t('pricing.oneTime.label')}
               </div>
@@ -383,16 +363,36 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: st
               </Link>
             </div>
 
-            {/* Pro tier */}
+            {/* Pro tier — 推荐 */}
             <div
               style={{
+                position: 'relative',
                 background: 'var(--pro)',
                 border: '1.8px solid var(--ink)',
                 borderRadius: 4,
-                boxShadow: '3px 3px 0 var(--ink)',
+                boxShadow: '6px 6px 0 var(--ink)',
                 padding: 28,
               }}
             >
+              <div
+                style={{
+                  position: 'absolute',
+                  top: -14,
+                  right: 18,
+                  padding: '5px 12px',
+                  background: 'var(--ink)',
+                  color: 'var(--paper)',
+                  border: '1.4px solid var(--ink)',
+                  fontFamily: 'var(--font-hand)',
+                  fontWeight: 600,
+                  fontSize: 15,
+                  transform: 'rotate(5deg)',
+                  boxShadow: '2px 2px 0 0 rgba(0,0,0,0.12)',
+                  borderRadius: 2,
+                }}
+              >
+                ★ {t('pricing.pro.recommended')}
+              </div>
               <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>
                 {t('pricing.pro.label')}
               </div>

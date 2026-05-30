@@ -31,8 +31,9 @@ export function TermsEn({ oneTimePrice }: { oneTimePrice: string }): JSX.Element
 
       <h2>4. Refunds</h2>
       <p>
-        See the <a href="/refund">refund policy page</a> for details. Summary: full refunds may be requested within 14 days
-        by emailing <a href="mailto:support@excalicast.cn">support@excalicast.cn</a>.
+        See the <a href="/refund">refund policy page</a> for details. Summary: the one-time watermark-free export is a
+        digital product delivered instantly and is non-refundable; the only exception is a charge where the unlock was
+        never delivered. Contact <a href="mailto:support@excalicast.cn">support@excalicast.cn</a>.
       </p>
 
       <h2>5. User Conduct</h2>

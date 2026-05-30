@@ -53,6 +53,7 @@
       },
       "pro": {
         "label": "Pro",
+        "recommended": "Recommended",
         "unit": "/mo",
         "tagline": "For regular creators. Subscribe monthly, cancel anytime.",
         "bullet1": "Watermark-free export on every recording",
@@ -83,7 +84,7 @@
     },
     "refund": {
       "heading": "Refund policy",
-      "body": "If you can't export a watermark-free MP4 after paying, or you're unsatisfied with the service, you can request a full refund <strong>within 14 days of purchase</strong>. Email <mail>support@excalicast.cn</mail> and we'll respond within 2 business days.",
+      "body": "The one-time watermark-free export is a digital product unlocked instantly on payment, so it is <strong>non-refundable</strong>. The only exception: if you were charged but the unlock was never delivered, email <mail>support@excalicast.cn</mail> and we'll verify and refund within 2 business days.",
       "viewFull": "Read the full refund policy →"
     },
     "contact": {
