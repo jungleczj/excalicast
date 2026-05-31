@@ -24,11 +24,15 @@ export default async function LandingPage({ params }: Props): Promise<JSX.Elemen
   const oneTimePrice = cfg ? formatPrice(cfg.oneTimePriceCents, cfg.currency) : '$4.99';
   const proPrice = cfg ? formatPrice(cfg.proMonthlyPriceCents, cfg.currency) : '$9.99';
   const maxPrice = cfg ? formatPrice(cfg.maxMonthlyPriceCents, cfg.currency) : '$15.99';
-  return <LandingContent oneTimePrice={oneTimePrice} proPrice={proPrice} maxPrice={maxPrice} />;
+  const provider = cfg?.provider ?? 'creem';
+  return <LandingContent oneTimePrice={oneTimePrice} proPrice={proPrice} maxPrice={maxPrice} provider={provider} />;
 }
 
-function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: string; proPrice: string; maxPrice: string }): JSX.Element {
+function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTimePrice: string; proPrice: string; maxPrice: string; provider: 'creem' | 'paddle' }): JSX.Element {
   const t = useTranslations('landing');
+  // 支付商文案随 active provider 动态显示（避免写死 Paddle）。
+  const providerLabel = provider === 'creem' ? 'Creem' : 'Paddle';
+  const providerUrl = provider === 'creem' ? 'https://www.creem.io' : 'https://www.paddle.com';
   return (
     <div className="flex h-full flex-col" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
       {/* ─── Header ─── */}
@@ -323,6 +327,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: st
                 <Bullet>{t('pricing.free.bullet2')}</Bullet>
                 <Bullet>{t('pricing.free.bullet3')}</Bullet>
                 <Bullet>{t('pricing.free.bullet4')}</Bullet>
+                <Bullet>{t('pricing.free.bullet5')}</Bullet>
               </ul>
 
               <Link href="/app" className="btn-sketch w-full" style={{ justifyContent: 'center' }}>
@@ -360,7 +365,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: st
                 <Bullet>{t('pricing.oneTime.bullet1')}</Bullet>
                 <Bullet>{t('pricing.oneTime.bullet2')}</Bullet>
                 <Bullet>{t('pricing.oneTime.bullet3')}</Bullet>
-                <Bullet>{t('pricing.oneTime.bullet4')}</Bullet>
+                <Bullet>{t('pricing.oneTime.bullet4', { provider: providerLabel })}</Bullet>
                 <Bullet>{t('pricing.oneTime.bullet5')}</Bullet>
               </ul>
 
@@ -421,6 +426,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: st
                 <Bullet>{t('pricing.pro.bullet3')}</Bullet>
                 <Bullet>{t('pricing.pro.bullet4')}</Bullet>
                 <Bullet>{t('pricing.pro.bullet5')}</Bullet>
+                <Bullet>{t('pricing.pro.bullet6')}</Bullet>
               </ul>
 
               <Link href="/app" className="btn-sketch w-full" style={{ justifyContent: 'center' }}>
@@ -459,6 +465,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: st
                 <Bullet>{t('pricing.max.bullet2')}</Bullet>
                 <Bullet>{t('pricing.max.bullet3')}</Bullet>
                 <Bullet>{t('pricing.max.bullet4')}</Bullet>
+                <Bullet>{t('pricing.max.bullet5')}</Bullet>
               </ul>
 
               <Link href="/app" className="btn-sketch w-full" style={{ justifyContent: 'center' }}>
@@ -471,9 +478,10 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice }: { oneTimePrice: st
             {t('pricing.methods')}
             <br />
             {t.rich('pricing.processedBy', {
-              paddle: (chunks) => (
+              provider: providerLabel,
+              link: (chunks) => (
                 <a
-                  href="https://www.paddle.com"
+                  href={providerUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{ color: 'var(--ink)', borderBottom: '1.4px solid var(--hi)', textDecoration: 'none' }}

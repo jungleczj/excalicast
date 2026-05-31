@@ -21,7 +21,7 @@ const TIER_VARIANT: Record<NonNullable<Props['tier']>, string> = {
 
 export function Brand(): JSX.Element {
   return (
-    <Link href="/app" className="flex items-center gap-2.5">
+    <Link href="/" className="flex items-center gap-2.5">
       <LogoMark size={28} />
       <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', color: 'var(--ink)' }}>
         Excalicast

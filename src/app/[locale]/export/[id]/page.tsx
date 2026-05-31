@@ -43,6 +43,19 @@ export default function ExportRecordingPage(): JSX.Element {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [config, setConfig] = useState<ExportConfig>(DEFAULT_CONFIG);
   const [exportProgress, setExportProgress] = useState<ExportProgressState | null>(null);
+  const [paymentDone, setPaymentDone] = useState(false);
+
+  // Creem 在新标签页支付后会带 ?creem_purchase=… 跳回本导出页。消费该参数：给个「支付完成」
+  // 提示并清掉 query（避免刷新重复触发）。解锁态由下方 ExportPanel 新鲜挂载自动拉取。
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get('creem_purchase')) return;
+    setPaymentDone(true);
+    window.history.replaceState(null, '', window.location.pathname + window.location.hash);
+    const tid = setTimeout(() => setPaymentDone(false), 6000);
+    return () => clearTimeout(tid);
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -68,8 +81,8 @@ export default function ExportRecordingPage(): JSX.Element {
   }, [id, router, locale]);
 
   const labels = locale === 'en'
-    ? { back: 'Back', recordingDone: 'Editor', localSavedAt: 'Saved locally', recordingPrefix: 'Project', withAudio: '🎤 with audio', withCamera: '🎥 with camera', delete: 'Delete recording', duration: 'Duration', ratio: 'Ratio', snapshots: 'Snapshots', audio: 'Audio', approx: '~', notRecorded: '—', notRecordedSub: 'not recorded', localStorage: 'local', backLibrary: 'Back to library', loading: 'Loading recording metadata…' }
-    : { back: '返回', recordingDone: '编辑器', localSavedAt: '本机保存', recordingPrefix: '项目', withAudio: '🎤 含音频', withCamera: '🎥 含摄像头', delete: '删除录制', duration: '时长', ratio: '比例', snapshots: '快照', audio: '音频', approx: '约', notRecorded: '—', notRecordedSub: '未录', localStorage: '本地', backLibrary: '返回录制库', loading: '加载录制元数据…' };
+    ? { back: 'Back', recordingDone: 'Editor', localSavedAt: 'Saved locally', recordingPrefix: 'Project', withAudio: '🎤 with audio', withCamera: '🎥 with camera', delete: 'Delete recording', duration: 'Duration', ratio: 'Ratio', snapshots: 'Snapshots', audio: 'Audio', approx: '~', notRecorded: '—', notRecordedSub: 'not recorded', localStorage: 'local', backLibrary: 'Back to library', loading: 'Loading recording metadata…', paymentReceived: 'Payment received · unlocked' }
+    : { back: '返回', recordingDone: '编辑器', localSavedAt: '本机保存', recordingPrefix: '项目', withAudio: '🎤 含音频', withCamera: '🎥 含摄像头', delete: '删除录制', duration: '时长', ratio: '比例', snapshots: '快照', audio: '音频', approx: '约', notRecorded: '—', notRecordedSub: '未录', localStorage: '本地', backLibrary: '返回录制库', loading: '加载录制元数据…', paymentReceived: '支付完成 · 已解锁' };
 
   if (loadError) {
     return (
@@ -118,6 +131,23 @@ export default function ExportRecordingPage(): JSX.Element {
   return (
     <div className="flex h-full flex-col" style={{ background: 'var(--paper-2)' }}>
       <AppHeader tier="free" />
+
+      {paymentDone && (
+        <div
+          className="fixed left-1/2 top-4 z-50 -translate-x-1/2 px-4 py-2"
+          style={{
+            background: 'var(--ok, #1a7f37)',
+            color: '#fff',
+            border: '1.4px solid var(--ink)',
+            borderRadius: 4,
+            boxShadow: '3px 3px 0 var(--ink)',
+            fontFamily: 'var(--font-mono)',
+            fontSize: 12,
+          }}
+        >
+          {labels.paymentReceived}
+        </div>
+      )}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left: preview + meta */}

@@ -1,0 +1,78 @@
+<!--
+  Excalicast — 魔法链接登录邮件模板
+  用于 Supabase Auth 的 "Magic Link" 模板（signInWithOtp 触发）。
+
+  生效方式（二选一）：
+    A. Dashboard：Authentication → Email Templates → Magic Link，把本文件内容粘进 Message body。
+    B. CLI：在 supabase/config.toml 中 [auth.email.template.magic_link] content_path 指向本文件，
+       然后 `supabase config push` 推到远程项目。
+
+  可用变量（Supabase GoTrue）：
+    {{ .ConfirmationURL }}  一键登录链接（已含 token + redirect_to）
+    {{ .Token }}            6 位数字验证码（备用，用户也可手动输入）
+    {{ .SiteURL }}          站点 URL
+    {{ .Email }}            收件邮箱
+  注意：邮件客户端对 CSS 支持有限，样式一律内联。
+-->
+<table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#f7f5ef;padding:32px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <tr>
+    <td align="center">
+      <table width="440" cellpadding="0" cellspacing="0" role="presentation" style="max-width:440px;width:100%;background:#fffdf7;border:2px solid #1a1a1a;border-radius:6px;box-shadow:6px 6px 0 #1a1a1a;overflow:hidden;">
+        <!-- 头部品牌带 -->
+        <tr>
+          <td style="padding:22px 28px;background:#ffe08a;border-bottom:1.6px solid #1a1a1a;">
+            <span style="font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:13px;font-weight:700;letter-spacing:0.12em;color:#1a1a1a;text-transform:uppercase;">Excalicast</span>
+          </td>
+        </tr>
+        <!-- 正文 -->
+        <tr>
+          <td style="padding:28px;">
+            <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;letter-spacing:-0.02em;color:#1a1a1a;line-height:1.2;">登录 Excalicast</h1>
+            <p style="margin:0 0 22px;font-size:14px;line-height:1.6;color:#444;">
+              点击下面的按钮即可登录你的账号。链接 10 分钟内有效，且只能使用一次。
+            </p>
+
+            <!-- 主按钮 -->
+            <table cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 22px;">
+              <tr>
+                <td style="background:#1a1a1a;border:1.6px solid #1a1a1a;border-radius:4px;box-shadow:4px 4px 0 #ffe08a;">
+                  <a href="{{ .ConfirmationURL }}" target="_blank"
+                     style="display:inline-block;padding:14px 28px;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#fffdf7;text-decoration:none;">
+                    登录 / Sign in
+                  </a>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0 0 6px;font-size:12px;line-height:1.6;color:#777;">
+              按钮无法点击？复制下面的链接到浏览器打开：
+            </p>
+            <p style="margin:0 0 22px;font-size:12px;line-height:1.5;color:#1a1a1a;word-break:break-all;">
+              <a href="{{ .ConfirmationURL }}" target="_blank" style="color:#1a1a1a;">{{ .ConfirmationURL }}</a>
+            </p>
+
+            <p style="margin:0 0 4px;font-size:12px;line-height:1.6;color:#777;">
+              或在登录页手动输入验证码：
+            </p>
+            <p style="margin:0 0 22px;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:24px;font-weight:700;letter-spacing:0.18em;color:#1a1a1a;">
+              {{ .Token }}
+            </p>
+
+            <hr style="border:none;border-top:1.4px solid #1a1a1a;opacity:0.25;margin:0 0 16px;" />
+            <p style="margin:0;font-size:11px;line-height:1.6;color:#999;">
+              如果你没有请求过登录邮件，可以安全地忽略本邮件，不会有任何账号变动。
+            </p>
+          </td>
+        </tr>
+        <!-- 页脚 -->
+        <tr>
+          <td style="padding:16px 28px;background:#f0ede4;border-top:1.4px solid #1a1a1a;">
+            <p style="margin:0;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:10px;letter-spacing:0.06em;color:#888;text-transform:uppercase;">
+              Excalicast · 白板录制增强工具
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>

@@ -33,10 +33,11 @@
       "free": {
         "label": "Free",
         "tagline": "No signup. Just open the app.",
-        "bullet1": "Unlimited recordings (up to 30 minutes each)",
-        "bullet2": "Voice + camera bubble",
+        "bullet1": "Unlimited recording · no time limit",
+        "bullet2": "Voice + camera bubble (drag / resize)",
         "bullet3": "Export MP4 (with Excalicast watermark)",
         "bullet4": "Multi-ratio export (16:9 / 9:16 / 1:1 / 4:5)",
+        "bullet5": "Local web playback. Data stays in your browser, no account.",
         "cta": "Start recording"
       },
       "oneTime": {
@@ -47,7 +48,7 @@
         "bullet1": "Everything in Free",
         "bullet2": "Permanent watermark removal",
         "bullet3": "Re-export this recording into any ratio, watermark-free, as many times as you want",
-        "bullet4": "Secure Paddle checkout (cards / Apple Pay / Google Pay)",
+        "bullet4": "Secure {provider} checkout (cards)",
         "bullet5": "Recording data stays in your browser. Server only stores payment status.",
         "cta": "Record first to unlock"
       },
@@ -56,25 +57,27 @@
         "recommended": "Recommended",
         "unit": "/mo",
         "tagline": "For regular creators. Subscribe monthly, cancel anytime.",
-        "bullet1": "Watermark-free export on every recording",
-        "bullet2": "AI subtitles (auto SRT timeline)",
-        "bullet3": "Cloud backup + unlimited recording length",
-        "bullet4": "Cross-device cloud template library",
-        "bullet5": "Priority support",
+        "bullet1": "Everything in Free",
+        "bullet2": "Watermark-free export on every recording",
+        "bullet3": "Subtitles (auto SRT timeline, zh/en)",
+        "bullet4": "Cloud backup (loss-proof, multi-device access)",
+        "bullet5": "Cross-device cloud template library",
+        "bullet6": "Priority support",
         "cta": "Upgrade in app"
       },
       "max": {
         "label": "Max",
         "unit": "/mo",
-        "tagline": "Everything in Pro, plus AI handouts and public sharing.",
+        "tagline": "Everything in Pro, plus structured handouts and public sharing.",
         "bullet1": "Everything in Pro",
-        "bullet2": "AI structured handout (Markdown + transcript)",
-        "bullet3": "Public share link (web playback · 30-day TTL)",
-        "bullet4": "Priority support",
+        "bullet2": "Structured handout (Markdown outline + transcript, smart figures)",
+        "bullet3": "Multi-format handout export (Markdown / HTML / PDF)",
+        "bullet4": "Public share link (web playback · 30-day TTL)",
+        "bullet5": "Priority support",
         "cta": "Upgrade in app"
       },
-      "methods": "Accepted payment methods: Visa · Mastercard · American Express · Apple Pay · Google Pay",
-      "processedBy": "All transactions are processed by <paddle>Paddle</paddle>. Excalicast never sees your payment details."
+      "methods": "Accepted payment methods: Visa · Mastercard · American Express",
+      "processedBy": "All transactions are processed by <link>{provider}</link>. Excalicast never sees your payment details."
     },
     "flow": {
       "heading": "How it works",
@@ -333,7 +336,7 @@
     "subtitleAction": "Generate",
     "subtitleActionLocked": "Upgrade Pro",
     "handoutTitle": "Structured handout",
-    "handoutDesc": "Markdown · outline + transcript via Deepseek",
+    "handoutDesc": "Markdown · outline + transcript",
     "handoutGenerate": "Generate",
     "handoutGenerating": "Generating…",
     "handoutNeedsCloud": "Save to cloud first",
@@ -356,12 +359,12 @@
     "use": "Use",
     "upgrade": "Upgrade",
     "proBundleTitle": "Pro features",
-    "proBundleDesc": "AI subtitles + cross-device templates",
+    "proBundleDesc": "Subtitles + cross-device templates",
     "proBundleUnlock": "Upgrade to Pro",
     "cloudTemplateTitle": "Cross-device cloud templates",
     "cloudTemplateDesc": "Template library synced across devices",
     "maxBundleTitle": "Max features",
-    "maxBundleDesc": "AI handout + public share link",
+    "maxBundleDesc": "Structured handout + public share link",
     "maxBundleUnlock": "Upgrade to Max",
     "saveToCloudAndRetry": "Save to cloud & retry",
     "savingToCloud": "Saving to cloud…",
@@ -438,7 +441,7 @@
     "secure": "secure checkout",
     "features": [
       "✅ Permanent watermark removal (every recording, no per-recording payment)",
-      "✅ AI subtitles (auto-generated SRT timeline)",
+      "✅ Subtitles (auto-generated SRT timeline)",
       "✅ Cloud backup of recordings (multi-device access)",
       "✅ Cross-device cloud template library (synced across devices)",
       "✅ Priority support"
@@ -460,14 +463,14 @@
   },
   "maxUpgrade": {
     "title": "Upgrade to Max",
-    "subtitle": "Everything in Pro, plus AI handouts and public share links. Billed monthly, cancel anytime.",
+    "subtitle": "Everything in Pro, plus structured handouts and public share links. Billed monthly, cancel anytime.",
     "perMonth": "/mo",
     "subscriptionTag": "Subscription · {provider} {env}",
     "sandbox": "sandbox",
     "secure": "secure checkout",
     "features": [
-      "✅ Everything in Pro (watermark-free export, AI subtitles, cloud backup, cloud template library)",
-      "✅ AI structured handout (Markdown outline + transcript)",
+      "✅ Everything in Pro (watermark-free export, subtitles, cloud backup, cloud template library)",
+      "✅ Structured handout (Markdown outline + transcript)",
       "✅ Public share link (web playback · 30-day TTL)",
       "✅ Priority support"
     ],

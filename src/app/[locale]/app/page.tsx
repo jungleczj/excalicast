@@ -30,6 +30,7 @@ export default function HomePage(): JSX.Element {
   const [cameraEnabled, setCameraEnabled] = useState<boolean>(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [cameraPos, setCameraPos] = useState({ x: 0, y: 0 });
+  const [cameraSize, setCameraSize] = useState(160);
   const [proUpgradeOpen, setProUpgradeOpen] = useState(false);
 
   // 录制条位置：默认放在 Excalidraw toolbar 之下、右上角，避开顶部菜单
@@ -42,6 +43,7 @@ export default function HomePage(): JSX.Element {
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const workspaceRootRef = useRef<HTMLDivElement | null>(null);
   const cameraPosLsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cameraSizeLsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const excalidrawApiRef = useRef<any>(null);
   const laserPointRef = useRef<((x: number, y: number, button: 'down' | 'up') => void) | null>(null);
@@ -69,6 +71,17 @@ export default function HomePage(): JSX.Element {
     const w = window.innerWidth;
     const h = window.innerHeight;
 
+    // 先恢复气泡尺寸（用于把位置约束在视口内）
+    let initSize = 160;
+    const savedSize = localStorage.getItem('excalicast.camera-size');
+    if (savedSize) {
+      const s = Number(savedSize);
+      if (Number.isFinite(s)) {
+        initSize = Math.max(80, Math.min(480, Math.round(s)));
+        setCameraSize(initSize);
+      }
+    }
+
     const savedCam = localStorage.getItem('excalicast.camera-pos');
     if (savedCam) {
       try {
@@ -76,8 +89,8 @@ export default function HomePage(): JSX.Element {
         if (typeof p?.x === 'number' && typeof p?.y === 'number') {
           // 约束到当前视口内，防止上次窗口比这次大时跑到屏幕外
           setCameraPos({
-            x: Math.max(0, Math.min(w - 160, p.x)),
-            y: Math.max(0, Math.min(h - 160, p.y)),
+            x: Math.max(0, Math.min(w - initSize, p.x)),
+            y: Math.max(0, Math.min(h - initSize, p.y)),
           });
         } else {
           setCameraPos({ x: w - 200, y: h - 280 });
@@ -109,7 +122,7 @@ export default function HomePage(): JSX.Element {
     setCameraPos(p);
     // 录制中：把 viewport 坐标 + 当前 size 喂给 session，写到 cameraPositions 表
     if (sessionRef.current) {
-      sessionRef.current.recordCameraMove(p.x, p.y, 160);
+      sessionRef.current.recordCameraMove(p.x, p.y, cameraSize);
     }
     // UX：跨刷新记住位置（debounce 250ms 避免拖拽时写爆 localStorage）
     if (cameraPosLsTimerRef.current !== null) clearTimeout(cameraPosLsTimerRef.current);
@@ -117,7 +130,20 @@ export default function HomePage(): JSX.Element {
       try { localStorage.setItem('excalicast.camera-pos', JSON.stringify(p)); }
       catch { /* quota / private mode */ }
     }, 250);
-  }, []);
+  }, [cameraSize]);
+
+  // 摄像头尺寸变更：(1) 录制中转发给 session（位置不变、size 变）；(2) debounced 写 localStorage
+  const handleCameraSizeChange = useCallback((next: number) => {
+    setCameraSize(next);
+    if (sessionRef.current) {
+      sessionRef.current.recordCameraMove(cameraPos.x, cameraPos.y, next);
+    }
+    if (cameraSizeLsTimerRef.current !== null) clearTimeout(cameraSizeLsTimerRef.current);
+    cameraSizeLsTimerRef.current = setTimeout(() => {
+      try { localStorage.setItem('excalicast.camera-size', String(next)); }
+      catch { /* quota / private mode */ }
+    }, 250);
+  }, [cameraPos.x, cameraPos.y]);
 
   // 拖拽逻辑
   useEffect(() => {
@@ -218,12 +244,12 @@ export default function HomePage(): JSX.Element {
       // 录制开始时种一颗 t=0 事件，保证回放/导出能定位到当前气泡位置，
       // 而不是回退到默认右下角
       if (session.hasCamera) {
-        session.recordCameraMove(cameraPos.x, cameraPos.y, 160);
+        session.recordCameraMove(cameraPos.x, cameraPos.y, cameraSize);
       }
     } catch (err) {
       alert(t('startFailed', { message: err instanceof Error ? err.message : 'unknown' }));
     }
-  }, [cameraEnabled, cameraStream, cameraPos, t]);
+  }, [cameraEnabled, cameraStream, cameraPos, cameraSize, t]);
 
   const handlePause = useCallback(() => {
     sessionRef.current?.pause();
@@ -345,10 +371,11 @@ export default function HomePage(): JSX.Element {
           <div className="rb-no-record">
             <CameraBubble
               stream={cameraStream}
-              size={160}
+              size={cameraSize}
               shape="circle"
               position={cameraPos}
               onPositionChange={handleCameraPositionChange}
+              onSizeChange={handleCameraSizeChange}
             />
           </div>
         )}

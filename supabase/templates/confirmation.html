@@ -1,0 +1,51 @@
+<!--
+  Excalicast — 注册确认邮件模板（"Confirm signup"）。
+  当新邮箱首次登录/注册时 Supabase 可能发此模板。品牌与 magic_link.html 保持一致。
+  变量：{{ .ConfirmationURL }} {{ .Token }} {{ .SiteURL }} {{ .Email }}
+-->
+<table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background:#f7f5ef;padding:32px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <tr>
+    <td align="center">
+      <table width="440" cellpadding="0" cellspacing="0" role="presentation" style="max-width:440px;width:100%;background:#fffdf7;border:2px solid #1a1a1a;border-radius:6px;box-shadow:6px 6px 0 #1a1a1a;overflow:hidden;">
+        <tr>
+          <td style="padding:22px 28px;background:#ffe08a;border-bottom:1.6px solid #1a1a1a;">
+            <span style="font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:13px;font-weight:700;letter-spacing:0.12em;color:#1a1a1a;text-transform:uppercase;">Excalicast</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:28px;">
+            <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;letter-spacing:-0.02em;color:#1a1a1a;line-height:1.2;">欢迎加入 Excalicast</h1>
+            <p style="margin:0 0 22px;font-size:14px;line-height:1.6;color:#444;">
+              点击下面的按钮确认邮箱并完成登录。链接 10 分钟内有效。
+            </p>
+            <table cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 22px;">
+              <tr>
+                <td style="background:#1a1a1a;border:1.6px solid #1a1a1a;border-radius:4px;box-shadow:4px 4px 0 #ffe08a;">
+                  <a href="{{ .ConfirmationURL }}" target="_blank"
+                     style="display:inline-block;padding:14px 28px;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:13px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#fffdf7;text-decoration:none;">
+                    确认并登录 / Confirm
+                  </a>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:0 0 6px;font-size:12px;line-height:1.6;color:#777;">按钮无法点击？复制链接到浏览器打开：</p>
+            <p style="margin:0 0 22px;font-size:12px;line-height:1.5;color:#1a1a1a;word-break:break-all;">
+              <a href="{{ .ConfirmationURL }}" target="_blank" style="color:#1a1a1a;">{{ .ConfirmationURL }}</a>
+            </p>
+            <hr style="border:none;border-top:1.4px solid #1a1a1a;opacity:0.25;margin:0 0 16px;" />
+            <p style="margin:0;font-size:11px;line-height:1.6;color:#999;">
+              如果你没有注册过 Excalicast，可以安全地忽略本邮件。
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:16px 28px;background:#f0ede4;border-top:1.4px solid #1a1a1a;">
+            <p style="margin:0;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:10px;letter-spacing:0.06em;color:#888;text-transform:uppercase;">
+              Excalicast · 白板录制增强工具
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>

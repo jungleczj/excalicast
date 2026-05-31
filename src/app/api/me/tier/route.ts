@@ -26,12 +26,14 @@ export async function GET(): Promise<NextResponse<TierResponse>> {
       loggedIn: true,
     });
   }
-  // 已 cancelled 但未到期仍享受 Pro，到期后自动降级为 free
+  // 已 cancelled 但未到期仍享受 Pro，到期后自动降级为 free。
+  // past_due（扣款失败宽限期）也保留权益——宽限期结束支付商会推 cancelled，届时再降级。
   const now = Date.now();
   const isStillEntitled =
     sub.status === 'active' ||
-    (sub.status === 'cancelled' && sub.currentPeriodEnd != null && sub.currentPeriodEnd > now) ||
-    sub.status === 'paused';
+    sub.status === 'paused' ||
+    sub.status === 'past_due' ||
+    (sub.status === 'cancelled' && sub.currentPeriodEnd != null && sub.currentPeriodEnd > now);
   return NextResponse.json({
     tier: isStillEntitled ? sub.tier : 'free',
     status: sub.status,

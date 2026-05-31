@@ -120,7 +120,8 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
       const res = await fetch('/api/checkout/pro', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ tier }),
+        // returnTo：支付成功后回到当前页（如导出页 /zh/export/[id]）；在 /app 触发时自然回 /app
+        body: JSON.stringify({ tier, returnTo: window.location.pathname }),
       });
       const j = (await res.json().catch(() => ({}))) as {
         provider?: 'paddle' | 'creem';

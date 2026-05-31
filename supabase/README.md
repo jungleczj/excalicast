@@ -82,6 +82,44 @@ export async function isRecordingPaid(recordingId: string): Promise<boolean> {
 }
 ```
 
+## 自定义登录邮件品牌（魔法链接）
+
+默认情况下 Supabase 托管邮件的标题/正文/发件人都是 Supabase 品牌，用户收到
+登录邮件会疑惑甚至找不到。品牌化分两层，**都需要在 Supabase 侧操作**（代码无法直接改）：
+
+### 1. 邮件标题 + 正文（模板层）
+
+仓库已备好 Excalicast 品牌模板：
+
+- `supabase/templates/magic_link.html` — 魔法链接登录邮件（`signInWithOtp` 触发，主用）
+- `supabase/templates/confirmation.html` — 新邮箱注册确认邮件
+
+**方式 A（Dashboard，最直接）**：Authentication → Email Templates → 选 **Magic Link**，
+把标题改成 `登录 Excalicast`、Message body 粘贴 `magic_link.html` 全文；
+对 **Confirm signup** 同样粘贴 `confirmation.html`。
+
+**方式 B（CLI）**：`supabase/config.toml` 已配好 `[auth.email.template.*]` 指向上述文件，
+执行 `supabase config push` 推到远程项目（ref 见 `.temp/linked-project.json`）。
+⚠️ `config push` 会同步整个 `[auth]` 配置，push 前先核对差异，避免覆盖 Dashboard 上的其它设置。
+
+### 2. 发件人（去掉 Supabase 域名 + 解除频率限制）→ 自定义 SMTP
+
+要让邮件从 `noreply@excalicast.cc` 发出（而非 Supabase 共享域名）、并解除默认 SMTP 的
+低频限制，必须配置**自定义 SMTP**（推荐 Resend）：
+
+1. **验证发送域名**：在 Resend 添加 `excalicast.cc`，按提示在域名 DNS 加 **SPF / DKIM** 记录，等验证通过。
+2. **填 SMTP 凭证**：
+   - Dashboard → Authentication → SMTP Settings 开启 Custom SMTP，填
+     `host=smtp.resend.com`、`port=465`、`user=resend`、`pass=<Resend API Key>`、
+     sender `noreply@excalicast.cc`、显示名 `Excalicast`；
+   - 或把这些值放进 `.env.local`（见 `.env.local.example` 的 `SMTP_*` 段）后 `supabase config push`
+     注入 `config.toml` 的 `[auth.email.smtp]`。
+3. **URL Configuration**：确认 Authentication → URL Configuration 里
+   Site URL = `https://excalicast.cc`、Redirect URLs 含 `https://excalicast.cc/api/auth/callback`。
+
+代码侧发送链路（`LoginModal.tsx` 的 `signInWithOtp` + `emailRedirectTo`）**无需改动**——
+它已用 `window.location.origin` 自适配域名。品牌化只发生在模板与 SMTP 配置层。
+
 ## Hard constraints (from CLAUDE.md, do not violate)
 
 - ❌ Subtitles must use **Aliyun Qwen / DashScope**, never OpenAI Whisper.

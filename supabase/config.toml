@@ -1,0 +1,40 @@
+# Supabase 配置 — 仅聚焦 Auth 邮件品牌化（魔法链接登录邮件）。
+#
+# 本文件有两种用法：
+#   1) 作为 Dashboard 手动配置的「对照清单」（推荐先用 Dashboard，见 README）。
+#   2) 用 CLI 一次性推到远程项目：`supabase config push`
+#      ⚠️ config push 会同步**整个 [auth] 配置**到远程，可能覆盖你在 Dashboard 上
+#         其它的 auth 设置。push 前请先核对差异，确认只动邮件相关项。
+#
+# 真实 SMTP 凭证通过环境变量注入（见 .env.local.example），绝不写进本文件。
+# content_path 相对仓库根目录（运行 CLI 的位置）。
+
+project_id = "excalicast"
+
+[auth]
+# 生产站点 URL 与魔法链接回跳白名单（否则 /api/auth/callback 回跳会被拒）
+site_url = "https://excalicast.cc"
+additional_redirect_urls = ["https://excalicast.cc/api/auth/callback"]
+
+[auth.email]
+enable_signup = true
+# 自定义 SMTP：用自有域名发件，去掉 Supabase 默认发件域名 + 解除默认发送频率限制。
+# 推荐 Resend：host=smtp.resend.com, port=465, user=resend, pass=<Resend API Key>
+[auth.email.smtp]
+enabled = true
+host = "env(SMTP_HOST)"
+port = 465                       # Resend 用 465(SSL) 或 587(STARTTLS)，改这里
+user = "env(SMTP_USER)"
+pass = "env(SMTP_PASS)"
+admin_email = "env(SMTP_ADMIN_EMAIL)"   # 发件地址，如 noreply@excalicast.cc
+sender_name = "env(SMTP_SENDER_NAME)"    # 发件显示名，如 Excalicast
+
+# 魔法链接登录邮件（signInWithOtp 触发）
+[auth.email.template.magic_link]
+subject = "登录 Excalicast"
+content_path = "./supabase/templates/magic_link.html"
+
+# 新邮箱注册确认邮件
+[auth.email.template.confirmation]
+subject = "欢迎加入 Excalicast — 确认邮箱"
+content_path = "./supabase/templates/confirmation.html"

@@ -9,7 +9,13 @@ interface Props {
   shape?: 'circle' | 'rounded';
   position: { x: number; y: number };
   onPositionChange: (next: { x: number; y: number }) => void;
+  /** 拖动右下角手柄缩放气泡边长（px）。不传则不显示缩放手柄。 */
+  onSizeChange?: (next: number) => void;
 }
+
+// 气泡边长范围（与 CLAUDE.md 摄像头规格一致）
+const MIN_SIZE = 80;
+const MAX_SIZE = 480;
 
 /**
  * 摄像头浮窗 — 设计稿 DraggableBubble：
@@ -18,9 +24,10 @@ interface Props {
  *  - 没有 stream 时显示占位脸
  *  - 右上角 Drag 指示点（hover 状态显示）
  */
-export function CameraBubble({ stream, size = 160, shape = 'circle', position, onPositionChange }: Props): JSX.Element | null {
+export function CameraBubble({ stream, size = 160, shape = 'circle', position, onPositionChange, onSizeChange }: Props): JSX.Element | null {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [dragging, setDragging] = useState(false);
+  const [resizing, setResizing] = useState(false);
   const dragOffset = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
@@ -56,9 +63,40 @@ export function CameraBubble({ stream, size = 160, shape = 'circle', position, o
     };
   }, [dragging, onPositionChange]);
 
+  // 缩放：右下角手柄，左上角(position)为锚点，边长 = 鼠标相对锚点的较大轴距，钳到 [80,480]
+  useEffect(() => {
+    if (!resizing || !onSizeChange) return;
+    let raf: number | null = null;
+    let pending: number | null = null;
+    const flush = () => {
+      raf = null;
+      if (pending != null) { onSizeChange(pending); pending = null; }
+    };
+    const onMove = (e: MouseEvent) => {
+      const next = Math.max(e.clientX - position.x, e.clientY - position.y);
+      pending = Math.round(Math.min(MAX_SIZE, Math.max(MIN_SIZE, next)));
+      if (raf === null) raf = requestAnimationFrame(flush);
+    };
+    const onUp = () => setResizing(false);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      if (raf !== null) cancelAnimationFrame(raf);
+    };
+  }, [resizing, onSizeChange, position.x, position.y]);
+
   const handleMouseDown = (e: React.MouseEvent) => {
     dragOffset.current = { x: e.clientX - position.x, y: e.clientY - position.y };
     setDragging(true);
+  };
+
+  const handleResizeMouseDown = (e: React.MouseEvent) => {
+    // 阻断冒泡：避免触发外层拖拽
+    e.stopPropagation();
+    e.preventDefault();
+    setResizing(true);
   };
 
   return (
@@ -75,7 +113,7 @@ export function CameraBubble({ stream, size = 160, shape = 'circle', position, o
         // 不论是否有 stream 都用深色 ink-2 —— 跟有流时的暗色 video placeholder 衔接，
         // 避免颜色突变给用户"在切换什么东西"的错觉。
         background: '#1f2937',
-        cursor: dragging ? 'grabbing' : 'grab',
+        cursor: resizing ? 'nwse-resize' : dragging ? 'grabbing' : 'grab',
       }}
     >
       {stream ? (
@@ -102,6 +140,25 @@ export function CameraBubble({ stream, size = 160, shape = 'circle', position, o
       >
         <I.Drag size={11} />
       </div>
+
+      {onSizeChange && (
+        <div
+          onMouseDown={handleResizeMouseDown}
+          title="拖动缩放"
+          className="absolute bottom-1.5 right-1.5 grid h-[22px] w-[22px] place-items-center rounded-full"
+          style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(6px)', cursor: 'nwse-resize' }}
+        >
+          {/* 右下角缩放抓手：CSS 双线，无需图标依赖 */}
+          <span
+            style={{
+              width: 9,
+              height: 9,
+              borderRight: '2px solid rgba(255,255,255,0.92)',
+              borderBottom: '2px solid rgba(255,255,255,0.92)',
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

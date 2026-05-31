@@ -48,6 +48,7 @@ export async function requireTier(
   const stillEntitled =
     status === 'active' ||
     status === 'paused' ||
+    status === 'past_due' ||
     (status === 'cancelled' && sub?.currentPeriodEnd != null && sub.currentPeriodEnd > Date.now());
   const tier: SubscriptionTier = stillEntitled ? baseTier : 'free';
 

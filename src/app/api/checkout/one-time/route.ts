@@ -19,9 +19,9 @@ export const dynamic = 'force-dynamic';
  */
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  let body: { recordingId?: string };
+  let body: { recordingId?: string; returnTo?: string };
   try {
-    body = (await req.json()) as { recordingId?: string };
+    body = (await req.json()) as { recordingId?: string; returnTo?: string };
   } catch {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
   }
@@ -38,6 +38,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const cookieLocale = req.cookies.get(LOCALE_COOKIE)?.value;
   const locale = cookieLocale && (locales as readonly string[]).includes(cookieLocale) ? cookieLocale : defaultLocale;
 
+  // returnTo：支付成功后回到发起页（如 /zh/export/[id]）。校验同 /api/auth/callback，
+  // 仅接受站内绝对路径，防开放重定向；非法则回退原 /app 落地（带 recording 便于定位）。
+  const returnTo = typeof body.returnTo === 'string' ? body.returnTo : undefined;
+  const safeReturnTo = returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : null;
+  const successUrl = safeReturnTo
+    ? `${appUrl}${safeReturnTo}?creem_purchase=one_time`
+    : `${appUrl}/${locale}/app?creem_purchase=one_time&recording=${encodeURIComponent(recordingId)}`;
+
   if (cfg.provider === 'creem') {
     if (!cfg.oneTimeProductId || !cfg.apiKey || !cfg.apiBase) {
       return NextResponse.json(
@@ -49,7 +57,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const result = await createCreemCheckout({
         creds: { apiKey: cfg.apiKey, apiBase: cfg.apiBase },
         productId: cfg.oneTimeProductId,
-        successUrl: `${appUrl}/${locale}/app?creem_purchase=one_time&recording=${encodeURIComponent(recordingId)}`,
+        successUrl,
         metadata: {
           kind: 'one_time',
           recordingId,

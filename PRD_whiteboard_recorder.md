@@ -1,9 +1,11 @@
 # PRD：白板录制工具
-**版本**：v0.5  
+**版本**：v0.5.2  
 **状态**：开发中  
 **作者**：—  
-**最后更新**：2026-05-30  
-**变更**：v0.5 - 新增「## 十一、实现进展与变更记录（持续同步）」，沉淀已落地实现（定价四档 + Max 可购买、素材库云同步/市场、分享链接、AI 讲义、激光笔、品牌标识等）与第四轮迭代（讲义智能配图/多格式导出、录制与导出性能、分享加载与移动端自适应、字幕清洗单行）。本 PRD 自此为产品需求唯一来源，新增内容须同步更新（见 CLAUDE.md「PRD 同步要求」）。  
+**最后更新**：2026-05-31  
+**变更**：v0.5.2 - 定价页四档权益补全（校准「全档不限时长」、支付商按 active provider 动态显示=Creem）；面向用户文案去掉 `Deepseek`/`AI` 字样；应用内 logo 点击回落地页；摄像头气泡可缩放（前端 80–480）；修 `past_due` 宽限期被误降级为 free。详见「## 十一」最新一条。  
+**历史变更**：v0.5.1 - 支付成功后回到发起页（导出页透传 `returnTo`，新标签不再落到 `/app`）；登录邮件品牌化（Excalicast 邮件模板 + 自定义 SMTP 配置/手册）。  
+**历史变更**：v0.5 - 新增「## 十一、实现进展与变更记录（持续同步）」，沉淀已落地实现（定价四档 + Max 可购买、素材库云同步/市场、分享链接、AI 讲义、激光笔、品牌标识等）与第四轮迭代（讲义智能配图/多格式导出、录制与导出性能、分享加载与移动端自适应、字幕清洗单行）。本 PRD 自此为产品需求唯一来源，新增内容须同步更新（见 CLAUDE.md「PRD 同步要求」）。  
 **历史**：v0.4 - 录制方案锁定 B（事件流重放）；单次购买改为 paid_recordings 表（去令牌）；所有外部 LLM/Whisper 调用必须经服务端 BFF；所有层级录制时长无上限；支付服务统一 Creem；新增数据生命周期 / 合规告知 / 退款政策 / 录制恢复 / 分享链接管理 / PoC 清单六个章节
 
 ---
@@ -885,6 +887,17 @@ Pro/Max 导出（订阅状态验证）：
 ## 十一、实现进展与变更记录（持续同步）
 
 > 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
+
+- **2026-05-31｜定价页权益补全 + 文案净化 + logo 回落地页 + 摄像头缩放 + 修到期 bug**：
+  1. **定价页四档权益补全 + 口径校准**（`page.tsx` + `messages/{zh,en}.json` 的 `landing.pricing.*`）：free/one_time/pro/max bullets 按 `TIER_PERMISSIONS` 真实权益列全；**校准「全档不限时长」**（删 free「最长 30 分钟」、删 Pro「无限录制时长」专属卖点，与 `supabase/README.md` 硬约束一致）；**支付商文案按 active provider 动态显示**（落地页 `getActiveConfig().provider` → Creem/Paddle 名称与链接，`oneTime.bullet4`/`methods`/`processedBy` 改用 `{provider}` 变量与 `<link>`，不再写死 Paddle）。
+  2. **面向用户文案去实现细节词**：导出页/升级弹窗去掉 `Deepseek`（讲义）与 `AI`（字幕/讲义）字样（`exportPanel.*`、`proUpgrade/maxUpgrade.features`、`landing.pricing.pro/max`）；服务端模型调用不变（字幕=千问、讲义=deepseek）。
+  3. **应用内 logo 回落地页**：`AppHeader.Brand` 链接 `/app` → `/`。
+  4. **摄像头气泡可缩放**：`CameraBubble` 加右下角缩放手柄 + `onSizeChange`（边长 80–480），`app/page.tsx` 加 `cameraSize` 状态/持久化并接入 `recordCameraMove`；录制存储与导出管线本就按 `sizePx` 工作，故纯前端补全。
+  5. **修会员到期 bug**：`past_due`（扣款失败宽限期）此前被立即降级为 free；`src/lib/tier.ts` 与 `/api/me/tier` 两处统一把 `past_due` 视为仍有权益（宽限期结束支付商推 `cancelled` 再按期末降级）。
+
+- **2026-05-31｜支付回流到发起页 + 登录邮件品牌化**：
+  1. **支付成功回到发起页**：Creem checkout 的 `successUrl` 不再写死 `/app`，改为透传发起页路径 `returnTo`（前端取 `window.location.pathname`），让新标签页付完后回到**发起支付的导出页** `/[locale]/export/[id]`（而非通用 `/app`）。涉及 `ProUpgradeModal`/`PaywallModal`（fetch body 加 `returnTo`）、`/api/checkout/pro`、`/api/checkout/one-time`（读取并按 `startsWith('/') && !startsWith('//')` 校验防开放重定向，非法回退 `/app`）。导出页 `export/[id]/page.tsx` 新增消费 `?creem_purchase=` 参数：弹「支付完成·已解锁」轻提示 + 清掉 query；解锁态由 `ExportPanel` 新鲜挂载自动拉取，返回标签**不自动重启导出**（避免丢失原标签所选比例/去水印配置）。原标签的 `visibilitychange/focus` 重查续上逻辑不变。
+  2. **登录邮件品牌化（Supabase Auth）**：仓库新增 Excalicast 品牌邮件模板 `supabase/templates/{magic_link,confirmation}.html` + `supabase/config.toml`（`[auth.email.template.*]` 标题/正文 + `[auth.email.smtp]` 自定义 SMTP 引用 env），`.env.local.example` 增 `SMTP_*`、`supabase/README.md` 增《自定义登录邮件品牌》操作手册。真正生效需在 Supabase Dashboard 配模板 + 自定义 SMTP（推荐 Resend，需 DNS 验证 `excalicast.cc`）或 `supabase config push`；代码发送链路（`signInWithOtp`/`emailRedirectTo`）无需改动。
 
 ### 11.1 已落地能力概览（截至 2026-05-30）
 

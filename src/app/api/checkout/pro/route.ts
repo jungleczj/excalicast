@@ -26,9 +26,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   let tier: 'pro' | 'max' = 'pro';
+  let returnTo: string | undefined;
   try {
-    const body = (await req.json().catch(() => ({}))) as { tier?: string };
+    const body = (await req.json().catch(() => ({}))) as { tier?: string; returnTo?: string };
     if (body.tier === 'max') tier = 'max';
+    if (typeof body.returnTo === 'string') returnTo = body.returnTo;
   } catch {
     // 无 body → 默认 pro
   }
@@ -42,6 +44,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const cookieLocale = req.cookies.get(LOCALE_COOKIE)?.value;
   const locale = cookieLocale && (locales as readonly string[]).includes(cookieLocale) ? cookieLocale : defaultLocale;
 
+  // returnTo：让支付成功后回到发起页（如 /zh/export/[id]），而不是写死 /app。
+  // 校验同 /api/auth/callback：仅接受站内绝对路径，防开放重定向；非法则回退 /app。
+  const safeReturnTo = returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : null;
+  const successUrl = safeReturnTo
+    ? `${appUrl}${safeReturnTo}?creem_purchase=${tier}`
+    : `${appUrl}/${locale}/app?creem_purchase=${tier}`;
+
   if (cfg.provider === 'creem') {
     if (!productId || !cfg.apiKey || !cfg.apiBase) {
       return NextResponse.json(
@@ -53,7 +62,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const result = await createCreemCheckout({
         creds: { apiKey: cfg.apiKey, apiBase: cfg.apiBase },
         productId,
-        successUrl: `${appUrl}/${locale}/app?creem_purchase=${tier}`,
+        successUrl,
         customerEmail: user.email ?? undefined,
         metadata: {
           kind: tier === 'max' ? 'max_subscription' : 'pro_subscription',

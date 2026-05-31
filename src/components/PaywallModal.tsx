@@ -114,7 +114,8 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
       const res = await fetch('/api/checkout/one-time', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ recordingId }),
+        // returnTo：支付成功后回到当前导出页 /zh/export/[id]，而不是落到 /app
+        body: JSON.stringify({ recordingId, returnTo: window.location.pathname }),
       });
       const j = (await res.json().catch(() => ({}))) as {
         provider?: 'paddle' | 'creem';
