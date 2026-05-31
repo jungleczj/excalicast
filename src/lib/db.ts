@@ -671,6 +671,20 @@ export async function updateCloudRecordingTitle(
   if (error) throw new Error(`updateCloudRecordingTitle: ${error.message}`);
 }
 
+export async function updateCloudRecordingSubtitle(
+  userId: string,
+  id: string,
+  subtitleSrt: string | null,
+): Promise<void> {
+  const client = requireSupabase();
+  const { error } = await client
+    .from('recordings_cloud')
+    .update({ subtitle_srt: subtitleSrt })
+    .eq('user_id', userId)
+    .eq('id', id);
+  if (error) throw new Error(`updateCloudRecordingSubtitle: ${error.message}`);
+}
+
 export async function deleteCloudRecording(userId: string, id: string): Promise<void> {
   const client = requireSupabase();
   const { error } = await client

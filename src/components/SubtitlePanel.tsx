@@ -15,6 +15,22 @@ const AUDIO_MIN_BYTES = 2000;
 const AUDIO_MIN_DURATION_MS = 500;
 
 /**
+ * 若录制已云端备份，则把字幕同步到云端行（recordings_cloud.subtitle_srt），
+ * 否则分享/讲义读不到（先上传后生成字幕的情况）。best-effort：401/404/失败均忽略。
+ */
+async function syncSubtitleToCloud(recordingId: string, subtitleSrt: string | null): Promise<void> {
+  try {
+    await fetch(`/api/recordings/${encodeURIComponent(recordingId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subtitleSrt }),
+    });
+  } catch {
+    /* 未登录 / 未上云 / 网络问题 → 忽略 */
+  }
+}
+
+/**
  * 把后端 / 本地预检产生的错误码翻译成给用户看的文案。
  * 命中 i18n 键的归 i18n；其它（包括上游 DashScope 任意中文）做剥前缀处理后透传。
  */
@@ -139,6 +155,9 @@ export function SubtitlePanel({ open, recordingId, onClose, onSaved }: Props): J
           await saveSubtitleSrt(recordingId, finalSrt);
           setExistingSrt(finalSrt);
           onSaved?.(finalSrt);
+          // 若该录制已上云：把字幕同步到云端行，否则分享/讲义读不到（先上传后生成字幕的情况）。
+          // best-effort：未登录/未上云返回 401/404，忽略即可。
+          void syncSubtitleToCloud(recordingId, finalSrt);
         }
       } else if (r.status === 'failed') {
         setPhase('failed');
@@ -158,6 +177,7 @@ export function SubtitlePanel({ open, recordingId, onClose, onSaved }: Props): J
     setExistingSrt(null);
     setSrt('');
     setPhase('idle');
+    void syncSubtitleToCloud(recordingId, null); // 一并清掉云端字幕
   };
 
   if (!open) return null;

@@ -2,6 +2,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { bulkAddLaserEvents, getClientDb } from '@/lib/db-client';
+import { getCurrentOwnerKey } from '@/lib/ownerKey';
 import { startAudioRecorder, type AudioRecorderHandle } from '@/services/audioRecorder';
 import { startCameraRecorder, type CameraHandle } from '@/services/cameraRecorder';
 import { ShellCapturer } from '@/services/workspaceShellCapture';
@@ -77,6 +78,7 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
   const recordingId = uuidv4();
   const startedAt = Date.now();
   const db = getClientDb();
+  const ownerKey = await getCurrentOwnerKey();
 
   await db.recordings.put({
     id: recordingId,
@@ -85,6 +87,7 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
     hasAudio: false,
     hasCamera: false,
     status: 'recording',
+    ownerKey,
   });
 
   let audio: AudioRecorderHandle | null = null;

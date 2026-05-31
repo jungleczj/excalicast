@@ -912,6 +912,17 @@ Pro/Max 导出（订阅状态验证）：
 
 ### 11.2 变更记录（按时间倒序）
 
+- **2026-05-31｜code-review 修复（8 项）**：
+  - 本地隔离加固：`RecordingsList` 等 `useAuth.loading` settle 后才列表/认领（避免用 guestId 误认领 legacy）；`listRecordings` 改用 ownerKey 索引查询、不再回退返回 legacy。
+  - by-id 越权：`getRecording/loadFullRecording/deleteRecording` 加可选 `ownerKey` 校验；`/export/[id]`、`/play/[id]`、`RecordingsList` 删除均传当前 ownerKey（他号经 id 无法查看/删除）。
+  - 支付 `recheck` 用 `pollingRef` 互斥（避免 focus+visibility 并发双触发 onPaid/onUpgraded）。
+  - `getCurrentOwnerKey` 改用 `auth.getSession()`（本地无网络，录制启动不阻塞、不因网络抖动误归 guest）。
+  - 清理：`BundleCard` 合并 Pro/Max 卡头部重复（删 `MaxBundleCard`/`ProBundleCard`）；`getOrCreateGuestId` 标注仅客户端。
+- **2026-05-31｜本地隔离 + 支付回跳 + Pro 功能卡**：
+  1. **本地录制按用户隔离**（隐私）：`recordings` 加 `ownerKey`（登录=user.id / 匿名=guestId，新 `src/lib/ownerKey.ts`），Dexie v9；`listRecordings(ownerKey)` 过滤 + legacy 认领；匿名→登录 `migrateRecordingsOwner`；`RecordingsList`/`library` 随登录态取 ownerKey。同设备多账号互不可见。
+  2. **支付后回跳/恢复**：`PaywallModal`/`ProUpgradeModal` 在标签 `visibilitychange`/`focus` 时立即重查 isPaid / tier（补足轮询超时）——导出自动恢复、订阅回到已解锁面板（不自执行）；`/app` 消费 `?creem_purchase=` 显示「支付完成」提示并 `history.replace` 清参（修死页）。Paddle overlay 不变。
+  3. **ExportPanel「Pro 功能」卡**：新增 `ProBundleCard`（仿 `MaxBundleCard` 布局），行1 字幕、行2「跨设备云端保存模板/多端同步素材库」（被动权益无按钮）；`MaxBundleRow` 按钮改可选；移除旧 `FeatureRow`。
+- **2026-05-30｜字幕云端同步修复**：先上传云端、后生成字幕时，字幕只写本地 IndexedDB、未更新 `recordings_cloud.subtitle_srt`，导致分享/讲义看不到字幕。新增 `updateCloudRecordingSubtitle`，`PATCH /api/recordings/[id]` 支持 `subtitleSrt`，`SubtitlePanel` 生成/移除字幕后 best-effort 同步云端（未上云 404 忽略）。
 - **2026-05-30｜第七轮 · 定价卡对齐 + 摄像头导出提速 + 摄像头存储压缩**：
   1. 生产定价不更新**根因**（非代码）：active 行是 `creem/test`，页面只读 active 行；改的是别的行。修复=改 active 行或 `activate` 切 live。同步机制：落地页 force-dynamic 刷新即生效；弹窗经 admin API 改才有 Realtime 推送（直接改库需刷新）。
   2. 定价页四卡 CTA 按钮底部对齐（卡片 flex column + bullets `flex-grow`）。

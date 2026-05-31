@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { AppHeader } from '@/components/AppHeader';
 import { RecordingsList } from '@/components/RecordingsList';
 import { listRecordings } from '@/lib/db-client';
+import { getCurrentOwnerKey } from '@/lib/ownerKey';
 import type { RecordingMetadata } from '@/types/recording';
 import { Link } from '@/i18n/navigation';
 
@@ -14,10 +15,13 @@ export default function LibraryPage(): JSX.Element {
   const [stats, setStats] = useState<{ count: number; totalMs: number }>({ count: 0, totalMs: 0 });
 
   useEffect(() => {
-    listRecordings().then((list: RecordingMetadata[]) => {
-      const totalMs = list.reduce((acc, m) => acc + m.durationMs, 0);
-      setStats({ count: list.length, totalMs });
-    }).catch(() => { /* ignore */ });
+    getCurrentOwnerKey()
+      .then((ownerKey) => listRecordings(ownerKey))
+      .then((list: RecordingMetadata[]) => {
+        const totalMs = list.reduce((acc, m) => acc + m.durationMs, 0);
+        setStats({ count: list.length, totalMs });
+      })
+      .catch(() => { /* ignore */ });
   }, []);
 
   // 兜底：万一 libraries.excalidraw.com 市集把 addLibrary hash 甩到了 /library（理论

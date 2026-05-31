@@ -35,6 +35,9 @@ export interface RecordingMetadata {
   lastFrameThumbnail?: string;
   title?: string;
   subtitleSrt?: string;
+  /** 归属键：登录用户=user.id，匿名=每浏览器 guestId。用于本地录制库按用户隔离。
+   *  v9 之前的旧录制无此字段（legacy），首次被当前用户列出时认领。 */
+  ownerKey?: string;
 }
 
 export interface AudioChunk {

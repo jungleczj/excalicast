@@ -79,6 +79,31 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
     }
   };
 
+  // Creem 在新标签页支付：用户付完切回本标签时立即重查入账，避免只靠定时轮询（可能超时）。
+  useEffect(() => {
+    if (!open) return;
+    const recheck = async () => {
+      if (document.visibilityState !== 'visible') return;
+      if (pollingRef.current) return; // 与轮询/自身共享互斥，避免 focus+visibility 并发双触发
+      pollingRef.current = true;
+      try {
+        if (await isPaid(recordingId)) {
+          setStatusMsg(t('unlocked'));
+          onPaid?.();
+          onClose();
+        }
+      } catch { /* 未付/瞬时错误 → 忽略 */ } finally {
+        pollingRef.current = false;
+      }
+    };
+    document.addEventListener('visibilitychange', recheck);
+    window.addEventListener('focus', recheck);
+    return () => {
+      document.removeEventListener('visibilitychange', recheck);
+      window.removeEventListener('focus', recheck);
+    };
+  }, [open, recordingId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!open) return null;
 
   const handleUnlock = async () => {

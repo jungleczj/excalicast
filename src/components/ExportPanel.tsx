@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { exportRecording, downloadBlob } from '@/services/exportPipeline';
 import { isPaid } from '@/services/paymentClient';
@@ -294,39 +294,62 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
         </h3>
         <p className="mb-3" style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--ink-2)' }}>{t('advancedLede')}</p>
         <div className="space-y-2">
-          <FeatureRow
-            icon={<I.Subtitles size={16} />}
-            title={t('subtitleTitle')}
-            desc={t('subtitleDesc')}
-            tier="Pro"
+          <BundleCard
+            bandColor="var(--pro)"
+            pill="PRO"
+            headerIcon={<I.Sparkles size={16} />}
+            title={t('proBundleTitle')}
+            desc={t('proBundleDesc')}
+            unlockLabel={t('proBundleUnlock')}
             unlocked={subscription.permissions.subtitle}
-            actionLabel={subscription.permissions.subtitle ? t('subtitleAction') : t('subtitleActionLocked')}
-            onAction={() => {
-              if (subscription.permissions.subtitle) setSubtitlePanelOpen(true);
-              else openUpgrade('pro');
-            }}
-            useLabel={t('use')}
-            upgradeLabel={t('upgrade')}
+            onUpgrade={() => openUpgrade('pro')}
+            rows={[
+              {
+                icon: <I.Subtitles size={14} />,
+                action: {
+                  title: t('subtitleTitle'),
+                  desc: t('subtitleDesc'),
+                  actionLabel: subscription.permissions.subtitle ? t('subtitleAction') : t('subtitleActionLocked'),
+                  onAction: () => setSubtitlePanelOpen((v) => !v),
+                },
+              },
+              {
+                icon: <I.Cloud size={14} />,
+                // 被动权益：无动作按钮（actionLabel 空）
+                action: { title: t('cloudTemplateTitle'), desc: t('cloudTemplateDesc'), actionLabel: '', onAction: () => {} },
+              },
+            ]}
           />
-          <MaxBundleCard
+          <BundleCard
+            bandColor="var(--max)"
+            pill="MAX"
+            headerIcon={<I.Sparkles size={16} />}
             title={t('maxBundleTitle')}
             desc={t('maxBundleDesc')}
             unlockLabel={t('maxBundleUnlock')}
             unlocked={maxUnlocked}
             onUpgrade={() => openUpgrade('max')}
-            handout={{
-              title: t('handoutTitle'),
-              desc: t('handoutDesc'),
-              actionLabel: handoutOpen ? t('handoutTitle') : t('handoutGenerate'),
-              onAction: () => setHandoutOpen((v) => !v),
-            }}
-            share={{
-              title: t('shareTitle'),
-              desc: t('shareDesc'),
-              actionLabel: shareBusy ? t('shareCreating') : t('shareCreate'),
-              onAction: () => { void handleCreateShareLink(); },
-              busy: shareBusy,
-            }}
+            rows={[
+              {
+                icon: <I.Sparkles size={14} />,
+                action: {
+                  title: t('handoutTitle'),
+                  desc: t('handoutDesc'),
+                  actionLabel: handoutOpen ? t('handoutTitle') : t('handoutGenerate'),
+                  onAction: () => setHandoutOpen((v) => !v),
+                },
+              },
+              {
+                icon: <I.Share size={14} />,
+                action: {
+                  title: t('shareTitle'),
+                  desc: t('shareDesc'),
+                  actionLabel: shareBusy ? t('shareCreating') : t('shareCreate'),
+                  onAction: () => { void handleCreateShareLink(); },
+                  busy: shareBusy,
+                },
+              },
+            ]}
           />
         </div>
 
@@ -478,107 +501,6 @@ function RadioCard({ selected, onClick, title, meta, hint, accent }: RadioCardPr
   );
 }
 
-function FeatureRow({ icon, title, desc, tier, highlight, unlocked, actionLabel, onAction, useLabel, upgradeLabel }: {
-  icon: React.ReactNode;
-  title: string;
-  desc: string;
-  tier: string;
-  highlight?: boolean;
-  unlocked: boolean;
-  actionLabel?: string;
-  onAction?: () => void;
-  useLabel: string;
-  upgradeLabel: string;
-}): JSX.Element {
-  const button = onAction ? (
-    <button
-      type="button"
-      onClick={onAction}
-      className="flex items-center gap-1"
-      style={{
-        padding: '5px 10px',
-        background: unlocked ? 'var(--ink)' : 'var(--paper)',
-        color: unlocked ? 'var(--paper)' : 'var(--ink)',
-        border: '1.3px solid var(--ink)',
-        borderRadius: 3,
-        fontFamily: 'var(--font-mono)',
-        fontSize: 10,
-        fontWeight: 600,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        cursor: 'pointer',
-      }}
-    >
-      {!unlocked && <I.Lock size={10} />}
-      {actionLabel ?? (unlocked ? useLabel : upgradeLabel)}
-    </button>
-  ) : (
-    <button
-      disabled
-      className="flex items-center gap-1"
-      style={{
-        padding: '5px 10px',
-        background: 'var(--paper-2)',
-        color: 'var(--ink-3)',
-        border: '1.3px dashed var(--ink)',
-        borderRadius: 3,
-        fontFamily: 'var(--font-mono)',
-        fontSize: 10,
-        fontWeight: 600,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-      }}
-    >
-      <I.Lock size={10} /> {upgradeLabel}
-    </button>
-  );
-  const tierBg = tier === 'Max' ? 'var(--max)' : 'var(--pro)';
-  return (
-    <div
-      className="flex items-center gap-3 px-3 py-3"
-      style={{
-        background: 'var(--paper)',
-        border: '1.4px solid var(--ink)',
-        borderRadius: 3,
-      }}
-    >
-      <div
-        className="grid h-8 w-8 flex-shrink-0 place-items-center"
-        style={{
-          background: highlight ? 'var(--max)' : 'var(--pro)',
-          border: '1.4px solid var(--ink)',
-          borderRadius: 3,
-          color: 'var(--ink)',
-        }}
-      >
-        {icon}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink)' }}>{title}</span>
-          <span
-            style={{
-              padding: '1px 6px',
-              background: tierBg,
-              border: '1px solid var(--ink)',
-              borderRadius: 999,
-              fontFamily: 'var(--font-mono)',
-              fontSize: 9,
-              fontWeight: 700,
-              letterSpacing: '0.08em',
-              color: 'var(--ink)',
-            }}
-          >
-            {tier.toUpperCase()}
-          </span>
-        </div>
-        <div className="mt-0.5" style={{ fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.4 }}>{desc}</div>
-      </div>
-      {button}
-    </div>
-  );
-}
-
 interface MaxBundleAction {
   title: string;
   desc: string;
@@ -588,73 +510,54 @@ interface MaxBundleAction {
 }
 
 /**
- * Max 套件卡片 —— 把 handout + share 两个 Max 行合并到一个边框里。
- * 锁定（非 Max）状态：单个"升级到 Max"CTA 灰显两个子项；
- * 解锁状态：两个子项各自独立可点。
+ * 套件卡片（Pro / Max 共用）—— 头部色带（图标 + 标题 + 档位徽标 + 未解锁时升级锁按钮）
+ * + 若干行（MaxBundleRow，行的 actionLabel 为空则不渲染按钮，用于被动权益）。
  */
-function MaxBundleCard({
+function BundleCard({
+  bandColor,
+  pill,
+  headerIcon,
   title,
   desc,
   unlockLabel,
   unlocked,
   onUpgrade,
-  handout,
-  share,
+  rows,
 }: {
+  bandColor: string;
+  pill: string;
+  headerIcon: React.ReactNode;
   title: string;
   desc: string;
   unlockLabel: string;
   unlocked: boolean;
   onUpgrade: () => void;
-  handout: MaxBundleAction;
-  share: MaxBundleAction;
+  rows: Array<{ icon: React.ReactNode; action: MaxBundleAction }>;
 }): JSX.Element {
   return (
-    <div
-      style={{
-        background: 'var(--paper)',
-        border: '1.4px solid var(--ink)',
-        borderRadius: 3,
-      }}
-    >
+    <div style={{ background: 'var(--paper)', border: '1.4px solid var(--ink)', borderRadius: 3 }}>
       {/* Header band */}
       <div
         className="flex items-center gap-3 px-3 py-3"
-        style={{
-          background: 'var(--max)',
-          borderBottom: '1.4px solid var(--ink)',
-          borderTopLeftRadius: 3,
-          borderTopRightRadius: 3,
-        }}
+        style={{ background: bandColor, borderBottom: '1.4px solid var(--ink)', borderTopLeftRadius: 3, borderTopRightRadius: 3 }}
       >
         <div
           className="grid h-8 w-8 flex-shrink-0 place-items-center"
-          style={{
-            background: 'var(--paper)',
-            border: '1.4px solid var(--ink)',
-            borderRadius: 3,
-            color: 'var(--ink)',
-          }}
+          style={{ background: 'var(--paper)', border: '1.4px solid var(--ink)', borderRadius: 3, color: 'var(--ink)' }}
         >
-          <I.Sparkles size={16} />
+          {headerIcon}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink)' }}>{title}</span>
             <span
               style={{
-                padding: '1px 6px',
-                background: 'var(--paper)',
-                border: '1px solid var(--ink)',
-                borderRadius: 999,
-                fontFamily: 'var(--font-mono)',
-                fontSize: 9,
-                fontWeight: 700,
-                letterSpacing: '0.08em',
-                color: 'var(--ink)',
+                padding: '1px 6px', background: 'var(--paper)', border: '1px solid var(--ink)',
+                borderRadius: 999, fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 700,
+                letterSpacing: '0.08em', color: 'var(--ink)',
               }}
             >
-              MAX
+              {pill}
             </span>
           </div>
           <div className="mt-0.5" style={{ fontSize: 11, color: 'var(--ink-2)', lineHeight: 1.4 }}>{desc}</div>
@@ -665,17 +568,9 @@ function MaxBundleCard({
             onClick={onUpgrade}
             className="flex items-center gap-1"
             style={{
-              padding: '5px 10px',
-              background: 'var(--ink)',
-              color: 'var(--paper)',
-              border: '1.3px solid var(--ink)',
-              borderRadius: 3,
-              fontFamily: 'var(--font-mono)',
-              fontSize: 10,
-              fontWeight: 600,
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-              cursor: 'pointer',
+              padding: '5px 10px', background: 'var(--ink)', color: 'var(--paper)',
+              border: '1.3px solid var(--ink)', borderRadius: 3, fontFamily: 'var(--font-mono)',
+              fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer',
             }}
           >
             <I.Lock size={10} />
@@ -684,20 +579,12 @@ function MaxBundleCard({
         )}
       </div>
 
-      {/* Two action rows */}
-      <MaxBundleRow
-        icon={<I.Sparkles size={14} />}
-        action={handout}
-        unlocked={unlocked}
-        onLockedClick={onUpgrade}
-      />
-      <div style={{ height: 1, background: 'var(--rule-faint)' }} />
-      <MaxBundleRow
-        icon={<I.Share size={14} />}
-        action={share}
-        unlocked={unlocked}
-        onLockedClick={onUpgrade}
-      />
+      {rows.map((r, i) => (
+        <Fragment key={i}>
+          {i > 0 && <div style={{ height: 1, background: 'var(--rule-faint)' }} />}
+          <MaxBundleRow icon={r.icon} action={r.action} unlocked={unlocked} onLockedClick={onUpgrade} />
+        </Fragment>
+      ))}
     </div>
   );
 }
@@ -733,29 +620,36 @@ function MaxBundleRow({
         <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>{action.title}</div>
         <div style={{ fontSize: 10.5, color: 'var(--ink-3)', lineHeight: 1.4 }}>{action.desc}</div>
       </div>
-      <button
-        type="button"
-        onClick={() => (unlocked ? action.onAction() : onLockedClick())}
-        disabled={action.busy}
-        className="flex items-center gap-1"
-        style={{
-          padding: '4px 9px',
-          background: unlocked ? 'var(--ink)' : 'var(--paper)',
-          color: unlocked ? 'var(--paper)' : 'var(--ink)',
-          border: '1.3px solid var(--ink)',
-          borderRadius: 3,
-          fontFamily: 'var(--font-mono)',
-          fontSize: 9.5,
-          fontWeight: 600,
-          letterSpacing: '0.06em',
-          textTransform: 'uppercase',
-          cursor: action.busy ? 'not-allowed' : 'pointer',
-          flexShrink: 0,
-        }}
-      >
-        {!unlocked && <I.Lock size={10} />}
-        {action.actionLabel}
-      </button>
+      {action.actionLabel ? (
+        <button
+          type="button"
+          onClick={() => (unlocked ? action.onAction() : onLockedClick())}
+          disabled={action.busy}
+          className="flex items-center gap-1"
+          style={{
+            padding: '4px 9px',
+            background: unlocked ? 'var(--ink)' : 'var(--paper)',
+            color: unlocked ? 'var(--paper)' : 'var(--ink)',
+            border: '1.3px solid var(--ink)',
+            borderRadius: 3,
+            fontFamily: 'var(--font-mono)',
+            fontSize: 9.5,
+            fontWeight: 600,
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+            cursor: action.busy ? 'not-allowed' : 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          {!unlocked && <I.Lock size={10} />}
+          {action.actionLabel}
+        </button>
+      ) : null}
     </div>
   );
 }
+
+/**
+ * Pro 套件卡片 —— 与 MaxBundleCard 同布局（头部色带 + 行）。
+ * 行1 字幕（可点）；行2 跨设备云端保存模板（被动权益，无按钮）。
+ */

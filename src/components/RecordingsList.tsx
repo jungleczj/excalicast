@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Link, useRouter } from '@/i18n/navigation';
-import { listRecordings, deleteRecording, updateRecordingTitle } from '@/lib/db-client';
+import { listRecordings, deleteRecording, updateRecordingTitle, migrateRecordingsOwner } from '@/lib/db-client';
+import { getOrCreateGuestId } from '@/lib/ownerKey';
+import { useAuth } from '@/hooks/useAuth';
 import {
   importCloudRecording,
   listCloudRecordings,
@@ -108,6 +110,7 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
   const locale = useLocale();
   const router = useRouter();
   const subscription = useSubscription();
+  const { user, loading: authLoading } = useAuth();
   const canCloud = subscription.permissions.cloudBackup && subscription.loggedIn;
 
   const [items, setItems] = useState<MergedItem[]>([]);
@@ -122,7 +125,15 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
   const editInputRef = useRef<HTMLInputElement | null>(null);
 
   const refresh = useCallback(async () => {
-    const localList = await listRecordings();
+    // 等 auth settle 再列表/认领：避免在登录态解析前用 guestId 误认领 legacy 录制。
+    if (authLoading) return;
+    // 本地录制按 ownerKey 隔离：登录=user.id，匿名=guestId。
+    const ownerKey = user?.id ?? getOrCreateGuestId();
+    // 登录后把匿名期间录制并入账户（幂等：迁移后 guest 行清零）。
+    if (user?.id) {
+      try { await migrateRecordingsOwner(getOrCreateGuestId(), user.id); } catch { /* ignore */ }
+    }
+    const localList = await listRecordings(ownerKey);
     let cloudList: CloudRecording[] = [];
     if (canCloud) {
       try {
@@ -147,7 +158,7 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
     );
     setItems(arr);
     setLoaded(true);
-  }, [canCloud]);
+  }, [canCloud, user?.id, authLoading]);
 
   useEffect(() => { void refresh(); }, [refresh, refreshKey]);
 
@@ -161,7 +172,7 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
   const handleDelete = useCallback(async (id: string) => {
     if (!confirm(t('deleteConfirm'))) return;
     const item = items.find((it) => it.id === id);
-    await deleteRecording(id);
+    await deleteRecording(id, user?.id ?? getOrCreateGuestId());
     if (item?.cloud && canCloud) {
       try { await removeCloudRecording(id); } catch { /* ignore */ }
     }
@@ -170,7 +181,7 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
       const next = new Set(s); next.delete(id); return next;
     });
     await refresh();
-  }, [items, refresh, t, canCloud]);
+  }, [items, refresh, t, canCloud, user?.id]);
 
   const handleUpload = useCallback(async (id: string) => {
     setErrorMsg(null);

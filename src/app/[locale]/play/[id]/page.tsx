@@ -7,6 +7,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { I } from '@/components/icons';
 import { SharedPlayer } from '@/components/SharedPlayer';
 import { loadFullRecording, deleteRecording } from '@/lib/db-client';
+import { getCurrentOwnerKey } from '@/lib/ownerKey';
 import type { CameraPositionEvent, LaserEvent, RecordingMetadata, WhiteboardSnapshot } from '@/types/recording';
 import { Link, useRouter } from '@/i18n/navigation';
 
@@ -30,7 +31,7 @@ export default function PlayPage(): JSX.Element {
     let cancelled = false;
     let createdAudioUrl: string | null = null;
     let createdCameraUrl: string | null = null;
-    loadFullRecording(id).then((r) => {
+    getCurrentOwnerKey().then((ownerKey) => loadFullRecording(id, ownerKey)).then((r) => {
       if (cancelled) return;
       setMeta(r.metadata);
       setSnapshots(r.snapshots);
@@ -57,7 +58,7 @@ export default function PlayPage(): JSX.Element {
   const handleDelete = useCallback(async () => {
     const msg = locale === 'en' ? 'Delete this recording? Cannot be undone.' : '删除这条录制？此操作不可恢复。';
     if (!confirm(msg)) return;
-    await deleteRecording(id);
+    await deleteRecording(id, await getCurrentOwnerKey());
     router.push('/library');
   }, [id, router, locale]);
 

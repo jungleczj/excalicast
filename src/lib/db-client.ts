@@ -146,6 +146,19 @@ class ExcalicastDB extends Dexie {
       libraryItems: 'id, status, created',
       laserEvents: '++id, recordingId, timestamp, [recordingId+timestamp]',
     });
+    // v9: recordings 增加 ownerKey（按用户隔离本地录制库）。旧行 ownerKey 留空（legacy），
+    // 首次被当前用户列出时认领。无需 .upgrade 迁移。
+    this.version(9).stores({
+      recordings: 'id, startedAt, status, ownerKey',
+      snapshots: '++id, recordingId, timestamp',
+      audioChunks: '++id, recordingId, index',
+      cameraChunks: '++id, recordingId, index',
+      binaryFiles: '++id, recordingId, fileId',
+      workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
+      cameraPositions: '++id, recordingId, timestamp, [recordingId+timestamp]',
+      libraryItems: 'id, status, created',
+      laserEvents: '++id, recordingId, timestamp, [recordingId+timestamp]',
+    });
   }
 }
 
@@ -155,13 +168,46 @@ export function getClientDb(): ExcalicastDB {
   return _db;
 }
 
-export async function listRecordings(): Promise<RecordingMetadata[]> {
+/**
+ * 列出当前 ownerKey 的录制（按用户隔离）。
+ * legacy（v9 前无 ownerKey 的旧录制）首次被列出时认领给当前 ownerKey。
+ * **调用方必须在 auth 已 settle（useAuth.loading=false）后才调**，否则会用 guestId 误认领。
+ */
+export async function listRecordings(ownerKey: string): Promise<RecordingMetadata[]> {
   const db = getClientDb();
-  return db.recordings.orderBy('startedAt').reverse().toArray();
+  // 认领 legacy 行（一次性；v9 后新录制都带 ownerKey，之后此扫描命中为空）。
+  const legacy = await db.recordings.filter((r) => !r.ownerKey).toArray();
+  if (legacy.length > 0) {
+    await db.recordings.bulkPut(legacy.map((r) => ({ ...r, ownerKey })));
+  }
+  // 用 v9 的 ownerKey 索引查询，避免把其它账号的行读进内存，也不再回退返回 legacy。
+  const rows = await db.recordings.where('ownerKey').equals(ownerKey).sortBy('startedAt');
+  return rows.reverse(); // startedAt 降序（最新在前）
 }
 
-export async function getRecording(recordingId: string): Promise<RecordingMetadata | undefined> {
-  return getClientDb().recordings.get(recordingId);
+/** 校验某录制是否属于当前 ownerKey（legacy/无主视为允许，向后兼容）。 */
+async function ownsRecording(recordingId: string, ownerKey: string): Promise<boolean> {
+  const r = await getClientDb().recordings.get(recordingId);
+  if (!r) return false;
+  return !r.ownerKey || r.ownerKey === ownerKey;
+}
+
+/** 把某 ownerKey 的录制整体改归另一个（匿名→登录时把 guest 录制并入账户）。 */
+export async function migrateRecordingsOwner(fromOwnerKey: string, toOwnerKey: string): Promise<void> {
+  if (!fromOwnerKey || !toOwnerKey || fromOwnerKey === toOwnerKey) return;
+  const db = getClientDb();
+  const rows = await db.recordings.where('ownerKey').equals(fromOwnerKey).toArray();
+  if (rows.length > 0) {
+    await db.recordings.bulkPut(rows.map((r) => ({ ...r, ownerKey: toOwnerKey })));
+  }
+}
+
+export async function getRecording(recordingId: string, ownerKey?: string): Promise<RecordingMetadata | undefined> {
+  const r = await getClientDb().recordings.get(recordingId);
+  if (!r) return undefined;
+  // 传了 ownerKey 时按用户隔离：他人录制视为不存在（legacy/无主放行，向后兼容）。
+  if (ownerKey && r.ownerKey && r.ownerKey !== ownerKey) return undefined;
+  return r;
 }
 
 export async function updateRecordingTitle(recordingId: string, title: string): Promise<void> {
@@ -179,8 +225,10 @@ export async function clearSubtitleSrt(recordingId: string): Promise<void> {
   await getClientDb().recordings.update(recordingId, { subtitleSrt: undefined });
 }
 
-export async function deleteRecording(recordingId: string): Promise<void> {
+export async function deleteRecording(recordingId: string, ownerKey?: string): Promise<void> {
   const db = getClientDb();
+  // 传了 ownerKey 时只允许删自己的（防同设备他号经 id 删除他人录制）。
+  if (ownerKey && !(await ownsRecording(recordingId, ownerKey))) return;
   await db.transaction(
     'rw',
     [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.cameraPositions, db.binaryFiles, db.workspaceShells, db.laserEvents],
@@ -220,7 +268,7 @@ export async function countWorkspaceShells(recordingId: string): Promise<number>
     .count();
 }
 
-export async function loadFullRecording(recordingId: string): Promise<{
+export async function loadFullRecording(recordingId: string, ownerKey?: string): Promise<{
   metadata: RecordingMetadata;
   snapshots: WhiteboardSnapshot[];
   audioBlob: Blob | null;
@@ -232,6 +280,10 @@ export async function loadFullRecording(recordingId: string): Promise<{
   const db = getClientDb();
   const metadata = await db.recordings.get(recordingId);
   if (!metadata) throw new Error(`recording_not_found: ${recordingId}`);
+  // 传了 ownerKey 时按用户隔离：他人录制按"不存在"处理（legacy/无主放行）。
+  if (ownerKey && metadata.ownerKey && metadata.ownerKey !== ownerKey) {
+    throw new Error(`recording_not_found: ${recordingId}`);
+  }
 
   const snapshots = await db.snapshots
     .where('recordingId').equals(recordingId)

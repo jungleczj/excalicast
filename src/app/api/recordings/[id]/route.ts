@@ -5,6 +5,7 @@ import {
   getCloudRecording,
   removeCloudRecordingObjects,
   updateCloudRecordingTitle,
+  updateCloudRecordingSubtitle,
 } from '@/lib/db';
 
 export const runtime = 'nodejs';
@@ -35,19 +36,27 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<NextResponse> {
   if (!userId) {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
   }
-  let body: { title?: string | null };
+  let body: { title?: string | null; subtitleSrt?: string | null };
   try {
-    body = (await req.json()) as { title?: string | null };
+    body = (await req.json()) as { title?: string | null; subtitleSrt?: string | null };
   } catch {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
   }
-  if (body.title === undefined) {
+  if (body.title === undefined && body.subtitleSrt === undefined) {
     return NextResponse.json({ error: 'no_fields_to_update' }, { status: 400 });
   }
   const row = await getCloudRecording(userId, id);
   if (!row) return NextResponse.json({ error: 'not_found' }, { status: 404 });
-  const next = typeof body.title === 'string' ? body.title.trim() : null;
-  await updateCloudRecordingTitle(userId, id, next && next.length > 0 ? next : null);
+  if (body.title !== undefined) {
+    const next = typeof body.title === 'string' ? body.title.trim() : null;
+    await updateCloudRecordingTitle(userId, id, next && next.length > 0 ? next : null);
+  }
+  if (body.subtitleSrt !== undefined) {
+    const srt = typeof body.subtitleSrt === 'string' && body.subtitleSrt.trim().length > 0
+      ? body.subtitleSrt
+      : null;
+    await updateCloudRecordingSubtitle(userId, id, srt);
+  }
   return NextResponse.json({ ok: true });
 }
 

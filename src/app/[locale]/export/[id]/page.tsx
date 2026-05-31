@@ -10,6 +10,7 @@ import { ExportPanel, type ExportProgressState } from '@/components/ExportPanel'
 import { WorkspaceShellToggle } from '@/components/WorkspaceShellToggle';
 import { I } from '@/components/icons';
 import { getRecording, deleteRecording } from '@/lib/db-client';
+import { getCurrentOwnerKey } from '@/lib/ownerKey';
 import type { ExportConfig, RecordingMetadata } from '@/types/recording';
 import { Link, useRouter } from '@/i18n/navigation';
 
@@ -45,10 +46,13 @@ export default function ExportRecordingPage(): JSX.Element {
 
   useEffect(() => {
     if (!id) return;
-    getRecording(id).then((m) => {
-      if (!m) setLoadError(locale === 'en' ? `Recording not found: ${id}` : `录制不存在：${id}`);
-      else setMeta(m);
-    }).catch((err) => setLoadError(err instanceof Error ? err.message : 'load_failed'));
+    getCurrentOwnerKey()
+      .then((ownerKey) => getRecording(id, ownerKey))
+      .then((m) => {
+        if (!m) setLoadError(locale === 'en' ? `Recording not found: ${id}` : `录制不存在：${id}`);
+        else setMeta(m);
+      })
+      .catch((err) => setLoadError(err instanceof Error ? err.message : 'load_failed'));
   }, [id, locale]);
 
   const handlePaidChange = useCallback((isPaidNow: boolean) => {
@@ -59,7 +63,7 @@ export default function ExportRecordingPage(): JSX.Element {
     if (!id) return;
     const msg = locale === 'en' ? 'Delete this recording? Cannot be undone.' : '删除这条录制？此操作不可恢复。';
     if (!confirm(msg)) return;
-    await deleteRecording(id);
+    await deleteRecording(id, await getCurrentOwnerKey());
     router.push('/library');
   }, [id, router, locale]);
 

@@ -183,6 +183,7 @@
     "footer": "支付完成后自动切换到无水印模式"
   },
   "workspace": {
+    "paymentReceived": "支付完成 ✓ —— 可回到原标签页继续操作。",
     "cameraOpenFailed": "无法打开摄像头：{message}",
     "startFailed": "开始录制失败：{message}",
     "stopFailed": "停止录制失败：{message}",
@@ -354,6 +355,11 @@
     "shareClose": "关闭",
     "use": "使用",
     "upgrade": "升级",
+    "proBundleTitle": "Pro 功能",
+    "proBundleDesc": "AI 字幕 + 跨设备素材库",
+    "proBundleUnlock": "升级到 Pro",
+    "cloudTemplateTitle": "跨设备云端保存模板",
+    "cloudTemplateDesc": "多端同步素材库",
     "maxBundleTitle": "Max 功能",
     "maxBundleDesc": "AI 讲义 + 公开分享链接",
     "maxBundleUnlock": "升级到 Max",

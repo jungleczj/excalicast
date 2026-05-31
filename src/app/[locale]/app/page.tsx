@@ -47,6 +47,22 @@ export default function HomePage(): JSX.Element {
   const laserPointRef = useRef<((x: number, y: number, button: 'down' | 'up') => void) | null>(null);
   const [laserActive, setLaserActive] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [paymentDone, setPaymentDone] = useState(false);
+
+  // Creem 在新标签页支付后会重定向回 /app?creem_purchase=…。消费该参数：刷新会员态、
+  // 给个「支付完成」提示并清掉 query（避免刷新重复触发 / 死页）。原标签的恢复由弹窗的
+  // visibility 重查负责（导出自动、订阅回到已解锁面板）。
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.get('creem_purchase')) return;
+    setPaymentDone(true);
+    void subscription.refresh?.();
+    window.history.replaceState(null, '', window.location.pathname + window.location.hash);
+    const tid = setTimeout(() => setPaymentDone(false), 6000);
+    return () => clearTimeout(tid);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 初始化摄像头位置（优先 localStorage，否则右下角默认）
   useEffect(() => {
@@ -368,6 +384,23 @@ export default function HomePage(): JSX.Element {
               onPause={handlePause}
               onResume={handleResume}
             />
+          </div>
+        )}
+
+        {paymentDone && (
+          <div
+            className="rb-no-record fixed left-1/2 top-4 z-50 -translate-x-1/2 px-4 py-2"
+            style={{
+              background: 'var(--ok, #1a7f37)',
+              color: '#fff',
+              border: '1.4px solid var(--ink)',
+              borderRadius: 4,
+              boxShadow: '3px 3px 0 var(--ink)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 12,
+            }}
+          >
+            {t('paymentReceived')}
           </div>
         )}
 

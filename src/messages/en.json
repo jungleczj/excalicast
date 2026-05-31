@@ -183,6 +183,7 @@
     "footer": "Watermark will be removed automatically after payment"
   },
   "workspace": {
+    "paymentReceived": "Payment received ✓ — you can return to your previous tab to continue.",
     "cameraOpenFailed": "Could not open camera: {message}",
     "startFailed": "Could not start recording: {message}",
     "stopFailed": "Could not stop recording: {message}",
@@ -354,6 +355,11 @@
     "shareClose": "Close",
     "use": "Use",
     "upgrade": "Upgrade",
+    "proBundleTitle": "Pro features",
+    "proBundleDesc": "AI subtitles + cross-device templates",
+    "proBundleUnlock": "Upgrade to Pro",
+    "cloudTemplateTitle": "Cross-device cloud templates",
+    "cloudTemplateDesc": "Template library synced across devices",
     "maxBundleTitle": "Max features",
     "maxBundleDesc": "AI handout + public share link",
     "maxBundleUnlock": "Upgrade to Max",

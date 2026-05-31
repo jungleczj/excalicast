@@ -70,6 +70,36 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
     }
   };
 
+  // Creem 在新标签页支付：付完切回本标签立即重查 tier，避免只靠定时轮询（可能超时）。
+  // 订阅入账后只关弹窗回到已解锁面板——不自动执行任何功能。
+  useEffect(() => {
+    if (!open) return;
+    const recheck = async () => {
+      if (document.visibilityState !== 'visible') return;
+      if (pollingRef.current) return; // 与轮询/自身共享互斥，避免 focus+visibility 并发双触发
+      pollingRef.current = true;
+      try {
+        const r = await fetch('/api/me/tier', { cache: 'no-store' });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (isMax ? j.tier === 'max' : (j.tier === 'pro' || j.tier === 'max')) {
+          setStatusMsg(t('synced'));
+          await refreshTier();
+          onUpgraded?.();
+          onClose();
+        }
+      } catch { /* 未入账/瞬时错误 → 忽略 */ } finally {
+        pollingRef.current = false;
+      }
+    };
+    document.addEventListener('visibilitychange', recheck);
+    window.addEventListener('focus', recheck);
+    return () => {
+      document.removeEventListener('visibilitychange', recheck);
+      window.removeEventListener('focus', recheck);
+    };
+  }, [open, isMax]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const openPaddleCheckout = (u: { id: string; email: string }) => {
     if (!paddle) {
       setError(t('errorPaddleNotInit'));
