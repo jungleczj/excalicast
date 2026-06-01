@@ -24,6 +24,13 @@
 
 ---
 
+## ⚠️ 域名约定（强制，勿误改）
+
+- **站点 / 品牌 / 规范域名 = `excalicast.cc`**：网站访问、SEO 的 `SITE_URL`（`src/lib/seo/alternates.ts`）、canonical / sitemap / hreflang / OpenGraph / llms.txt / IndexNow 全部用 `excalicast.cc`。
+- **客服邮箱 = `support@excalicast.cn`（`.cn` 是故意的，不是笔误）**：落地页 footer、法律页、邮件模板里出现的 `support@excalicast.cn` / `excalicast.cn` **保持不动**，不要"顺手"改成 `.cc`。
+
+---
+
 ## 项目概述
 
 本项目是一个基于 白板 的录制增强工具，核心功能：

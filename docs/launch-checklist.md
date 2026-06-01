@@ -4,19 +4,11 @@
 
 ---
 
-## Block 0. 上线前必须先拍板：域名一致性（阻断项）
+## Block 0. 域名约定（已确认，见 CLAUDE.md「域名约定」）
 
-**现状不一致，必须先统一再上线：**
-- SEO 用 `.cc`：`src/lib/seo/alternates.ts` 的 `SITE_URL = 'https://excalicast.cc'`（canonical / sitemap / hreflang / OG / llms.txt 全部基于它）。CLAUDE.md 与支付 admin API 也用 `excalicast.cc`。
-- 落地页 footer 与邮箱用 `.cn`：`src/app/[locale]/page.tsx` footer `© 2026 · excalicast.cn`、`mailto:support@excalicast.cn`；法律页/邮件模板亦多处 `excalicast.cn`。
-
-**为什么是阻断项**：canonical / hreflang / sitemap 必须指向**实际可访问的域名**。若真实站点部署在 `.cn`，但 canonical 全写 `.cc`，搜索引擎会把规范页指向一个不是当前域的地址 → 索引混乱、hreflang 失效、OG 图 404。
-
-**待你确认（二选一）**：
-- [ ] **真实生产域名 = `excalicast.cc`** → 把 footer/邮箱/法律页里的 `.cn` 统一改成 `.cc`（我可代改，约 5–8 处文案）。
-- [ ] **真实生产域名 = `excalicast.cn`** → 把 `src/lib/seo/alternates.ts` 的 `SITE_URL` 改成 `.cn`（一处，SEO 全链路随之跟正）。
-
-> 在你给出域名前，本项保持不动（不擅自改）。
+- **站点 / canonical / sitemap / OG / IndexNow 域名 = `excalicast.cc`**（实测线上跑在 .cc，`SITE_URL` 正确）。
+- **客服邮箱 = `support@excalicast.cn`（`.cn` 故意，勿改）**；footer/法律页/邮件里的 `.cn` 保持不动。
+- 无需任何域名改动，可直接进入下面步骤。
 
 ---
 
@@ -62,5 +54,22 @@
 
 ---
 
+## 7. IndexNow（加速 Bing / Yandex / Seznam / Naver 收录）
+
+IndexNow 让你主动把 URL 推给 Bing 等引擎，新站收录比干等自然爬取快得多。（Google 不正式消费 IndexNow，Google 侧靠 §3 的请求编入索引 + 外链。）
+
+- [ ] 部署后确认密钥文件可达：`curl https://excalicast.cc/e0db09f0b1ee71fc3abbf04e5909381f.txt` → 返回该 key 本身（200, text/plain）。**必须先可达**，否则 IndexNow 校验失败。
+- [ ] 跑提交脚本：`npx tsx scripts/indexnow.ts`（先 `--dry-run` 看 URL 列表）。返回 `200`/`202` 即受理。
+- [ ] Bing Webmaster →「IndexNow」面板可看到提交记录与处理状态。
+- [ ] **每次部署 / 新增内容页后重跑** `npx tsx scripts/indexnow.ts`。
+
+## 8. 新站收录预期（管理预期，别焦虑）
+
+- 刚提交 sitemap / inspection 时，GSC 常见「已发现-尚未编入索引」「重复网页-未选定规范网页」「网页会自动重定向（指 `/` 或带尾斜杠的 `/en/`）」，Bing 常见「known but has issues」——**这些多为新域名初次索引的正常瞬时态，不是 bug**（markup 实测正确）。
+- 收录通常需 **数天~数周**；最大加速杠杆是**外链信号**（ProductHunt/Show HN/AlternativeTo 一上，收录明显变快）+ GSC 手动「请求编入索引」+ IndexNow（Bing）。
+- 复查节奏：1 周看 Bing、2–3 周看 Google；别反复删了重交 sitemap（会重置）。
+
+---
+
 ## 一句话
-先定死域名（block 0）→ Vercel 开 Analytics → 部署 → curl 冒烟 → GSC/Bing 交 sitemap → 富结果/OG 校验 → 看埋点事件 → 1–2 周后 GEO 抽测。
+Vercel 开 Analytics → 部署 → curl 冒烟（含 IndexNow key 文件）→ GSC/Bing 交 sitemap → 跑 `indexnow.ts` → 富结果/OG 校验 → GSC 请求编入索引 + 上外链 → 1–3 周复查收录 + GEO 抽测。

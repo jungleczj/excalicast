@@ -889,6 +889,10 @@ Pro/Max 导出（订阅状态验证）：
 
 > 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
 
+- **2026-06-01｜IndexNow 即时收录 + 域名约定固化**：
+  1. **IndexNow**（加速 Bing/Yandex/Seznam/Naver 收录新站）：新增密钥文件 `public/e0db09f0b1ee71fc3abbf04e5909381f.txt` + 提交脚本 `scripts/indexnow.ts`（复用 `allContentRoutes()` 生成全量双语 URL POST 到 `api.indexnow.org`，支持 `--dry-run`，部署/加内容后手动跑）。`docs/launch-checklist.md` 增 IndexNow 用法 + 新站收录预期章节。诊断结论：GSC/Bing 报的「重复未选规范页 / 自动重定向 / known but has issues」均为新域名初次索引正常瞬时态，markup 实测无误，主加速杠杆是外链 + 请求编入索引 + IndexNow。
+  2. **域名约定写入 CLAUDE.md**：站点/canonical/SEO/IndexNow = `excalicast.cc`；客服邮箱 `support@excalicast.cn`（`.cn` 故意，禁止"顺手"改）。
+
 - **2026-06-01｜枢纽博客内链图谱 + 上线清单（推广第三阶段）**：
   1. **内链图谱**：`src/content/types.ts` 加 `ContentRef` + 各内容类型可选 `related?`；新增 `src/components/content/RelatedLinks.tsx`（解析 ref → 本地化标题链接，复用 `EntryList`），在 compare/use-cases/blog 三个 `[slug]` 模板的 CtaRow 前渲染。
   2. **3 篇枢纽博客**（`src/content/blog.ts`，hub-and-spoke）：`loom-alternatives-for-whiteboard`、`repurpose-one-recording-into-shorts-reels`、`record-whiteboard-lectures-online-teaching`，各 `related` 链向多个对比/场景页；并给 2 篇原博客 + vs-loom / record-whiteboard-lecture / whiteboard-video-for-youtube-shorts 回填双向 `related`。博客增至 5 篇，全自动进 sitemap。
