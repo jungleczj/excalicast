@@ -12,6 +12,6 @@ export async function middleware(request: NextRequest) {
  */
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|api/paddle-webhook|api/asr/audio).*)',
+    '/((?!_next/static|_next/image|favicon\\.ico|sitemap\\.xml|robots\\.txt|llms\\.txt|opengraph-image|api/paddle-webhook|api/asr/audio).*)',
   ],
 };

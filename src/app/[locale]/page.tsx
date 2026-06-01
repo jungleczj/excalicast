@@ -3,6 +3,14 @@ import { Link } from '@/i18n/navigation';
 import { useTranslations } from 'next-intl';
 import { setRequestLocale, getTranslations } from 'next-intl/server';
 import { getActiveConfig, formatPrice } from '@/lib/paymentConfig';
+import { buildAlternates } from '@/lib/seo/alternates';
+import { JsonLd } from '@/components/seo/JsonLd';
+import { TrackedLink } from '@/components/analytics/TrackedLink';
+import {
+  softwareApplicationSchema,
+  organizationSchema,
+  faqPageSchema,
+} from '@/lib/seo/schema';
 
 interface Props {
   params: Promise<{ locale: string }>;
@@ -14,7 +22,12 @@ export const dynamic = 'force-dynamic';
 export async function generateMetadata({ params }: Props) {
   const { locale } = await params;
   const t = await getTranslations({ locale, namespace: 'landing.meta' });
-  return { title: t('title'), description: t('description') };
+  return {
+    // absolute：避免被 layout 的 '%s · Excalicast' 模板二次包裹。
+    title: { absolute: t('title') },
+    description: t('description'),
+    alternates: buildAlternates('/', locale),
+  };
 }
 
 export default async function LandingPage({ params }: Props): Promise<JSX.Element> {
@@ -25,7 +38,33 @@ export default async function LandingPage({ params }: Props): Promise<JSX.Elemen
   const proPrice = cfg ? formatPrice(cfg.proMonthlyPriceCents, cfg.currency) : '$9.99';
   const maxPrice = cfg ? formatPrice(cfg.maxMonthlyPriceCents, cfg.currency) : '$15.99';
   const provider = cfg?.provider ?? 'creem';
-  return <LandingContent oneTimePrice={oneTimePrice} proPrice={proPrice} maxPrice={maxPrice} provider={provider} />;
+
+  // ── GEO 结构化数据：让 AI 引擎能把产品事实 + 定价直接引用 ──
+  const t = await getTranslations({ locale, namespace: 'landing' });
+  const currency = (cfg?.currency ?? 'usd').toUpperCase();
+  const toMajor = (cents: number | undefined, fallback: number) =>
+    cents != null ? cents / 100 : fallback;
+  const productSchema = softwareApplicationSchema({
+    locale,
+    description: t('meta.description'),
+    oneTimePrice: toMajor(cfg?.oneTimePriceCents, 4.99),
+    proPrice: toMajor(cfg?.proMonthlyPriceCents, 9.99),
+    maxPrice: toMajor(cfg?.maxMonthlyPriceCents, 15.99),
+    currency,
+  });
+  const faqSchema = faqPageSchema(
+    [1, 2, 3, 4].map((i) => ({
+      question: t(`faq.q${i}.q`),
+      answer: t(`faq.q${i}.a`, { price: oneTimePrice }),
+    })),
+  );
+
+  return (
+    <>
+      <JsonLd data={[productSchema, organizationSchema(), faqSchema]} />
+      <LandingContent oneTimePrice={oneTimePrice} proPrice={proPrice} maxPrice={maxPrice} provider={provider} />
+    </>
+  );
 }
 
 function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTimePrice: string; proPrice: string; maxPrice: string; provider: 'creem' | 'paddle' }): JSX.Element {
@@ -68,10 +107,10 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
             </a>
           ))}
         </nav>
-        <Link href="/app" className="btn-sketch btn-sketch-primary" style={{ padding: '10px 18px' }}>
+        <TrackedLink event="cta_start_recording" eventProps={{ surface: 'nav' }} href="/app" className="btn-sketch btn-sketch-primary" style={{ padding: '10px 18px' }}>
           <span className="recording-indicator h-1.5 w-1.5 rounded-full" style={{ background: 'var(--rec)' }} />
           {t('nav.startRecording')}
-        </Link>
+        </TrackedLink>
       </header>
 
       <main className="flex-1 overflow-auto">
@@ -104,10 +143,10 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
             </p>
 
             <div className="mt-9 flex items-center gap-3">
-              <Link href="/app" className="btn-sketch btn-sketch-primary">
+              <TrackedLink event="cta_start_recording" eventProps={{ surface: 'hero' }} href="/app" className="btn-sketch btn-sketch-primary">
                 <span className="recording-indicator h-1.5 w-1.5 rounded-full" style={{ background: 'var(--rec)' }} />
                 {t('hero.ctaPrimary')}
-              </Link>
+              </TrackedLink>
               <a href="#pricing" className="btn-sketch">{t('hero.ctaSecondary')}</a>
             </div>
 
@@ -330,9 +369,9 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
                 <Bullet>{t('pricing.free.bullet5')}</Bullet>
               </ul>
 
-              <Link href="/app" className="btn-sketch w-full" style={{ justifyContent: 'center' }}>
+              <TrackedLink event="pricing_cta_click" eventProps={{ tier: 'free' }} href="/app" className="btn-sketch w-full" style={{ justifyContent: 'center' }}>
                 {t('pricing.free.cta')}
-              </Link>
+              </TrackedLink>
             </div>
 
             {/* One-time tier */}
@@ -369,9 +408,9 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
                 <Bullet>{t('pricing.oneTime.bullet5')}</Bullet>
               </ul>
 
-              <Link href="/app" className="btn-sketch btn-sketch-primary w-full" style={{ justifyContent: 'center' }}>
+              <TrackedLink event="pricing_cta_click" eventProps={{ tier: 'one_time' }} href="/app" className="btn-sketch btn-sketch-primary w-full" style={{ justifyContent: 'center' }}>
                 {t('pricing.oneTime.cta')}
-              </Link>
+              </TrackedLink>
             </div>
 
             {/* Pro tier — 推荐 */}
@@ -429,9 +468,9 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
                 <Bullet>{t('pricing.pro.bullet6')}</Bullet>
               </ul>
 
-              <Link href="/app" className="btn-sketch w-full" style={{ justifyContent: 'center' }}>
+              <TrackedLink event="pricing_cta_click" eventProps={{ tier: 'pro' }} href="/app" className="btn-sketch w-full" style={{ justifyContent: 'center' }}>
                 {t('pricing.pro.cta')}
-              </Link>
+              </TrackedLink>
             </div>
 
             {/* Max tier */}
@@ -468,9 +507,9 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
                 <Bullet>{t('pricing.max.bullet5')}</Bullet>
               </ul>
 
-              <Link href="/app" className="btn-sketch w-full" style={{ justifyContent: 'center' }}>
+              <TrackedLink event="pricing_cta_click" eventProps={{ tier: 'max' }} href="/app" className="btn-sketch w-full" style={{ justifyContent: 'center' }}>
                 {t('pricing.max.cta')}
-              </Link>
+              </TrackedLink>
             </div>
           </div>
 
@@ -596,6 +635,9 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
           </div>
           <nav className="flex flex-wrap gap-5">
             <Link href="/" style={{ color: 'inherit', textDecoration: 'none' }}>{t('footer.home')}</Link>
+            <Link href="/compare" style={{ color: 'inherit', textDecoration: 'none' }}>{t('footer.compare')}</Link>
+            <Link href="/use-cases" style={{ color: 'inherit', textDecoration: 'none' }}>{t('footer.useCases')}</Link>
+            <Link href="/blog" style={{ color: 'inherit', textDecoration: 'none' }}>{t('footer.blog')}</Link>
             <Link href="/privacy" style={{ color: 'inherit', textDecoration: 'none' }}>{t('footer.privacy')}</Link>
             <Link href="/terms" style={{ color: 'inherit', textDecoration: 'none' }}>{t('footer.terms')}</Link>
             <Link href="/refund" style={{ color: 'inherit', textDecoration: 'none' }}>{t('footer.refund')}</Link>

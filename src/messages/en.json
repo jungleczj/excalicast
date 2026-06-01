@@ -4,6 +4,24 @@
       "title": "Excalicast — Whiteboard Recorder",
       "description": "Record whiteboard activity + mic audio. One take, exported to multiple aspect ratios."
     },
+    "faq": {
+      "q1": {
+        "q": "What is Excalicast?",
+        "a": "Excalicast is a browser-based whiteboard recorder. You draw in an Excalidraw canvas while it captures your operation stream and microphone audio, then exports an MP4 in 16:9, 9:16, 1:1, or 4:5 — all from a single recording."
+      },
+      "q2": {
+        "q": "How is Excalicast different from a screen recorder like Loom?",
+        "a": "Instead of capturing screen pixels, Excalicast records the whiteboard operation stream. The recording is never affected by window occlusion, minimization, or switching tabs, and the same take can be exported to multiple aspect ratios without re-recording."
+      },
+      "q3": {
+        "q": "Is Excalicast free? Do I need an account?",
+        "a": "Recording and watermarked MP4 export are free with no sign-up. A one-time payment of {price} unlocks watermark-free export for a recording. Pro and Max monthly plans add auto subtitles, cloud backup, AI handouts, and share links."
+      },
+      "q4": {
+        "q": "Where are my recordings stored?",
+        "a": "Recordings live locally in your browser (IndexedDB) and videos render in-browser via ffmpeg.wasm. Raw recordings never leave your computer; the server only stores payment records."
+      }
+    },
     "nav": {
       "pricing": "Pricing",
       "contact": "Contact",
@@ -96,6 +114,9 @@
     },
     "footer": {
       "home": "Home",
+      "compare": "Compare",
+      "useCases": "Use cases",
+      "blog": "Blog",
       "privacy": "Privacy",
       "terms": "Terms",
       "refund": "Refunds",

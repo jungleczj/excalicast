@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { track } from '@vercel/analytics';
 import { I } from '@/components/icons';
 import { isPaid } from '@/services/paymentClient';
 import { openCheckout, closeCheckout } from '@/services/paddleClient';
@@ -62,6 +63,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
         try {
           if (await isPaid(recordingId)) {
+            track('purchase_success', { kind: 'one_time' });
             setStatusMsg(t('unlocked'));
             onPaid?.();
             onClose();
@@ -88,6 +90,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
       pollingRef.current = true;
       try {
         if (await isPaid(recordingId)) {
+          track('purchase_success', { kind: 'one_time' });
           setStatusMsg(t('unlocked'));
           onPaid?.();
           onClose();
@@ -110,6 +113,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
     setError(null);
     setStatusMsg(null);
     setBusy(true);
+    track('checkout_start', { kind: 'one_time' });
     try {
       const res = await fetch('/api/checkout/one-time', {
         method: 'POST',

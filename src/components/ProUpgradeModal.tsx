@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { track } from '@vercel/analytics';
 import { I } from '@/components/icons';
 import { LoginModal } from '@/components/LoginModal';
 import { openProSubscriptionCheckout, closeCheckout } from '@/services/paddleClient';
@@ -51,6 +52,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
           if (r.ok) {
             const j = await r.json();
             if (isMax ? j.tier === 'max' : (j.tier === 'pro' || j.tier === 'max')) {
+              track('purchase_success', { kind: 'subscription', tier });
               setStatusMsg(t('synced'));
               await refreshTier();
               onUpgraded?.();
@@ -83,6 +85,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
         if (!r.ok) return;
         const j = await r.json();
         if (isMax ? j.tier === 'max' : (j.tier === 'pro' || j.tier === 'max')) {
+          track('purchase_success', { kind: 'subscription', tier });
           setStatusMsg(t('synced'));
           await refreshTier();
           onUpgraded?.();
@@ -116,6 +119,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
 
   const openCheckoutForProvider = async () => {
     setBusy(true);
+    track('checkout_start', { kind: 'subscription', tier });
     try {
       const res = await fetch('/api/checkout/pro', {
         method: 'POST',

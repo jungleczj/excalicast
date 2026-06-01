@@ -1,9 +1,10 @@
 # PRD：白板录制工具
-**版本**：v0.5.2  
+**版本**：v0.6  
 **状态**：开发中  
 **作者**：—  
-**最后更新**：2026-05-31  
-**变更**：v0.5.2 - 定价页四档权益补全（校准「全档不限时长」、支付商按 active provider 动态显示=Creem）；面向用户文案去掉 `Deepseek`/`AI` 字样；应用内 logo 点击回落地页；摄像头气泡可缩放（前端 80–480）；修 `past_due` 宽限期被误降级为 free。详见「## 十一」最新一条。  
+**最后更新**：2026-06-01  
+**变更**：v0.6 - 新增 SEO / GEO / 内容营销基建（「## 十二」）：技术 SEO 地基（sitemap/robots/OpenGraph/hreflang/Analytics）、GEO（JSON-LD `SoftwareApplication`/`FAQPage`/`Article` + `llms.txt` + 放行 AI 爬虫）、程序化内容引擎（`/compare`·`/use-cases`·`/blog` 数据驱动长尾着陆页）+ 零预算冷启动手册 `docs/marketing-cold-start.md`。详见「## 十一」最新一条与「## 十二」。  
+**历史变更**：v0.5.2 - 定价页四档权益补全（校准「全档不限时长」、支付商按 active provider 动态显示=Creem）；面向用户文案去掉 `Deepseek`/`AI` 字样；应用内 logo 点击回落地页；摄像头气泡可缩放（前端 80–480）；修 `past_due` 宽限期被误降级为 free。详见「## 十一」最新一条。  
 **历史变更**：v0.5.1 - 支付成功后回到发起页（导出页透传 `returnTo`，新标签不再落到 `/app`）；登录邮件品牌化（Excalicast 邮件模板 + 自定义 SMTP 配置/手册）。  
 **历史变更**：v0.5 - 新增「## 十一、实现进展与变更记录（持续同步）」，沉淀已落地实现（定价四档 + Max 可购买、素材库云同步/市场、分享链接、AI 讲义、激光笔、品牌标识等）与第四轮迭代（讲义智能配图/多格式导出、录制与导出性能、分享加载与移动端自适应、字幕清洗单行）。本 PRD 自此为产品需求唯一来源，新增内容须同步更新（见 CLAUDE.md「PRD 同步要求」）。  
 **历史**：v0.4 - 录制方案锁定 B（事件流重放）；单次购买改为 paid_recordings 表（去令牌）；所有外部 LLM/Whisper 调用必须经服务端 BFF；所有层级录制时长无上限；支付服务统一 Creem；新增数据生命周期 / 合规告知 / 退款政策 / 录制恢复 / 分享链接管理 / PoC 清单六个章节
@@ -888,6 +889,22 @@ Pro/Max 导出（订阅状态验证）：
 
 > 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
 
+- **2026-06-01｜枢纽博客内链图谱 + 上线清单（推广第三阶段）**：
+  1. **内链图谱**：`src/content/types.ts` 加 `ContentRef` + 各内容类型可选 `related?`；新增 `src/components/content/RelatedLinks.tsx`（解析 ref → 本地化标题链接，复用 `EntryList`），在 compare/use-cases/blog 三个 `[slug]` 模板的 CtaRow 前渲染。
+  2. **3 篇枢纽博客**（`src/content/blog.ts`，hub-and-spoke）：`loom-alternatives-for-whiteboard`、`repurpose-one-recording-into-shorts-reels`、`record-whiteboard-lectures-online-teaching`，各 `related` 链向多个对比/场景页；并给 2 篇原博客 + vs-loom / record-whiteboard-lecture / whiteboard-video-for-youtube-shorts 回填双向 `related`。博客增至 5 篇，全自动进 sitemap。
+  3. **上线清单**（`docs/launch-checklist.md`）：Vercel 开 Analytics、冒烟测试、GSC/Bing 提交、富结果/OG 校验、埋点事件验证、GEO 抽测。**标记域名一致性阻断项**：SEO 用 `excalicast.cc`，footer/邮箱用 `excalicast.cn`，上线前需二选一统一（未擅自改，待定夺）。
+
+- **2026-06-01｜内容扩量 + 转化埋点 + Demo 脚本（推广第二阶段）**：
+  1. **长尾页扩量（+11，纯数据）**：`src/content/compare.ts` 加 6 对比页（vs Scribe / Excalidraw / Screen Studio / Tella / VEED / Zoom 录制），`src/content/use-cases.ts` 加 5 场景页（数学讲题 / PM 需求讲解 / 在线课程 / 系统设计讲解 / 白板视频加字幕），双语完整；`[slug]` 模板、`generateStaticParams`、sitemap、hreflang、FAQ JSON-LD 全自动收录，零路由改动。
+  2. **转化埋点（Vercel Analytics 自定义事件）**：新增 `src/components/analytics/TrackedLink.tsx`（'use client' 包装 i18n Link + `track()`）。落地页 6 个 CTA（nav/hero `cta_start_recording`、四档 `pricing_cta_click{tier}`）与内容页 `CtaRow`（`content_cta_click{type,slug}`）换 TrackedLink；`PaywallModal`/`ProUpgradeModal` 加 `checkout_start` 与 `purchase_success{kind,tier}`；`ExportPanel` 导出/字幕/讲义/分享加 `feature_click{feature,gated}`。**只加埋点，不改业务/支付/门控逻辑**。
+  3. **Demo 视频**：`docs/demo-video-script.md`（业界工具地图 Screen Studio/Descript/ElevenLabs/Arcade 等 + 45–60s 主脚本 + 12–15s 竖屏短版，中英双语分镜）。
+
+- **2026-06-01｜SEO + GEO 推广基建 + 程序化内容引擎（冷启动）**：为零预算自然流量获客落地三层能力（详见新增「## 十二、SEO / GEO / 内容营销」与 `docs/marketing-cold-start.md`）。
+  1. **技术 SEO 地基**：`[locale]/layout.tsx` 加 `metadataBase` + 全站 OpenGraph/Twitter 默认值 + 标题模板；landing `page.tsx` `generateMetadata` 补 canonical/hreflang（`x-default=en`）；新增 `src/app/sitemap.ts`（遍历 locale × 路由 + hreflang）、`src/app/robots.ts`、`src/app/[locale]/opengraph-image.tsx`（动态 1200×630 OG 图，品牌 paper/ink 配色）；`middleware.ts` matcher 排除 `sitemap.xml/robots.txt/llms.txt/opengraph-image`；接入 `@vercel/analytics` + `@vercel/speed-insights`。复用工具 `src/lib/seo/{alternates,meta,schema}.ts`。
+  2. **GEO（让 AI 引擎引用 excalicast.cc）**：新增 `src/components/seo/JsonLd.tsx`；landing 注入 `SoftwareApplication`（offers 三档价格从 `payment_config` 实时读）+ `Organization` + `FAQPage`（新增 `landing.faq.q1–q4` 双语文案）；内容页注入 `FAQPage`/`BreadcrumbList`/`Article`；新增 `src/app/llms.txt/route.ts`（llmstxt.org 约定的 AI 站点说明书，价格实时）；robots 显式放行 GPTBot/PerplexityBot/ClaudeBot/Google-Extended 等 AI 爬虫。
+  3. **程序化 SEO 内容引擎**：新增数据层 `src/content/{compare,use-cases,blog}.ts`（双语 typed data，无 CMS/MDX 依赖）+ 动态路由 `[locale]/{compare,use-cases,blog}/[slug]` 与 hub 列表页（Server Component 静态渲染，`generateStaticParams` 预渲染全部 slug，自动进 sitemap）；首批 3 对比页（vs Loom/tldraw/录屏）+ 3 use-case + 2 blog；landing 页脚加内容入口（`footer.compare/useCases/blog` 双语键）；脚手架 `scripts/new-content.ts`（一行命令加长尾页）。
+  4. **运营手册**：`docs/marketing-cold-start.md`（Search Console/Bing 接入、ProductHunt/Show HN/Reddit 可照抄文案、Excalidraw 生态借力、GEO 写作铁律、统一话术、衡量口径）。
+
 - **2026-05-31｜定价页权益补全 + 文案净化 + logo 回落地页 + 摄像头缩放 + 修到期 bug**：
   1. **定价页四档权益补全 + 口径校准**（`page.tsx` + `messages/{zh,en}.json` 的 `landing.pricing.*`）：free/one_time/pro/max bullets 按 `TIER_PERMISSIONS` 真实权益列全；**校准「全档不限时长」**（删 free「最长 30 分钟」、删 Pro「无限录制时长」专属卖点，与 `supabase/README.md` 硬约束一致）；**支付商文案按 active provider 动态显示**（落地页 `getActiveConfig().provider` → Creem/Paddle 名称与链接，`oneTime.bullet4`/`methods`/`processedBy` 改用 `{provider}` 变量与 `<link>`，不再写死 Paddle）。
   2. **面向用户文案去实现细节词**：导出页/升级弹窗去掉 `Deepseek`（讲义）与 `AI`（字幕/讲义）字样（`exportPanel.*`、`proUpgrade/maxUpgrade.features`、`landing.pricing.pro/max`）；服务端模型调用不变（字幕=千问、讲义=deepseek）。
@@ -962,4 +979,34 @@ Pro/Max 导出（订阅状态验证）：
   8. 分享加载（`s/[short]/page.tsx`）：画布只等 snapshots 即渲染，音/画改签名 URL 直接 `src` 流式、逐资源容错（修复加载慢/加载不出来）。
 - **2026-05-29｜定价四档 + Max 可购买 + 价格一致性**（commit 2311273）：见 11.1「定价与会员」。
 - **2026-05-29 前｜素材库市场 + 云同步、激光笔、录制中切摄像头、品牌 favicon、Pro/Max 云备份**（见 git 历史 c61a1d5 / ab91766 / e461644 / 1157429 / cd77850）。
+
+---
+
+## 十二、SEO / GEO / 内容营销（自然流量获客）
+
+> 目标：零预算、海外先行的双语，通过自然搜索 + AI 引擎引用获客。本章为产品设计意图，落地现状见「## 十一」2026-06-01 条；人工执行的渠道手册见 `docs/marketing-cold-start.md`。
+
+### 12.1 技术 SEO 地基
+- **统一来源**：`SITE_URL = https://excalicast.cc`（`src/lib/seo/alternates.ts`）。`[locale]/layout.tsx` 设 `metadataBase` + 全站 OpenGraph/Twitter 默认值 + 标题模板 `%s · Excalicast`（landing 用 `title.absolute` 避免二次包裹）。
+- **sitemap / robots**：`src/app/sitemap.ts` 遍历 `locales × (营销页 + 内容页)`，每条带 `zh-CN/en/x-default` hreflang；`src/app/robots.ts` 放行通用爬虫，`Disallow /api /app /library /s/`。
+- **hreflang**：`buildAlternates(path, locale)` 产出 canonical + languages（`x-default = en`，海外先行）。所有营销页/内容页 `generateMetadata` 复用 `pageMetadata()`（`src/lib/seo/meta.ts`）。
+- **OG 图**：`[locale]/opengraph-image.tsx` 用 `next/og` 动态生成 1200×630（品牌 paper/ink 配色 + 比例徽标），自动注入所有页 og:image/twitter:image。
+- **Analytics**：`@vercel/analytics` + `@vercel/speed-insights` 挂在 layout。
+- **约束**：`/app`、`/library`、`/s/[short]` 不进 sitemap（Client-only / 私有）。`middleware.ts` matcher 排除 SEO 路由。
+
+### 12.2 GEO（Generative Engine Optimization）
+让 ChatGPT / Perplexity / Google AI Overview / Claude 在相关提问中引用并推荐 excalicast.cc：
+- **JSON-LD**（`src/components/seo/JsonLd.tsx` + `src/lib/seo/schema.ts`）：landing 注入 `SoftwareApplication`（`offers` 三档价格从 `payment_config` 实时读，`featureList` 用具体事实句）+ `Organization` + `FAQPage`；对比/场景页注入 `FAQPage` + `BreadcrumbList`；博客注入 `Article`。
+- **llms.txt**（`src/app/llms.txt/route.ts`）：llmstxt.org 约定的 AI 站点说明书，含定义、差异化、实时三档价格、关键页链接。
+- **AI 爬虫放行**：robots 显式 Allow `GPTBot / OAI-SearchBot / PerplexityBot / ClaudeBot / Google-Extended / Applebot-Extended / CCBot`。
+- **内容写作铁律**：首句自包含定义句、具体数字、对比表 + FAQ 结构（见手册 §1.1）。
+
+### 12.3 程序化内容引擎
+- **数据层**：`src/content/{compare,use-cases,blog}.ts` 为双语 typed data（无 CMS / MDX 依赖，随仓库部署），类型见 `src/content/types.ts`。
+- **路由模板**：`[locale]/compare/[slug]`、`[locale]/use-cases/[slug]`、`[locale]/blog/[slug]` + 三个 hub 列表页，均 Server Component 静态渲染，`generateStaticParams` 预渲染全部 slug，sitemap 自动收录（`allContentRoutes()`）。
+- **扩量**：`scripts/new-content.ts` 一行命令打印骨架 → 填双语字段（或交 AI 按写作铁律起草）即多一个长尾着陆页，**无需碰路由代码**。
+- **首批内容**：对比页 vs Loom / tldraw / 录屏；use-case 录白板讲座 / 异步架构讲解 / 短视频白板讲解；blog 不录屏录白板 / 一录多比例。
+
+### 12.4 衡量
+Vercel Analytics（来源/转化）+ Google Search Console / Bing Webmaster（查询曝光、索引覆盖）。重点盯 `/compare/*`、`/use-cases/*` 曝光起势，按 Search Console 已有曝光词补页。GEO 每两周抽测（Perplexity/ChatGPT 问「Loom alternative for whiteboard」等是否引用）。
 

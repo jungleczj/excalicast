@@ -1,20 +1,49 @@
 import '../globals.css';
 import type { ReactNode } from 'react';
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { NextIntlClientProvider } from 'next-intl';
-import { getMessages, setRequestLocale } from 'next-intl/server';
+import { getMessages, setRequestLocale, getTranslations } from 'next-intl/server';
+import { Analytics } from '@vercel/analytics/next';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import { PaddleProvider } from '@/components/providers/PaddleProvider';
 import { LibraryImportHandler } from '@/components/LibraryImportHandler';
 import { locales, type Locale } from '@/i18n/config';
+import { SITE_URL } from '@/lib/seo/alternates';
 
 // 预水合脚本：在 React/Excalidraw 启动前就把市集回流的 `#addLibrary=` 抓走并清掉，
 // 存进 window.__excalicastPendingLib，杜绝任何后续脚本抢跑。无 hash 时立即 return。
 const CAPTURE_HASH_SCRIPT = `(function(){try{var m=location.hash.match(/addLibrary=([^&]+)/);if(m){window.__excalicastPendingLib=decodeURIComponent(m[1]);history.replaceState(null,'',location.pathname+location.search);}}catch(e){}})();`;
 
-export const metadata = {
-  title: 'Excalicast',
-  description: 'Whiteboard recording — one take, every aspect ratio',
-};
+// metadataBase + OpenGraph/Twitter 默认值在此统一设置；子页面用各自的 generateMetadata
+// 覆盖 title/description/alternates。og:image / twitter:image 由同目录 opengraph-image.tsx
+// 自动注入，无需在此手写。
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  const t = await getTranslations({ locale, namespace: 'landing.meta' });
+  return {
+    metadataBase: new URL(SITE_URL),
+    title: { default: t('title'), template: '%s · Excalicast' },
+    description: t('description'),
+    applicationName: 'Excalicast',
+    openGraph: {
+      type: 'website',
+      siteName: 'Excalicast',
+      locale: locale === 'zh' ? 'zh_CN' : 'en_US',
+      title: t('title'),
+      description: t('description'),
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: t('title'),
+      description: t('description'),
+    },
+  };
+}
 
 // 移动端：device-width + 适配刘海屏（分享页等全屏内容）
 export const viewport = {
@@ -48,6 +77,8 @@ export default async function RootLayout({ children, params }: Props): Promise<J
           <PaddleProvider>{children}</PaddleProvider>
           <LibraryImportHandler />
         </NextIntlClientProvider>
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
