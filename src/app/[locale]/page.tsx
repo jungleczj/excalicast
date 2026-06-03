@@ -76,7 +76,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
     <div className="flex h-full flex-col" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
       {/* ─── Header ─── */}
       <header
-        className="flex h-16 flex-shrink-0 items-center justify-between px-10"
+        className="flex h-16 flex-shrink-0 items-center justify-between px-4 sm:px-10"
         style={{ background: 'var(--paper)', borderBottom: '2px solid var(--ink)' }}
       >
         <Link href="/" className="flex items-center gap-2.5">
@@ -85,7 +85,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
             Excalicast
           </span>
         </Link>
-        <nav className="flex items-center gap-8">
+        <nav className="hidden items-center gap-8 md:flex">
           {['Home', 'Pricing', 'Contact'].map((item, i) => (
             <a
               key={item}
@@ -116,8 +116,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
       <main className="flex-1 overflow-auto">
         {/* ─── HERO ─── */}
         <section
-          className="grid gap-14 px-20 py-20"
-          style={{ gridTemplateColumns: '1.05fr 1fr', alignItems: 'center' }}
+          className="grid grid-cols-1 items-center gap-10 px-6 py-12 sm:px-10 lg:grid-cols-[1.05fr_1fr] lg:gap-14 lg:px-20 lg:py-20"
         >
           <div>
             <div className="mb-7 flex items-center gap-2">
@@ -126,7 +125,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
             </div>
             <h1
               style={{
-                fontSize: 60,
+                fontSize: 'clamp(34px, 7.5vw, 60px)',
                 fontWeight: 700,
                 lineHeight: 1.05,
                 letterSpacing: '-0.035em',
@@ -151,7 +150,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
             </div>
 
             <div
-              className="mt-6 flex items-center gap-5"
+              className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2"
               style={{ fontSize: 13, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}
             >
               <span className="flex items-center gap-1.5"><I.Check size={14} sw={2.2} /> No download</span>
@@ -297,8 +296,8 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
         </section>
 
         {/* ─── 4 ASSETS ─── */}
-        <section className="px-20 pb-16 pt-8">
-          <div className="mb-12 flex items-end justify-between">
+        <section className="px-6 pb-16 pt-8 sm:px-10 lg:px-20">
+          <div className="mb-12 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div style={{ maxWidth: 600 }}>
               <div className="label-mono mb-3">// the core promise</div>
               <h2 style={{ fontSize: 38, fontWeight: 700, letterSpacing: '-0.025em', lineHeight: 1.1, margin: 0 }}>
@@ -310,7 +309,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
             </p>
           </div>
 
-          <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             <FeatureCard tag="01" Icon={I.Edit} color="var(--hi)" title={t('features.lossless.title')} desc={t('features.lossless.desc')} />
             <FeatureCard tag="02" Icon={I.Mic} color="var(--pro)" title={t('features.audio.title')} desc={t('features.audio.desc')} />
             <FeatureCard tag="03" Icon={I.Crop} color="var(--max)" title={t('features.ratios.title')} desc={t('features.ratios.desc')} />
@@ -321,7 +320,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
         </section>
 
         {/* ─── PRICING ─── */}
-        <section id="pricing" className="px-20 py-16" style={{ borderTop: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}>
+        <section id="pricing" className="px-6 py-16 sm:px-10 lg:px-20" style={{ borderTop: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}>
           <div className="mb-12 text-center">
             <div className="label-mono mb-3">// pricing</div>
             <h2 style={{ fontSize: 44, fontWeight: 700, letterSpacing: '-0.03em', lineHeight: 1.05, margin: 0 }}>
@@ -336,7 +335,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
             </p>
           </div>
 
-          <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(4, 1fr)', maxWidth: 1240, margin: '0 auto' }}>
+          <div className="mx-auto grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4" style={{ maxWidth: 1240 }}>
             {/* Free tier */}
             <div
               style={{
@@ -533,14 +532,14 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
         </section>
 
         {/* ─── HOW IT WORKS ─── */}
-        <section className="px-20 py-16">
+        <section className="px-6 py-16 sm:px-10 lg:px-20">
           <div className="mb-12 text-center">
             <div className="label-mono mb-3">// the flow</div>
             <h2 style={{ fontSize: 36, fontWeight: 700, letterSpacing: '-0.025em', lineHeight: 1.1, margin: 0 }}>
               {t('flow.heading')}
             </h2>
           </div>
-          <div className="grid gap-10" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+          <div className="grid grid-cols-1 gap-10 sm:grid-cols-3">
             <Step n={1} title={t('flow.step1.title')} desc={t('flow.step1.desc')} />
             <Step n={2} title={t('flow.step2.title')} desc={t('flow.step2.desc')} />
             <Step n={3} title={t('flow.step3.title')} desc={t('flow.step3.desc', { price: oneTimePrice })} />
@@ -549,7 +548,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
 
         {/* ─── REFUND ─── */}
         <section style={{ borderTop: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}>
-          <div className="mx-auto px-10 py-16" style={{ maxWidth: 720 }}>
+          <div className="mx-auto px-6 py-16 sm:px-10" style={{ maxWidth: 720 }}>
             <h2 className="text-center" style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.025em', margin: 0 }}>
               {t('refund.heading')}
             </h2>
@@ -581,7 +580,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
         </section>
 
         {/* ─── CONTACT ─── */}
-        <section id="contact" className="mx-auto px-10 py-16 text-center" style={{ maxWidth: 720 }}>
+        <section id="contact" className="mx-auto px-6 py-16 text-center sm:px-10" style={{ maxWidth: 720 }}>
           <h2 style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.025em', margin: 0 }}>
             {t('contact.heading')}
           </h2>
@@ -612,13 +611,10 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, provider }: { oneTim
 
         {/* ─── FOOTER ─── */}
         <footer
+          className="flex flex-col items-start gap-4 px-6 py-6 sm:flex-row sm:items-center sm:justify-between sm:px-10"
           style={{
             background: 'var(--paper-2)',
             borderTop: '1.5px solid var(--ink)',
-            padding: '24px 40px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
             fontFamily: 'var(--font-mono)',
             fontSize: 11,
             color: 'var(--ink-2)',
