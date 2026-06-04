@@ -26,47 +26,60 @@ export function PricingTiers({
   oneTimeCents,
   proCents,
   maxCents,
+  proYearlyCents,
+  maxYearlyCents,
+  yearlyAvailable,
   currency,
 }: {
   oneTimeCents: number;
   proCents: number;
   maxCents: number;
+  proYearlyCents: number;
+  maxYearlyCents: number;
+  yearlyAvailable: boolean;
   currency: string;
 }): JSX.Element {
   const t = useTranslations('pricingPage');
   const tl = useTranslations('landing.pricing');
   const [yearly, setYearly] = useState(false);
 
-  const yr = (cents: number) => Math.round(cents * 0.8); // 20% off, shown per-month
+  // 年付仅在已配置年付 product 时可选；否则强制按月并隐藏切换。
+  const showYearly = yearlyAvailable && yearly;
+  // 年价存的是「年度总价」；定价页按「折合每月（年付）」展示，与 perMonthYearly 文案一致。
+  const monthlyEquivYearly = (annualCents: number) => Math.round(annualCents / 12);
   const priceFor = (key: Tier['key']): { price: string; unit: string } => {
     if (key === 'free') return { price: '$0', unit: t('units.free') };
     if (key === 'oneTime') return { price: formatPrice(oneTimeCents, currency), unit: t('units.oneTime') };
-    const cents = key === 'pro' ? proCents : maxCents;
-    if (yearly) return { price: formatPrice(yr(cents), currency), unit: t('perMonthYearly') };
-    return { price: formatPrice(cents, currency), unit: t('units.pro') };
+    if (showYearly) {
+      const annual = key === 'pro' ? proYearlyCents : maxYearlyCents;
+      return { price: formatPrice(monthlyEquivYearly(annual), currency), unit: t('perMonthYearly') };
+    }
+    return { price: formatPrice(key === 'pro' ? proCents : maxCents, currency), unit: t('units.pro') };
   };
   const nameFor = (key: Tier['key']) => tl(`${key}.label`);
 
   return (
     <>
-      <div className="mb-7 flex flex-wrap items-center justify-center gap-2.5">
-        <div style={{ display: 'inline-flex', padding: 4, border: '1.5px solid var(--ink)', borderRadius: 999, background: 'var(--paper)', boxShadow: '2px 2px 0 var(--ink)' }}>
-          {(['monthly', 'yearly'] as const).map((m) => {
-            const active = (m === 'yearly') === yearly;
-            return (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setYearly(m === 'yearly')}
-                style={{ padding: '8px 18px', background: active ? 'var(--ink)' : 'transparent', color: active ? 'var(--paper)' : 'var(--ink)', border: 'none', borderRadius: 999, fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer' }}
-              >
-                {t(m)}
-              </button>
-            );
-          })}
+      {yearlyAvailable && (
+        <div className="mb-7 flex flex-wrap items-center justify-center gap-2.5">
+          <div style={{ display: 'inline-flex', padding: 4, border: '1.5px solid var(--ink)', borderRadius: 999, background: 'var(--paper)', boxShadow: '2px 2px 0 var(--ink)' }}>
+            {(['monthly', 'yearly'] as const).map((m) => {
+              const active = (m === 'yearly') === yearly;
+              return (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setYearly(m === 'yearly')}
+                  style={{ padding: '8px 18px', background: active ? 'var(--ink)' : 'transparent', color: active ? 'var(--paper)' : 'var(--ink)', border: 'none', borderRadius: 999, fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer' }}
+                >
+                  {t(m)}
+                </button>
+              );
+            })}
+          </div>
+          <MonoTag variant="hi">{t('saveBadge')}</MonoTag>
         </div>
-        <MonoTag variant="hi">{t('saveBadge')}</MonoTag>
-      </div>
+      )}
 
       <div className="stagger grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" style={{ alignItems: 'start' }}>
         {TIERS.map((tier) => {

@@ -1119,7 +1119,9 @@ Chrome 默认允许使用磁盘空间的 60%。录制完成后提示用户及时
 
 价格列：`one_time_price_cents`(499) / `pro_monthly_price_cents`(999) / `max_monthly_price_cents`(1599)；对应三个 product id 列 `one_time_product_id` / `pro_product_id` / `max_product_id`。Max 订阅经 `/api/checkout/pro` 传 `{tier:'max'}` 走通，Creem webhook 按 metadata.kind / tier 解析授予 `tier:'max'`。
 
-`is_active = true` 全表唯一（partial unique index 保底）。读取链路: `getActiveConfig()` 一行；webhook 验签拿所有 creem 行的 webhook_secret 当候选。`toPublic()` 严格白名单（含三档价格，product id 不暴露），凭证永远不暴露给前端。
+**年付（Pro/Max）**：另有 4 列 `pro_yearly_price_cents`(默认 9590) / `max_yearly_price_cents`(默认 15350，即月价×12×0.8 省 20%) + `pro_yearly_product_id` / `max_yearly_product_id`（默认 NULL）。`/api/checkout/pro` 传 `{tier, billing:'yearly'}` 时选用对应年付 product id（缺失返 `creem_creds_missing`）；月/年订阅周期由 **Creem 按 product 自动报回**，creem-webhook **无需改**。前端是否显示「年付」开关由 `toPublic().yearlyAvailable` 决定（两个 yearly product id 都非空才 true）——未在 Creem 建好年度 product 并填 `*_yearly_product_id` 前，定价页 / 升级弹窗只显示月付。`metadata.kind` 年付加 `_yearly` 后缀，仅供审计。
+
+`is_active = true` 全表唯一（partial unique index 保底）。读取链路: `getActiveConfig()` 一行；webhook 验签拿所有 creem 行的 webhook_secret 当候选。`toPublic()` 严格白名单（含三档月价 + 两档年价 + `yearlyAvailable` 布尔，**所有 product id 不暴露**），凭证永远不暴露给前端。
 
 ### 改价（不切 mode）
 
@@ -1133,6 +1135,22 @@ curl -X POST https://excalicast.cc/api/admin/payment-config \
 ```
 
 成功后会通过 Supabase Realtime broadcast 推送，所有在线用户的 PaywallModal / ProUpgradeModal 不刷新就看到新价。landing/terms 是 Server Component，下次访问见新价。
+
+### 开通 / 改年付价格
+
+年付要真实可买，必须先在 Creem 后台为 Pro / Max 各建一个**年度循环（yearly recurring）product**，再把价格 + product id 同步进 DB。两个年付 product id 都填好后，前端才显示「年付」开关（`yearlyAvailable=true`）。
+
+```bash
+curl -X POST https://excalicast.cc/api/admin/payment-config \
+  -H "x-admin-secret: $ADMIN_SECRET" -H "Content-Type: application/json" \
+  -d '{
+    "provider":"creem","mode":"live",
+    "proYearlyPriceCents":9590,  "proYearlyProductId":"prod_LIVE_pro_yearly",
+    "maxYearlyPriceCents":15350, "maxYearlyProductId":"prod_LIVE_max_yearly"
+  }'
+```
+
+校验同月付：服务端会调 Creem `GET /products/{id}` 比对 `*_yearly_price_cents`，对不上返 409（slot=`pro_yearly`/`max_yearly`）+ hint。改年价同理（先改 Creem 后台年度 product，再 POST 同步）。
 
 ### 切换 live ↔ test 模式
 

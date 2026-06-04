@@ -1,9 +1,10 @@
 # PRD：白板录制工具
-**版本**：v0.6  
+**版本**：v0.6.1  
 **状态**：开发中  
 **作者**：—  
-**最后更新**：2026-06-01  
-**变更**：v0.6 - 新增 SEO / GEO / 内容营销基建（「## 十二」）：技术 SEO 地基（sitemap/robots/OpenGraph/hreflang/Analytics）、GEO（JSON-LD `SoftwareApplication`/`FAQPage`/`Article` + `llms.txt` + 放行 AI 爬虫）、程序化内容引擎（`/compare`·`/use-cases`·`/blog` 数据驱动长尾着陆页）+ 零预算冷启动手册 `docs/marketing-cold-start.md`。详见「## 十一」最新一条与「## 十二」。  
+**最后更新**：2026-06-04  
+**变更**：v0.6.1 - 会员年付价格全链路（`payment_config` 加 4 列年价/年付 product id、`/api/checkout/pro` 加 `billing`、升级弹窗/定价页月年切换、admin 校验扩展到年付槽位、Supabase 迁移）+ 定价页去除团队席位收费内容。详见「## 十一」最新一条。  
+**历史变更**：v0.6 - 新增 SEO / GEO / 内容营销基建（「## 十二」）：技术 SEO 地基（sitemap/robots/OpenGraph/hreflang/Analytics）、GEO（JSON-LD `SoftwareApplication`/`FAQPage`/`Article` + `llms.txt` + 放行 AI 爬虫）、程序化内容引擎（`/compare`·`/use-cases`·`/blog` 数据驱动长尾着陆页）+ 零预算冷启动手册 `docs/marketing-cold-start.md`。详见「## 十一」最新一条与「## 十二」。  
 **历史变更**：v0.5.2 - 定价页四档权益补全（校准「全档不限时长」、支付商按 active provider 动态显示=Creem）；面向用户文案去掉 `Deepseek`/`AI` 字样；应用内 logo 点击回落地页；摄像头气泡可缩放（前端 80–480）；修 `past_due` 宽限期被误降级为 free。详见「## 十一」最新一条。  
 **历史变更**：v0.5.1 - 支付成功后回到发起页（导出页透传 `returnTo`，新标签不再落到 `/app`）；登录邮件品牌化（Excalicast 邮件模板 + 自定义 SMTP 配置/手册）。  
 **历史变更**：v0.5 - 新增「## 十一、实现进展与变更记录（持续同步）」，沉淀已落地实现（定价四档 + Max 可购买、素材库云同步/市场、分享链接、AI 讲义、激光笔、品牌标识等）与第四轮迭代（讲义智能配图/多格式导出、录制与导出性能、分享加载与移动端自适应、字幕清洗单行）。本 PRD 自此为产品需求唯一来源，新增内容须同步更新（见 CLAUDE.md「PRD 同步要求」）。  
@@ -888,6 +889,10 @@ Pro/Max 导出（订阅状态验证）：
 ## 十一、实现进展与变更记录（持续同步）
 
 > 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
+
+- **2026-06-04｜会员年付价格 + 去团队席位收费**：
+  1. **去团队席位**（仅 UI/文案）：定价页 Max 套餐权益删「团队席位（最多 3 个）」、特性矩阵删「团队席位」行、删 FAQ「团队怎么办」（q6）。涉及 `src/messages/{en,zh}.json`、`src/app/[locale]/pricing/page.tsx`（`MATRIX.account` 改为 2 行权益 + FAQ 渲染 q1–q5）。`src/content/use-cases.ts` 里「录给团队看」是使用场景内容，保留不动。
+  2. **年付价格全链路**：`payment_config` 加 4 列 `pro_yearly_price_cents`(默认 9590) / `max_yearly_price_cents`(默认 15350，即月价×12×0.8 省 20%) / `pro_yearly_product_id` / `max_yearly_product_id`（默认 NULL）。`/api/checkout/pro` 入参加 `billing:'monthly'|'yearly'`，年付选对应年付 product id（缺失→`creem_creds_missing`）；月/年订阅周期由 **Creem 按 product 自动报回**，creem-webhook 无需改。`toPublic()` 暴露两档年价 + `yearlyAvailable`（两个年付 product id 都非空才 true，**product id 不暴露**）。升级弹窗 `ProUpgradeModal` 与定价页 `PricingTiers` 仅在 `yearlyAvailable` 时显示月/年切换；定价页年付按「折合每月」展示。admin `/api/admin/payment-config` 接受 4 个年付字段并把 Creem 价格校验扩展到 `pro_yearly`/`max_yearly` 槽位。新增迁移 `supabase/migrations/20260604120000_payment_config_yearly.sql`（ADD COLUMN + 按行回填年价）。涉及 `src/lib/paymentConfig.ts`、`src/app/api/checkout/pro/route.ts`、`src/app/api/admin/payment-config/route.ts`、`src/components/ProUpgradeModal.tsx`、`src/app/[locale]/pricing/{page,PricingTiers}.tsx`、`src/messages/{en,zh}.json`。**注**：真实年付下单需先在 Creem 建年度循环 product 并用 admin API 填 `*_yearly_product_id`，未填则前端隐藏年付、仅月付。
 
 - **2026-06-01｜IndexNow 即时收录 + 域名约定固化**：
   1. **IndexNow**（加速 Bing/Yandex/Seznam/Naver 收录新站）：新增密钥文件 `public/e0db09f0b1ee71fc3abbf04e5909381f.txt` + 提交脚本 `scripts/indexnow.ts`（复用 `allContentRoutes()` 生成全量双语 URL POST 到 `api.indexnow.org`，支持 `--dry-run`，部署/加内容后手动跑）。`docs/launch-checklist.md` 增 IndexNow 用法 + 新站收录预期章节。诊断结论：GSC/Bing 报的「重复未选规范页 / 自动重定向 / known but has issues」均为新域名初次索引正常瞬时态，markup 实测无误，主加速杠杆是外链 + 请求编入索引 + IndexNow。

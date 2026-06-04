@@ -28,6 +28,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
   const { user, loading: authLoading } = useAuth();
   const { refresh: refreshTier } = useSubscription();
   const { config: paymentCfg } = usePaymentConfig();
+  const [billing, setBilling] = useState<'monthly' | 'yearly'>('monthly');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
@@ -37,8 +38,15 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
 
   const provider = paymentCfg?.provider ?? 'paddle';
   const providerLabel = provider === 'creem' ? 'Creem' : 'Paddle';
+  // 年付仅在两档年付 product 都配置好时可选；否则强制按月，不显示切换。
+  const yearlyAvailable = !!paymentCfg?.yearlyAvailable;
+  const effectiveBilling: 'monthly' | 'yearly' = yearlyAvailable ? billing : 'monthly';
+  const monthlyCents = paymentCfg ? (isMax ? paymentCfg.maxMonthlyPriceCents : paymentCfg.proMonthlyPriceCents) : 0;
+  const yearlyCents = paymentCfg ? (isMax ? paymentCfg.maxYearlyPriceCents : paymentCfg.proYearlyPriceCents) : 0;
   const priceLabel = paymentCfg
-    ? `${formatPrice(isMax ? paymentCfg.maxMonthlyPriceCents : paymentCfg.proMonthlyPriceCents, paymentCfg.currency)}${t('perMonth')}`
+    ? (effectiveBilling === 'yearly'
+        ? `${formatPrice(yearlyCents, paymentCfg.currency)}${t('perYear')}`
+        : `${formatPrice(monthlyCents, paymentCfg.currency)}${t('perMonth')}`)
     : '…';
 
   const pollUntilPro = async () => {
@@ -119,13 +127,13 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
 
   const openCheckoutForProvider = async () => {
     setBusy(true);
-    track('checkout_start', { kind: 'subscription', tier });
+    track('checkout_start', { kind: 'subscription', tier, billing: effectiveBilling });
     try {
       const res = await fetch('/api/checkout/pro', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         // returnTo：支付成功后回到当前页（如导出页 /zh/export/[id]）；在 /app 触发时自然回 /app
-        body: JSON.stringify({ tier, returnTo: window.location.pathname }),
+        body: JSON.stringify({ tier, billing: effectiveBilling, returnTo: window.location.pathname }),
       });
       const j = (await res.json().catch(() => ({}))) as {
         provider?: 'paddle' | 'creem';
@@ -250,7 +258,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
               color: 'var(--ink)',
             }}
           >
-            <I.Sparkles size={26} sw={1.6} />
+            {isMax ? <I.Sparkles size={26} sw={1.6} /> : <I.Captions size={26} sw={1.6} />}
           </div>
           <h2
             style={{
@@ -270,6 +278,48 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
           <p style={{ fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.55, margin: 0 }}>
             {t('subtitle')}
           </p>
+
+          {yearlyAvailable && (
+            <div
+              className="mt-5 flex items-center gap-1 p-1"
+              style={{ background: 'var(--paper-2)', border: '1.4px solid var(--ink)', borderRadius: 3 }}
+              role="tablist"
+            >
+              {(['monthly', 'yearly'] as const).map((b) => {
+                const active = effectiveBilling === b;
+                return (
+                  <button
+                    key={b}
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setBilling(b)}
+                    className="flex flex-1 items-center justify-center gap-1.5"
+                    style={{
+                      padding: '7px 10px',
+                      borderRadius: 2,
+                      fontSize: 12.5,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      border: active ? '1.3px solid var(--ink)' : '1.3px solid transparent',
+                      background: active ? 'var(--paper)' : 'transparent',
+                      color: 'var(--ink)',
+                      boxShadow: active ? '2px 2px 0 var(--ink)' : 'none',
+                    }}
+                  >
+                    {b === 'monthly' ? t('billingMonthly') : t('billingYearly')}
+                    {b === 'yearly' && (
+                      <span
+                        className="tag-mono tag-mono-pro"
+                        style={{ fontSize: 9.5, padding: '1px 5px' }}
+                      >
+                        {t('saveBadge')}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           <div
             className="mt-5 flex items-end gap-2 p-4"

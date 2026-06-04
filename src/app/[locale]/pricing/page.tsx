@@ -33,7 +33,21 @@ export default async function PricingRoute({ params }: Props): Promise<JSX.Eleme
   const oneTimeCents = cfg?.oneTimePriceCents ?? 499;
   const proCents = cfg?.proMonthlyPriceCents ?? 999;
   const maxCents = cfg?.maxMonthlyPriceCents ?? 1599;
-  return <PricingContent oneTimeCents={oneTimeCents} proCents={proCents} maxCents={maxCents} currency={currency} />;
+  const proYearlyCents = cfg?.proYearlyPriceCents ?? 9590;
+  const maxYearlyCents = cfg?.maxYearlyPriceCents ?? 15350;
+  // 年付切换仅在两档年付 product 都配置好时显示（toPublic 不暴露 product id，只给布尔）。
+  const yearlyAvailable = cfg ? !!(cfg.proYearlyProductId && cfg.maxYearlyProductId) : false;
+  return (
+    <PricingContent
+      oneTimeCents={oneTimeCents}
+      proCents={proCents}
+      maxCents={maxCents}
+      proYearlyCents={proYearlyCents}
+      maxYearlyCents={maxYearlyCents}
+      yearlyAvailable={yearlyAvailable}
+      currency={currency}
+    />
+  );
 }
 
 // matrix cell values aligned to pricingPage.matrix.rows.* label arrays
@@ -44,10 +58,10 @@ const MATRIX: { cat: string; vals: (boolean | string)[][] }[] = [
   { cat: 'assets', vals: [[false, false, false, true], [false, false, false, true], [false, false, false, true]] },
   { cat: 'sharing', vals: [[true, true, true, true], [false, false, false, true], [false, false, false, true]] },
   { cat: 'templates', vals: [[true, true, true, true], [true, true, true, true], [false, false, true, true]] },
-  { cat: 'account', vals: [[true, true, false, false], [false, false, true, true], ['—', '—', '1', '3']] },
+  { cat: 'account', vals: [[true, true, false, false], [false, false, true, true]] },
 ];
 
-function PricingContent({ oneTimeCents, proCents, maxCents, currency }: { oneTimeCents: number; proCents: number; maxCents: number; currency: string }): JSX.Element {
+function PricingContent({ oneTimeCents, proCents, maxCents, proYearlyCents, maxYearlyCents, yearlyAvailable, currency }: { oneTimeCents: number; proCents: number; maxCents: number; proYearlyCents: number; maxYearlyCents: number; yearlyAvailable: boolean; currency: string }): JSX.Element {
   const t = useTranslations('pricingPage');
   const tl = useTranslations('landing');
   const th = useTranslations('header');
@@ -83,7 +97,7 @@ function PricingContent({ oneTimeCents, proCents, maxCents, currency }: { oneTim
 
         {/* Tiers (client island: billing toggle) */}
         <section className="px-6 pb-16 sm:px-10 lg:px-20">
-          <PricingTiers oneTimeCents={oneTimeCents} proCents={proCents} maxCents={maxCents} currency={currency} />
+          <PricingTiers oneTimeCents={oneTimeCents} proCents={proCents} maxCents={maxCents} proYearlyCents={proYearlyCents} maxYearlyCents={maxYearlyCents} yearlyAvailable={yearlyAvailable} currency={currency} />
         </section>
 
         {/* Feature matrix */}
@@ -102,7 +116,7 @@ function PricingContent({ oneTimeCents, proCents, maxCents, currency }: { oneTim
               <p style={{ color: 'var(--ink-2)', marginTop: 14, fontSize: 14, lineHeight: 1.6 }}>{t('faq.intro')}</p>
             </div>
             <div className="stagger grid gap-3.5">
-              {[1, 2, 3, 4, 5, 6].map((i) => (
+              {[1, 2, 3, 4, 5].map((i) => (
                 <PricingFaq key={i} q={t(`faq.q${i}.q`)} a={t(`faq.q${i}.a`)} open={i === 1} />
               ))}
             </div>

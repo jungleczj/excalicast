@@ -60,12 +60,16 @@ interface PostBody {
   oneTimePriceCents?: number;
   proMonthlyPriceCents?: number;
   maxMonthlyPriceCents?: number;
+  proYearlyPriceCents?: number;
+  maxYearlyPriceCents?: number;
   apiKey?: string | null;
   webhookSecret?: string | null;
   apiBase?: string | null;
   oneTimeProductId?: string | null;
   proProductId?: string | null;
   maxProductId?: string | null;
+  proYearlyProductId?: string | null;
+  maxYearlyProductId?: string | null;
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
@@ -85,7 +89,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (body.mode !== 'live' && body.mode !== 'test') {
     return NextResponse.json({ error: 'invalid_mode', hint: "mode must be 'live' or 'test'" }, { status: 400 });
   }
-  for (const k of ['oneTimePriceCents', 'proMonthlyPriceCents', 'maxMonthlyPriceCents'] as const) {
+  for (const k of ['oneTimePriceCents', 'proMonthlyPriceCents', 'maxMonthlyPriceCents', 'proYearlyPriceCents', 'maxYearlyPriceCents'] as const) {
     if (body[k] != null && (typeof body[k] !== 'number' || body[k]! < 0)) {
       return NextResponse.json({ error: `invalid_${k}` }, { status: 400 });
     }
@@ -101,12 +105,16 @@ export async function POST(req: Request): Promise<NextResponse> {
     oneTimePriceCents: body.oneTimePriceCents,
     proMonthlyPriceCents: body.proMonthlyPriceCents,
     maxMonthlyPriceCents: body.maxMonthlyPriceCents,
+    proYearlyPriceCents: body.proYearlyPriceCents,
+    maxYearlyPriceCents: body.maxYearlyPriceCents,
     apiKey: body.apiKey,
     webhookSecret: body.webhookSecret,
     apiBase: body.apiBase,
     oneTimeProductId: body.oneTimeProductId,
     proProductId: body.proProductId,
     maxProductId: body.maxProductId,
+    proYearlyProductId: body.proYearlyProductId,
+    maxYearlyProductId: body.maxYearlyProductId,
   };
 
   // Merge against current to know the final-effective state for validation
@@ -117,23 +125,38 @@ export async function POST(req: Request): Promise<NextResponse> {
     oneTimePriceCents: patch.oneTimePriceCents ?? existing?.oneTimePriceCents ?? 499,
     proMonthlyPriceCents: patch.proMonthlyPriceCents ?? existing?.proMonthlyPriceCents ?? 999,
     maxMonthlyPriceCents: patch.maxMonthlyPriceCents ?? existing?.maxMonthlyPriceCents ?? 1599,
+    proYearlyPriceCents: patch.proYearlyPriceCents ?? existing?.proYearlyPriceCents ?? 9590,
+    maxYearlyPriceCents: patch.maxYearlyPriceCents ?? existing?.maxYearlyPriceCents ?? 15350,
     currency: (patch.currency ?? existing?.currency ?? 'usd').toLowerCase(),
     oneTimeProductId: patch.oneTimeProductId !== undefined ? patch.oneTimeProductId : existing?.oneTimeProductId ?? null,
     proProductId: patch.proProductId !== undefined ? patch.proProductId : existing?.proProductId ?? null,
     maxProductId: patch.maxProductId !== undefined ? patch.maxProductId : existing?.maxProductId ?? null,
+    proYearlyProductId: patch.proYearlyProductId !== undefined ? patch.proYearlyProductId : existing?.proYearlyProductId ?? null,
+    maxYearlyProductId: patch.maxYearlyProductId !== undefined ? patch.maxYearlyProductId : existing?.maxYearlyProductId ?? null,
   };
 
   // Creem write-time validation —— call Creem to confirm price/currency match.
   if (patch.provider === 'creem' && effective.apiKey && effective.apiBase) {
-    for (const slot of ['one_time', 'pro', 'max'] as const) {
+    const slotField: Record<string, string> = {
+      one_time: 'oneTimePriceCents',
+      pro: 'proMonthlyPriceCents',
+      max: 'maxMonthlyPriceCents',
+      pro_yearly: 'proYearlyPriceCents',
+      max_yearly: 'maxYearlyPriceCents',
+    };
+    for (const slot of ['one_time', 'pro', 'max', 'pro_yearly', 'max_yearly'] as const) {
       const productId =
         slot === 'one_time' ? effective.oneTimeProductId
         : slot === 'pro' ? effective.proProductId
-        : effective.maxProductId;
+        : slot === 'max' ? effective.maxProductId
+        : slot === 'pro_yearly' ? effective.proYearlyProductId
+        : effective.maxYearlyProductId;
       const expectedCents =
         slot === 'one_time' ? effective.oneTimePriceCents
         : slot === 'pro' ? effective.proMonthlyPriceCents
-        : effective.maxMonthlyPriceCents;
+        : slot === 'max' ? effective.maxMonthlyPriceCents
+        : slot === 'pro_yearly' ? effective.proYearlyPriceCents
+        : effective.maxYearlyPriceCents;
       if (!productId) continue;
       try {
         const cp = await fetchCreemProduct(productId, { apiKey: effective.apiKey, apiBase: effective.apiBase });
@@ -141,7 +164,7 @@ export async function POST(req: Request): Promise<NextResponse> {
           return NextResponse.json({
             error: 'creem_price_mismatch',
             slot,
-            field: slot === 'one_time' ? 'oneTimePriceCents' : slot === 'pro' ? 'proMonthlyPriceCents' : 'maxMonthlyPriceCents',
+            field: slotField[slot],
             dbValue: expectedCents,
             creemValue: cp.priceCents,
             productId,

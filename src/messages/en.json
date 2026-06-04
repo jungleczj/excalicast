@@ -230,7 +230,7 @@
       "free": { "tagline": "Record and replay locally. Built for trying us out before you commit.", "cta": "Just start", "features": ["Unlimited recording length", "MP4 export with watermark", "PNG / SVG snapshot", "Local template library", "Cross-device template sync", "Auto captions", "Cloud backup & save"] },
       "oneTime": { "tagline": "Just need to publish one clean MP4? No account, no subscription.", "cta": "Buy a single export", "features": ["Watermark-free MP4 export", "No account required", "Recording stays on device", "Local template library", "Cross-device template sync", "Auto captions", "Cloud backup & save"] },
       "pro": { "tagline": "For teachers and architects publishing weekly. Captions included.", "cta": "Try Pro", "features": ["Everything in One-time", "Auto captions (Alibaba Qwen ASR)", "Download SRT / VTT / ASS", "Cloud backup & save", "Cross-device template sync", "Use market + local templates anywhere", "Re-export old recordings clean", "Auto outline + handout"] },
-      "max": { "tagline": "Turn every recording into shareable, indexable knowledge.", "cta": "Go Max", "badge": "most picked", "features": ["Everything in Pro", "Auto outline · chapters with timestamps", "Markdown / PDF / HTML handout", "Cloud share links · 30-day TTL", "In-browser canvas replay for recipients", "Custom watermark (your brand)", "Priority ASR lane", "Team seats (up to 3)"] }
+      "max": { "tagline": "Turn every recording into shareable, indexable knowledge.", "cta": "Go Max", "badge": "most picked", "features": ["Everything in Pro", "Auto outline · chapters with timestamps", "Markdown / PDF / HTML handout", "Cloud share links · 30-day TTL", "In-browser canvas replay for recipients", "Custom watermark (your brand)", "Priority ASR lane"] }
     },
     "matrix": {
       "heading": "The whole picture.",
@@ -244,7 +244,7 @@
         "assets": ["Auto chapter outline", "Markdown handout", "PDF handout export"],
         "sharing": ["Local Web replay", "Cloud share link", "Custom watermark / branding"],
         "templates": ["Local template library", "Market templates", "Cross-device template sync"],
-        "account": ["No-account use", "Cloud backup & save", "Team seats"]
+        "account": ["No-account use", "Cloud backup & save"]
       }
     },
     "faq": {
@@ -254,8 +254,7 @@
       "q2": { "q": "Why is the one-time purchase so cheap?", "a": "It authorizes one watermark-free render. No account, no infra to run on our side once you've downloaded — we charge close to what it costs us." },
       "q3": { "q": "Do you upload my recording when I export?", "a": "Never. ffmpeg.wasm renders the MP4 entirely in your browser. The only server call verifies your purchase / subscription and carries no recording data." },
       "q4": { "q": "What happens to captions audio?", "a": "Audio is sent to Alibaba Qwen ASR, transcribed, and deleted immediately — no storage on our side." },
-      "q5": { "q": "Can I cancel Pro / Max anytime?", "a": "Yes. Subscriptions are month-to-month. Cancel and you keep all locally-recorded data; cloud backups age out after 30 days unless you re-subscribe." },
-      "q6": { "q": "What about teams?", "a": "Max includes 3 seats. Anything bigger — including SSO and admin controls — email support@excalicast.cn and we'll quote it." }
+      "q5": { "q": "Can I cancel Pro / Max anytime?", "a": "Yes. Subscriptions are month-to-month. Cancel and you keep all locally-recorded data; cloud backups age out after 30 days unless you re-subscribe." }
     }
   },
   "appIntro": {
@@ -292,6 +291,7 @@
       "startRecording": "Start recording"
     },
     "lastUpdated": "Last updated: {date}",
+    "breadcrumbLegal": "Legal",
     "entity": "Entity: Excalicast",
     "questionsCta": "Still have questions? Drop us a line.",
     "footer": {
@@ -605,6 +605,10 @@
     "title": "Upgrade to Pro",
     "subtitle": "Unlock all advanced capabilities. Billed monthly, cancel anytime.",
     "perMonth": "/mo",
+    "perYear": "/yr",
+    "billingMonthly": "Monthly",
+    "billingYearly": "Yearly",
+    "saveBadge": "Save 20%",
     "subscriptionTag": "Subscription · {provider} {env}",
     "sandbox": "sandbox",
     "secure": "secure checkout",
@@ -634,6 +638,10 @@
     "title": "Upgrade to Max",
     "subtitle": "Everything in Pro, plus structured handouts and public share links. Billed monthly, cancel anytime.",
     "perMonth": "/mo",
+    "perYear": "/yr",
+    "billingMonthly": "Monthly",
+    "billingYearly": "Yearly",
+    "saveBadge": "Save 20%",
     "subscriptionTag": "Subscription · {provider} {env}",
     "sandbox": "sandbox",
     "secure": "secure checkout",
