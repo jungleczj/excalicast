@@ -70,7 +70,7 @@
   --font-display: "Geist", system-ui, -apple-system, sans-serif;
   --font-sans:    "Geist", system-ui, -apple-system, sans-serif;
   --font-mono:    "JetBrains Mono", ui-monospace, "Consolas", monospace;
-  --font-hand:    "Caveat", "Geist", cursive;
+  --font-hand:    "Caveat", "Geist", system-ui, -apple-system, sans-serif;
 
   --radius-sm: 3px;
   --radius-md: 4px;
@@ -87,6 +87,27 @@
   --hard-sm:     2px 2px 0 0 var(--ink);
   --hard-lg:     6px 6px 0 0 var(--ink);
   --hard-hi:     4px 4px 0 0 var(--hi);
+
+  /* ── Scale tokens (align with design tokens.css) ─────── */
+  --s-1: 4px;  --s-2: 8px;  --s-3: 12px; --s-4: 16px; --s-5: 20px;
+  --s-6: 24px; --s-8: 32px; --s-10: 40px; --s-12: 48px; --s-16: 64px;
+  --s-20: 80px; --s-24: 96px;
+
+  --r-1: 2px; --r-2: 4px; --r-3: 6px; --r-4: 10px; --r-5: 14px; --r-full: 9999px;
+
+  --text-2xs: 10px; --text-xs: 12px; --text-sm: 14px; --text-base: 16px;
+  --text-lg: 18px; --text-xl: 22px; --text-2xl: 28px; --text-3xl: 36px;
+  --text-4xl: 48px; --text-5xl: 64px;
+
+  /* ── Footer (dark) tokens — used by FooterBar primitive ─ */
+  --foot-bg:     #1A1A1A;
+  --foot-bg-2:   #141413;
+  --foot-text:   #FBFBFA;
+  --foot-dim:    #B7B7B0;
+  --foot-faint:  #6B6B66;
+  --foot-rule:   #33332F;
+  --foot-dot:    rgba(255,255,255,0.06);
+  --foot-accent: var(--hi);
 }
 
 * { box-sizing: border-box; }
@@ -207,6 +228,85 @@ body {
   background-image: radial-gradient(circle, #D9D7CC 0.8px, transparent 1.2px);
   background-size: 16px 16px;
 }
+/* aliases matching design tokens.css class names */
+.dots { background-image: radial-gradient(circle, #C9C7BD 1px, transparent 1.5px); background-size: 22px 22px; }
+.dots-fine { background-image: radial-gradient(circle, #D9D7CC 0.8px, transparent 1.2px); background-size: 16px 16px; }
+.grid-bg {
+  background-image:
+    linear-gradient(var(--rule-faint) 1px, transparent 1px),
+    linear-gradient(90deg, var(--rule-faint) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* ── Sketch helpers from design tokens.css (additive) ──── */
+.sketch-frame { position: relative; }
+.sketch-frame::before,
+.sketch-frame::after {
+  content: ""; position: absolute; inset: 0;
+  border: 1.5px solid var(--ink); border-radius: 5px 4px 6px 5px;
+  pointer-events: none;
+}
+.sketch-frame::after {
+  inset: -2px -1px -1px -2px; border-radius: 4px 6px 5px 4px;
+  opacity: 0.35; transform: rotate(-0.15deg);
+}
+
+.hi-block {
+  display: inline-block; background: var(--hi); padding: 2px 10px;
+  box-shadow: 2px 0 0 var(--hi), -2px 0 0 var(--hi);
+  border-radius: 2px; transform: rotate(-0.4deg);
+}
+
+.underline-hand { position: relative; display: inline-block; }
+.underline-hand::after {
+  content: ""; position: absolute; left: -4px; right: -4px; bottom: -6px; height: 6px;
+  background:
+    radial-gradient(ellipse 60% 100% at 30% 50%, var(--ink) 40%, transparent 41%) 0 0/12px 6px no-repeat,
+    linear-gradient(95deg, var(--ink) 0 60%, transparent 60%) 0 50%/100% 1.6px no-repeat;
+}
+
+.rec-dot {
+  width: 10px; height: 10px; border-radius: 999px; background: var(--rec);
+  display: inline-block; animation: recording-pulse 1.4s ease-in-out infinite;
+}
+
+.hr-sketch { height: 1.5px; background: var(--ink); border: 0; margin: 0; position: relative; }
+.hr-sketch::after {
+  content: ""; position: absolute; left: 2%; right: 2%; top: 1.5px; height: 1px;
+  background: var(--ink-3); opacity: 0.5; transform: rotate(-0.2deg);
+}
+
+/* hover lift used by SketchCard / cards */
+.lift { transition: transform 120ms ease, box-shadow 120ms ease; }
+.lift:hover { transform: translate(-1px, -1px); box-shadow: var(--hard); }
+
+/* nav link active underline (HeaderBar) */
+.nav-link { position: relative; }
+.nav-link.is-active::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -2px; height: 2px; background: currentColor;
+}
+
+/* marker sweep — left→right reveal when in view; degrades to plain marker */
+.marker-sweep {
+  background: linear-gradient(180deg, transparent 0 28%, var(--hi) 28% 92%, transparent 92% 100%);
+  border-radius: 1px; -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+/* tape wiggle / float — subtle idle motion; respects reduced-motion below */
+@keyframes tape-float { 0%,100% { transform: rotate(var(--tilt,-2deg)) translateY(0); } 50% { transform: rotate(var(--tilt,-2deg)) translateY(-2px); } }
+.float-tilt { animation: tape-float 4s ease-in-out infinite; }
+.tape-wiggle:hover { transform: rotate(calc(var(--rot,-2deg) * -1)); }
+
+@media (prefers-reduced-motion: reduce) {
+  .float-tilt, .rec-dot, .recording-indicator, .camera-idle-pulse { animation: none !important; }
+}
+
+/* footer chips + link hover (FooterBar) */
+.foot-chip {
+  padding: 2px 8px; border-radius: 999px; border: 1px solid var(--foot-rule);
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--foot-dim);
+}
+.footer-link:hover { color: var(--foot-text) !important; }
 
 @keyframes recording-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.5); }

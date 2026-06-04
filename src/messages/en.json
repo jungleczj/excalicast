@@ -5,22 +5,108 @@
       "description": "Record whiteboard activity + mic audio. One take, exported to multiple aspect ratios."
     },
     "faq": {
+      "heading": "Questions, plainly answered.",
+      "intro": "Optimized for humans first, then for answer engines. Each card is a self-contained Q&A pair with structured data.",
+      "emailCta": "Email support@excalicast.cn",
+      "readFull": "Read full answer",
       "q1": {
+        "tag": "PRODUCT",
         "q": "What is Excalicast?",
-        "a": "Excalicast is a browser-based whiteboard recorder. You draw in an Excalidraw canvas while it captures your operation stream and microphone audio, then exports an MP4 in 16:9, 9:16, 1:1, or 4:5 — all from a single recording."
+        "a": "Excalicast is a browser-based whiteboard recorder built on Excalidraw. It captures your hand-drawn canvas plus voice and produces up to four publishable assets from a single recording: an MP4 video, auto SRT captions, an auto chapter outline, and a Markdown / PDF handout."
       },
       "q2": {
-        "q": "How is Excalicast different from a screen recorder like Loom?",
-        "a": "Instead of capturing screen pixels, Excalicast records the whiteboard operation stream. The recording is never affected by window occlusion, minimization, or switching tabs, and the same take can be exported to multiple aspect ratios without re-recording."
+        "tag": "TECH",
+        "q": "Do I need to install anything?",
+        "a": "No. Excalicast runs entirely in your browser. Recording, editing and MP4 rendering all happen locally via ffmpeg.wasm — nothing to download, install or update."
       },
       "q3": {
-        "q": "Is Excalicast free? Do I need an account?",
-        "a": "Recording and watermarked MP4 export are free with no sign-up. A one-time payment of {price} unlocks watermark-free export for a recording. Pro and Max monthly plans add auto subtitles, cloud backup, AI handouts, and share links."
+        "tag": "PRICING",
+        "href": "#pricing",
+        "q": "Is it free? Do I need an account?",
+        "a": "Yes. The free tier records unlimited length and exports a watermarked MP4 with no sign-up. A one-time payment of {price} lifts the watermark for a recording; Pro and Max monthly plans add auto captions, cloud backup, AI handouts and share links."
       },
       "q4": {
-        "q": "Where are my recordings stored?",
-        "a": "Recordings live locally in your browser (IndexedDB) and videos render in-browser via ffmpeg.wasm. Raw recordings never leave your computer; the server only stores payment records."
+        "tag": "DIFFERENTIATOR",
+        "q": "Why whiteboard recording instead of screen recording?",
+        "a": "Excalicast records the canvas event stream — every stroke, shape and move — not pixels off your screen. Other windows, system notifications, and even minimizing the browser don't pollute the final video. Loom and OBS record pixels; we record events."
+      },
+      "q5": {
+        "tag": "PRIVACY",
+        "href": "/privacy",
+        "q": "Does my recording leave my device?",
+        "a": "By default, no. Recordings live in your browser's IndexedDB and the MP4 renders locally. Only opt-in features briefly use the network: captioning (audio sent to Alibaba Qwen ASR, then deleted), cloud backup (Pro/Max), and share links (Max — sends events, not the MP4)."
+      },
+      "q6": {
+        "tag": "BILLING",
+        "href": "/refund",
+        "q": "Can I cancel anytime?",
+        "a": "Yes. Subscriptions are month-to-month, cancellable anytime by emailing support@excalicast.cn. See the Refund Policy for details on one-time exports."
+      },
+      "q7": {
+        "tag": "RECORDING",
+        "q": "What aspect ratios are supported?",
+        "a": "Landscape (16:9, 4:3, 21:9, 16:10, 3:2), portrait (9:16, 4:5, 3:4, 2:3), square (1:1), and fully custom pixel dimensions. The crop frame locks at recording start, so the same take exports to any ratio without reframing."
+      },
+      "q8": {
+        "tag": "TECH",
+        "q": "Which browsers work?",
+        "a": "Chrome 110+ and Edge 110+ are recommended. Camera background removal needs a GPU-capable Chromium-based browser; on others it falls back gracefully."
+      },
+      "q9": {
+        "tag": "CONTACT",
+        "q": "How do I contact support?",
+        "a": "Email support@excalicast.cn — a real human responds within 24 hours on business days. No chatbots, no ticketing labyrinth."
       }
+    },
+    "socialProof": "Trusted by teams at",
+    "assets": {
+      "heading1": "One recording.",
+      "heading2": "Four publishable assets.",
+      "sub": "Capture your canvas and voice once; walk away with a video, captions, an outline and a handout.",
+      "mp4": { "tag": "01 · MP4", "title": "High-quality video", "body": "Local ffmpeg.wasm renders crisp H.264 at your chosen aspect — 16:9, 9:16, 1:1, or custom." },
+      "srt": { "tag": "02 · SRT", "title": "Auto captions", "body": "Alibaba Qwen ASR transcribes voice (Chinese & English), inline editable, export SRT or burn into MP4. (Pro)" },
+      "outline": { "tag": "03 · OUTLINE", "title": "Auto chapter outline", "body": "Event stream + transcript become semantic chapters with timestamps, inside your handout. (Max)" },
+      "handout": { "tag": "04 · HANDOUT", "title": "Markdown handout", "body": "Title hierarchy, embedded canvas frames and explanatory paragraphs. Export Markdown, PDF or HTML. (Max)" }
+    },
+    "shots": {
+      "kicker": "// inside the editor",
+      "heading": "The real thing.",
+      "sub": "Record, trim on a timeline, edit captions, and export — all in the browser.",
+      "alt": "Excalicast editor screenshot"
+    },
+    "isolation": {
+      "tag": "// architecture decision",
+      "heading": "Other windows can't ruin your recording.",
+      "body": "We capture the event stream from the canvas — not pixels off your screen. Open Slack mid-recording, take a call, even minimize the window. Your final video is always the canvas, never the chaos.",
+      "check1": "Other windows overlap your browser → no effect",
+      "check2": "System notifications fire → not in the recording",
+      "check3": "Switch tabs to check a reference → audio keeps recording",
+      "check4": "Browser minimized → frames freeze, no black-screen artifact",
+      "beforeLabel": "✕ Screen recorders (OBS, Loom)",
+      "beforeText": "Captures pixels → a Slack popup ruins the recording → trash the take.",
+      "afterLabel": "✓ Excalicast",
+      "afterText": "Captures canvas events → renders off-screen → the screen is irrelevant.",
+      "tape": "unique to us"
+    },
+    "trust": {
+      "heading": "Everything you need, in one place.",
+      "sub": "Pricing, policies, and a real human at support@excalicast.cn. We believe in being legible.",
+      "pricing": { "title": "Pricing", "desc": "Free · One-time · Pro · Max — compare every feature side by side.", "tag": "4 PLANS" },
+      "privacy": { "title": "Privacy Policy", "desc": "What we collect, what we never touch, and how to delete everything.", "tag": "LOCAL-FIRST" },
+      "terms": { "title": "Terms of Service", "desc": "The rules of the road, in plain English. No legalese ambush.", "tag": "PLAIN ENGLISH" },
+      "refund": { "title": "Refund Policy", "desc": "Money back on first-time subscriptions. One-time exports clarified.", "tag": "REFUNDS" },
+      "contact": { "title": "Contact us", "desc": "Email support@excalicast.cn — a human reads it within 24 hours.", "tag": "SUPPORT" },
+      "status": { "title": "Status & uptime", "desc": "Built local-first, so your recordings keep working even if we don't.", "tag": "LOCAL-FIRST" },
+      "calloutKicker": "Need help right now?",
+      "calloutTitle": "Email us and a real person responds within 24 hours."
+    },
+    "pricingTeaser": {
+      "heading": "Pay only when it leaves your laptop.",
+      "sub": "The free tier records and exports MP4 with a small watermark. Pay once to lift it, or subscribe for captions, auto handouts and shareable links.",
+      "free": { "unit": "forever", "body": "Record · MP4 with watermark · PNG/SVG snapshot · local replay", "cta": "Just start" },
+      "oneTime": { "unit": "per recording", "body": "Watermark-free MP4 · no account · re-export any ratio", "cta": "Buy once" },
+      "pro": { "unit": "/ month", "body": "One-time + auto captions + cloud backup + template sync", "cta": "Try Pro" },
+      "max": { "unit": "/ month", "body": "Pro + auto outline + handout (MD/PDF/HTML) + share links", "cta": "Go Max", "popular": "most picked" }
     },
     "nav": {
       "pricing": "Pricing",
@@ -29,11 +115,17 @@
     },
     "hero": {
       "badge": "Runs in your browser · no signup",
-      "titleLine1": "Record once,",
-      "titleLine2": "ship every aspect ratio",
-      "subtitle": "Excalicast is a browser-based whiteboard recorder. Draw in Excalidraw, capture voice and actions, then export 16:9 / 9:16 / 1:1 / 4:5 MP4s — ready for YouTube, TikTok, Instagram, and more.",
-      "ctaPrimary": "Start free",
+      "titleLine1": "Record once.",
+      "titleLine2": "Get four assets.",
+      "marker": "Video, captions, outline, handout.",
+      "subtitle": "A browser-based whiteboard recorder built on Excalidraw. Capture your canvas and voice, then walk away with a publish-ready MP4 in any ratio (16:9 / 9:16 / 1:1 / 4:5), plus captions, an auto outline and a Markdown handout.",
+      "ctaPrimary": "Start recording — free",
       "ctaSecondary": "See pricing",
+      "viewDemo": "View demo",
+      "demoClose": "Close",
+      "chipNoDownload": "No download",
+      "chipNoSignup": "No sign-up",
+      "chipLocalFirst": "Local-first",
       "disclaimer": "Recording is free · watermarked MP4 export is free · {price} per recording to unlock watermark-free export"
     },
     "features": {
@@ -122,6 +214,62 @@
       "refund": "Refunds",
       "contact": "Contact"
     }
+  },
+  "pricingPage": {
+    "meta": { "title": "Pricing — Excalicast", "description": "Free forever with watermark. One-time watermark-free export, or Pro / Max monthly for captions, handouts and share links. Compare every feature." },
+    "kicker": "// pricing",
+    "title": "Pay only when it",
+    "titleMark": "leaves your laptop.",
+    "sub": "The free tier records and exports MP4 forever. Lift the watermark with a one-time purchase, or subscribe to unlock auto-captions, auto handouts, and cloud share links.",
+    "monthly": "Monthly",
+    "yearly": "Yearly",
+    "saveBadge": "SAVE 20% YEARLY",
+    "perMonthYearly": "/ mo, billed yearly",
+    "units": { "free": "forever", "oneTime": "per recording", "pro": "/ month", "max": "/ month" },
+    "tiers": {
+      "free": { "tagline": "Record and replay locally. Built for trying us out before you commit.", "cta": "Just start", "features": ["Unlimited recording length", "MP4 export with watermark", "PNG / SVG snapshot", "Local template library", "Cross-device template sync", "Auto captions", "Cloud backup & save"] },
+      "oneTime": { "tagline": "Just need to publish one clean MP4? No account, no subscription.", "cta": "Buy a single export", "features": ["Watermark-free MP4 export", "No account required", "Recording stays on device", "Local template library", "Cross-device template sync", "Auto captions", "Cloud backup & save"] },
+      "pro": { "tagline": "For teachers and architects publishing weekly. Captions included.", "cta": "Try Pro", "features": ["Everything in One-time", "Auto captions (Alibaba Qwen ASR)", "Download SRT / VTT / ASS", "Cloud backup & save", "Cross-device template sync", "Use market + local templates anywhere", "Re-export old recordings clean", "Auto outline + handout"] },
+      "max": { "tagline": "Turn every recording into shareable, indexable knowledge.", "cta": "Go Max", "badge": "most picked", "features": ["Everything in Pro", "Auto outline · chapters with timestamps", "Markdown / PDF / HTML handout", "Cloud share links · 30-day TTL", "In-browser canvas replay for recipients", "Custom watermark (your brand)", "Priority ASR lane", "Team seats (up to 3)"] }
+    },
+    "matrix": {
+      "heading": "The whole picture.",
+      "note": "Lines marked local never leave your device. Captioning briefly uploads audio to Alibaba Qwen ASR; share links host your event stream + audio (never the MP4).",
+      "feature": "Feature",
+      "cats": { "recording": "RECORDING", "export": "EXPORT", "captions": "CAPTIONS", "assets": "SMART ASSETS", "sharing": "SHARING", "templates": "TEMPLATES", "account": "ACCOUNT" },
+      "rows": {
+        "recording": ["Unlimited length", "Aspect ratio presets", "Camera bubble + mic", "Canvas-only isolation"],
+        "export": ["MP4 export (with watermark)", "MP4 export (no watermark)", "4K export", "Re-export old recordings"],
+        "captions": ["Auto captions", "SRT / VTT / ASS download", "Inline transcript editor"],
+        "assets": ["Auto chapter outline", "Markdown handout", "PDF handout export"],
+        "sharing": ["Local Web replay", "Cloud share link", "Custom watermark / branding"],
+        "templates": ["Local template library", "Market templates", "Cross-device template sync"],
+        "account": ["No-account use", "Cloud backup & save", "Team seats"]
+      }
+    },
+    "faq": {
+      "heading": "Common questions.",
+      "intro": "Anything else? Email support@excalicast.cn — we read everything.",
+      "q1": { "q": "Does the watermark obscure my content?", "a": "It sits in the bottom-right corner — visible but never on top of important canvas area. Free tier only." },
+      "q2": { "q": "Why is the one-time purchase so cheap?", "a": "It authorizes one watermark-free render. No account, no infra to run on our side once you've downloaded — we charge close to what it costs us." },
+      "q3": { "q": "Do you upload my recording when I export?", "a": "Never. ffmpeg.wasm renders the MP4 entirely in your browser. The only server call verifies your purchase / subscription and carries no recording data." },
+      "q4": { "q": "What happens to captions audio?", "a": "Audio is sent to Alibaba Qwen ASR, transcribed, and deleted immediately — no storage on our side." },
+      "q5": { "q": "Can I cancel Pro / Max anytime?", "a": "Yes. Subscriptions are month-to-month. Cancel and you keep all locally-recorded data; cloud backups age out after 30 days unless you re-subscribe." },
+      "q6": { "q": "What about teams?", "a": "Max includes 3 seats. Anything bigger — including SSO and admin controls — email support@excalicast.cn and we'll quote it." }
+    }
+  },
+  "appIntro": {
+    "welcome": "Welcome",
+    "title": "Record in 3 steps",
+    "step1": "Draw anything on the canvas — or start from a template.",
+    "step2": "Hit the red ● Start button to record canvas + voice.",
+    "step3": "Stop, then pick a ratio and export your MP4.",
+    "tipIsolation": "Other windows, notifications, even minimizing won't ruin the recording — we capture the canvas, not your screen.",
+    "startDrawing": "Start drawing",
+    "fromTemplate": "Start from a template",
+    "skip": "Skip",
+    "emptyHint": "Draw something, then hit ● to record",
+    "emptyCta": "Start from a template"
   },
   "header": {
     "library": "Library",

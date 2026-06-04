@@ -1,4 +1,5 @@
 import '../globals.css';
+import '../animations.css';
 import type { ReactNode } from 'react';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
@@ -6,6 +7,7 @@ import { NextIntlClientProvider } from 'next-intl';
 import { getMessages, setRequestLocale, getTranslations } from 'next-intl/server';
 import { Analytics } from '@vercel/analytics/next';
 import { SpeedInsights } from '@vercel/speed-insights/next';
+import { MotionLayer } from '@/components/motion/MotionLayer';
 import { PaddleProvider } from '@/components/providers/PaddleProvider';
 import { LibraryImportHandler } from '@/components/LibraryImportHandler';
 import { locales, type Locale } from '@/i18n/config';
@@ -77,6 +79,7 @@ export default async function RootLayout({ children, params }: Props): Promise<J
           <PaddleProvider>{children}</PaddleProvider>
           <LibraryImportHandler />
         </NextIntlClientProvider>
+        <MotionLayer />
         <Analytics />
         <SpeedInsights />
       </body>

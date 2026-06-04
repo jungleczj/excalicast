@@ -1,0 +1,192 @@
+/* ExcalidrawRec — Sketchfolio-style motion layer (ported 1:1 from design
+ * animations.css). Loaded after globals.css; wired up by MotionLayer.tsx.
+ * All motion respects [data-motion] on <html> (0=off,1=subtle,2=playful) and
+ * prefers-reduced-motion. */
+
+:root {
+  --motion: 1;
+  --t-fast: 380ms;
+  --t-med:  680ms;
+  --t-slow: 1100ms;
+  --t-draw: 1400ms;
+  --ease-pen: cubic-bezier(.55, .08, .32, 1);
+  --ease-pop: cubic-bezier(.34, 1.42, .64, 1);
+  --ease-soft: cubic-bezier(.22, .61, .36, 1);
+
+  /* Footer warm-dark theme (design default; overrides globals' footer tokens) */
+  --foot-bg:      #201D19;
+  --foot-bg-2:    #181512;
+  --foot-text:    #F7F5EF;
+  --foot-dim:     rgba(247,245,239,0.68);
+  --foot-faint:   rgba(247,245,239,0.42);
+  --foot-rule:    rgba(247,245,239,0.20);
+  --foot-accent:  #FFD166;
+  --foot-dot:     rgba(247,245,239,0.09);
+  --foot-chip-bd: rgba(247,245,239,0.32);
+}
+
+[data-motion="0"] { --motion: 0; }
+[data-motion="2"] { --motion: 2; --t-fast: 320ms; --t-med: 560ms; --t-slow: 900ms; --t-draw: 1100ms; }
+
+[data-motion="0"] .reveal,
+[data-motion="0"] .reveal-up,
+[data-motion="0"] .reveal-left,
+[data-motion="0"] .reveal-right,
+[data-motion="0"] .reveal-pop,
+[data-motion="0"] .marker-sweep > .__sweep-fill,
+[data-motion="0"] .draw-in path,
+[data-motion="0"] .draw-in line,
+[data-motion="0"] .draw-in rect,
+[data-motion="0"] .draw-in circle,
+[data-motion="0"] .draw-in ellipse,
+[data-motion="0"] .draw-in polyline {
+  opacity: 1 !important;
+  transform: none !important;
+  stroke-dashoffset: 0 !important;
+}
+[data-motion="0"] .float,
+[data-motion="0"] .float-slow,
+[data-motion="0"] .float-tilt,
+[data-motion="0"] .wobble-idle,
+[data-motion="0"] .scan-sweep::after,
+[data-motion="0"] .rec-dot,
+[data-motion="0"] .marquee .__marq-track {
+  animation: none !important;
+}
+
+/* Reveal primitives */
+.reveal-up, .reveal-left, .reveal-right, .reveal-pop, .reveal { opacity: 0; will-change: transform, opacity; }
+.reveal-up    { transform: translateY(18px); }
+.reveal-left  { transform: translateX(-22px); }
+.reveal-right { transform: translateX(22px); }
+.reveal-pop   { transform: scale(.94) rotate(-1.2deg); }
+.reveal-up.in, .reveal-left.in, .reveal-right.in, .reveal-pop.in, .reveal.in {
+  opacity: 1; transform: translateY(0) translateX(0) scale(1) rotate(0);
+  transition: opacity var(--t-med) var(--ease-soft), transform var(--t-med) var(--ease-pop);
+}
+.stagger > * { transition-delay: calc(var(--i, 0) * 70ms); }
+
+/* SVG draw-in (corner brackets etc.) */
+.draw-in path, .draw-in line, .draw-in rect, .draw-in circle, .draw-in ellipse, .draw-in polyline, .draw-in polygon {
+  stroke-dasharray: var(--len, 400); stroke-dashoffset: var(--len, 400);
+}
+.draw-in.in path, .draw-in.in line, .draw-in.in rect, .draw-in.in circle, .draw-in.in ellipse, .draw-in.in polyline, .draw-in.in polygon {
+  animation: draw-stroke var(--t-draw) var(--ease-pen) forwards; animation-delay: calc(var(--si, 0) * 90ms);
+}
+@keyframes draw-stroke { to { stroke-dashoffset: 0; } }
+
+/* Floating / idle */
+.float      { animation: float-y 4.2s var(--ease-soft) infinite; }
+.float-slow { animation: float-y 7s var(--ease-soft) infinite; }
+.float-tilt { animation: float-tilt 5.6s var(--ease-soft) infinite; transform-origin: center; }
+@keyframes float-y { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+@keyframes float-tilt { 0%,100% { transform: translateY(0) rotate(var(--tilt, -2deg)); } 50% { transform: translateY(-5px) rotate(calc(var(--tilt, -2deg) + 1.5deg)); } }
+.wobble-idle { animation: wobble-idle 6s ease-in-out infinite; }
+@keyframes wobble-idle { 0%,100% { transform: rotate(0); } 25% { transform: rotate(-0.15deg); } 75% { transform: rotate(0.15deg); } }
+
+/* Hover lifts (design version — overrides globals' .lift) */
+.lift { transition: transform 180ms var(--ease-pop), box-shadow 180ms var(--ease-pop); }
+.lift:hover { transform: translate(-2px, -3px) rotate(-0.3deg); box-shadow: 6px 7px 0 0 var(--ink, #1A1A1A); }
+.lift-hi:hover { box-shadow: 5px 5px 0 0 var(--hi-deep, #E5B73D), 8px 8px 0 0 var(--ink, #1A1A1A); }
+.btn-stamp:active { transform: translate(1px, 1px) scale(0.985); transition: transform 60ms; }
+.card-nudge { transition: transform 220ms var(--ease-soft); }
+.card-nudge:hover { transform: translate(-3px, -3px); }
+
+/* REC pulse (soft, breathing) */
+@keyframes rec-pulse-soft {
+  0%,100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.55); transform: scale(1); }
+  50%     { box-shadow: 0 0 0 9px rgba(220,38,38,0); transform: scale(1.08); }
+}
+.rec-dot { animation: rec-pulse-soft 1.6s var(--ease-soft) infinite; }
+
+/* Wavy underline draw */
+.underline-draw {
+  background-size: 0% 100%; background-repeat: no-repeat;
+  background-image: linear-gradient(transparent calc(100% - 4px), var(--hi-deep, #E5B73D) calc(100% - 4px));
+  transition: background-size 900ms var(--ease-pen) 200ms;
+}
+.underline-draw.in { background-size: 100% 100%; }
+
+/* Tape wiggle */
+.tape-wiggle { transition: transform 180ms var(--ease-pop); }
+.tape-wiggle:hover { animation: tape-wiggle .55s var(--ease-pop); }
+@keyframes tape-wiggle {
+  0% { transform: rotate(var(--rot, -2deg)); }
+  25% { transform: rotate(calc(var(--rot, -2deg) - 4deg)) translateY(-1px); }
+  50% { transform: rotate(calc(var(--rot, -2deg) + 3deg)) translateY(0); }
+  75% { transform: rotate(calc(var(--rot, -2deg) - 1.5deg)); }
+  100% { transform: rotate(var(--rot, -2deg)); }
+}
+
+/* Nav link center-grow underline (design version — overrides globals) */
+.nav-link { position: relative; }
+.nav-link::after {
+  content: ""; position: absolute; left: 50%; right: 50%; bottom: -4px; height: 1.8px;
+  background: currentColor; transition: left 220ms var(--ease-pop), right 220ms var(--ease-pop);
+}
+.nav-link:hover::after, .nav-link.is-active::after { left: 0; right: 0; }
+
+/* Browser dots pulse on hover */
+.dot-pulse:hover { animation: dot-pulse 380ms var(--ease-pop); }
+@keyframes dot-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.25); } }
+
+/* Details / FAQ open + chevron rotate */
+details > div[data-faq-answer] { animation: faq-open 380ms var(--ease-soft); }
+@keyframes faq-open { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+details summary .faq-icon { transition: transform 220ms var(--ease-pop), background 200ms; }
+details[open] summary .faq-icon { transform: rotate(45deg); background: var(--ink) !important; color: var(--paper) !important; }
+
+/* Marquee — two pre-built tracks animate seamlessly */
+.marquee {
+  display: flex; overflow: hidden; gap: 0;
+  mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+}
+.marquee .__marq-track {
+  display: flex; flex: 0 0 auto; gap: 56px; padding-right: 56px; align-items: center;
+  animation: marquee var(--marq-dur, 28s) linear infinite;
+}
+.marquee:hover .__marq-track { animation-play-state: paused; }
+@keyframes marquee { to { transform: translateX(-100%); } }
+
+/* Magnetic + parallax (JS-driven; CSS smooths) */
+.magnetic { transition: transform 220ms var(--ease-pop); will-change: transform; }
+.parallax-host { position: relative; }
+.parallax-host [data-parallax] { transition: transform 280ms var(--ease-soft); will-change: transform; }
+
+/* Corner viewfinder bracket draw-in */
+.brackets-draw svg path { stroke-dasharray: 30; stroke-dashoffset: 30; }
+.brackets-draw.in svg path { animation: draw-stroke 700ms var(--ease-pen) forwards; animation-delay: 600ms; }
+
+/* Recording chrome scan sweep */
+.scan-sweep { position: relative; overflow: hidden; }
+.scan-sweep::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(120deg, transparent 35%, rgba(255,209,102,0.18) 50%, transparent 65%);
+  transform: translateX(-100%); animation: scan 4.5s ease-in-out infinite; pointer-events: none;
+}
+@keyframes scan { 0% { transform: translateX(-100%); } 60% { transform: translateX(120%); } 100% { transform: translateX(120%); } }
+
+/* Dark footer link hover + chips */
+.footer-link { position: relative; transition: color 160ms var(--ease-soft); }
+.footer-link:hover { color: var(--foot-text, #FBFBFA) !important; }
+.footer-link::after {
+  content: ""; position: absolute; left: 0; bottom: -2px; height: 1.4px; width: 0;
+  background: var(--foot-accent, #FFD166); transition: width 200ms var(--ease-pop);
+}
+.footer-link:hover::after { width: 100%; }
+.foot-chip {
+  display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px;
+  border: 1.2px solid var(--foot-chip-bd); background: transparent;
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--foot-dim);
+  transition: border-color 160ms, color 160ms;
+}
+.foot-chip:hover { border-color: var(--foot-accent); color: var(--foot-text); }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal, .reveal-up, .reveal-left, .reveal-right, .reveal-pop { opacity: 1 !important; transform: none !important; }
+  .float, .float-slow, .float-tilt, .wobble-idle, .rec-dot, .scan-sweep::after, .marquee .__marq-track,
+  .draw-in.in path, .draw-in.in line, .draw-in.in rect, .draw-in.in circle, .draw-in.in ellipse, .draw-in.in polyline,
+  .brackets-draw.in svg path { animation: none !important; }
+}

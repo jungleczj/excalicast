@@ -247,6 +247,77 @@ export const I = {
       <path d="M4 6 h2 M4 12 h2 M4 18 h2 M9 6 h11 M9 12 h11 M9 18 h11" />
     </Base>
   ),
+  // ── added for ExcalidrawRec UI refactor ──────────────────
+  Monitor: (p: IconProps) => (
+    <Base {...p}>
+      <rect x="3" y="4" width="18" height="12" rx="2" />
+      <path d="M8 20 h8 M12 16 v4" />
+    </Base>
+  ),
+  Captions: (p: IconProps) => (
+    <Base {...p}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M7 11 a2 2 0 0 1 3 -0.6 M14 11 a2 2 0 0 1 3 -0.6 M7 14 a2 2 0 0 0 3 0.6 M14 14 a2 2 0 0 0 3 0.6" />
+    </Base>
+  ),
+  Doc: (p: IconProps) => (
+    <Base {...p}>
+      <path d="M6 3 h8 l4 4 v14 a1 1 0 0 1 -1 1 H6 a1 1 0 0 1 -1 -1 V4 a1 1 0 0 1 1 -1 z" />
+      <path d="M14 3 v4 h4 M8.5 12 h7 M8.5 15.5 h7 M8.5 19 h4" />
+    </Base>
+  ),
+  Bell: (p: IconProps) => (
+    <Base {...p}>
+      <path d="M6 9 a6 6 0 0 1 12 0 c0 5 1.5 6 2 7 H4 c0.5 -1 2 -2 2 -7 z" />
+      <path d="M10 20 a2 2 0 0 0 4 0" />
+    </Base>
+  ),
+  Tag: (p: IconProps) => (
+    <Base {...p}>
+      <path d="M3 11 V4 a1 1 0 0 1 1 -1 h7 l9 9 a1 1 0 0 1 0 1.4 l-6.6 6.6 a1 1 0 0 1 -1.4 0 z" />
+      <circle cx="7.5" cy="7.5" r="1.3" />
+    </Base>
+  ),
+  Globe: (p: IconProps) => (
+    <Base {...p}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12 h18 M12 3 c3 3 3 15 0 18 c-3 -3 -3 -15 0 -18" />
+    </Base>
+  ),
+  Hand: (p: IconProps) => (
+    <Base {...p}>
+      <path d="M7 11 V6.5 a1.4 1.4 0 0 1 2.8 0 V11 V5 a1.4 1.4 0 0 1 2.8 0 v6 V6 a1.4 1.4 0 0 1 2.8 0 v6 l0 1 a1.4 1.4 0 0 1 2.6 -0.6 l0 -1.4 a1.4 1.4 0 0 1 2.8 0 v3 a6 6 0 0 1 -6 6 h-2 a6 6 0 0 1 -5.2 -3 L4 16 a1.5 1.5 0 0 1 2.4 -1.8 z" />
+    </Base>
+  ),
+  Pencil: (p: IconProps) => (
+    <Base {...p}>
+      <path d="M4 20 l1 -4 L15.5 5.5 a2 2 0 0 1 3 3 L8 19 l-4 1 z" />
+      <path d="M13.5 7.5 l3 3" />
+    </Base>
+  ),
+  Diamond: (p: IconProps) => <Base {...p}><path d="M12 3 L21 12 L12 21 L3 12 Z" /></Base>,
+  Arrow: (p: IconProps) => (
+    <Base {...p}>
+      <path d="M4 12 h15 M13 6 l6 6 l-6 6" />
+    </Base>
+  ),
+  Text: (p: IconProps) => (
+    <Base {...p}>
+      <path d="M5 6 V4.5 h14 V6 M12 4.5 V20 M9 20 h6" />
+    </Base>
+  ),
+  Eraser: (p: IconProps) => (
+    <Base {...p}>
+      <path d="M9 20 H20 M5 16 l5 -5 l6 6 l-3 3 H8 z M10 11 l4 -4 a2 2 0 0 1 3 0 l3 3 a2 2 0 0 1 0 3 l-4 4" />
+    </Base>
+  ),
+  Settings: (p: IconProps) => (
+    <Base {...p}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 3 v2.5 M12 18.5 V21 M3 12 h2.5 M18.5 12 H21 M5.5 5.5 l1.8 1.8 M16.7 16.7 l1.8 1.8 M18.5 5.5 l-1.8 1.8 M7.3 16.7 l-1.8 1.8" />
+    </Base>
+  ),
+  Bolt: (p: IconProps) => <Base {...p}><path d="M13 2 L4 14 h6 l-1 8 l9 -12 h-6 z" /></Base>,
 };
 
 // Hand-drawn logo mark for the brand

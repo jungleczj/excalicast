@@ -9,6 +9,7 @@ import { CameraBubble } from '@/components/CameraBubble';
 import { LibraryDrawer } from '@/components/LibraryDrawer';
 import { I } from '@/components/icons';
 import { ProUpgradeModal } from '@/components/ProUpgradeModal';
+import { FirstRunGuide } from '@/components/onboarding/FirstRunGuide';
 import { useSubscription } from '@/hooks/useSubscription';
 import { startRecording, type SessionHandle } from '@/services/recordingSession';
 import type { WhiteboardChangeFn } from '@/components/Whiteboard';
@@ -21,6 +22,7 @@ const Whiteboard = dynamic(() => import('@/components/Whiteboard'), {
 
 export default function HomePage(): JSX.Element {
   const t = useTranslations('workspace');
+  const ti = useTranslations('appIntro');
   const router = useRouter();
   const subscription = useSubscription();
   const [state, setState] = useState<'idle' | 'recording' | 'paused' | 'processing'>('idle');
@@ -50,6 +52,33 @@ export default function HomePage(): JSX.Element {
   const [laserActive, setLaserActive] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [paymentDone, setPaymentDone] = useState(false);
+  const [showIntro, setShowIntro] = useState(false);
+  const [isCanvasEmpty, setIsCanvasEmpty] = useState(true);
+
+  // 首次访问引导：仅当未看过时显示（localStorage 记忆）
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem('excalicast.seenAppIntro')) setShowIntro(true);
+    } catch { /* private mode */ }
+  }, []);
+  const dismissIntro = useCallback(() => {
+    setShowIntro(false);
+    try { localStorage.setItem('excalicast.seenAppIntro', '1'); } catch { /* ignore */ }
+  }, []);
+
+  // 空画布检测：idle 时轻量轮询 Excalidraw 场景元素数，驱动「空状态」提示。
+  useEffect(() => {
+    if (state !== 'idle') return;
+    const check = () => {
+      try {
+        const els = excalidrawApiRef.current?.getSceneElements?.();
+        setIsCanvasEmpty(!els || els.length === 0);
+      } catch { /* api 未就绪 */ }
+    };
+    check();
+    const id = setInterval(check, 1500);
+    return () => clearInterval(id);
+  }, [state]);
 
   // Creem 在新标签页支付后会重定向回 /app?creem_purchase=…。消费该参数：刷新会员态、
   // 给个「支付完成」提示并清掉 query（避免刷新重复触发 / 死页）。原标签的恢复由弹窗的
@@ -465,6 +494,29 @@ export default function HomePage(): JSX.Element {
             void subscription.refresh();
           }}
         />
+
+        {/* 空画布提示：idle + 画布空 + 引导已关 时显示，不阻挡作画 */}
+        {!showIntro && isCanvasEmpty && state === 'idle' && (
+          <div className="rb-no-record pointer-events-none absolute inset-0 z-20 grid place-items-center" style={{ paddingBottom: 140 }}>
+            <div className="fade-in flex flex-col items-center gap-3 text-center">
+              <div style={{ fontFamily: 'var(--font-hand)', fontSize: 22, color: 'var(--ink-3)' }}>{ti('emptyHint')}</div>
+              <button type="button" className="btn-sketch btn-stamp pointer-events-auto" onClick={() => setLibraryOpen(true)}>
+                <I.Library size={14} /> {ti('emptyCta')}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 首次访问引导浮层 */}
+        {showIntro && (
+          <FirstRunGuide
+            onClose={dismissIntro}
+            onStartFromTemplate={() => {
+              setLibraryOpen(true);
+              dismissIntro();
+            }}
+          />
+        )}
       </div>
     </div>
   );
