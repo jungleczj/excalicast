@@ -1,9 +1,11 @@
 # PRD：白板录制工具
-**版本**：v0.6.1  
+**版本**：v0.6.3  
 **状态**：开发中  
 **作者**：—  
-**最后更新**：2026-06-04  
-**变更**：v0.6.1 - 会员年付价格全链路（`payment_config` 加 4 列年价/年付 product id、`/api/checkout/pro` 加 `billing`、升级弹窗/定价页月年切换、admin 校验扩展到年付槽位、Supabase 迁移）+ 定价页去除团队席位收费内容。详见「## 十一」最新一条。  
+**最后更新**：2026-06-05  
+**变更**：v0.6.3 - 修 Excalidraw unpkg CDN ChunkLoadError（自托管资源）；裁切框升级为可拖拽移动 + 四角缩放（预设锁比例 / 自定义自由框选 + 框旁 W×H 实时联动），导出按框定区域输出；选定裁切框后摄像头限框内移动。详见「## 十一」最新一条。  
+**历史变更**：v0.6.2 - 设计重构 Phase 2：录制前 Setup 面板（比例分组 + 摄像头配置 + 麦克风 + 含工作区开关 + 3 秒倒计时）+ 比例集扩到 10 预设 + 配置随录制持久化 + 画布裁切框 viewfinder + 导出默认沿用。详见「## 十一」。  
+**历史变更**：v0.6.1 - 会员年付价格全链路（`payment_config` 加 4 列年价/年付 product id、`/api/checkout/pro` 加 `billing`、升级弹窗/定价页月年切换、admin 校验扩展到年付槽位、Supabase 迁移）+ 定价页去除团队席位收费内容。详见「## 十一」。  
 **历史变更**：v0.6 - 新增 SEO / GEO / 内容营销基建（「## 十二」）：技术 SEO 地基（sitemap/robots/OpenGraph/hreflang/Analytics）、GEO（JSON-LD `SoftwareApplication`/`FAQPage`/`Article` + `llms.txt` + 放行 AI 爬虫）、程序化内容引擎（`/compare`·`/use-cases`·`/blog` 数据驱动长尾着陆页）+ 零预算冷启动手册 `docs/marketing-cold-start.md`。详见「## 十一」最新一条与「## 十二」。  
 **历史变更**：v0.5.2 - 定价页四档权益补全（校准「全档不限时长」、支付商按 active provider 动态显示=Creem）；面向用户文案去掉 `Deepseek`/`AI` 字样；应用内 logo 点击回落地页；摄像头气泡可缩放（前端 80–480）；修 `past_due` 宽限期被误降级为 free。详见「## 十一」最新一条。  
 **历史变更**：v0.5.1 - 支付成功后回到发起页（导出页透传 `returnTo`，新标签不再落到 `/app`）；登录邮件品牌化（Excalicast 邮件模板 + 自定义 SMTP 配置/手册）。  
@@ -889,6 +891,21 @@ Pro/Max 导出（订阅状态验证）：
 ## 十一、实现进展与变更记录（持续同步）
 
 > 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
+
+- **2026-06-05｜修 Excalidraw CDN 崩溃 + 裁切框可拖拽缩放 + 摄像头限框内 + 自定义改框选**：
+  1. **ChunkLoadError 修复**：Excalidraw 字体/资源原从 `unpkg.com` CDN 加载（`Whiteboard.tsx` 未设 `EXCALIDRAW_ASSET_PATH`），CDN 不可达即整页崩。改为**自托管**：`window.EXCALIDRAW_ASSET_PATH='/'` + `scripts/copy-excalidraw-assets.mjs` 在 `predev`/`prebuild` 把 `excalidraw-assets[-dev]` 复制进 `public/`（`.gitignore` 忽略，不入库）。
+  2. **裁切框可交互**：`AspectCropOverlay` 从静态参考框升级为可拖拽移动 + 四角缩放（预设锁该比例 / Custom 自由比例），钳制在画布区内；裁切框存为画布区比例 `CropWindow{rx,ry,rw,rh}`，导出对每帧取视口对应子矩形（`cropping.ts` follow_viewport 分支 + `exportPipeline`）。停止录制时持久化进 `recording.setup.cropWindow`，导出默认沿用；导出页改比例偏离录制 framing 时自动回退居中。
+  3. **摄像头限框内**：选定裁切框（非 default）后，人像气泡只能在裁切框屏幕矩形内拖动（app 页 `handleCameraPositionChange` 钳制）。
+  4. **自定义改框选**：Setup 的 Custom 去掉填像素 W×H（无感知），改为「画布上自由框选」+ 框旁 W×H 输入实时双向联动预览；输出尺寸 `customOutput` 由框选区域换算（≤1920 取偶）或用户手输，导出按之输出（`ExportConfig.customOutput`）。
+  涉及：`Whiteboard.tsx`、`scripts/copy-excalidraw-assets.mjs`、`package.json`、`.gitignore`、`types/recording.ts`、`services/{cropping,exportPipeline}.ts`、`components/{AspectCropOverlay,RecordingSetup}.tsx`、`app/[locale]/{app,export/[id]}/page.tsx`、`messages/{en,zh}.json`。
+
+- **2026-06-04｜录制前 Setup 面板 + 比例锁定 + 画布裁切框（设计重构 Phase 2）**：把画幅比例从「仅导出时选」前置到「录制前锁定」。
+  1. **Setup 面板**（`src/components/RecordingSetup.tsx`，照设计稿 setup.jsx 1:1）：idle 点「开始」先弹面板——比例分组 tab（默认整画板 / 横屏 / 竖屏 / 方形 / 自定义 W×H）+ 摄像头气泡配置（开关 / 尺寸滑块 80–480 / 形状 / 九宫格位置 / 背景抠除开关）+ 麦克风 + 「包含工作区界面」开关（对所有比例都出现）+ 底部「全程本地」+ 3 秒倒计时开始。
+  2. **比例集扩展**：`AspectRatio` 从 4 个扩到 10 个预设（16:9/4:3/21:9/16:10/3:2/9:16/4:5/3:4/2:3/1:1，含 group + 平台 hint），`cropping.ts` 把 aspect 仅当数字用故无破坏。
+  3. **配置随录制持久化**：`RecordingSetupConfig` 存进 `RecordingMetadata.setup`（`framing`/`croppingMode`/`includeWorkspaceShell`/`customW,H`/`camera{...}`）；导出页据此设默认 ExportConfig（`framing=default`→fit_all_content；custom→最接近预设；含工作区沿用）。
+  4. **画布裁切框 viewfinder**（`src/components/AspectCropOverlay.tsx`，照 recording.jsx CropFrame）：录制中固定比例时画框外蒙层 + 虚线框 + 四角括号 + 比例徽标 + px 标注；`default` 整画板不画。控制栏录制态加比例徽标。
+  5. **边界**：背景抠除本轮仅存开关、不接实时 mediapipe 分割（PRD 标可选 GPU 特性）；自定义比例在导出层映射到最接近预设。
+  涉及：`src/types/recording.ts`、`src/lib/db-client.ts`(类型)、`src/services/recordingSession.ts`、`src/app/[locale]/app/page.tsx`、`src/components/{RecordingSetup,AspectCropOverlay,RecordingBar,icons}.tsx`、`src/app/[locale]/export/[id]/page.tsx`、`src/messages/{en,zh}.json`。
 
 - **2026-06-04｜会员年付价格 + 去团队席位收费**：
   1. **去团队席位**（仅 UI/文案）：定价页 Max 套餐权益删「团队席位（最多 3 个）」、特性矩阵删「团队席位」行、删 FAQ「团队怎么办」（q6）。涉及 `src/messages/{en,zh}.json`、`src/app/[locale]/pricing/page.tsx`（`MATRIX.account` 改为 2 行权益 + FAQ 渲染 q1–q5）。`src/content/use-cases.ts` 里「录给团队看」是使用场景内容，保留不动。

@@ -11,20 +11,32 @@ export interface AudioRecorderHandle {
   getMimeType: () => string;
 }
 
-export async function startAudioRecorder(recordingId: string): Promise<AudioRecorderHandle | null> {
-  let stream: MediaStream;
+/** 语音场景标准麦克风约束（16kHz 单声道 + 回声/降噪）。 */
+export const MIC_CONSTRAINTS: MediaStreamConstraints = {
+  audio: {
+    echoCancellation: true,
+    noiseSuppression: true,
+    sampleRate: 16000,
+    channelCount: 1,
+  },
+};
+
+/** 预先获取麦克风流（取景阶段用，供后续 startAudioRecorder 复用）。失败返回 null。 */
+export async function acquireMicStream(): Promise<MediaStream | null> {
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        sampleRate: 16000,
-        channelCount: 1,
-      },
-    });
+    return await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
   } catch {
     return null;
   }
+}
+
+export async function startAudioRecorder(
+  recordingId: string,
+  existingStream?: MediaStream | null,
+): Promise<AudioRecorderHandle | null> {
+  // 复用取景阶段已采集的流，避免在倒计时后才申请权限/唤醒设备
+  const stream = existingStream ?? (await acquireMicStream());
+  if (!stream) return null;
 
   const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
     ? 'audio/webm;codecs=opus'

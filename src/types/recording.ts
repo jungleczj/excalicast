@@ -38,6 +38,8 @@ export interface RecordingMetadata {
   /** 归属键：登录用户=user.id，匿名=每浏览器 guestId。用于本地录制库按用户隔离。
    *  v9 之前的旧录制无此字段（legacy），首次被当前用户列出时认领。 */
   ownerKey?: string;
+  /** 录制前 Setup 面板锁定的画幅/摄像头/工作区配置；导出默认沿用。旧录制无此字段。 */
+  setup?: RecordingSetupConfig;
 }
 
 export interface AudioChunk {
@@ -89,13 +91,33 @@ export interface LaserEvent {
 
 // ----- 导出配置 -----
 
-export type AspectRatio = '16:9' | '9:16' | '1:1' | '4:5';
+export type AspectRatio =
+  // 横屏
+  | '16:9' | '4:3' | '21:9' | '16:10' | '3:2'
+  // 竖屏
+  | '9:16' | '4:5' | '3:4' | '2:3'
+  // 方形
+  | '1:1';
 
-export const ASPECT_PRESETS: Record<AspectRatio, { width: number; height: number; label: string }> = {
-  '16:9': { width: 1280, height: 720, label: '16:9' },
-  '9:16': { width: 720, height: 1280, label: '9:16' },
-  '1:1':  { width: 960, height: 960,  label: '1:1' },
-  '4:5':  { width: 864, height: 1080, label: '4:5' },
+export type AspectGroup = 'landscape' | 'portrait' | 'square';
+
+export const ASPECT_PRESETS: Record<
+  AspectRatio,
+  { width: number; height: number; label: string; group: AspectGroup; platforms: string }
+> = {
+  // 横屏
+  '16:9':  { width: 1920, height: 1080, label: '16:9',  group: 'landscape', platforms: 'YouTube · Bilibili · Zoom' },
+  '4:3':   { width: 1440, height: 1080, label: '4:3',   group: 'landscape', platforms: 'Classrooms · PPT' },
+  '21:9':  { width: 2560, height: 1080, label: '21:9',  group: 'landscape', platforms: 'Ultrawide · Cinema' },
+  '16:10': { width: 1920, height: 1200, label: '16:10', group: 'landscape', platforms: 'MacBook · iPad' },
+  '3:2':   { width: 1620, height: 1080, label: '3:2',   group: 'landscape', platforms: 'Surface · Mirrorless' },
+  // 竖屏
+  '9:16':  { width: 1080, height: 1920, label: '9:16',  group: 'portrait',  platforms: 'TikTok · Shorts · Reels' },
+  '4:5':   { width: 1080, height: 1350, label: '4:5',   group: 'portrait',  platforms: 'Instagram feed' },
+  '3:4':   { width: 1080, height: 1440, label: '3:4',   group: 'portrait',  platforms: 'Xiaohongshu' },
+  '2:3':   { width: 1080, height: 1620, label: '2:3',   group: 'portrait',  platforms: 'Pinterest · Print' },
+  // 方形
+  '1:1':   { width: 1080, height: 1080, label: '1:1',   group: 'square',    platforms: 'Instagram · WeChat' },
 };
 
 export type CroppingMode = 'follow_viewport' | 'fit_all_content';
@@ -107,6 +129,10 @@ export interface ExportConfig {
   withWatermark: boolean;
   burnSubtitles?: boolean;
   includeWorkspaceShell?: boolean;
+  /** 录制前框定的裁切框（follow_viewport 下覆盖默认居中 cover-crop）。 */
+  cropWindow?: CropWindow;
+  /** Custom framing 的输出像素尺寸（优先于 ASPECT_PRESETS）。 */
+  customOutput?: { width: number; height: number };
 }
 
 export interface ShellCanvasRect {
@@ -143,4 +169,47 @@ export interface SceneRect {
   y: number;
   width: number;
   height: number;
+}
+
+// ----- 录制前 Setup 配置 -----
+
+export type CameraShape = 'circle' | 'rounded';
+export type CameraCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+
+export interface CameraSetupConfig {
+  enabled: boolean;
+  sizePx: number;            // 80..480
+  shape: CameraShape;
+  position: CameraCorner;
+  backgroundRemoval: boolean; // 仅存开关；实时分割本轮不接
+}
+
+/**
+ * 裁切框（viewfinder）的位置/大小，存为「画布区」的比例矩形（0..1），与像素/分辨率解耦。
+ * 录制中用户拖拽/缩放裁切框即更新它；导出时对每帧取该时刻视口 scene 矩形的对应子矩形输出。
+ */
+export interface CropWindow {
+  rx: number;  // 左上角 X 占画布区宽的比例
+  ry: number;  // 左上角 Y 占画布区高的比例
+  rw: number;  // 宽占画布区宽的比例
+  rh: number;  // 高占画布区高的比例
+}
+
+/**
+ * 录制前 Setup 面板选定并锁定的配置，随录制存进 RecordingMetadata.setup，
+ * 录制中据此画裁切框，导出页据此设默认 ExportConfig。
+ *
+ * framing='default' 表示「整个画板」：croppingMode 走 fit_all_content、不画固定比例裁切框。
+ * framing='custom' 表示自定义 W×H 固定比例（customWidth/customHeight 必填）。
+ * 否则为预设固定比例，croppingMode 默认 follow_viewport。
+ */
+export interface RecordingSetupConfig {
+  framing: AspectRatio | 'default' | 'custom';
+  croppingMode: CroppingMode;
+  includeWorkspaceShell: boolean;  // 是否把工作区界面一起录进/导出
+  /** 裁切框位置/大小（固定比例 + Custom 用；default 不裁不存）。 */
+  cropWindow?: CropWindow;
+  /** framing='custom' 的输出像素尺寸（由框选区域换算或用户手输；预设比例用 ASPECT_PRESETS）。 */
+  customOutput?: { width: number; height: number };
+  camera: CameraSetupConfig;
 }

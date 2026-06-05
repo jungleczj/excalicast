@@ -362,7 +362,10 @@
     "discardConfirm": "Discard this recording? All data will be deleted.",
     "dragToMove": "Drag to move",
     "loadingWhiteboard": "Loading whiteboard…",
-    "libraryToggle": "Library"
+    "libraryToggle": "Library",
+    "framingHint": "Drag to frame the crop, then start",
+    "framingStart": "Start recording",
+    "framingCancel": "Cancel"
   },
   "libraryDrawer": {
     "title": "Library",
@@ -401,6 +404,63 @@
     "enableCameraNow": "Turn on camera now",
     "laserOn": "Laser pointer on · click to turn off",
     "laserOff": "Laser pointer (K) · click to turn on"
+  },
+  "recordingSetup": {
+    "step": "step 1 of 1 — pre-flight",
+    "title": "New recording",
+    "close": "Close",
+    "cropLocked": "CROP LOCKED",
+    "aspect": {
+      "title": "Aspect ratio",
+      "subtitle": "Locks the crop frame on canvas — no black bars on export.",
+      "tabLandscape": "Landscape",
+      "tabPortrait": "Portrait",
+      "tabSquare": "Square",
+      "tabCustom": "Custom",
+      "tabDefault": "Default",
+      "defaultTitle": "Whole board",
+      "defaultHint": "Capture everything on the canvas — no fixed-ratio crop.",
+      "customWidth": "Width",
+      "customHeight": "Height",
+      "customHint": "Draw the crop frame freely on the canvas, or type width × height beside it to preview."
+    },
+    "includeShell": {
+      "label": "Include workspace UI",
+      "hint": "Record the toolbar & menus too, not just the canvas."
+    },
+    "camera": {
+      "title": "Camera bubble",
+      "subtitle": "Overlays your face on the canvas while recording.",
+      "size": "Size · {px}px",
+      "shape": "Shape",
+      "shapeCircle": "Circle",
+      "shapeRounded": "Rounded",
+      "position": "Position",
+      "bgRemoval": "Bg removal",
+      "bgRemovalNote": "GPU only · auto-disabled on low-end"
+    },
+    "mic": {
+      "title": "Microphone",
+      "subtitle": "Opus 32kbps · ~7 MB per 30 min",
+      "default": "Default microphone"
+    },
+    "footer": {
+      "local": "STAYS LOCAL · NEVER UPLOADED",
+      "cancel": "Cancel",
+      "start": "Start ({sec}s countdown)"
+    },
+    "hint": {
+      "16:9": "YouTube · Bilibili · Zoom",
+      "4:3": "Classrooms · PPT",
+      "21:9": "Ultrawide · Cinema",
+      "16:10": "MacBook · iPad",
+      "3:2": "Surface · Mirrorless",
+      "9:16": "TikTok · Shorts · Reels",
+      "4:5": "Instagram feed",
+      "3:4": "Xiaohongshu",
+      "2:3": "Pinterest · Print",
+      "1:1": "Instagram · WeChat"
+    }
   },
   "whiteboard": {
     "loadingCore": "Loading whiteboard…"

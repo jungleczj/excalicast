@@ -15,6 +15,8 @@ interface Props {
   cameraMuted?: boolean;
   /** 激光笔（Excalidraw laser tool）是否激活 */
   laserActive?: boolean;
+  /** 当前锁定的画幅比例徽标（如 '16:9' / 'default'）；录制态显示 */
+  aspect?: string;
   onToggleCamera: () => void;
   /** 录制中点 mic 图标 —— 翻转软静音 */
   onToggleAudioMute?: () => void;
@@ -61,7 +63,7 @@ export function RecordingBar(props: Props): JSX.Element {
   const t = useTranslations('recordingBar');
   const {
     state, elapsedMs, hasAudio, hasCamera, cameraEnabled,
-    audioMuted, cameraMuted, laserActive,
+    audioMuted, cameraMuted, laserActive, aspect,
     onToggleCamera, onToggleAudioMute, onToggleCameraMute, onToggleLaser,
     onStart, onStop, onDiscard, onPause, onResume,
   } = props;
@@ -207,6 +209,21 @@ export function RecordingBar(props: Props): JSX.Element {
       )}
 
       <Divider />
+
+      {aspect && (
+        <div
+          style={{
+            padding: '4px 8px',
+            background: 'rgba(255,255,255,0.08)',
+            borderRadius: 3,
+            fontSize: 10,
+            fontWeight: 600,
+            letterSpacing: '0.06em',
+          }}
+        >
+          {aspect}
+        </div>
+      )}
 
       <SrcToggle
         IconOn={I.Mic}

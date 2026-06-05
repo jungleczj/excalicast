@@ -308,8 +308,10 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const rawShells = await getWorkspaceShells(opts.recordingId);
   const useShell = rawShells.length > 0 && (opts.includeWorkspaceShell ?? true);
   const decodedShells = useShell ? await decodeShells(rawShells) : [];
-  const outputW = preset.width;
-  const outputH = preset.height;
+  // Custom framing 用 customOutput 作输出尺寸（取偶，编码器要求）；否则用预设。
+  const evenize = (n: number) => Math.max(2, Math.round(n / 2) * 2);
+  const outputW = opts.customOutput ? evenize(opts.customOutput.width) : preset.width;
+  const outputH = opts.customOutput ? evenize(opts.customOutput.height) : preset.height;
 
   const contentBox = computeContentBoundingBox(snapshots);
   const fallbackViewport = (() => {
@@ -323,6 +325,8 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     croppingMode: opts.croppingMode,
     contentBox,
     fallbackViewport,
+    // shell 模式按 canvasRect 比例裁，不应用用户框定窗口
+    cropWindow: useShell ? undefined : opts.cropWindow,
   };
 
   opts.onPhase?.('rendering_frames');
@@ -727,9 +731,10 @@ export async function renderPreviewFrame(
   const useShell = rawShells.length > 0 && (config.includeWorkspaceShell ?? true);
   const decodedShells = useShell ? await decodeShells(rawShells) : [];
 
-  // 输出尺寸恒为 picker 比例；shell 按 cover 缩放后绘制
-  const outputW = preset.width;
-  const outputH = preset.height;
+  // 输出尺寸：Custom 用 customOutput（取偶），否则 picker 比例；shell 按 cover 缩放后绘制
+  const evenize = (n: number) => Math.max(2, Math.round(n / 2) * 2);
+  const outputW = config.customOutput ? evenize(config.customOutput.width) : preset.width;
+  const outputH = config.customOutput ? evenize(config.customOutput.height) : preset.height;
 
   target.width = outputW;
   target.height = outputH;
@@ -793,6 +798,7 @@ export async function renderPreviewFrame(
       croppingMode: config.croppingMode,
       contentBox,
       fallbackViewport,
+      cropWindow: config.cropWindow,
     });
   })();
 

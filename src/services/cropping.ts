@@ -1,6 +1,6 @@
 'use client';
 
-import type { WhiteboardSnapshot, AspectRatio, CroppingMode, SceneRect } from '@/types/recording';
+import type { WhiteboardSnapshot, AspectRatio, CroppingMode, CropWindow, SceneRect } from '@/types/recording';
 import { ASPECT_PRESETS } from '@/types/recording';
 
 /**
@@ -145,6 +145,8 @@ export interface CropContext {
   contentBox: SceneRect | null;
   /** follow_viewport 模式的兜底矩形（当 snapshot 没有 viewport 信息时用） */
   fallbackViewport: SceneRect;
+  /** 录制时框定的裁切框（画布区比例）；follow_viewport 下覆盖默认居中 cover-crop。 */
+  cropWindow?: CropWindow;
 }
 
 /**
@@ -162,6 +164,16 @@ export function cropRectForAspect(
   }
   // follow_viewport
   const vp = (snap && viewportFromAppState(snap.appState)) ?? ctx.fallbackViewport;
+  // 用户框定的裁切框：取视口对应子矩形（窗口本身已是目标比例，无需再 cover-crop）
+  if (ctx.cropWindow) {
+    const cw = ctx.cropWindow;
+    return {
+      x: vp.x + cw.rx * vp.width,
+      y: vp.y + cw.ry * vp.height,
+      width: cw.rw * vp.width,
+      height: cw.rh * vp.height,
+    };
+  }
   return coverCrop(vp, targetAspect);
 }
 

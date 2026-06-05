@@ -39,20 +39,33 @@ function pickMimeType(): string {
  * 分段；中间断开的时间段无视频，配合 cameraPositions 表的 hidden 事件，导出/
  * 回放管线已知如何跳过气泡）。
  */
-export async function startCameraRecorder(recordingId: string): Promise<CameraHandle> {
+/** 人头气泡摄像头约束：360p + 24fps（配合 VP9 + 300kbps 显著降存储）。 */
+export const CAMERA_CONSTRAINTS: MediaStreamConstraints = {
+  video: { width: { ideal: 360 }, height: { ideal: 360 }, frameRate: { ideal: 24 }, facingMode: 'user' },
+  audio: false, // 音频独立采集，避免双流
+};
+
+/** 预先获取摄像头流（取景预览用，供 startCameraRecorder 复用）。 */
+export async function acquireCameraStream(): Promise<MediaStream> {
+  return navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS);
+}
+
+export async function startCameraRecorder(
+  recordingId: string,
+  existingStream?: MediaStream | null,
+): Promise<CameraHandle> {
   const db = getClientDb();
   const mimeType = pickMimeType();
   let chunkIndex = 0;
   let currentStream: MediaStream | null = null;
   let currentRecorder: MediaRecorder | null = null;
   let stoppedPromise: Promise<void> = Promise.resolve();
+  // 首次 acquire 复用取景预览流；之后（mute→unmute）仍 fresh 获取
+  let pendingInitial: MediaStream | null = existingStream ?? null;
 
   const acquire = async (): Promise<void> => {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      // 人头气泡：360p + 24fps 足够，显著降低云端存储（配合 VP9 + 300kbps）
-      video: { width: { ideal: 360 }, height: { ideal: 360 }, frameRate: { ideal: 24 }, facingMode: 'user' },
-      audio: false, // 音频独立采集，避免双流
-    });
+    const stream = pendingInitial ?? (await acquireCameraStream());
+    pendingInitial = null;
     const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 300_000 });
     recorder.ondataavailable = async (e) => {
       if (e.data && e.data.size > 0) {

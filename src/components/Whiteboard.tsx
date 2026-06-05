@@ -4,7 +4,14 @@ import dynamic from 'next/dynamic';
 import { useMemo, useRef, useState, type RefObject } from 'react';
 
 const Excalidraw = dynamic(
-  async () => (await import('@excalidraw/excalidraw')).Excalidraw,
+  async () => {
+    // 自托管 Excalidraw 字体/资源：指向同源 /excalidraw-assets[-dev]/，
+    // 否则默认回退 unpkg CDN，CDN 不可达时整块 chunk 加载失败（ChunkLoadError）。
+    if (typeof window !== 'undefined') {
+      (window as unknown as { EXCALIDRAW_ASSET_PATH?: string }).EXCALIDRAW_ASSET_PATH = '/';
+    }
+    return (await import('@excalidraw/excalidraw')).Excalidraw;
+  },
   { ssr: false, loading: () => <div className="grid h-full place-items-center text-text-tertiary" /> },
 );
 

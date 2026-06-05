@@ -362,7 +362,10 @@
     "discardConfirm": "丢弃当前录制？所有数据将被删除。",
     "dragToMove": "拖动以移动",
     "loadingWhiteboard": "加载白板…",
-    "libraryToggle": "模板库"
+    "libraryToggle": "模板库",
+    "framingHint": "拖动调整裁切框，确认后开始",
+    "framingStart": "开始录制",
+    "framingCancel": "取消"
   },
   "libraryDrawer": {
     "title": "模板库",
@@ -401,6 +404,63 @@
     "enableCameraNow": "录制中开启摄像头",
     "laserOn": "激光笔已开启 · 点击关闭",
     "laserOff": "激光笔（K）· 点击开启"
+  },
+  "recordingSetup": {
+    "step": "第 1 步 / 共 1 步 — 录制前准备",
+    "title": "新建录制",
+    "close": "关闭",
+    "cropLocked": "已锁定裁切",
+    "aspect": {
+      "title": "画幅比例",
+      "subtitle": "在画布上锁定裁切框 —— 导出无黑边。",
+      "tabLandscape": "横屏",
+      "tabPortrait": "竖屏",
+      "tabSquare": "方形",
+      "tabCustom": "自定义",
+      "tabDefault": "默认",
+      "defaultTitle": "整个画板",
+      "defaultHint": "录制画布上的全部内容 —— 不做固定比例裁切。",
+      "customWidth": "宽",
+      "customHeight": "高",
+      "customHint": "在画布上自由拖拽框选，或在框旁输入宽 × 高实时预览。"
+    },
+    "includeShell": {
+      "label": "包含工作区界面",
+      "hint": "连工具栏和菜单一起录，而不仅是画布。"
+    },
+    "camera": {
+      "title": "摄像头气泡",
+      "subtitle": "录制时把人像叠加在画布上。",
+      "size": "尺寸 · {px}px",
+      "shape": "形状",
+      "shapeCircle": "圆形",
+      "shapeRounded": "圆角",
+      "position": "位置",
+      "bgRemoval": "背景抠除",
+      "bgRemovalNote": "仅 GPU · 低配设备自动禁用"
+    },
+    "mic": {
+      "title": "麦克风",
+      "subtitle": "Opus 32kbps · 每 30 分钟约 7 MB",
+      "default": "默认麦克风"
+    },
+    "footer": {
+      "local": "全程本地 · 永不上传",
+      "cancel": "取消",
+      "start": "开始（{sec} 秒倒计时）"
+    },
+    "hint": {
+      "16:9": "YouTube · B站 · Zoom",
+      "4:3": "课堂 · PPT",
+      "21:9": "超宽屏 · 电影感",
+      "16:10": "MacBook · iPad",
+      "3:2": "Surface · 微单",
+      "9:16": "抖音 · Shorts · Reels",
+      "4:5": "Instagram 信息流",
+      "3:4": "小红书",
+      "2:3": "Pinterest · 印刷",
+      "1:1": "Instagram · 微信"
+    }
   },
   "whiteboard": {
     "loadingCore": "加载白板内核…"

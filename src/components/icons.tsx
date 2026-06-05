@@ -210,6 +210,10 @@ export const I = {
     </Base>
   ),
   Crop: (p: IconProps) => <Base {...p}><path d="M6 3 v15 h15 M3 6 h15 v15" /></Base>,
+  Circle: (p: IconProps) => <Base {...p}><circle cx="12" cy="12" r="8" /></Base>,
+  Ratio16x9: (p: IconProps) => <Base {...p}><rect x="3" y="7" width="18" height="10" rx="0.6" /></Base>,
+  Ratio9x16: (p: IconProps) => <Base {...p}><rect x="7" y="3" width="10" height="18" rx="0.6" /></Base>,
+  Ratio1x1: (p: IconProps) => <Base {...p}><rect x="5" y="5" width="14" height="14" rx="0.6" /></Base>,
   Mail: (p: IconProps) => (
     <Base {...p}>
       <rect x="2" y="4" width="20" height="16" rx="2" />

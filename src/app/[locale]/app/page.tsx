@@ -5,15 +5,41 @@ import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
 import { AppHeader } from '@/components/AppHeader';
 import { RecordingBar } from '@/components/RecordingBar';
+import { RecordingSetup } from '@/components/RecordingSetup';
 import { CameraBubble } from '@/components/CameraBubble';
+import { AspectCropOverlay } from '@/components/AspectCropOverlay';
 import { LibraryDrawer } from '@/components/LibraryDrawer';
 import { I } from '@/components/icons';
 import { ProUpgradeModal } from '@/components/ProUpgradeModal';
 import { FirstRunGuide } from '@/components/onboarding/FirstRunGuide';
 import { useSubscription } from '@/hooks/useSubscription';
 import { startRecording, type SessionHandle } from '@/services/recordingSession';
+import { acquireMicStream } from '@/services/audioRecorder';
+import { acquireCameraStream } from '@/services/cameraRecorder';
 import type { WhiteboardChangeFn } from '@/components/Whiteboard';
+import type { CameraCorner, CameraShape, CropWindow, RecordingSetupConfig } from '@/types/recording';
 import { useRouter } from '@/i18n/navigation';
+
+const DEFAULT_SETUP: RecordingSetupConfig = {
+  framing: '16:9',
+  croppingMode: 'follow_viewport',
+  includeWorkspaceShell: false,
+  camera: { enabled: false, sizePx: 160, shape: 'circle', position: 'bottom-right', backgroundRemoval: false },
+};
+
+/** 摄像头气泡角落预设 → 视口像素坐标（与 CameraBubble 的 fixed 定位一致）。 */
+function cornerToXY(corner: CameraCorner, sizePx: number): { x: number; y: number } {
+  const margin = 24;
+  const headerOffset = 64; // AppHeader 高度
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const left = corner === 'top-left' || corner === 'bottom-left';
+  const top = corner === 'top-left' || corner === 'top-right';
+  return {
+    x: left ? margin : Math.max(margin, w - sizePx - margin),
+    y: top ? headerOffset + margin : Math.max(headerOffset + margin, h - sizePx - margin),
+  };
+}
 
 const Whiteboard = dynamic(() => import('@/components/Whiteboard'), {
   ssr: false,
@@ -25,7 +51,7 @@ export default function HomePage(): JSX.Element {
   const ti = useTranslations('appIntro');
   const router = useRouter();
   const subscription = useSubscription();
-  const [state, setState] = useState<'idle' | 'recording' | 'paused' | 'processing'>('idle');
+  const [state, setState] = useState<'idle' | 'framing' | 'recording' | 'paused' | 'processing'>('idle');
   const [elapsed, setElapsed] = useState<number>(0);
   const [hasAudio, setHasAudio] = useState<boolean>(false);
   const [hasCamera, setHasCamera] = useState<boolean>(false);
@@ -33,7 +59,23 @@ export default function HomePage(): JSX.Element {
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [cameraPos, setCameraPos] = useState({ x: 0, y: 0 });
   const [cameraSize, setCameraSize] = useState(160);
+  const [cameraShape, setCameraShape] = useState<CameraShape>('circle');
   const [proUpgradeOpen, setProUpgradeOpen] = useState(false);
+  // 录制前 Setup 面板 + 倒计时
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [setupConfig, setSetupConfig] = useState<RecordingSetupConfig>(DEFAULT_SETUP);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const pendingStartRef = useRef<{ config: RecordingSetupConfig; pos: { x: number; y: number }; size: number } | null>(null);
+  // 取景阶段预采集的麦克风流（开录时复用，避免倒计时后才申请权限）
+  const [micStream, setMicStream] = useState<MediaStream | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  micStreamRef.current = micStream;
+  // 裁切框（画布区比例）+ Custom 输出尺寸；录制中由 overlay 编辑
+  const [cropWindow, setCropWindow] = useState<CropWindow | null>(null);
+  const [customOutput, setCustomOutput] = useState<{ width: number; height: number } | undefined>(undefined);
+  const canvasAreaRef = useRef<HTMLDivElement | null>(null);
+  const cropWindowRef = useRef<CropWindow | null>(null);
+  cropWindowRef.current = cropWindow;
 
   // 录制条位置：默认放在 Excalidraw toolbar 之下、右上角，避开顶部菜单
   const [barPos, setBarPos] = useState<{ x: number; y: number } | null>(null);
@@ -148,6 +190,20 @@ export default function HomePage(): JSX.Element {
 
   // 摄像头位置变更：(1) 录制中转发给 session；(2) debounced 写 localStorage
   const handleCameraPositionChange = useCallback((p: { x: number; y: number }) => {
+    // 选定裁切框后（非 default）：把气泡钳制在裁切框屏幕矩形内
+    const cw = cropWindowRef.current;
+    const area = canvasAreaRef.current;
+    if (cw && area && setupConfig.framing !== 'default') {
+      const r = area.getBoundingClientRect();
+      const fx = r.left + cw.rx * r.width;
+      const fy = r.top + cw.ry * r.height;
+      const fw = cw.rw * r.width;
+      const fh = cw.rh * r.height;
+      p = {
+        x: Math.max(fx, Math.min(fx + fw - cameraSize, p.x)),
+        y: Math.max(fy, Math.min(fy + fh - cameraSize, p.y)),
+      };
+    }
     setCameraPos(p);
     // 录制中：把 viewport 坐标 + 当前 size 喂给 session，写到 cameraPositions 表
     if (sessionRef.current) {
@@ -159,7 +215,7 @@ export default function HomePage(): JSX.Element {
       try { localStorage.setItem('excalicast.camera-pos', JSON.stringify(p)); }
       catch { /* quota / private mode */ }
     }, 250);
-  }, [cameraSize]);
+  }, [cameraSize, setupConfig.framing]);
 
   // 摄像头尺寸变更：(1) 录制中转发给 session（位置不变、size 变）；(2) debounced 写 localStorage
   const handleCameraSizeChange = useCallback((next: number) => {
@@ -253,16 +309,27 @@ export default function HomePage(): JSX.Element {
     }
   }, [cameraEnabled, cameraStream, state, t]);
 
-  const handleStart = useCallback(async () => {
-    // 释放预览流（recordingSession 会重新申请，避免双流冲突）
-    cameraStream?.getTracks().forEach((t) => t.stop());
-    setCameraStream(null);
+  // idle 态点「开始」：打开录制前 Setup 面板（替代直接开录）
+  const handleStart = useCallback(() => {
+    setSetupConfig((prev) => ({
+      ...prev,
+      camera: { ...prev.camera, enabled: cameraEnabled, sizePx: cameraSize, shape: cameraShape },
+    }));
+    setSetupOpen(true);
+  }, [cameraEnabled, cameraSize, cameraShape]);
 
+  // 真正开录（取景确认 + 倒计时结束后调用）—— 复用取景已采集的麦克风/摄像头流，瞬时开录
+  const beginRecording = useCallback(async (config: RecordingSetupConfig, startPos: { x: number; y: number }, startSize: number) => {
     try {
       const session = await startRecording({
-        withCamera: cameraEnabled,
+        withCamera: config.camera.enabled,
         workspaceRoot: workspaceRootRef.current,
+        setup: config,
+        audioStream: micStreamRef.current,
+        cameraStream,
       });
+      // 流所有权移交 session（stop 时由其停轨）；清掉页面侧引用，避免重复管理
+      setMicStream(null);
       sessionRef.current = session;
       changeRef.current = session.onWhiteboardChange;
       laserPointRef.current = session.recordLaserPoint;
@@ -270,15 +337,71 @@ export default function HomePage(): JSX.Element {
       setHasCamera(session.hasCamera);
       setCameraStream(session.cameraStream);
       setState('recording');
-      // 录制开始时种一颗 t=0 事件，保证回放/导出能定位到当前气泡位置，
-      // 而不是回退到默认右下角
+      // 录制开始种一颗 t=0 事件，定位当前气泡位置
       if (session.hasCamera) {
-        session.recordCameraMove(cameraPos.x, cameraPos.y, cameraSize);
+        session.recordCameraMove(startPos.x, startPos.y, startSize);
       }
     } catch (err) {
       alert(t('startFailed', { message: err instanceof Error ? err.message : 'unknown' }));
     }
-  }, [cameraEnabled, cameraStream, cameraPos, cameraSize, t]);
+  }, [cameraStream, t]);
+
+  // Setup 面板确认：应用配置 → 进入取景态（在画布上框选裁切框/摆相机），暂不倒计时
+  const handleSetupConfirm = useCallback(async (config: RecordingSetupConfig) => {
+    setSetupConfig(config);
+    setSetupOpen(false);
+    // 裁切框重置 → overlay 按所选比例居中初始化（default 不显框）
+    setCropWindow(null);
+    setCustomOutput(undefined);
+    setCameraEnabled(config.camera.enabled);
+    setCameraSize(config.camera.sizePx);
+    setCameraShape(config.camera.shape);
+    setCameraPos(cornerToXY(config.camera.position, config.camera.sizePx));
+    // 取景预览：启用相机则申请预览流（与录制同约束，开录直接复用）；否则停掉已有预览
+    if (config.camera.enabled) {
+      if (!cameraStream) {
+        try { setCameraStream(await acquireCameraStream()); }
+        catch { /* 取景无预览不阻塞，开录时再申请 */ }
+      }
+    } else {
+      cameraStream?.getTracks().forEach((tk) => tk.stop());
+      setCameraStream(null);
+    }
+    // 预采集麦克风（在倒计时之前申请权限并就绪，供电平表 + 开录复用）
+    micStreamRef.current?.getTracks().forEach((tk) => tk.stop());
+    setMicStream(await acquireMicStream());
+    setState('framing');
+  }, [cameraStream]);
+
+  // 取景确认：用当前相机位置/尺寸构建待开录参数 → 启动 3 秒倒计时
+  const handleConfirmFraming = useCallback(() => {
+    pendingStartRef.current = { config: setupConfig, pos: cameraPos, size: cameraSize };
+    setCountdown(3);
+  }, [setupConfig, cameraPos, cameraSize]);
+
+  // 取景取消：停掉摄像头/麦克风预览、清裁切框、回 idle
+  const handleCancelFraming = useCallback(() => {
+    cameraStream?.getTracks().forEach((tk) => tk.stop());
+    setCameraStream(null);
+    micStreamRef.current?.getTracks().forEach((tk) => tk.stop());
+    setMicStream(null);
+    setCropWindow(null);
+    setState('idle');
+  }, [cameraStream]);
+
+  // 倒计时：3→2→1→0 后真正开录
+  useEffect(() => {
+    if (countdown === null) return;
+    if (countdown <= 0) {
+      const pending = pendingStartRef.current;
+      pendingStartRef.current = null;
+      setCountdown(null);
+      if (pending) void beginRecording(pending.config, pending.pos, pending.size);
+      return;
+    }
+    const id = setTimeout(() => setCountdown((c) => (c === null ? null : c - 1)), 1000);
+    return () => clearTimeout(id);
+  }, [countdown, beginRecording]);
 
   const handlePause = useCallback(() => {
     sessionRef.current?.pause();
@@ -345,6 +468,20 @@ export default function HomePage(): JSX.Element {
     setState('processing');
     try {
       const meta = await s.stop();
+      // 持久化录制中最终框定的裁切框到 recording.setup（导出默认沿用）
+      const cw = cropWindowRef.current;
+      if (cw && setupConfig.framing !== 'default') {
+        try {
+          const { getClientDb } = await import('@/lib/db-client');
+          await getClientDb().recordings.update(meta.id, {
+            setup: {
+              ...setupConfig,
+              cropWindow: cw,
+              ...(setupConfig.framing === 'custom' && customOutput ? { customOutput } : {}),
+            },
+          });
+        } catch { /* 持久化失败不阻塞跳转 */ }
+      }
       sessionRef.current = null;
       changeRef.current = null;
       laserPointRef.current = null;
@@ -362,7 +499,7 @@ export default function HomePage(): JSX.Element {
       laserPointRef.current = null;
       setState('idle');
     }
-  }, [router, t]);
+  }, [router, t, setupConfig, customOutput]);
 
   const handleDiscard = useCallback(async () => {
     const s = sessionRef.current;
@@ -388,12 +525,23 @@ export default function HomePage(): JSX.Element {
     <div className="flex h-full flex-col" ref={workspaceRootRef}>
       {/* AppHeader 全程可见，以便录制时被 shell capturer 抓到（之前会在录制时隐藏） */}
       <AppHeader tier={subscription.tier} onUpgradePro={() => setProUpgradeOpen(true)} />
-      <div className="relative flex-1 overflow-hidden">
+      <div className="relative flex-1 overflow-hidden" ref={canvasAreaRef}>
         <Whiteboard
           onChangeRef={changeRef}
           onApiReady={(api) => { excalidrawApiRef.current = api; }}
           laserPointRef={laserPointRef}
         />
+
+        {/* 裁切框 viewfinder：取景态 + 录制中显示（'default' 整画板不画） */}
+        {(state === 'framing' || isRecording) && setupConfig.framing !== 'default' && (
+          <AspectCropOverlay
+            framing={setupConfig.framing}
+            value={cropWindow}
+            onChange={setCropWindow}
+            customOutput={customOutput}
+            onCustomOutputChange={setCustomOutput}
+          />
+        )}
 
         {/* 摄像头浮窗：idle 期间用预览流；录制态如启用则用 session stream */}
         {(cameraEnabled || (isRecording && hasCamera)) && !cameraMuted && (
@@ -401,7 +549,7 @@ export default function HomePage(): JSX.Element {
             <CameraBubble
               stream={cameraStream}
               size={cameraSize}
-              shape="circle"
+              shape={cameraShape}
               position={cameraPos}
               onPositionChange={handleCameraPositionChange}
               onSizeChange={handleCameraSizeChange}
@@ -409,8 +557,22 @@ export default function HomePage(): JSX.Element {
           </div>
         )}
 
+        {/* 取景控制条：取景态显示，用户框选/摆相机后点「开始录制」才进入倒计时 */}
+        {state === 'framing' && (
+          <div className="rb-no-record fixed left-1/2 bottom-7 z-40 -translate-x-1/2">
+            <FramingBar
+              hint={t('framingHint')}
+              startLabel={t('framingStart')}
+              cancelLabel={t('framingCancel')}
+              micStream={micStream}
+              onStart={handleConfirmFraming}
+              onCancel={handleCancelFraming}
+            />
+          </div>
+        )}
+
         {/* 浮动录制条：position: fixed + 可拖拽，wrapper 不阻挡 Excalidraw 工具区点击 */}
-        {barPos && (
+        {barPos && state !== 'framing' && (
           <div
             className="rb-no-record fixed z-30"
             style={{
@@ -430,6 +592,7 @@ export default function HomePage(): JSX.Element {
               audioMuted={audioMuted}
               cameraMuted={cameraMuted}
               laserActive={laserActive}
+              aspect={isRecording ? setupConfig.framing : undefined}
               onToggleCamera={handleToggleCamera}
               onToggleAudioMute={handleToggleAudioMute}
               onToggleCameraMute={handleToggleCameraMute}
@@ -495,6 +658,31 @@ export default function HomePage(): JSX.Element {
           }}
         />
 
+        {/* 录制前 Setup 面板 */}
+        <RecordingSetup
+          open={setupOpen}
+          initial={setupConfig}
+          onCancel={() => setSetupOpen(false)}
+          onStart={handleSetupConfirm}
+        />
+
+        {/* 开录倒计时 3-2-1 */}
+        {countdown !== null && countdown > 0 && (
+          <div className="fade-in fixed inset-0 z-[60] grid place-items-center" style={{ background: 'rgba(26,26,26,0.55)' }}>
+            <div
+              className="grid place-items-center"
+              style={{
+                width: 140, height: 140, borderRadius: '50%',
+                background: 'var(--paper)', border: '2px solid var(--ink)',
+                boxShadow: '6px 6px 0 var(--hi)',
+                fontFamily: 'var(--font-display)', fontSize: 72, fontWeight: 700, color: 'var(--ink)',
+              }}
+            >
+              {countdown}
+            </div>
+          </div>
+        )}
+
         {/* 空画布提示：idle + 画布空 + 引导已关 时显示，不阻挡作画 */}
         {!showIntro && isCanvasEmpty && state === 'idle' && (
           <div className="rb-no-record pointer-events-none absolute inset-0 z-20 grid place-items-center" style={{ paddingBottom: 140 }}>
@@ -517,6 +705,102 @@ export default function HomePage(): JSX.Element {
             }}
           />
         )}
+      </div>
+    </div>
+  );
+}
+
+/** 取景态浮动控制条：提示 + 麦克风电平表（测音频）+ 取消 + 开始录制（→ 倒计时）。 */
+function FramingBar({
+  hint,
+  startLabel,
+  cancelLabel,
+  micStream,
+  onStart,
+  onCancel,
+}: {
+  hint: string;
+  startLabel: string;
+  cancelLabel: string;
+  micStream: MediaStream | null;
+  onStart: () => void;
+  onCancel: () => void;
+}): JSX.Element {
+  return (
+    <div
+      className="flex items-center gap-3"
+      style={{
+        padding: '10px 14px',
+        background: 'var(--paper)',
+        border: '1.8px solid var(--ink)',
+        borderRadius: 6,
+        boxShadow: '4px 4px 0 var(--ink)',
+      }}
+    >
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-2)', letterSpacing: '0.02em' }}>{hint}</span>
+      <MicLevelMeter stream={micStream} />
+      <button type="button" className="btn-sketch" onClick={onCancel} style={{ padding: '7px 14px' }}>
+        {cancelLabel}
+      </button>
+      <button
+        type="button"
+        className="btn-sketch btn-sketch-primary btn-stamp flex items-center"
+        onClick={onStart}
+        style={{ gap: 8, padding: '7px 16px' }}
+      >
+        <span className="rec-dot" style={{ width: 7, height: 7 }} />
+        {startLabel}
+      </button>
+    </div>
+  );
+}
+
+/** 实时麦克风电平表：AnalyserNode 读流的音量，8 根竖条按当前 level 点亮（测音频用）。 */
+function MicLevelMeter({ stream }: { stream: MediaStream | null }): JSX.Element {
+  const [level, setLevel] = useState(0); // 0..1
+
+  useEffect(() => {
+    if (!stream || stream.getAudioTracks().length === 0) { setLevel(0); return; }
+    const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const ctx = new AC();
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    let raf = 0;
+    const tick = () => {
+      analyser.getByteFrequencyData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) sum += data[i];
+      const avg = sum / data.length / 255; // 归一化
+      setLevel((prev) => Math.max(avg, prev * 0.8)); // 平滑回落
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => {
+      cancelAnimationFrame(raf);
+      try { source.disconnect(); } catch { /* ignore */ }
+      void ctx.close();
+    };
+  }, [stream]);
+
+  const bars = [0.12, 0.25, 0.38, 0.5, 0.62, 0.75, 0.88, 1];
+  return (
+    <div className="flex items-center" style={{ gap: 6, padding: '4px 8px', border: '1.4px solid var(--ink)', borderRadius: 3, background: 'var(--paper-2)' }}>
+      <I.Mic size={13} />
+      <div className="flex items-end" style={{ gap: 2, height: 14 }}>
+        {bars.map((threshold, i) => (
+          <div
+            key={i}
+            style={{
+              width: 3,
+              height: 4 + i * 1.4,
+              background: level >= threshold ? 'var(--ink)' : 'var(--rule-soft)',
+              borderRadius: 1,
+            }}
+          />
+        ))}
       </div>
     </div>
   );

@@ -6,7 +6,7 @@ import { getCurrentOwnerKey } from '@/lib/ownerKey';
 import { startAudioRecorder, type AudioRecorderHandle } from '@/services/audioRecorder';
 import { startCameraRecorder, type CameraHandle } from '@/services/cameraRecorder';
 import { ShellCapturer } from '@/services/workspaceShellCapture';
-import type { LaserEvent, RecordingMetadata } from '@/types/recording';
+import type { LaserEvent, RecordingMetadata, RecordingSetupConfig } from '@/types/recording';
 
 export interface SessionHandle {
   recordingId: string;
@@ -69,6 +69,12 @@ export interface SessionHandle {
 export interface StartOptions {
   withCamera: boolean;
   workspaceRoot?: HTMLElement | null;
+  /** 录制前 Setup 面板锁定的配置；写进 recording，导出默认沿用。 */
+  setup?: RecordingSetupConfig;
+  /** 取景阶段已采集的麦克风流；复用以避免倒计时后才申请权限。 */
+  audioStream?: MediaStream | null;
+  /** 取景阶段已采集的摄像头流；复用以避免倒计时后才唤醒设备。 */
+  cameraStream?: MediaStream | null;
 }
 
 const SNAPSHOT_THROTTLE_MS = 50;
@@ -88,16 +94,17 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
     hasCamera: false,
     status: 'recording',
     ownerKey,
+    ...(opts.setup ? { setup: opts.setup } : {}),
   });
 
   let audio: AudioRecorderHandle | null = null;
-  try { audio = await startAudioRecorder(recordingId); } catch { audio = null; }
+  try { audio = await startAudioRecorder(recordingId, opts.audioStream); } catch { audio = null; }
   const hasAudio = audio !== null;
   if (hasAudio) await db.recordings.update(recordingId, { hasAudio: true });
 
   let camera: CameraHandle | null = null;
   if (opts.withCamera) {
-    try { camera = await startCameraRecorder(recordingId); } catch { camera = null; }
+    try { camera = await startCameraRecorder(recordingId, opts.cameraStream); } catch { camera = null; }
   }
   if (camera) await db.recordings.update(recordingId, { hasCamera: true });
 

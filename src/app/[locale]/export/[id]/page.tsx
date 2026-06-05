@@ -11,7 +11,8 @@ import { WorkspaceShellToggle } from '@/components/WorkspaceShellToggle';
 import { I } from '@/components/icons';
 import { getRecording, deleteRecording } from '@/lib/db-client';
 import { getCurrentOwnerKey } from '@/lib/ownerKey';
-import type { ExportConfig, RecordingMetadata } from '@/types/recording';
+import type { AspectRatio, ExportConfig, RecordingMetadata, RecordingSetupConfig } from '@/types/recording';
+import { ASPECT_PRESETS } from '@/types/recording';
 import { Link, useRouter } from '@/i18n/navigation';
 
 const DEFAULT_CONFIG: ExportConfig = {
@@ -20,6 +21,38 @@ const DEFAULT_CONFIG: ExportConfig = {
   fps: 15,
   withWatermark: true,
 };
+
+/** 自定义 W×H → 最接近的预设比例（ExportConfig.aspectRatio 只接受预设）。 */
+function nearestPreset(w: number, h: number): AspectRatio {
+  if (!w || !h) return '16:9';
+  const target = w / h;
+  let best: AspectRatio = '16:9';
+  let bestDiff = Infinity;
+  for (const [id, p] of Object.entries(ASPECT_PRESETS) as [AspectRatio, (typeof ASPECT_PRESETS)[AspectRatio]][]) {
+    const diff = Math.abs(p.width / p.height - target);
+    if (diff < bestDiff) { bestDiff = diff; best = id; }
+  }
+  return best;
+}
+
+/** 录制前 Setup 配置 → 导出默认（沿用比例 / 裁切模式 / 含工作区 / 裁切框）。 */
+function exportDefaultsFromSetup(setup: RecordingSetupConfig): ExportConfig {
+  const base: ExportConfig = { ...DEFAULT_CONFIG, includeWorkspaceShell: setup.includeWorkspaceShell };
+  if (setup.framing === 'default') {
+    return { ...base, aspectRatio: '16:9', croppingMode: 'fit_all_content' };
+  }
+  if (setup.framing === 'custom') {
+    const out = setup.customOutput;
+    return {
+      ...base,
+      aspectRatio: nearestPreset(out?.width ?? 16, out?.height ?? 9),
+      croppingMode: 'follow_viewport',
+      cropWindow: setup.cropWindow,
+      customOutput: out,
+    };
+  }
+  return { ...base, aspectRatio: setup.framing, croppingMode: 'follow_viewport', cropWindow: setup.cropWindow };
+}
 
 function fmtDuration(ms: number): string {
   const s = Math.round(ms / 1000);
@@ -63,7 +96,11 @@ export default function ExportRecordingPage(): JSX.Element {
       .then((ownerKey) => getRecording(id, ownerKey))
       .then((m) => {
         if (!m) setLoadError(locale === 'en' ? `Recording not found: ${id}` : `录制不存在：${id}`);
-        else setMeta(m);
+        else {
+          setMeta(m);
+          // 录制前 Setup 锁定的比例/裁切/含工作区 → 作为导出默认
+          if (m.setup) setConfig(exportDefaultsFromSetup(m.setup));
+        }
       })
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'load_failed'));
   }, [id, locale]);
@@ -71,6 +108,16 @@ export default function ExportRecordingPage(): JSX.Element {
   const handlePaidChange = useCallback((isPaidNow: boolean) => {
     if (isPaidNow) setConfig((c) => ({ ...c, withWatermark: false }));
   }, []);
+
+  // 改比例（偏离录制锁定的 framing）时丢弃裁切框/自定义输出，回退居中预设，避免比例不符拉伸。
+  const handleConfigChange = useCallback((next: ExportConfig) => {
+    setConfig((prev) => {
+      if (next.aspectRatio !== prev.aspectRatio && meta?.setup?.framing !== next.aspectRatio) {
+        return { ...next, cropWindow: undefined, customOutput: undefined };
+      }
+      return next;
+    });
+  }, [meta]);
 
   const handleDelete = useCallback(async () => {
     if (!id) return;
@@ -226,8 +273,8 @@ export default function ExportRecordingPage(): JSX.Element {
           style={{ width: 420, background: 'var(--paper)' }}
         >
           <div className="space-y-6">
-            <WorkspaceShellToggle recordingId={id} config={config} onChange={setConfig} />
-            <ExportRatioPicker config={config} onChange={setConfig} />
+            <WorkspaceShellToggle recordingId={id} config={config} onChange={handleConfigChange} />
+            <ExportRatioPicker config={config} onChange={handleConfigChange} />
             <div style={{ height: 1.5, background: 'var(--ink)', opacity: 0.4 }} />
             <ExportPanel
               recordingId={id}

@@ -17,3 +17,6 @@ supabase/.branches/
 test-results/
 playwright-report/
 playwright/.cache/
+# 自托管的 Excalidraw 资源（由 scripts/copy-excalidraw-assets.mjs 生成）
+public/excalidraw-assets/
+public/excalidraw-assets-dev/
