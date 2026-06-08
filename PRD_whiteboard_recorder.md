@@ -1,9 +1,10 @@
 # PRD：白板录制工具
-**版本**：v0.6.4  
+**版本**：v0.6.5  
 **状态**：开发中  
 **作者**：—  
-**最后更新**：2026-06-06  
-**变更**：v0.6.4 - 关键用户事件落库 Supabase（`analytics_events` + `/api/analytics` + 统一 `trackEvent` 双写）；后台分析 Dashboard `/admin/analytics`（漏斗/时序/排行，ADMIN_SECRET 鉴权）；Library 页 1:1 重做（搜索 + 筛选 + 排序 + grid/list 视图切换）。详见「## 十一」最新一条。  
+**最后更新**：2026-06-08  
+**变更**：v0.6.5 - 导出页按 `editor.jsx` 1:1 重做为编辑器（顶栏可改名 + Share/Export · 左播放器 + 时间轴 · 右按 tier 分级 Tab）+ 功能性时间轴裁剪（单 in/out 段，`recording.segments`，导出按段裁剪、ffmpeg `-ss` 对齐音频/摄像头/字幕）。详见「## 十一」最新一条。  
+**历史变更**：v0.6.4 - 关键用户事件落库 Supabase（`analytics_events` + `/api/analytics` + 统一 `trackEvent` 双写）；后台分析 Dashboard `/admin/analytics`（漏斗/时序/排行，ADMIN_SECRET 鉴权）；Library 页 1:1 重做（搜索 + 筛选 + 排序 + grid/list 视图切换）。详见「## 十一」最新一条。  
 **历史变更**：v0.6.3 - 修 Excalidraw unpkg CDN ChunkLoadError（自托管资源）；裁切框升级为可拖拽移动 + 四角缩放（预设锁比例 / 自定义自由框选 + 框旁 W×H 实时联动），导出按框定区域输出；选定裁切框后摄像头限框内移动。详见「## 十一」。  
 **历史变更**：v0.6.2 - 设计重构 Phase 2：录制前 Setup 面板（比例分组 + 摄像头配置 + 麦克风 + 含工作区开关 + 3 秒倒计时）+ 比例集扩到 10 预设 + 配置随录制持久化 + 画布裁切框 viewfinder + 导出默认沿用。详见「## 十一」。  
 **历史变更**：v0.6.1 - 会员年付价格全链路（`payment_config` 加 4 列年价/年付 product id、`/api/checkout/pro` 加 `billing`、升级弹窗/定价页月年切换、admin 校验扩展到年付槽位、Supabase 迁移）+ 定价页去除团队席位收费内容。详见「## 十一」。  
@@ -821,31 +822,34 @@ Pro/Max 导出（订阅状态验证）：
 
 ---
 
-#### 4. 导出页：录制完成后
+#### 4. 导出页 / 编辑器：录制完成后
+
+按设计稿（`editor.jsx`）重做为**编辑器**布局：顶栏（返回 + Logo + 可改项目名 + tier 标 + Share/Export）· 左列（播放器预览 + **时间轴**）· 右列（**按 tier 分级 Tab**）。
 
 ```
-┌────────────────────────────────────────────────────┐
-│  录制完成  时长：03:27   画幅：16:9              │
-│────────────────────────────────────────────────────│
-│                                                    │
-│   ▶  [  播放预览  ]   ← Web 播放器，行内预览       │
-│                                                    │
-│────────────────────────────────────────────────────│
-│  导出 MP4                                          │
-│  ○ 含水印（免费）    ● 无水印（单次 ¥X 或 Pro）   │
-│  [  渲染并下载  ]  预计耗时 ~3 分钟  进度条显示    │
-│────────────────────────────────────────────────────│
-│  🔒 生成字幕（Pro 起）                             │
-│  🔒 AI 讲义（Max 起）                             │
-│  🔒 分享链接（Max 起）                             │
-│                                                    │
-│  锁定功能点击后：滑出升级卡片，非打断弹窗          │
-└────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ ←  ✎ Excalicast   [ 我的录制标题____ ]   [PRO]   Share  Export │
+│──────────────────────────────────────────────────────────────│
+│  ┌── 左：预览 + 时间轴 ──┐  ┌── 右：分级 Tab ───────────────┐ │
+│  │  ▶  [  播放预览  ]      │  │ Export · Captions · Outline ·  │ │
+│  │                        │  │ Handout                        │ │
+│  │  ┌ TRIM ─ 保留 0:08 ─┐ │  │ ── Export ──                   │ │
+│  │  │ Canvas ▓▓▓▓▓▓▓▓   │ │  │  画幅比例 + 工作区开关          │ │
+│  │  │ Mic    ░▓▓▓▓▓░    │ │  │  ○含水印  ●无水印(单次/Pro)    │ │
+│  │  │ Captions ▓▓▓▓     │ │  │  [ 渲染并下载 ] 进度条          │ │
+│  │  │ ├┤裁掉  ▓保留▓  ├┤│ │  │ ── Captions(Pro) ──            │ │
+│  │  └───────────────────┘ │  │ ── Outline/Handout(Max) ──     │ │
+│  └────────────────────────┘  │  锁定档：LockBlock 升级块       │ │
+│                              └────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-- 导出页是最重要的付费转化入口，锁定功能用灰色 + 🔒 图标展示，保留可见性
-- 水印预览实时渲染在播放器右下角，让用户直观感受"有水印 vs 无水印"差距
-- 参考 Excalicord：功能分层清晰，免费功能不藏，付费功能可见但锁定
+- **顶栏**：项目名内联可编辑（复用 `updateRecordingTitle`）；tier 标签；Share / Export 按钮切到 Export Tab。
+- **左列**：`ExportPreview` 播放器 + `Timeline`（时间轴裁剪，见下）+ 删除录制。
+- **右列分级 Tab**（按 `useSubscription().tier`）：Export（比例 + 工作区开关 + 水印 + 导出）所有档可见；Captions=Pro、Outline/Handout=Max，锁定档渲染升级块点开 `ProUpgradeModal`。
+- **功能性时间轴裁剪（单 in/out 段）**：拖左右手柄设保留区间 `[inMs,outMs]`，框外（裁掉部分）变暗；改动去抖写入 `recording.segments`，导出按段裁剪输出（见「## 十一」）。多段 Split 留作后续。
+- 导出页是最重要的付费转化入口，锁定功能用 LockBlock 升级块展示，保留可见性。
+- 水印预览实时渲染在播放器右下角，让用户直观感受"有水印 vs 无水印"差距。
 
 ---
 
@@ -892,6 +896,12 @@ Pro/Max 导出（订阅状态验证）：
 ## 十一、实现进展与变更记录（持续同步）
 
 > 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
+
+- **2026-06-08｜导出页改编辑器 1:1 重做 + 功能性时间轴裁剪（设计 Phase 3）**：
+  1. **编辑器外壳 + 分级 Tab**：`/export/[id]` 按 `editor.jsx` 重做为编辑器布局——顶栏（返回 + Logo + 内联可改项目名 `updateRecordingTitle` + tier 标 + Share/Export）· 左列（`ExportPreview` 播放器 + `Timeline` + 删除）· 右列分级 Tab（Export 全档可见；Captions=Pro；Outline/Handout=Max，锁定档 LockBlock 点开 `ProUpgradeModal`）。Export Tab 复用 `ExportRatioPicker` + `WorkspaceShellToggle` + `ExportPanel`（`showAdvanced` 控制是否含字幕/讲义/分享段；Tab 化后这里关掉、由独立 Tab 承载）。
+  2. **裁剪数据模型 + 时间轴交互**：`RecordingMetadata.segments?: TimeSegment[]` + `ExportConfig.segments`（ms，缺省=整段）；`updateRecordingSegments(id, segments)`（`db-client`，校验/去零长/排序，空则存 undefined）。`src/components/editor/Timeline.tsx`：单 in/out 段拖左右手柄设保留区间、框外变暗、reset 复位；改动经导出页去抖（500ms）持久化进 `recording.segments` 并同步进 `config.segments`。
+  3. **导出管线按裁剪输出**：`exportPipeline` 读 `opts.segments?.[0]` 得 `trimIn/trimOut/outDurationMs`；帧只渲染落在保留段内的源时间（`t = trimIn + i/fps*1000`）、输出时间从 0 起；**裁剪时强制走 ffmpeg 兜底路径**（WebCodecs 整段编码音频无法裁音轨），音频/摄像头用 `-ss trimIn` 对齐；摄像头 overlay 的 `enable=between` 区间整体左移 `trimIn` 并钳到 `[0,outDurationMs]`；字幕烧录随帧源时间天然对齐；`-shortest` 保证输出 = 保留段时长。`default` 无裁剪时与现状完全一致。
+  涉及：`src/app/[locale]/export/[id]/page.tsx`、`src/components/editor/Timeline.tsx`（新）、`src/components/ExportPanel.tsx`（`showAdvanced`）、`src/types/recording.ts`、`src/lib/db-client.ts`、`src/services/exportPipeline.ts`、`src/messages/{en,zh}.json`。
 
 - **2026-06-06｜关键事件落库 Supabase + 后台分析 Dashboard + Library 页重做（设计 Phase 4）**：
   1. **事件分析基建**：新增 `analytics_events` 表（RLS 开启、无 client 策略，仅 service-role 读写）+ `/api/analytics`（POST，service-role insert，读登录态拿 user_id，白名单校验，始终 204 不阻塞）+ 客户端统一 `trackEvent`（`src/lib/analytics/{events,track}.ts`，双写 Vercel Analytics + `sendBeacon` 到自有库，带 sessionId/guestId/path/locale）。`TrackedLink` 与各埋点点改用 `trackEvent`。接入关键事件：`cta_start_recording`/`pricing_cta_click`/`content_cta_click`/`view_demo`/`feature_click`/`upgrade_modal_open`/`checkout_start`/`purchase_success`/`recording_start`/`recording_complete`/`recording_discard`/`export_success`/`subtitle_generate`/`handout_generate`/`share_create`/`library_view`/`library_search`/`library_filter`（`signup`/`login` 暂留白名单未接，避免页面加载噪声）。

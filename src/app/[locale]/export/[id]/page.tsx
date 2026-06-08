@@ -1,15 +1,20 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, type JSX } from 'react';
 import { useParams } from 'next/navigation';
 import { useLocale } from 'next-intl';
-import { AppHeader } from '@/components/AppHeader';
 import { ExportRatioPicker } from '@/components/ExportRatioPicker';
 import { ExportPreview } from '@/components/ExportPreview';
 import { ExportPanel, type ExportProgressState } from '@/components/ExportPanel';
 import { WorkspaceShellToggle } from '@/components/WorkspaceShellToggle';
-import { I } from '@/components/icons';
-import { getRecording, deleteRecording } from '@/lib/db-client';
+import { SubtitlePanel } from '@/components/SubtitlePanel';
+import { HandoutPanel } from '@/components/HandoutPanel';
+import { ProUpgradeModal } from '@/components/ProUpgradeModal';
+import { Timeline } from '@/components/editor/Timeline';
+import { I, LogoMark } from '@/components/icons';
+import { MonoTag } from '@/components/ui';
+import { useSubscription } from '@/hooks/useSubscription';
+import { getRecording, deleteRecording, updateRecordingTitle, updateRecordingSegments } from '@/lib/db-client';
 import { getCurrentOwnerKey } from '@/lib/ownerKey';
 import type { AspectRatio, ExportConfig, RecordingMetadata, RecordingSetupConfig } from '@/types/recording';
 import { ASPECT_PRESETS } from '@/types/recording';
@@ -54,36 +59,34 @@ function exportDefaultsFromSetup(setup: RecordingSetupConfig): ExportConfig {
   return { ...base, aspectRatio: setup.framing, croppingMode: 'follow_viewport', cropWindow: setup.cropWindow };
 }
 
-function fmtDuration(ms: number): string {
-  const s = Math.round(ms / 1000);
-  const mm = Math.floor(s / 60);
-  const ss = s % 60;
-  return `${mm}:${String(ss).padStart(2, '0')}`;
-}
+type Tab = 'export' | 'captions' | 'outline' | 'handout';
 
-function fmtTime(ts: number): string {
-  const d = new Date(ts);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
-
-export default function ExportRecordingPage(): JSX.Element {
+export default function EditorRecordingPage(): JSX.Element {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = params?.id ?? '';
   const locale = useLocale();
+  const en = locale === 'en';
+  const subscription = useSubscription();
+  const isPro = subscription.tier === 'pro' || subscription.tier === 'max';
+  const isMax = subscription.tier === 'max';
 
   const [meta, setMeta] = useState<RecordingMetadata | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [config, setConfig] = useState<ExportConfig>(DEFAULT_CONFIG);
   const [exportProgress, setExportProgress] = useState<ExportProgressState | null>(null);
   const [paymentDone, setPaymentDone] = useState(false);
+  const [tab, setTab] = useState<Tab>('export');
+  const [title, setTitle] = useState('');
+  const [upgradeOpen, setUpgradeOpen] = useState<false | 'pro' | 'max'>(false);
+  // 时间轴裁剪保留区间 [inMs, outMs]
+  const [inMs, setInMs] = useState(0);
+  const [outMs, setOutMs] = useState(0);
 
-  // Creem 在新标签页支付后会带 ?creem_purchase=… 跳回本导出页。消费该参数：给个「支付完成」
-  // 提示并清掉 query（避免刷新重复触发）。解锁态由下方 ExportPanel 新鲜挂载自动拉取。
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    if (!params.get('creem_purchase')) return;
+    const sp = new URLSearchParams(window.location.search);
+    if (!sp.get('creem_purchase')) return;
     setPaymentDone(true);
     window.history.replaceState(null, '', window.location.pathname + window.location.hash);
     const tid = setTimeout(() => setPaymentDone(false), 6000);
@@ -95,21 +98,23 @@ export default function ExportRecordingPage(): JSX.Element {
     getCurrentOwnerKey()
       .then((ownerKey) => getRecording(id, ownerKey))
       .then((m) => {
-        if (!m) setLoadError(locale === 'en' ? `Recording not found: ${id}` : `录制不存在：${id}`);
+        if (!m) setLoadError(en ? `Recording not found: ${id}` : `录制不存在：${id}`);
         else {
           setMeta(m);
-          // 录制前 Setup 锁定的比例/裁切/含工作区 → 作为导出默认
+          setTitle(m.title?.trim() || (en ? `Recording ${id.slice(0, 8)}` : `录制 ${id.slice(0, 8)}`));
           if (m.setup) setConfig(exportDefaultsFromSetup(m.setup));
+          const seg0 = m.segments?.[0];
+          setInMs(seg0 ? seg0.start : 0);
+          setOutMs(seg0 ? seg0.end : m.durationMs);
         }
       })
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'load_failed'));
-  }, [id, locale]);
+  }, [id, en]);
 
   const handlePaidChange = useCallback((isPaidNow: boolean) => {
     if (isPaidNow) setConfig((c) => ({ ...c, withWatermark: false }));
   }, []);
 
-  // 改比例（偏离录制锁定的 framing）时丢弃裁切框/自定义输出，回退居中预设，避免比例不符拉伸。
   const handleConfigChange = useCallback((next: ExportConfig) => {
     setConfig((prev) => {
       if (next.aspectRatio !== prev.aspectRatio && meta?.setup?.framing !== next.aspectRatio) {
@@ -119,216 +124,207 @@ export default function ExportRecordingPage(): JSX.Element {
     });
   }, [meta]);
 
+  const commitTitle = useCallback(() => {
+    if (!id) return;
+    void updateRecordingTitle(id, title);
+  }, [id, title]);
+
+  // 裁剪区间 → 同步进 config.segments（导出用）+ 去抖持久化到 recording.segments
+  useEffect(() => {
+    if (!meta) return;
+    const trimmed = inMs > 0 || outMs < meta.durationMs;
+    const segs = trimmed ? [{ start: inMs, end: outMs }] : undefined;
+    setConfig((c) => (JSON.stringify(c.segments) === JSON.stringify(segs) ? c : { ...c, segments: segs }));
+    const tid = setTimeout(() => { void updateRecordingSegments(id, trimmed ? [{ start: inMs, end: outMs }] : []); }, 500);
+    return () => clearTimeout(tid);
+  }, [inMs, outMs, meta, id]);
+
   const handleDelete = useCallback(async () => {
     if (!id) return;
-    const msg = locale === 'en' ? 'Delete this recording? Cannot be undone.' : '删除这条录制？此操作不可恢复。';
-    if (!confirm(msg)) return;
+    if (!confirm(en ? 'Delete this recording? Cannot be undone.' : '删除这条录制？此操作不可恢复。')) return;
     await deleteRecording(id, await getCurrentOwnerKey());
     router.push('/library');
-  }, [id, router, locale]);
-
-  const labels = locale === 'en'
-    ? { back: 'Back', recordingDone: 'Editor', localSavedAt: 'Saved locally', recordingPrefix: 'Project', withAudio: '🎤 with audio', withCamera: '🎥 with camera', delete: 'Delete recording', duration: 'Duration', ratio: 'Ratio', snapshots: 'Snapshots', audio: 'Audio', approx: '~', notRecorded: '—', notRecordedSub: 'not recorded', localStorage: 'local', backLibrary: 'Back to library', loading: 'Loading recording metadata…', paymentReceived: 'Payment received · unlocked' }
-    : { back: '返回', recordingDone: '编辑器', localSavedAt: '本机保存', recordingPrefix: '项目', withAudio: '🎤 含音频', withCamera: '🎥 含摄像头', delete: '删除录制', duration: '时长', ratio: '比例', snapshots: '快照', audio: '音频', approx: '约', notRecorded: '—', notRecordedSub: '未录', localStorage: '本地', backLibrary: '返回录制库', loading: '加载录制元数据…', paymentReceived: '支付完成 · 已解锁' };
+  }, [id, router, en]);
 
   if (loadError) {
     return (
-      <div className="flex h-full flex-col" style={{ background: 'var(--paper)' }}>
-        <AppHeader tier="free" />
+      <Shell>
         <div className="grid flex-1 place-items-center">
-          <div
-            className="px-8 py-6 text-center"
-            style={{
-              background: 'var(--paper)',
-              border: '1.6px solid var(--ink)',
-              borderRadius: 4,
-              boxShadow: '3px 3px 0 var(--ink)',
-            }}
-          >
-            <p style={{ fontSize: 13, color: 'var(--rec)', fontFamily: 'var(--font-mono)', letterSpacing: '0.04em' }}>{loadError}</p>
-            <Link
-              href="/library"
-              className="mt-4 inline-block"
-              style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink)', borderBottom: '1.5px solid var(--ink)', textDecoration: 'none', letterSpacing: '0.06em', textTransform: 'uppercase' }}
-            >
-              {labels.backLibrary}
+          <div className="px-8 py-6 text-center" style={CARD}>
+            <p style={{ fontSize: 13, color: 'var(--rec)', fontFamily: 'var(--font-mono)' }}>{loadError}</p>
+            <Link href="/library" className="mt-4 inline-block" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink)', borderBottom: '1.5px solid var(--ink)', textDecoration: 'none', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              {en ? 'Back to library' : '返回录制库'}
             </Link>
           </div>
         </div>
-      </div>
+      </Shell>
     );
   }
 
   if (!meta) {
     return (
-      <div className="flex h-full flex-col" style={{ background: 'var(--paper)' }}>
-        <AppHeader tier="free" />
-        <div
-          className="grid flex-1 place-items-center"
-          style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}
-        >
-          {labels.loading}
+      <Shell>
+        <div className="grid flex-1 place-items-center" style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          {en ? 'Loading recording…' : '加载录制…'}
         </div>
-      </div>
+      </Shell>
     );
   }
 
-  const snapshotsApprox = Math.round(meta.durationMs / 50);
+  const tierLabel = subscription.tier === 'max' ? 'MAX PLAN' : subscription.tier === 'pro' ? 'PRO PLAN' : 'FREE';
+  const tierVariant = subscription.tier === 'max' ? 'max' : subscription.tier === 'pro' ? 'pro' : 'soft';
+
+  const exportTab = (
+    <div className="space-y-5">
+      <WorkspaceShellToggle recordingId={id} config={config} onChange={handleConfigChange} />
+      <ExportRatioPicker config={config} onChange={handleConfigChange} />
+      <div style={{ height: 1.5, background: 'var(--ink)', opacity: 0.4 }} />
+      <ExportPanel recordingId={id} config={config} onConfigChange={setConfig} onPaidStateChange={handlePaidChange} onProgress={setExportProgress} />
+    </div>
+  );
+
+  const lockBlock = (target: 'pro' | 'max', title2: string, desc: string) => (
+    <div style={{ ...CARD, padding: 22 }} className="text-center">
+      <div className="mx-auto mb-4 grid h-12 w-12 place-items-center" style={{ background: target === 'max' ? 'var(--max)' : 'var(--pro)', border: '1.6px solid var(--ink)', borderRadius: 4, boxShadow: '3px 3px 0 var(--ink)' }}>
+        <I.Lock size={20} />
+      </div>
+      <div style={{ fontWeight: 700, fontSize: 16 }}>{title2}</div>
+      <p className="mt-2" style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5 }}>{desc}</p>
+      <button type="button" className="btn-sketch btn-sketch-primary mt-4" onClick={() => setUpgradeOpen(target)}>
+        <I.Sparkles size={13} /> {en ? `Upgrade to ${target.toUpperCase()}` : `升级 ${target.toUpperCase()}`}
+      </button>
+    </div>
+  );
+
+  const tabContent = (() => {
+    if (tab === 'captions') return isPro ? <SubtitlePanel open recordingId={id} onClose={() => {}} /> : lockBlock('pro', en ? 'Captions are a Pro feature' : '字幕是 Pro 功能', en ? 'Generate accurate subtitles from your audio.' : '从音频生成精准字幕。');
+    if (tab === 'outline' || tab === 'handout') return isMax ? <HandoutPanel recordingId={id} config={config} /> : lockBlock('max', en ? 'Outline & handout are Max features' : '大纲与讲义是 Max 功能', en ? 'Auto chapters + Markdown handout from your recording.' : '自动章节 + Markdown 讲义。');
+    return exportTab;
+  })();
+
+  const tabs: { id: Tab; label: string }[] = [
+    { id: 'export', label: en ? 'Export' : '导出' },
+    { id: 'captions', label: en ? 'Captions' : '字幕' },
+    { id: 'outline', label: en ? 'Outline' : '大纲' },
+    { id: 'handout', label: en ? 'Handout' : '讲义' },
+  ];
 
   return (
-    <div className="flex h-full flex-col" style={{ background: 'var(--paper-2)' }}>
-      <AppHeader tier="free" />
+    <Shell>
+      {/* Editor top bar */}
+      <div className="flex h-14 flex-shrink-0 items-center gap-3 px-4 sm:px-6" style={{ borderBottom: '1.8px solid var(--ink)', background: 'var(--paper)' }}>
+        <Link href="/library" className="grid h-8 w-8 place-items-center" style={{ border: '1.4px solid var(--ink)', background: 'var(--paper)', borderRadius: 3, color: 'var(--ink)' }} aria-label={en ? 'Back' : '返回'}>
+          <I.ChevronLeft size={14} />
+        </Link>
+        <LogoMark size={26} />
+        <div className="hidden h-5 sm:block" style={{ width: 1.5, background: 'var(--ink)', opacity: 0.4 }} />
+        <div className="min-w-0 flex-1">
+          <div className="label-mono" style={{ fontSize: 8.5 }}>// {en ? 'PROJECT' : '项目'}</div>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={commitTitle}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            maxLength={80}
+            className="w-full max-w-[420px] truncate bg-transparent outline-none"
+            style={{ border: 'none', fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}
+          />
+        </div>
+        <MonoTag variant={tierVariant as 'max' | 'pro' | 'soft'}>{tierLabel}</MonoTag>
+        <button type="button" className="btn-sketch hidden sm:inline-flex" onClick={() => setTab('export')} style={{ padding: '7px 12px' }}>
+          <I.Share size={13} /> {en ? 'Share' : '分享'}
+        </button>
+        <button type="button" className="btn-sketch btn-sketch-primary" onClick={() => setTab('export')} style={{ padding: '7px 14px' }}>
+          <I.Download size={13} /> {en ? 'Export' : '导出'}
+        </button>
+      </div>
 
       {paymentDone && (
-        <div
-          className="fixed left-1/2 top-4 z-50 -translate-x-1/2 px-4 py-2"
-          style={{
-            background: 'var(--ok, #1a7f37)',
-            color: '#fff',
-            border: '1.4px solid var(--ink)',
-            borderRadius: 4,
-            boxShadow: '3px 3px 0 var(--ink)',
-            fontFamily: 'var(--font-mono)',
-            fontSize: 12,
-          }}
-        >
-          {labels.paymentReceived}
+        <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 px-4 py-2" style={{ background: 'var(--ok, #1a7f37)', color: '#fff', border: '1.4px solid var(--ink)', borderRadius: 4, boxShadow: '3px 3px 0 var(--ink)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+          {en ? 'Payment received · unlocked' : '支付完成 · 已解锁'}
         </div>
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left: preview + meta */}
-        <div className="flex-1 overflow-auto px-8 py-8" style={{ borderRight: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}>
-          <div className="mx-auto" style={{ maxWidth: 760 }}>
-            <div className="mb-2 flex items-baseline gap-3">
-              <Link
-                href="/library"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 30,
-                  height: 30,
-                  border: '1.4px solid var(--ink)',
-                  background: 'var(--paper)',
-                  borderRadius: 3,
-                  color: 'var(--ink)',
-                }}
-                aria-label={labels.back}
-              >
-                <I.ChevronLeft size={14} />
-              </Link>
-              <div className="label-mono" style={{ fontSize: 10 }}>// {labels.recordingPrefix.toUpperCase()}</div>
-            </div>
-
-            <h1
-              className="mt-1 mb-1"
-              style={{ fontSize: 32, fontWeight: 700, letterSpacing: '-0.025em', color: 'var(--ink)', lineHeight: 1.1 }}
-            >
-              {labels.recordingDone}
-            </h1>
-            <div
-              className="mb-6"
-              style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.04em', textTransform: 'uppercase' }}
-            >
-              {labels.recordingPrefix} {id.slice(0, 8)} · {labels.localSavedAt} {fmtTime(meta.startedAt)}
-              {meta.hasAudio && <> · {labels.withAudio}</>}
-              {meta.hasCamera && <> · {labels.withCamera}</>}
-            </div>
-
-            <div
-              style={{
-                background: 'var(--paper)',
-                border: '1.8px solid var(--ink)',
-                borderRadius: 4,
-                boxShadow: '4px 4px 0 var(--ink)',
-                padding: 14,
-              }}
-            >
+        {/* Left: player + timeline */}
+        <div className="flex flex-1 flex-col overflow-auto p-6" style={{ borderRight: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}>
+          <div className="flex flex-1 items-center justify-center">
+            <div className="w-full" style={{ maxWidth: 760, ...CARD, padding: 14 }}>
               <ExportPreview recordingId={id} metadata={meta} config={config} progress={exportProgress} />
             </div>
+          </div>
 
-            <div className="mt-5 grid grid-cols-4 gap-3">
-              <Stat label={labels.duration} value={fmtDuration(meta.durationMs)} mono />
-              <Stat label={labels.ratio} value={config.aspectRatio} mono sub={`${ASPECT_DIM[config.aspectRatio]}`} />
-              <Stat label={labels.snapshots} value={String(snapshotsApprox)} sub={labels.approx} />
-              <Stat label={labels.audio} value={meta.hasAudio ? 'Opus 32k' : labels.notRecorded} sub={meta.hasAudio ? labels.localStorage : labels.notRecordedSub} />
-            </div>
+          {/* Timeline — 裁剪保留区间（导出按之输出） */}
+          <div className="mt-5">
+            <Timeline
+              durationMs={meta.durationMs}
+              inMs={inMs}
+              outMs={outMs}
+              onChange={(ni, no) => { setInMs(ni); setOutMs(no); }}
+              hasAudio={meta.hasAudio}
+              hasCaptions={!!meta.subtitleSrt}
+              labels={{
+                split: en ? 'Split' : '切分',
+                trim: en ? 'Trim' : '裁剪',
+                reset: en ? 'Reset' : '重置',
+                kept: en ? 'Kept' : '保留',
+                canvas: en ? 'Canvas' : '画面',
+                mic: en ? 'Mic' : '麦克风',
+                captions: en ? 'Captions' : '字幕',
+              }}
+            />
+          </div>
 
-            <div className="mt-5 flex justify-end">
-              <button
-                onClick={handleDelete}
-                className="btn-sketch"
-                style={{ padding: '7px 12px', fontSize: 10, color: 'var(--rec)', borderColor: 'var(--rec)' }}
-              >
-                <I.Trash size={12} /> {labels.delete}
-              </button>
-            </div>
+          <div className="mt-4 flex justify-end">
+            <button onClick={handleDelete} className="btn-sketch" style={{ padding: '7px 12px', fontSize: 10, color: 'var(--rec)', borderColor: 'var(--rec)' }}>
+              <I.Trash size={12} /> {en ? 'Delete recording' : '删除录制'}
+            </button>
           </div>
         </div>
 
-        {/* Right: sidebar */}
-        <aside
-          className="flex-shrink-0 overflow-y-auto p-6"
-          style={{ width: 420, background: 'var(--paper)' }}
-        >
-          <div className="space-y-6">
-            <WorkspaceShellToggle recordingId={id} config={config} onChange={handleConfigChange} />
-            <ExportRatioPicker config={config} onChange={handleConfigChange} />
-            <div style={{ height: 1.5, background: 'var(--ink)', opacity: 0.4 }} />
-            <ExportPanel
-              recordingId={id}
-              config={config}
-              onConfigChange={setConfig}
-              onPaidStateChange={handlePaidChange}
-              onProgress={setExportProgress}
-            />
+        {/* Right: tabbed panel */}
+        <aside className="flex-shrink-0 overflow-y-auto p-6" style={{ width: 420, background: 'var(--paper)' }}>
+          <div className="mb-5 flex gap-1" style={{ borderBottom: '1.5px solid var(--ink)' }}>
+            {tabs.map((tb) => {
+              const active = tab === tb.id;
+              return (
+                <button
+                  key={tb.id}
+                  type="button"
+                  onClick={() => setTab(tb.id)}
+                  style={{
+                    padding: '8px 12px', marginBottom: -1.5,
+                    background: active ? 'var(--hi)' : 'transparent',
+                    border: active ? '1.4px solid var(--ink)' : '1.4px solid transparent',
+                    borderBottom: active ? 'none' : '1.4px solid transparent',
+                    borderRadius: '3px 3px 0 0',
+                    fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                    color: 'var(--ink)', cursor: 'pointer',
+                  }}
+                >
+                  {tb.label}
+                </button>
+              );
+            })}
           </div>
+          {tabContent}
         </aside>
       </div>
-    </div>
+
+      <ProUpgradeModal
+        open={!!upgradeOpen}
+        tier={upgradeOpen === 'max' ? 'max' : 'pro'}
+        onClose={() => setUpgradeOpen(false)}
+        onUpgraded={() => { setUpgradeOpen(false); void subscription.refresh(); }}
+      />
+    </Shell>
   );
 }
 
-const ASPECT_DIM: Record<string, string> = {
-  '16:9': '1280×720',
-  '9:16': '720×1280',
-  '1:1':  '960×960',
-  '4:5':  '864×1080',
+const CARD: React.CSSProperties = {
+  background: 'var(--paper)', border: '1.8px solid var(--ink)', borderRadius: 4, boxShadow: '4px 4px 0 var(--ink)',
 };
 
-function Stat({ label, value, sub, mono }: { label: string; value: string; sub?: string; mono?: boolean }): JSX.Element {
-  return (
-    <div
-      style={{
-        background: 'var(--paper)',
-        border: '1.4px solid var(--ink)',
-        borderRadius: 3,
-        padding: 12,
-      }}
-    >
-      <div className="label-mono" style={{ fontSize: 9 }}>{label}</div>
-      <div
-        className="mt-1"
-        style={{
-          fontSize: 18,
-          fontWeight: 700,
-          letterSpacing: '-0.01em',
-          color: 'var(--ink)',
-          fontFamily: mono ? 'var(--font-mono)' : 'var(--font-display)',
-          fontVariantNumeric: mono ? 'tabular-nums' : undefined,
-        }}
-      >
-        {value}
-      </div>
-      {sub && (
-        <div
-          className="mt-0.5"
-          style={{ fontSize: 10.5, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}
-        >
-          {sub}
-        </div>
-      )}
-    </div>
-  );
+function Shell({ children }: { children: React.ReactNode }): JSX.Element {
+  return <div className="flex h-full flex-col" style={{ background: 'var(--paper-2)' }}>{children}</div>;
 }

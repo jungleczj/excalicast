@@ -292,7 +292,14 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const preset = ASPECT_PRESETS[opts.aspectRatio];
   const fps = opts.fps;
   const durationMs = metadata.durationMs;
-  const totalFrames = Math.max(1, Math.round((durationMs / 1000) * fps));
+
+  // 时间轴裁剪：单 in/out 段（segments[0]）。缺省=整段。导出只输出 [trimIn,trimOut]，
+  // 帧的源时间从 trimIn 起算、输出时间从 0 起算。音频/摄像头用 ffmpeg -ss 对齐。
+  const trimIn = Math.max(0, Math.min(durationMs, opts.segments?.[0]?.start ?? 0));
+  const trimOut = Math.max(trimIn + 1, Math.min(durationMs, opts.segments?.[0]?.end ?? durationMs));
+  const trimmed = trimIn > 0 || trimOut < durationMs;
+  const outDurationMs = trimOut - trimIn;
+  const totalFrames = Math.max(1, Math.round((outDurationMs / 1000) * fps));
 
   const filesForExport: Record<string, unknown> = {};
   for (const bf of binaryFiles) filesForExport[bf.fileId] = bf.data;
@@ -373,7 +380,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
 
   // 单帧时变输入（便宜，可在去重前算）
   const frameInputs = (i: number) => {
-    const t = (i / fps) * 1000;
+    const t = trimIn + (i / fps) * 1000;
     const snap = snapshotAt(snapshots, t);
     const shellAtTframe = useShell ? (shellAt(decodedShells, t) as DecodedShell | null) : null;
     const cueAtT = cues.length > 0 ? cueAt(cues, t) : null;
@@ -533,7 +540,9 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
 
   // —— WebCodecs 硬件编码主路径：浏览器支持时启用，失败自动回退 ffmpeg ——
   // 含摄像头时尝试用 VideoDecoder+webm 解复用把摄像头帧在画布内合成；解码不可用/失败 → 回退。
-  if ('VideoEncoder' in globalThis && 'AudioEncoder' in globalThis) {
+  // 裁剪时强制走 ffmpeg 兜底路径：WebCodecs 路径目前整段编码音频，无法按 in/out 裁音轨。
+  // ffmpeg 路径用 -ss 对音频/摄像头做精确裁剪，保证音画与帧的输出时间一致。
+  if (!trimmed && 'VideoEncoder' in globalThis && 'AudioEncoder' in globalThis) {
     try {
       if (cameraBlob) {
         cameraSource = await createCameraFrameSource(cameraBlob); // 失败抛错 → 回退 ffmpeg
@@ -614,8 +623,10 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   let nextIdx = 1;
   let audioIdx: number | null = null;
   let cameraIdx: number | null = null;
-  if (audioFile) { inputs.push('-i', audioFile); audioIdx = nextIdx++; }
-  if (cameraFile) { inputs.push('-i', cameraFile); cameraIdx = nextIdx++; }
+  // 裁剪时对音频/摄像头先 -ss 到 trimIn，使其源时间与帧的输出时间（从 0 起）对齐。
+  const ssArgs = trimmed ? ['-ss', (trimIn / 1000).toFixed(3)] : [];
+  if (audioFile) { inputs.push(...ssArgs, '-i', audioFile); audioIdx = nextIdx++; }
+  if (cameraFile) { inputs.push(...ssArgs, '-i', cameraFile); cameraIdx = nextIdx++; }
 
   // filter 链：仅保留 camera overlay（人像气泡用 ffmpeg 合成是为了用视频流，
   // 不能简单 burn 进 PNG —— 摄像头视频独立时间线）
@@ -640,9 +651,13 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         h: sh,
       };
     }
-    const segments = buildCameraSegments(cameraEvents, durationMs, camBounds);
+    const rawSegments = buildCameraSegments(cameraEvents, durationMs, camBounds);
+    // 用绝对时间建段，再整体左移 trimIn 并钳到 [0,outDurationMs]，与 -ss 后的摄像头/帧输出时间对齐。
+    const segments = rawSegments
+      .map((seg) => ({ ...seg, startMs: Math.max(0, seg.startMs - trimIn), endMs: Math.min(outDurationMs, seg.endMs - trimIn) }))
+      .filter((seg) => seg.endMs - seg.startMs >= 50);
 
-    if (segments.length === 0) {
+    if (rawSegments.length === 0) {
       // Legacy / 没有位置事件：静态右下角，落在 camBounds 内（shell 时即落在 letterboxed shell 区内）。
       const camSize = Math.max(16, Math.round(camBounds.h * 0.22));
       const overlayX = Math.round(camBounds.offX + camBounds.w - camSize - camBounds.w * 0.025);
@@ -652,7 +667,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       );
       filterParts.push(`${curLabel}[cam]overlay=${overlayX}:${overlayY}[v_with_cam]`);
       curLabel = '[v_with_cam]';
-    } else {
+    } else if (segments.length > 0) {
       // 1 路摄像头 split=N → 每段 scale + crop + hflip + geq → enable=between 叠加
       const labels = segments.map((_, i) => `[c${i}]`);
       filterParts.push(`[${cameraIdx}:v]split=${segments.length}${labels.join('')}`);

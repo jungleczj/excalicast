@@ -10,6 +10,7 @@ import type {
   RecordingMetadata,
   ShellCanvasRect,
   ShellSize,
+  TimeSegment,
   WhiteboardSnapshot,
   WorkspaceShellRow,
 } from '@/types/recording';
@@ -220,6 +221,14 @@ export async function updateRecordingTitle(recordingId: string, title: string): 
 export async function updateRecordingTags(recordingId: string, tags: string[]): Promise<void> {
   const clean = tags.map((s) => s.trim()).filter(Boolean).slice(0, 6);
   await getClientDb().recordings.update(recordingId, { tags: clean.length > 0 ? clean : undefined });
+}
+
+export async function updateRecordingSegments(recordingId: string, segments: TimeSegment[]): Promise<void> {
+  // 规整：去掉非法/零长段，按 start 排序；空数组存 undefined（=整段）。
+  const clean = segments
+    .filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start)
+    .sort((a, b) => a.start - b.start);
+  await getClientDb().recordings.update(recordingId, { segments: clean.length > 0 ? clean : undefined });
 }
 
 export async function saveSubtitleSrt(recordingId: string, srt: string): Promise<void> {

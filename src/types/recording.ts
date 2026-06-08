@@ -42,6 +42,14 @@ export interface RecordingMetadata {
   setup?: RecordingSetupConfig;
   /** 用户给录制打的类别标签（录制库卡片展示 + 可编辑）。 */
   tags?: string[];
+  /** 时间轴保留段（ms，相对录制开始）。缺省=整段 [0,durationMs]。导出按段裁剪输出。 */
+  segments?: TimeSegment[];
+}
+
+/** 保留段：导出时只输出 [start,end]（ms）内的内容，多段按序拼接。 */
+export interface TimeSegment {
+  start: number;
+  end: number;
 }
 
 export interface AudioChunk {
@@ -135,6 +143,8 @@ export interface ExportConfig {
   cropWindow?: CropWindow;
   /** Custom framing 的输出像素尺寸（优先于 ASPECT_PRESETS）。 */
   customOutput?: { width: number; height: number };
+  /** 时间轴裁剪保留段（ms）；缺省=整段。导出只输出这些段、按序拼接。 */
+  segments?: TimeSegment[];
 }
 
 export interface ShellCanvasRect {

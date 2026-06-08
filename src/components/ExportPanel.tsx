@@ -27,9 +27,11 @@ interface Props {
   onConfigChange: (next: ExportConfig) => void;
   onPaidStateChange?: (paid: boolean) => void;
   onProgress?: (state: ExportProgressState | null) => void;
+  /** 是否显示「进阶（字幕/讲义/分享）」捆绑区块。编辑器把这些拆到独立 Tab 时传 false。 */
+  showAdvanced?: boolean;
 }
 
-export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateChange, onProgress }: Props): JSX.Element {
+export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateChange, onProgress, showAdvanced = true }: Props): JSX.Element {
   const t = useTranslations('exportPanel');
   const subscription = useSubscription();
   const [paid, setPaid] = useState<boolean>(false);
@@ -280,6 +282,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
         )}
       </div>
 
+      {showAdvanced && (<>
       <div style={{ height: 1.5, background: 'var(--ink)', opacity: 0.4 }} />
 
       <div>
@@ -398,6 +401,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
           </div>
         )}
       </div>
+      </>)}
 
       {shareUrl && (
         <ShareLinkModal
