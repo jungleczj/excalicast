@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { track } from '@vercel/analytics';
+import { trackEvent } from '@/lib/analytics/track';
 import { exportRecording, downloadBlob } from '@/services/exportPipeline';
 import { isPaid } from '@/services/paymentClient';
 import { uploadRecording } from '@/services/cloudSync';
@@ -82,6 +82,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
       setShareUrl(j.url);
       setShareExpiresAt(j.expiresAt ?? 0);
       setShareModalOpen(true);
+      trackEvent('share_create', { recordingId });
     } catch (err) {
       setMaxFeatureMsg(err instanceof Error ? err.message : 'unknown');
     } finally {
@@ -124,7 +125,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
   }, [proUnlocked, onPaidStateChange]);
 
   const handleExport = useCallback(async () => {
-    track('feature_click', { feature: 'export', gated: !config.withWatermark && !effectivelyUnlocked });
+    trackEvent('feature_click', { feature: 'export', gated: !config.withWatermark && !effectivelyUnlocked });
     if (!config.withWatermark && !effectivelyUnlocked) {
       setPendingExport(true);
       setPaywallOpen(true);
@@ -160,6 +161,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
       const ratioTag = config.aspectRatio.replace(':', 'x');
       const wmTag = config.withWatermark ? 'wm' : 'clean';
       downloadBlob(blob, `excalicast_${recordingId.slice(0, 8)}_${ratioTag}_${wmTag}.mp4`);
+      trackEvent('export_success', { ratio: config.aspectRatio, watermark: config.withWatermark });
       setStatusMsg(t('doneStatus'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'export_failed');
@@ -313,7 +315,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
                   desc: t('subtitleDesc'),
                   actionLabel: subscription.permissions.subtitle ? t('subtitleAction') : t('subtitleActionLocked'),
                   onAction: () => {
-                    track('feature_click', { feature: 'subtitle', gated: !subscription.permissions.subtitle });
+                    trackEvent('feature_click', { feature: 'subtitle', gated: !subscription.permissions.subtitle });
                     setSubtitlePanelOpen((v) => !v);
                   },
                 },
@@ -342,7 +344,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
                   desc: t('handoutDesc'),
                   actionLabel: handoutOpen ? t('handoutTitle') : t('handoutGenerate'),
                   onAction: () => {
-                    track('feature_click', { feature: 'handout', gated: !subscription.permissions.handout });
+                    trackEvent('feature_click', { feature: 'handout', gated: !subscription.permissions.handout });
                     setHandoutOpen((v) => !v);
                   },
                 },
@@ -354,7 +356,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
                   desc: t('shareDesc'),
                   actionLabel: shareBusy ? t('shareCreating') : t('shareCreate'),
                   onAction: () => {
-                    track('feature_click', { feature: 'share', gated: !subscription.permissions.shareLink });
+                    trackEvent('feature_click', { feature: 'share', gated: !subscription.permissions.shareLink });
                     void handleCreateShareLink();
                   },
                   busy: shareBusy,

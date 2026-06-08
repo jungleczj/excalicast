@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { track } from '@vercel/analytics';
+import { trackEvent } from '@/lib/analytics/track';
 import { I } from '@/components/icons';
 import { LoginModal } from '@/components/LoginModal';
 import { openProSubscriptionCheckout, closeCheckout } from '@/services/paddleClient';
@@ -60,7 +60,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
           if (r.ok) {
             const j = await r.json();
             if (isMax ? j.tier === 'max' : (j.tier === 'pro' || j.tier === 'max')) {
-              track('purchase_success', { kind: 'subscription', tier });
+              trackEvent('purchase_success', { kind: 'subscription', tier });
               setStatusMsg(t('synced'));
               await refreshTier();
               onUpgraded?.();
@@ -80,6 +80,11 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
     }
   };
 
+  // 弹窗打开埋点（升级转化漏斗入口）
+  useEffect(() => {
+    if (open) trackEvent('upgrade_modal_open', { tier });
+  }, [open, tier]);
+
   // Creem 在新标签页支付：付完切回本标签立即重查 tier，避免只靠定时轮询（可能超时）。
   // 订阅入账后只关弹窗回到已解锁面板——不自动执行任何功能。
   useEffect(() => {
@@ -93,7 +98,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
         if (!r.ok) return;
         const j = await r.json();
         if (isMax ? j.tier === 'max' : (j.tier === 'pro' || j.tier === 'max')) {
-          track('purchase_success', { kind: 'subscription', tier });
+          trackEvent('purchase_success', { kind: 'subscription', tier });
           setStatusMsg(t('synced'));
           await refreshTier();
           onUpgraded?.();
@@ -127,7 +132,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
 
   const openCheckoutForProvider = async () => {
     setBusy(true);
-    track('checkout_start', { kind: 'subscription', tier, billing: effectiveBilling });
+    trackEvent('checkout_start', { kind: 'subscription', tier, billing: effectiveBilling });
     try {
       const res = await fetch('/api/checkout/pro', {
         method: 'POST',

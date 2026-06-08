@@ -40,6 +40,8 @@ export interface RecordingMetadata {
   ownerKey?: string;
   /** 录制前 Setup 面板锁定的画幅/摄像头/工作区配置；导出默认沿用。旧录制无此字段。 */
   setup?: RecordingSetupConfig;
+  /** 用户给录制打的类别标签（录制库卡片展示 + 可编辑）。 */
+  tags?: string[];
 }
 
 export interface AudioChunk {

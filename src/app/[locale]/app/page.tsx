@@ -16,6 +16,7 @@ import { useSubscription } from '@/hooks/useSubscription';
 import { startRecording, type SessionHandle } from '@/services/recordingSession';
 import { acquireMicStream } from '@/services/audioRecorder';
 import { acquireCameraStream } from '@/services/cameraRecorder';
+import { trackEvent } from '@/lib/analytics/track';
 import type { WhiteboardChangeFn } from '@/components/Whiteboard';
 import type { CameraCorner, CameraShape, CropWindow, RecordingSetupConfig } from '@/types/recording';
 import { useRouter } from '@/i18n/navigation';
@@ -65,6 +66,7 @@ export default function HomePage(): JSX.Element {
   const [setupOpen, setSetupOpen] = useState(false);
   const [setupConfig, setSetupConfig] = useState<RecordingSetupConfig>(DEFAULT_SETUP);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [framingWarn, setFramingWarn] = useState(false);
   const pendingStartRef = useRef<{ config: RecordingSetupConfig; pos: { x: number; y: number }; size: number } | null>(null);
   // 取景阶段预采集的麦克风流（开录时复用，避免倒计时后才申请权限）
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
@@ -203,6 +205,7 @@ export default function HomePage(): JSX.Element {
         x: Math.max(fx, Math.min(fx + fw - cameraSize, p.x)),
         y: Math.max(fy, Math.min(fy + fh - cameraSize, p.y)),
       };
+      setFramingWarn(false); // 钳制后必在框内，清除告警
     }
     setCameraPos(p);
     // 录制中：把 viewport 坐标 + 当前 size 喂给 session，写到 cameraPositions 表
@@ -337,6 +340,7 @@ export default function HomePage(): JSX.Element {
       setHasCamera(session.hasCamera);
       setCameraStream(session.cameraStream);
       setState('recording');
+      trackEvent('recording_start', { framing: config.framing, withCamera: config.camera.enabled, withAudio: session.hasAudio });
       // 录制开始种一颗 t=0 事件，定位当前气泡位置
       if (session.hasCamera) {
         session.recordCameraMove(startPos.x, startPos.y, startSize);
@@ -373,11 +377,34 @@ export default function HomePage(): JSX.Element {
     setState('framing');
   }, [cameraStream]);
 
-  // 取景确认：用当前相机位置/尺寸构建待开录参数 → 启动 3 秒倒计时
+  // 取景确认：校验摄像头在裁切框内 → 用当前相机位置/尺寸构建待开录参数 → 启动 3 秒倒计时
   const handleConfirmFraming = useCallback(() => {
+    // 开了摄像头 + 固定比例 + 已有裁切框时，气泡必须完全落在框内才允许开录
+    if (cameraEnabled && setupConfig.framing !== 'default') {
+      const cw = cropWindowRef.current;
+      const area = canvasAreaRef.current;
+      if (cw && area) {
+        const r = area.getBoundingClientRect();
+        const fx = r.left + cw.rx * r.width;
+        const fy = r.top + cw.ry * r.height;
+        const fw = cw.rw * r.width;
+        const fh = cw.rh * r.height;
+        const EPS = 1;
+        const inside =
+          cameraPos.x >= fx - EPS &&
+          cameraPos.y >= fy - EPS &&
+          cameraPos.x + cameraSize <= fx + fw + EPS &&
+          cameraPos.y + cameraSize <= fy + fh + EPS;
+        if (!inside) {
+          setFramingWarn(true);
+          return; // 不进入倒计时
+        }
+      }
+    }
+    setFramingWarn(false);
     pendingStartRef.current = { config: setupConfig, pos: cameraPos, size: cameraSize };
     setCountdown(3);
-  }, [setupConfig, cameraPos, cameraSize]);
+  }, [setupConfig, cameraPos, cameraSize, cameraEnabled]);
 
   // 取景取消：停掉摄像头/麦克风预览、清裁切框、回 idle
   const handleCancelFraming = useCallback(() => {
@@ -386,6 +413,7 @@ export default function HomePage(): JSX.Element {
     micStreamRef.current?.getTracks().forEach((tk) => tk.stop());
     setMicStream(null);
     setCropWindow(null);
+    setFramingWarn(false);
     setState('idle');
   }, [cameraStream]);
 
@@ -468,6 +496,7 @@ export default function HomePage(): JSX.Element {
     setState('processing');
     try {
       const meta = await s.stop();
+      trackEvent('recording_complete', { durationMs: meta.durationMs, framing: setupConfig.framing, hasCamera: meta.hasCamera, hasAudio: meta.hasAudio });
       // 持久化录制中最终框定的裁切框到 recording.setup（导出默认沿用）
       const cw = cropWindowRef.current;
       if (cw && setupConfig.framing !== 'default') {
@@ -505,6 +534,7 @@ export default function HomePage(): JSX.Element {
     const s = sessionRef.current;
     if (!s) return;
     if (!confirm(t('discardConfirm'))) return;
+    trackEvent('recording_discard');
     try {
       const meta = await s.stop();
       const { deleteRecording } = await import('@/lib/db-client');
@@ -540,6 +570,7 @@ export default function HomePage(): JSX.Element {
             onChange={setCropWindow}
             customOutput={customOutput}
             onCustomOutputChange={setCustomOutput}
+            interactive={state === 'framing'}
           />
         )}
 
@@ -565,6 +596,7 @@ export default function HomePage(): JSX.Element {
               startLabel={t('framingStart')}
               cancelLabel={t('framingCancel')}
               micStream={micStream}
+              warn={framingWarn ? t('framingCameraOutside') : null}
               onStart={handleConfirmFraming}
               onCancel={handleCancelFraming}
             />
@@ -716,6 +748,7 @@ function FramingBar({
   startLabel,
   cancelLabel,
   micStream,
+  warn,
   onStart,
   onCancel,
 }: {
@@ -723,6 +756,7 @@ function FramingBar({
   startLabel: string;
   cancelLabel: string;
   micStream: MediaStream | null;
+  warn?: string | null;
   onStart: () => void;
   onCancel: () => void;
 }): JSX.Element {
@@ -737,7 +771,9 @@ function FramingBar({
         boxShadow: '4px 4px 0 var(--ink)',
       }}
     >
-      <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-2)', letterSpacing: '0.02em' }}>{hint}</span>
+      {warn
+        ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--rec)', fontWeight: 600, letterSpacing: '0.02em' }}>{warn}</span>
+        : <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-2)', letterSpacing: '0.02em' }}>{hint}</span>}
       <MicLevelMeter stream={micStream} />
       <button type="button" className="btn-sketch" onClick={onCancel} style={{ padding: '7px 14px' }}>
         {cancelLabel}

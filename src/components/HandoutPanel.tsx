@@ -6,6 +6,7 @@ import { marked } from 'marked';
 import { I } from '@/components/icons';
 import { uploadRecording } from '@/services/cloudSync';
 import { renderPreviewFrame } from '@/services/exportPipeline';
+import { trackEvent } from '@/lib/analytics/track';
 import type { ExportConfig } from '@/types/recording';
 
 interface Chapter {
@@ -145,6 +146,7 @@ export function HandoutPanel({ recordingId, config, onJumpToTime }: Props): JSX.
       const outline = j.outline ?? { title: j.title, chapters: j.chapters ?? [], keyframes: j.keyframes ?? [] };
       setKeyframeImgs({});
       setData({ outline, markdown: j.markdown, model: j.model, generatedAt: Date.now() });
+      trackEvent('handout_generate', { recordingId });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'unknown');
     } finally {

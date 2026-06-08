@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
 import { downloadSrt, pollSubtitleJob, submitSubtitleJob } from '@/services/subtitleClient';
 import { clearSubtitleSrt, getRecording, loadFullRecording, saveSubtitleSrt } from '@/lib/db-client';
+import { trackEvent } from '@/lib/analytics/track';
 
 /**
  * 客户端预检阈值：低于此值的音频几乎肯定无法被 ASR 识别。
@@ -149,6 +150,7 @@ export function SubtitlePanel({ open, recordingId, onClose, onSaved }: Props): J
         const finalSrt = r.srt ?? '';
         setSrt(finalSrt);
         setPhase('done');
+        if (finalSrt) trackEvent('subtitle_generate', { recordingId });
         if (pollRef.current) clearInterval(pollRef.current);
         pollRef.current = null;
         if (finalSrt) {

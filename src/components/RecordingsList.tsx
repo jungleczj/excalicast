@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Link, useRouter } from '@/i18n/navigation';
-import { listRecordings, deleteRecording, updateRecordingTitle, migrateRecordingsOwner } from '@/lib/db-client';
+import { listRecordings, deleteRecording, updateRecordingTitle, updateRecordingTags, migrateRecordingsOwner } from '@/lib/db-client';
 import { getOrCreateGuestId } from '@/lib/ownerKey';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -18,11 +18,19 @@ import {
 } from '@/services/cloudSync';
 import { useSubscription } from '@/hooks/useSubscription';
 import { I } from '@/components/icons';
+import { trackEvent } from '@/lib/analytics/track';
 import type { RecordingMetadata } from '@/types/recording';
+import { ThumbScene } from '@/components/ThumbScene';
 
 interface Props {
   refreshKey?: number;
+  /** 来自页面的搜索词（按标题过滤）。 */
+  query?: string;
 }
+
+type FilterKind = 'all' | 'unfinished' | 'backed' | 'local';
+type SortKind = 'newest' | 'oldest' | 'longest';
+type ViewKind = 'grid' | 'list';
 
 interface MergedItem {
   id: string;
@@ -96,18 +104,37 @@ function defaultTitle(m: { id: string; title?: string }, locale: string): string
   return locale === 'en' ? `Recording ${m.id.slice(0, 8)}` : `录制 ${m.id.slice(0, 8)}`;
 }
 
-const TINTS = [
-  '#FFF8E0',
-  '#FBF8FF',
-  '#E6F3EA',
-  '#FFEEEE',
-];
+/** 设计风格的标签 pill（首个用 hi 高亮）。 */
+function Pill({ children, hi = false }: { children: React.ReactNode; hi?: boolean }): JSX.Element {
+  return (
+    <span
+      className="inline-flex items-center gap-1"
+      style={{
+        padding: '2px 8px',
+        border: '1px solid var(--ink)',
+        background: hi ? 'var(--hi)' : 'var(--paper)',
+        fontFamily: 'var(--font-mono)',
+        fontSize: 9,
+        fontWeight: 600,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase',
+        borderRadius: 999,
+        color: 'var(--ink)',
+      }}
+    >
+      {children}
+    </span>
+  );
+}
 
 type BusyKind = 'upload' | 'download' | null;
 
-export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
+export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Element {
   const t = useTranslations('library');
   const locale = useLocale();
+  const [filter, setFilter] = useState<FilterKind>('all');
+  const [sort, setSort] = useState<SortKind>('newest');
+  const [view, setView] = useState<ViewKind>('grid');
   const router = useRouter();
   const subscription = useSubscription();
   const { user, loading: authLoading } = useAuth();
@@ -117,12 +144,15 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
   const [loaded, setLoaded] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<string>('');
+  const [editingTagsId, setEditingTagsId] = useState<string | null>(null);
+  const [tagsDraft, setTagsDraft] = useState<string>('');
   const [busy, setBusy] = useState<Record<string, BusyKind>>({});
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [bulkProgress, setBulkProgress] = useState<BulkUploadProgress | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const editInputRef = useRef<HTMLInputElement | null>(null);
+  const tagsInputRef = useRef<HTMLInputElement | null>(null);
 
   const refresh = useCallback(async () => {
     // 等 auth settle 再列表/认领：避免在登录态解析前用 guestId 误认领 legacy 录制。
@@ -168,6 +198,13 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
       editInputRef.current.select();
     }
   }, [editingId]);
+
+  useEffect(() => {
+    if (editingTagsId && tagsInputRef.current) {
+      tagsInputRef.current.focus();
+      tagsInputRef.current.select();
+    }
+  }, [editingTagsId]);
 
   const handleDelete = useCallback(async (id: string) => {
     if (!confirm(t('deleteConfirm'))) return;
@@ -233,6 +270,22 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
     setEditValue('');
   }, []);
 
+  const startEditTags = useCallback((it: MergedItem) => {
+    setEditingTagsId(it.id);
+    setTagsDraft((it.local?.tags ?? []).join(', '));
+  }, []);
+
+  const commitTags = useCallback(async (id: string) => {
+    const next = tagsDraft.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 6);
+    setEditingTagsId(null);
+    setTagsDraft('');
+    const item = items.find((it) => it.id === id);
+    if (item?.local) {
+      try { await updateRecordingTags(id, next); } catch { /* ignore */ }
+    }
+    await refresh();
+  }, [tagsDraft, items, refresh]);
+
   const commitEdit = useCallback(async (id: string) => {
     const next = editValue;
     setEditingId(null);
@@ -290,6 +343,30 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
     setSelectedIds(new Set());
     await refresh();
   }, [eligibleForBulkBackup, refresh, selectedPendingIds, t]);
+
+  const visibleItems = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const arr = items.filter((it) => {
+      const d = displayMeta(it);
+      if (filter === 'unfinished' && d.status !== 'recording') return false;
+      if (filter === 'backed' && !it.cloud) return false;
+      if (filter === 'local' && !!it.cloud) return false;
+      if (q && !defaultTitle(d, locale).toLowerCase().includes(q)) return false;
+      return true;
+    });
+    return arr.sort((a, b) => {
+      const da = displayMeta(a);
+      const db = displayMeta(b);
+      if (sort === 'oldest') return da.startedAt - db.startedAt;
+      if (sort === 'longest') return db.durationMs - da.durationMs;
+      return db.startedAt - da.startedAt;
+    });
+  }, [items, filter, sort, query, locale]);
+
+  const changeFilter = useCallback((f: FilterKind) => {
+    setFilter(f);
+    trackEvent('library_filter', { filter: f });
+  }, []);
 
   if (!loaded) {
     return (
@@ -468,15 +545,125 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
         </div>
       )}
 
+      {/* 控制栏：筛选 chip + 排序 + 视图切换 */}
+      <div
+        className="mb-5 flex flex-wrap items-center justify-between gap-3 px-4 py-2.5"
+        style={{ background: 'var(--paper-2)', border: '1.5px solid var(--ink)', borderRadius: 4, boxShadow: '3px 3px 0 var(--ink)' }}
+      >
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="label-mono" style={{ marginRight: 4 }}>{t('filterLabel')} ·</span>
+          {(['all', 'unfinished', 'backed', 'local'] as const).map((k) => {
+            const active = filter === k;
+            const label = k === 'all' ? t('filterAll') : k === 'unfinished' ? t('filterUnfinished') : k === 'backed' ? t('filterBackedUp') : t('filterLocal');
+            return (
+              <button
+                key={k}
+                type="button"
+                onClick={() => changeFilter(k)}
+                style={{
+                  padding: '5px 12px', border: '1.4px solid var(--ink)', borderRadius: 999,
+                  background: active ? 'var(--hi)' : 'var(--paper)',
+                  fontFamily: 'var(--font-mono)', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                  color: 'var(--ink)', cursor: 'pointer', boxShadow: active ? '2px 2px 0 var(--ink)' : 'none',
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="label-mono">{t('sortLabel')}</span>
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortKind)}
+            style={{ padding: '5px 10px', border: '1.4px solid var(--ink)', borderRadius: 2, fontFamily: 'var(--font-mono)', fontSize: 11, background: 'var(--paper)', color: 'var(--ink)', cursor: 'pointer' }}
+          >
+            <option value="newest">{t('sortNewest')}</option>
+            <option value="oldest">{t('sortOldest')}</option>
+            <option value="longest">{t('sortLongest')}</option>
+          </select>
+          <div style={{ width: 1.5, height: 22, background: 'var(--ink)', opacity: 0.4 }} />
+          <div className="flex" style={{ border: '1.4px solid var(--ink)', borderRadius: 2, overflow: 'hidden' }}>
+            {([['grid', I.Grid, t('viewGrid')], ['list', I.List, t('viewList')]] as const).map(([v, Ic, lbl]) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setView(v as ViewKind)}
+                title={lbl}
+                aria-label={lbl}
+                style={{ padding: '6px 10px', background: view === v ? 'var(--ink)' : 'var(--paper)', color: view === v ? 'var(--paper)' : 'var(--ink)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+              >
+                <Ic size={13} />
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {visibleItems.length === 0 ? (
+        <div className="p-12 text-center" style={{ border: '2px dashed var(--ink)', borderRadius: 4, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+          {t('noMatch')}
+        </div>
+      ) : view === 'list' ? (
+        <div className="grid gap-2.5">
+          {visibleItems.map((it) => {
+            const d = displayMeta(it);
+            const hasLocal = !!it.local;
+            const hasCloud = !!it.cloud;
+            const itemBusy = busy[d.id];
+            const row = (
+              <div className="flex items-center gap-4 px-3 py-2.5" style={{ background: 'var(--paper)', border: '1.5px solid var(--ink)', borderRadius: 4, boxShadow: '2px 2px 0 var(--ink)' }}>
+                <div className="relative flex-shrink-0 overflow-hidden" style={{ width: 88, height: 50, background: 'var(--paper-2)', border: '1.2px solid var(--ink)', borderRadius: 2 }}>
+                  {d.thumbnail ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={d.thumbnail} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="absolute inset-0 dots-fine-bg" style={{ opacity: 0.4 }} />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate" style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{defaultTitle(d, locale)}</div>
+                  <div className="mt-0.5 flex items-center gap-2" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)' }}>
+                    <span>{fmtDate(d.startedAt, locale)}</span>
+                    <span>·</span>
+                    <span>{fmtDuration(d.durationMs)}</span>
+                    {hasLocal && hasCloud && <span>· {t('badgeSynced')}</span>}
+                    {!hasLocal && hasCloud && <span>· {t('badgeCloud')}</span>}
+                    {d.hasAudio && <I.Mic size={11} />}
+                    {d.hasCamera && <I.Camera size={11} />}
+                  </div>
+                </div>
+                {hasLocal && (
+                  <Link href={`/export/${d.id}` as never} onClick={(e) => e.stopPropagation()} className="grid h-7 w-7 flex-shrink-0 place-items-center" style={{ background: 'var(--paper)', border: '1.3px solid var(--ink)', color: 'var(--ink)', borderRadius: 3 }} title={t('export')} aria-label={t('export')}>
+                    <I.Download size={13} />
+                  </Link>
+                )}
+                {hasLocal && (
+                  <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); void handleDelete(d.id); }} className="grid h-7 w-7 flex-shrink-0 place-items-center" style={{ background: 'var(--paper)', border: '1.3px solid var(--rec)', color: 'var(--rec)', borderRadius: 3 }} title={t('delete')} aria-label={t('delete')}>
+                    <I.Trash size={13} />
+                  </button>
+                )}
+              </div>
+            );
+            return hasLocal ? (
+              <Link key={d.id} href={`/play/${d.id}` as never} className="block">{row}</Link>
+            ) : (
+              <div key={d.id} className="block cursor-pointer" onClick={() => { if (!itemBusy) void handleDownload(d.id, 'play'); }}>{row}</div>
+            );
+          })}
+        </div>
+      ) : (
       <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
-        {items.map((it, i) => {
+        {visibleItems.map((it) => {
           const d = displayMeta(it);
-          const tint = TINTS[(d.id.charCodeAt(0) + i) % 4];
           const isEditing = editingId === d.id;
           const hasLocal = !!it.local;
           const hasCloud = !!it.cloud;
           const itemBusy = busy[d.id];
           const selected = selectedIds.has(d.id);
+          const tags = it.local?.tags ?? [];
+          const editingTags = editingTagsId === d.id;
 
           // 云端状态决定第三颗 hover 图标的样式 + 行为
           const cloudIcon = (() => {
@@ -520,30 +707,12 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
             <>
               <div
                 className="relative overflow-hidden"
-                style={{ aspectRatio: '16/9', background: tint, borderBottom: '1.4px solid var(--ink)' }}
+                style={{ aspectRatio: '16/9', margin: 12, background: 'var(--paper-3)', border: '1.4px solid var(--ink)', borderRadius: 3 }}
               >
-                {d.thumbnail ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={d.thumbnail} alt="thumbnail" className="h-full w-full object-cover" />
-                ) : (
-                  <>
-                    <div
-                      className="absolute inset-0 dots-fine-bg"
-                      style={{ opacity: 0.4 }}
-                    />
-                    <div className="absolute inset-0 grid place-items-center" style={{ opacity: 0.65 }}>
-                      <svg width="62%" height="62%" viewBox="0 0 200 120">
-                        <rect x="20" y="30" width="50" height="30" fill="#FFF8E0" stroke="#1A1A1A" strokeWidth="1.5" rx="2" />
-                        <rect x="130" y="30" width="50" height="30" fill="#FBF8FF" stroke="#1A1A1A" strokeWidth="1.5" rx="2" />
-                        <line x1="70" y1="45" x2="125" y2="45" stroke="#1A1A1A" strokeWidth="1.5" />
-                        <polygon points="130,45 122,41 122,49" fill="#1A1A1A" />
-                        <rect x="65" y="80" width="70" height="22" fill="#E6F3EA" stroke="#1A1A1A" strokeWidth="1.5" rx="2" />
-                      </svg>
-                    </div>
-                  </>
-                )}
+                <div className="absolute inset-0 dots-fine" style={{ opacity: 0.5 }} />
+                <ThumbScene seed={d.id} />
                 <span
-                  className="absolute bottom-2 right-2"
+                  className="absolute right-2 top-2 group-hover:opacity-0"
                   style={{
                     background: 'var(--ink)',
                     color: 'var(--paper)',
@@ -553,6 +722,7 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
                     padding: '3px 8px',
                     borderRadius: 2,
                     letterSpacing: '0.04em',
+                    transition: 'opacity .15s',
                   }}
                 >
                   {fmtDuration(d.durationMs)}
@@ -644,10 +814,13 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
                     }}
                   />
                 ) : (
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-start gap-1">
                     <div
-                      className="min-w-0 flex-1 truncate"
-                      style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', letterSpacing: '-0.01em' }}
+                      className="min-w-0 flex-1"
+                      style={{
+                        fontSize: 14, fontWeight: 600, color: 'var(--ink)', letterSpacing: '-0.01em', lineHeight: 1.3,
+                        display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                      }}
                     >
                       {defaultTitle(d, locale)}
                     </div>
@@ -670,69 +843,53 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
                     )}
                   </div>
                 )}
+                {/* 元信息行：录制于 {相对时间} */}
                 <div
-                  className="mt-1.5 flex items-center gap-2"
-                  style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', letterSpacing: '0.04em' }}
+                  className="mt-1.5"
+                  style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.03em' }}
                 >
-                  <span>{fmtDate(d.startedAt, locale)}</span>
-                  {hasLocal && hasCloud && (
-                    <span
-                      className="flex items-center gap-1"
-                      style={{
-                        padding: '2px 7px',
-                        border: '1px solid var(--ink)',
-                        background: 'var(--pro)',
-                        fontSize: 9,
-                        fontWeight: 600,
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
-                        borderRadius: 999,
-                        color: 'var(--ink)',
+                  {t('recordedAt', { date: fmtDate(d.startedAt, locale) })}
+                </div>
+
+                {/* 类别标签 pills（首个高亮）+ 状态 + 编辑入口 */}
+                <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                  {editingTags ? (
+                    <input
+                      ref={tagsInputRef}
+                      type="text"
+                      value={tagsDraft}
+                      onChange={(e) => setTagsDraft(e.target.value)}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === 'Enter') { e.preventDefault(); void commitTags(d.id); }
+                        else if (e.key === 'Escape') { e.preventDefault(); setEditingTagsId(null); }
                       }}
-                    >
-                      <I.Cloud size={10} sw={2.5} />
-                      {t('badgeSynced')}
-                    </span>
+                      onBlur={() => { void commitTags(d.id); }}
+                      placeholder={t('tagsPlaceholder')}
+                      maxLength={60}
+                      className="w-full px-2 py-1 outline-none"
+                      style={{ border: '1.3px solid var(--ink)', background: 'var(--paper)', fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--ink)', borderRadius: 2 }}
+                    />
+                  ) : (
+                    <>
+                      {tags.map((tag, ti) => <Pill key={tag} hi={ti === 0}>{tag}</Pill>)}
+                      {hasLocal && hasCloud && <Pill><I.Cloud size={9} sw={2.5} /> {t('badgeSynced')}</Pill>}
+                      {hasLocal && !hasCloud && <Pill>{t('badgeLocal')}</Pill>}
+                      {!hasLocal && hasCloud && <Pill><I.Cloud size={9} sw={2.5} /> {t('badgeCloud')}</Pill>}
+                      {hasLocal && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); startEditTags(it); }}
+                          className="inline-flex items-center gap-1 opacity-0 transition group-hover:opacity-100"
+                          style={{ padding: '2px 8px', border: '1px dashed var(--ink)', borderRadius: 999, fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-2)', cursor: 'pointer', background: 'var(--paper)' }}
+                          title={t('addTag')}
+                        >
+                          <I.Tag size={9} /> {t('addTag')}
+                        </button>
+                      )}
+                    </>
                   )}
-                  {hasLocal && !hasCloud && (
-                    <span
-                      style={{
-                        padding: '2px 7px',
-                        border: '1px solid var(--ink)',
-                        background: 'var(--paper-2)',
-                        fontSize: 9,
-                        fontWeight: 600,
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
-                        borderRadius: 999,
-                        color: 'var(--ink-2)',
-                      }}
-                    >
-                      {t('badgeLocal')}
-                    </span>
-                  )}
-                  {!hasLocal && hasCloud && (
-                    <span
-                      className="flex items-center gap-1"
-                      style={{
-                        padding: '2px 7px',
-                        border: '1px solid var(--ink)',
-                        background: 'var(--hi)',
-                        fontSize: 9,
-                        fontWeight: 600,
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
-                        borderRadius: 999,
-                        color: 'var(--ink)',
-                      }}
-                    >
-                      <I.Cloud size={10} sw={2.5} />
-                      {t('badgeCloud')}
-                    </span>
-                  )}
-                  <div className="flex-1" />
-                  {d.hasAudio && <I.Mic size={12} />}
-                  {d.hasCamera && <I.Camera size={12} />}
                 </div>
               </div>
             </>
@@ -842,6 +999,7 @@ export function RecordingsList({ refreshKey = 0 }: Props): JSX.Element {
           );
         })}
       </div>
+      )}
     </div>
   );
 }

@@ -1,0 +1,42 @@
+// 关键用户事件白名单 —— 单一事件名来源（客户端 trackEvent + 服务端校验 + Dashboard 漏斗共用）。
+
+export const KNOWN_EVENTS = [
+  // 转化 / CTA
+  'cta_start_recording',
+  'pricing_cta_click',
+  'content_cta_click',
+  'view_demo',
+  'feature_click',
+  'upgrade_modal_open',
+  'checkout_start',
+  'purchase_success',
+  // 录制生命周期
+  'recording_start',
+  'recording_complete',
+  'recording_discard',
+  'export_success',
+  'subtitle_generate',
+  'handout_generate',
+  'share_create',
+  // 账号
+  'signup',
+  'login',
+  // 录制库
+  'library_view',
+  'library_search',
+  'library_filter',
+] as const;
+
+export type KnownEvent = (typeof KNOWN_EVENTS)[number];
+
+export const KNOWN_EVENT_SET: ReadonlySet<string> = new Set(KNOWN_EVENTS);
+
+/** 漏斗顺序（Dashboard 用）：每一级取独立用户数。 */
+export const FUNNEL_STEPS: KnownEvent[] = [
+  'cta_start_recording',
+  'recording_start',
+  'recording_complete',
+  'export_success',
+  'checkout_start',
+  'purchase_success',
+];

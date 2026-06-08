@@ -1,9 +1,10 @@
 # PRD：白板录制工具
-**版本**：v0.6.3  
+**版本**：v0.6.4  
 **状态**：开发中  
 **作者**：—  
-**最后更新**：2026-06-05  
-**变更**：v0.6.3 - 修 Excalidraw unpkg CDN ChunkLoadError（自托管资源）；裁切框升级为可拖拽移动 + 四角缩放（预设锁比例 / 自定义自由框选 + 框旁 W×H 实时联动），导出按框定区域输出；选定裁切框后摄像头限框内移动。详见「## 十一」最新一条。  
+**最后更新**：2026-06-06  
+**变更**：v0.6.4 - 关键用户事件落库 Supabase（`analytics_events` + `/api/analytics` + 统一 `trackEvent` 双写）；后台分析 Dashboard `/admin/analytics`（漏斗/时序/排行，ADMIN_SECRET 鉴权）；Library 页 1:1 重做（搜索 + 筛选 + 排序 + grid/list 视图切换）。详见「## 十一」最新一条。  
+**历史变更**：v0.6.3 - 修 Excalidraw unpkg CDN ChunkLoadError（自托管资源）；裁切框升级为可拖拽移动 + 四角缩放（预设锁比例 / 自定义自由框选 + 框旁 W×H 实时联动），导出按框定区域输出；选定裁切框后摄像头限框内移动。详见「## 十一」。  
 **历史变更**：v0.6.2 - 设计重构 Phase 2：录制前 Setup 面板（比例分组 + 摄像头配置 + 麦克风 + 含工作区开关 + 3 秒倒计时）+ 比例集扩到 10 预设 + 配置随录制持久化 + 画布裁切框 viewfinder + 导出默认沿用。详见「## 十一」。  
 **历史变更**：v0.6.1 - 会员年付价格全链路（`payment_config` 加 4 列年价/年付 product id、`/api/checkout/pro` 加 `billing`、升级弹窗/定价页月年切换、admin 校验扩展到年付槽位、Supabase 迁移）+ 定价页去除团队席位收费内容。详见「## 十一」。  
 **历史变更**：v0.6 - 新增 SEO / GEO / 内容营销基建（「## 十二」）：技术 SEO 地基（sitemap/robots/OpenGraph/hreflang/Analytics）、GEO（JSON-LD `SoftwareApplication`/`FAQPage`/`Article` + `llms.txt` + 放行 AI 爬虫）、程序化内容引擎（`/compare`·`/use-cases`·`/blog` 数据驱动长尾着陆页）+ 零预算冷启动手册 `docs/marketing-cold-start.md`。详见「## 十一」最新一条与「## 十二」。  
@@ -891,6 +892,12 @@ Pro/Max 导出（订阅状态验证）：
 ## 十一、实现进展与变更记录（持续同步）
 
 > 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
+
+- **2026-06-06｜关键事件落库 Supabase + 后台分析 Dashboard + Library 页重做（设计 Phase 4）**：
+  1. **事件分析基建**：新增 `analytics_events` 表（RLS 开启、无 client 策略，仅 service-role 读写）+ `/api/analytics`（POST，service-role insert，读登录态拿 user_id，白名单校验，始终 204 不阻塞）+ 客户端统一 `trackEvent`（`src/lib/analytics/{events,track}.ts`，双写 Vercel Analytics + `sendBeacon` 到自有库，带 sessionId/guestId/path/locale）。`TrackedLink` 与各埋点点改用 `trackEvent`。接入关键事件：`cta_start_recording`/`pricing_cta_click`/`content_cta_click`/`view_demo`/`feature_click`/`upgrade_modal_open`/`checkout_start`/`purchase_success`/`recording_start`/`recording_complete`/`recording_discard`/`export_success`/`subtitle_generate`/`handout_generate`/`share_create`/`library_view`/`library_search`/`library_filter`（`signup`/`login` 暂留白名单未接，避免页面加载噪声）。
+  2. **后台分析 Dashboard**：`/admin/analytics`（`ADMIN_SECRET` 鉴权、`noindex`、手绘风、无图表库）+ `/api/admin/analytics`（service-role 聚合：summary 卡片 / 转化漏斗（cta→录制→完成→导出→结账→付费 + 转化率）/ 近 N 天时间序列 / 事件排行 / 最近事件；range 7/30/90 天）。
+  3. **Library 页 1:1 重做**：`/library` 加搜索框（按标题）+ 筛选 chip（全部/未完成/已备份/仅本地）+ 排序（最新/最早/最长）+ grid/list 视图切换 + 列表视图；`RecordingsList` 原有云同步/批量备份/重命名/上传下载/删除逻辑全部保留，仅叠加过滤/排序/视图层。
+  涉及：`supabase/migrations/20260605120000_analytics_events.sql`、`src/app/api/{analytics,admin/analytics}/route.ts`、`src/app/[locale]/admin/analytics/{layout,page}.tsx`、`src/lib/analytics/*`、`src/components/{analytics/TrackedLink,ProUpgradeModal,PaywallModal,ExportPanel,SubtitlePanel,HandoutPanel,RecordingsList}.tsx`、`src/app/[locale]/{app,library}/page.tsx`、`src/messages/{en,zh}.json`。
 
 - **2026-06-05｜修 Excalidraw CDN 崩溃 + 裁切框可拖拽缩放 + 摄像头限框内 + 自定义改框选**：
   1. **ChunkLoadError 修复**：Excalidraw 字体/资源原从 `unpkg.com` CDN 加载（`Whiteboard.tsx` 未设 `EXCALIDRAW_ASSET_PATH`），CDN 不可达即整页崩。改为**自托管**：`window.EXCALIDRAW_ASSET_PATH='/'` + `scripts/copy-excalidraw-assets.mjs` 在 `predev`/`prebuild` 把 `excalidraw-assets[-dev]` 复制进 `public/`（`.gitignore` 忽略，不入库）。

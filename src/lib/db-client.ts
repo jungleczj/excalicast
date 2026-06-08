@@ -217,6 +217,11 @@ export async function updateRecordingTitle(recordingId: string, title: string): 
   });
 }
 
+export async function updateRecordingTags(recordingId: string, tags: string[]): Promise<void> {
+  const clean = tags.map((s) => s.trim()).filter(Boolean).slice(0, 6);
+  await getClientDb().recordings.update(recordingId, { tags: clean.length > 0 ? clean : undefined });
+}
+
 export async function saveSubtitleSrt(recordingId: string, srt: string): Promise<void> {
   await getClientDb().recordings.update(recordingId, { subtitleSrt: srt });
 }

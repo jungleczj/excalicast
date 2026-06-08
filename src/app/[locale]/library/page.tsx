@@ -1,18 +1,31 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { AppHeader } from '@/components/AppHeader';
 import { RecordingsList } from '@/components/RecordingsList';
+import { I } from '@/components/icons';
 import { listRecordings } from '@/lib/db-client';
 import { getCurrentOwnerKey } from '@/lib/ownerKey';
+import { trackEvent } from '@/lib/analytics/track';
 import type { RecordingMetadata } from '@/types/recording';
-import { Link } from '@/i18n/navigation';
 
 export default function LibraryPage(): JSX.Element {
   const t = useTranslations('library');
   const locale = useLocale();
   const [stats, setStats] = useState<{ count: number; totalMs: number }>({ count: 0, totalMs: 0 });
+  const [draft, setDraft] = useState('');   // 输入草稿
+  const [query, setQuery] = useState('');   // 已提交查询（下传 RecordingsList 过滤）
+
+  // 进入录制库埋点
+  useEffect(() => { trackEvent('library_view'); }, []);
+
+  // 点 Search / 回车才提交查询（非即时过滤）
+  const submitSearch = useCallback(() => {
+    const q = draft.trim();
+    setQuery(q);
+    if (q) trackEvent('library_search', { len: q.length });
+  }, [draft]);
 
   useEffect(() => {
     getCurrentOwnerKey()
@@ -75,17 +88,32 @@ export default function LibraryPage(): JSX.Element {
             </div>
 
             <div className="flex items-center gap-3">
-              <Link
-                href="/app"
+              <div
+                className="flex items-center gap-2"
+                style={{ padding: '9px 14px', border: '1.5px solid var(--ink)', borderRadius: 3, background: 'var(--paper)', width: 280, boxShadow: '2px 2px 0 var(--ink)' }}
+              >
+                <I.Search size={14} />
+                <input
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') submitSearch(); }}
+                  placeholder={t('searchPlaceholder')}
+                  className="w-full bg-transparent outline-none"
+                  style={{ border: 'none', fontSize: 13, fontFamily: 'var(--font-sans)', color: 'var(--ink)' }}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={submitSearch}
                 className="btn-sketch btn-sketch-primary"
               >
-                <span className="recording-indicator h-1.5 w-1.5 rounded-full" style={{ background: 'white' }} />
-                {t('newRecording')}
-              </Link>
+                <I.Search size={13} />
+                {t('searchButton')}
+              </button>
             </div>
           </div>
 
-          <RecordingsList />
+          <RecordingsList query={query} />
         </div>
       </div>
     </div>

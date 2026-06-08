@@ -365,7 +365,8 @@
     "libraryToggle": "模板库",
     "framingHint": "拖动调整裁切框，确认后开始",
     "framingStart": "开始录制",
-    "framingCancel": "取消"
+    "framingCancel": "取消",
+    "framingCameraOutside": "请先把摄像头气泡移到裁切框内再开始。"
   },
   "libraryDrawer": {
     "title": "模板库",
@@ -606,6 +607,23 @@
   },
   "library": {
     "title": "录制库",
+    "searchPlaceholder": "按标题搜索…",
+    "searchButton": "搜索",
+    "recordedAt": "录制于 {date}",
+    "addTag": "标签",
+    "tagsPlaceholder": "逗号分隔的标签",
+    "filterLabel": "筛选",
+    "filterAll": "全部",
+    "filterUnfinished": "未完成",
+    "filterBackedUp": "已备份",
+    "filterLocal": "仅本地",
+    "sortLabel": "排序",
+    "sortNewest": "最新优先",
+    "sortOldest": "最早优先",
+    "sortLongest": "最长优先",
+    "viewGrid": "网格视图",
+    "viewList": "列表视图",
+    "noMatch": "没有符合筛选条件的录制。",
     "empty": "还没有录制。去录第一条吧。",
     "newRecording": "新建录制",
     "open": "打开",

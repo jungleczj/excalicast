@@ -2,7 +2,7 @@
 
 import { useState, type JSX } from 'react';
 import { I } from '@/components/icons';
-import { track } from '@vercel/analytics';
+import { trackEvent } from '@/lib/analytics/track';
 
 /**
  * "▶ View demo" affordance + modal. Only rendered by the landing when
@@ -17,7 +17,7 @@ export function DemoButton({ label, closeLabel }: { label: string; closeLabel: s
         type="button"
         className="btn-sketch btn-stamp lift"
         onClick={() => {
-          track('view_demo');
+          trackEvent('view_demo');
           setOpen(true);
         }}
       >

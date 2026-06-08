@@ -50,14 +50,17 @@ export function Marker({
 }): JSX.Element {
   return (
     <span
-      className="marker-sweep"
       style={
         {
           padding: '0 8px',
           display: 'inline-block',
           transform: `rotate(${rotate}deg)`,
           borderRadius: 2,
-          '--hi': color,
+          // 设计稿：实心黄条 + 两侧 4px 外延（box-decoration-break 让换行也连续）
+          background: color,
+          boxShadow: `4px 0 0 ${color}, -4px 0 0 ${color}`,
+          WebkitBoxDecorationBreak: 'clone',
+          boxDecorationBreak: 'clone',
         } as CSSProperties
       }
     >

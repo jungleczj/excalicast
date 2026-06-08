@@ -13,6 +13,8 @@ interface Props {
   /** Custom 输出像素（W×H 输入显示用）。 */
   customOutput?: { width: number; height: number };
   onCustomOutputChange?: (o: { width: number; height: number }) => void;
+  /** 是否可交互（取景态 true：可拖边/缩放/输入；录制态 false：纯视觉，不挡画布/工具栏）。 */
+  interactive: boolean;
 }
 
 type Corner = 'tl' | 'tr' | 'bl' | 'br';
@@ -32,7 +34,7 @@ function deriveOutput(w: number, h: number): { width: number; height: number } {
  * 整框拖拽移动、四角缩放（预设锁比例 / Custom 自由）、Custom 框旁 W×H 输入两向联动。
  * 蒙层与框内 pointer-events:none（不挡作画），仅边/角手柄 + Custom 输入可点。
  */
-export function AspectCropOverlay({ framing, value, onChange, customOutput, onCustomOutputChange }: Props): JSX.Element {
+export function AspectCropOverlay({ framing, value, onChange, customOutput, onCustomOutputChange, interactive }: Props): JSX.Element {
   const t = useTranslations('recordingSetup');
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
@@ -165,15 +167,28 @@ export function AspectCropOverlay({ framing, value, onChange, customOutput, onCu
           <div style={dim(0, frame.y, frame.x, frame.h)} />
           <div style={dim(frame.x + frame.w, frame.y, size.w - frame.x - frame.w, frame.h)} />
 
-          {/* 虚线框（边可拖拽移动） */}
+          {/* 虚线框（纯视觉，不拦截点击 —— 保证框内作画/工具栏可用） */}
           <div
-            onMouseDown={onPointerDown('move')}
             style={{
               position: 'absolute', left: frame.x, top: frame.y, width: frame.w, height: frame.h,
               border: '2px dashed var(--ink)', borderRadius: 3, zIndex: 20,
-              pointerEvents: 'auto', cursor: 'move', background: 'transparent',
+              pointerEvents: 'none', background: 'transparent',
             }}
           />
+
+          {/* 取景态：四条细边拖拽条移动整框；框内部不设热区，不挡画布 */}
+          {interactive && [
+            { left: frame.x, top: frame.y - 7, width: frame.w, height: 14 },
+            { left: frame.x, top: frame.y + frame.h - 7, width: frame.w, height: 14 },
+            { left: frame.x - 7, top: frame.y, width: 14, height: frame.h },
+            { left: frame.x + frame.w - 7, top: frame.y, width: 14, height: frame.h },
+          ].map((s, i) => (
+            <div
+              key={i}
+              onMouseDown={onPointerDown('move')}
+              style={{ position: 'absolute', left: s.left, top: s.top, width: s.width, height: s.height, zIndex: 21, pointerEvents: 'auto', cursor: 'move' }}
+            />
+          ))}
 
           {/* 四角括号 + 缩放手柄 */}
           {([
@@ -186,19 +201,21 @@ export function AspectCropOverlay({ framing, value, onChange, customOutput, onCu
               <svg width="18" height="18" style={{ position: 'absolute', left: c.left, top: c.top, zIndex: 22, pointerEvents: 'none' }}>
                 <path d={c.path} stroke="var(--ink)" strokeWidth="2.4" fill="none" strokeLinecap="round" />
               </svg>
-              <div
-                onMouseDown={onPointerDown(c.c)}
-                style={{
-                  ...handleStyle, cursor: c.cursor,
-                  left: c.c === 'tl' || c.c === 'bl' ? frame.x - 8 : frame.x + frame.w - 8,
-                  top: c.c === 'tl' || c.c === 'tr' ? frame.y - 8 : frame.y + frame.h - 8,
-                }}
-              />
+              {interactive && (
+                <div
+                  onMouseDown={onPointerDown(c.c)}
+                  style={{
+                    ...handleStyle, cursor: c.cursor,
+                    left: c.c === 'tl' || c.c === 'bl' ? frame.x - 8 : frame.x + frame.w - 8,
+                    top: c.c === 'tl' || c.c === 'tr' ? frame.y - 8 : frame.y + frame.h - 8,
+                  }}
+                />
+              )}
             </div>
           ))}
 
-          {/* 比例徽标（预设）/ W×H 输入（Custom） */}
-          {!isCustom ? (
+          {/* 比例徽标：预设始终显示；Custom 非取景态显示折叠徽标 */}
+          {(!isCustom || !interactive) && (
             <div
               style={{
                 position: 'absolute', left: frame.x + 12, top: frame.y + 12,
@@ -206,9 +223,14 @@ export function AspectCropOverlay({ framing, value, onChange, customOutput, onCu
                 fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', zIndex: 23, pointerEvents: 'none',
               }}
             >
-              {framing} · {t('cropLocked')}
+              {isCustom
+                ? `${customOutput?.width ?? Math.round(frame.w)}×${customOutput?.height ?? Math.round(frame.h)}`
+                : framing} · {t('cropLocked')}
             </div>
-          ) : (
+          )}
+
+          {/* Custom 框旁 W×H 输入：仅取景态可调 */}
+          {isCustom && interactive && (
             <div
               className="flex items-center"
               style={{

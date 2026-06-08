@@ -365,7 +365,8 @@
     "libraryToggle": "Library",
     "framingHint": "Drag to frame the crop, then start",
     "framingStart": "Start recording",
-    "framingCancel": "Cancel"
+    "framingCancel": "Cancel",
+    "framingCameraOutside": "Move the camera bubble inside the crop frame to start."
   },
   "libraryDrawer": {
     "title": "Library",
@@ -606,6 +607,23 @@
   },
   "library": {
     "title": "Library",
+    "searchPlaceholder": "Search by title…",
+    "searchButton": "Search",
+    "recordedAt": "Recorded {date}",
+    "addTag": "Tag",
+    "tagsPlaceholder": "comma, separated tags",
+    "filterLabel": "Filter",
+    "filterAll": "All",
+    "filterUnfinished": "Unfinished",
+    "filterBackedUp": "Backed up",
+    "filterLocal": "Local only",
+    "sortLabel": "Sort",
+    "sortNewest": "Newest first",
+    "sortOldest": "Oldest first",
+    "sortLongest": "Longest first",
+    "viewGrid": "Grid view",
+    "viewList": "List view",
+    "noMatch": "No recordings match your filters.",
     "empty": "No recordings yet. Make your first one.",
     "newRecording": "New recording",
     "open": "Open",
