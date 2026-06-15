@@ -60,7 +60,7 @@ export function WorkspaceShellToggle({ recordingId, config, onChange }: Props): 
     <button
       type="button"
       onClick={() => onChange({ ...config, includeWorkspaceShell: !checked })}
-      className="w-full px-3 py-2.5 text-left transition"
+      className="press w-full px-3 py-2.5 text-left"
       style={{
         background: checked ? 'var(--hi)' : 'var(--paper)',
         border: '1.5px solid var(--ink)',

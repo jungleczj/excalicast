@@ -710,7 +710,10 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
                 style={{ aspectRatio: '16/9', margin: 12, background: 'var(--paper-3)', border: '1.4px solid var(--ink)', borderRadius: 3 }}
               >
                 <div className="absolute inset-0 dots-fine" style={{ opacity: 0.5 }} />
-                <ThumbScene seed={d.id} />
+                {/* 封面 hover 轻放大（被 overflow-hidden 裁切，对标设计 group-hover:scale） */}
+                <div className="absolute inset-0 transition-transform duration-300 ease-out group-hover:scale-105">
+                  <ThumbScene seed={d.id} />
+                </div>
                 <span
                   className="absolute right-2 top-2 group-hover:opacity-0"
                   style={{
@@ -905,7 +908,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
           return (
             <div
               key={d.id}
-              className="group relative overflow-hidden transition"
+              className="group relative overflow-hidden transition hover:-translate-y-[2px]"
               style={{
                 background: 'var(--paper)',
                 border: '1.6px solid var(--ink)',

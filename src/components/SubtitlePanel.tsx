@@ -229,7 +229,7 @@ export function SubtitlePanel({ open, recordingId, onClose, onSaved }: Props): J
         )}
 
         {(phase === 'uploading' || phase === 'pending' || phase === 'running') && (
-          <div className="mt-2 flex items-center gap-3 rounded-md border border-border-default bg-bg-secondary p-3">
+          <div className="fade-in mt-2 flex items-center gap-3 rounded-md border border-border-default bg-bg-secondary p-3">
             <span
               className="inline-block h-4 w-4 flex-shrink-0 animate-spin rounded-full border-2 border-primary-300 border-t-primary-700"
               aria-hidden

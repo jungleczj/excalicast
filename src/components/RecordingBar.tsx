@@ -275,6 +275,7 @@ function CtrlBtn({
     <button
       type="button"
       onClick={onClick}
+      className={tone === 'rec' ? 'press sketch-active' : 'press'}
       style={{
         display: 'flex',
         alignItems: 'center',

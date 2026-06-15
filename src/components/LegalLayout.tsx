@@ -1,86 +1,91 @@
-import { Brand } from '@/components/AppHeader';
+import type { CSSProperties, ReactNode, JSX } from 'react';
 import { Link } from '@/i18n/navigation';
 import { getTranslations } from 'next-intl/server';
-import type { ReactNode } from 'react';
+import { I, LogoMark } from '@/components/icons';
+import { MonoTag, FooterBar } from '@/components/ui';
+import { TrackedLink } from '@/components/analytics/TrackedLink';
 
 interface Props {
   title: string;
   /** Last updated date, ISO `YYYY-MM-DD`. */
   lastUpdated: string;
+  /** Short kind label for the hi tag (defaults to title). */
+  kind?: string;
+  /** Optional one-line summary under the title. */
+  summary?: string;
   children: ReactNode;
 }
 
+const navLink: CSSProperties = {
+  fontFamily: 'var(--font-mono)',
+  fontSize: 12,
+  fontWeight: 500,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+  color: 'var(--ink)',
+  opacity: 0.6,
+  textDecoration: 'none',
+  paddingBottom: 4,
+};
+
 /**
- * Shared shell for Privacy / Terms / Refund.
- * Marketing-style top header + reading area + legal footer.
+ * Shared shell for Privacy / Terms / Refund, ported to the ExcalidrawRec
+ * sketch design (LegalShell): sketch header + doc header (breadcrumb · kind tag
+ * · big title · last-updated) + .legal-prose body + design FooterBar.
  */
-export async function LegalLayout({ title, lastUpdated, children }: Props): Promise<JSX.Element> {
+export async function LegalLayout({ title, lastUpdated, kind, summary, children }: Props): Promise<JSX.Element> {
   const t = await getTranslations('legal');
   return (
-    <div className="flex h-full flex-col bg-bg-secondary">
-      <header className="flex-shrink-0 border-b border-border-default bg-bg-primary">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
-          <Brand />
-          <nav className="flex items-center gap-6 text-[13px] font-medium text-text-secondary">
-            <Link href="/" className="hover:text-text-primary">{t('nav.home')}</Link>
-            <Link href="/#pricing" className="hover:text-text-primary">{t('nav.pricing')}</Link>
-            <Link href="/#contact" className="hover:text-text-primary">{t('nav.contact')}</Link>
-            <Link href="/app" className="rounded-md bg-primary-600 px-4 py-1.5 text-[13px] font-semibold text-white shadow-sm hover:bg-primary-700">
-              {t('nav.startRecording')}
-            </Link>
-          </nav>
-        </div>
+    <div className="flex h-full flex-col" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
+      {/* Header */}
+      <header className="flex h-16 flex-shrink-0 items-center justify-between px-4 sm:px-10" style={{ background: 'var(--paper)', borderBottom: '2px solid var(--ink)' }}>
+        <Link href="/" className="flex items-center gap-2.5" style={{ textDecoration: 'none', color: 'var(--ink)' }}>
+          <LogoMark size={30} />
+          <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 20, letterSpacing: '-0.02em' }}>Excalicast</span>
+        </Link>
+        <nav className="hidden items-center gap-8 md:flex">
+          <Link href="/" className="nav-link" style={navLink}>{t('nav.home')}</Link>
+          <Link href="/pricing" className="nav-link" style={navLink}>{t('nav.pricing')}</Link>
+        </nav>
+        <TrackedLink event="cta_start_recording" eventProps={{ surface: 'nav' }} prefetchKind="whiteboard" href="/app" className="btn-sketch btn-sketch-primary btn-stamp" style={{ padding: '9px 16px' }}>
+          <span className="rec-dot" style={{ width: 6, height: 6 }} />
+          {t('nav.startRecording')}
+        </TrackedLink>
       </header>
 
       <main className="flex-1 overflow-auto">
-        <article className="mx-auto max-w-3xl px-6 py-14">
-          <header className="mb-10">
-            <h1 className="text-[34px] font-bold leading-tight tracking-tight text-text-primary">{title}</h1>
-            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-text-tertiary">
-              <span className="inline-flex items-center gap-1.5">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-                  <line x1="16" y1="2" x2="16" y2="6" />
-                  <line x1="8" y1="2" x2="8" y2="6" />
-                  <line x1="3" y1="10" x2="21" y2="10" />
-                </svg>
-                {t('lastUpdated', { date: lastUpdated })}
-              </span>
-              <span aria-hidden>·</span>
-              <span>{t('entity')}</span>
-            </div>
-          </header>
-
-          <div className="legal-prose">
-            {children}
+        {/* Doc header */}
+        <section className="px-6 py-10 sm:px-10 lg:px-20" style={{ borderBottom: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}>
+          <nav aria-label="Breadcrumb" className="mb-3.5 flex items-center gap-2" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            <Link href="/" style={{ color: 'var(--ink-3)', textDecoration: 'none' }}>{t('nav.home')}</Link>
+            <span aria-hidden>›</span>
+            <span>{t('breadcrumbLegal')}</span>
+            <span aria-hidden>›</span>
+            <span style={{ color: 'var(--ink)' }}>{title}</span>
+          </nav>
+          <MonoTag variant="hi">{kind ?? title}</MonoTag>
+          <h1 style={{ fontSize: 'clamp(30px, 6vw, 48px)', fontWeight: 700, letterSpacing: '-0.03em', margin: '12px 0 14px', lineHeight: 1.05 }}>{title}</h1>
+          {summary && <p style={{ fontSize: 16, color: 'var(--ink-2)', lineHeight: 1.55, margin: 0, maxWidth: 720 }}>{summary}</p>}
+          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-2)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            <span className="inline-flex items-center gap-1.5"><I.Edit size={13} /> {t('lastUpdated', { date: lastUpdated })}</span>
+            <span aria-hidden>·</span>
+            <span>{t('entity')}</span>
           </div>
+        </section>
 
-          <div className="mt-12 rounded-2xl border border-border-default bg-bg-primary p-5 text-center text-[13px]">
-            <p className="text-text-secondary">{t('questionsCta')}</p>
-            <a
-              href="mailto:support@excalicast.cn"
-              className="mt-1 inline-block font-mono font-semibold text-primary-600 hover:underline"
-            >
+        {/* Prose */}
+        <article className="mx-auto px-6 py-12 sm:px-10" style={{ maxWidth: 820 }}>
+          <div className="legal-prose">{children}</div>
+
+          <div className="mt-12 text-center" style={{ border: '1.5px solid var(--ink)', background: 'var(--paper)', borderRadius: 4, boxShadow: '3px 3px 0 var(--ink)', padding: 20 }}>
+            <p style={{ color: 'var(--ink-2)', fontSize: 13, margin: 0 }}>{t('questionsCta')}</p>
+            <a href="mailto:support@excalicast.cn" className="mt-1 inline-block" style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--ink)', borderBottom: '1.5px solid var(--hi)', textDecoration: 'none' }}>
               support@excalicast.cn
             </a>
           </div>
         </article>
 
-        <footer className="border-t border-border-default bg-bg-primary">
-          <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-7 md:flex-row">
-            <div className="flex items-center gap-3 text-[12px] text-text-tertiary">
-              <Brand />
-              <span>© 2026 Excalicast</span>
-            </div>
-            <nav className="flex flex-wrap gap-5 text-[12px] text-text-tertiary">
-              <Link href="/" className="hover:text-text-primary">{t('footer.home')}</Link>
-              <Link href="/privacy" className="hover:text-text-primary">{t('footer.privacy')}</Link>
-              <Link href="/terms" className="hover:text-text-primary">{t('footer.terms')}</Link>
-              <Link href="/refund" className="hover:text-text-primary">{t('footer.refund')}</Link>
-              <a href="mailto:support@excalicast.cn" className="hover:text-text-primary">{t('footer.contact')}</a>
-            </nav>
-          </div>
-        </footer>
+        <FooterBar />
       </main>
     </div>
   );

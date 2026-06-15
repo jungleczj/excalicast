@@ -16,8 +16,9 @@ import { MonoTag } from '@/components/ui';
 import { useSubscription } from '@/hooks/useSubscription';
 import { getRecording, deleteRecording, updateRecordingTitle, updateRecordingSegments } from '@/lib/db-client';
 import { getCurrentOwnerKey } from '@/lib/ownerKey';
-import type { AspectRatio, ExportConfig, RecordingMetadata, RecordingSetupConfig } from '@/types/recording';
+import type { AspectRatio, ExportConfig, RecordingMetadata, RecordingSetupConfig, TimeSegment } from '@/types/recording';
 import { ASPECT_PRESETS } from '@/types/recording';
+import { normalizeSegments, isTrimmed } from '@/utils/segments';
 import { Link, useRouter } from '@/i18n/navigation';
 
 const DEFAULT_CONFIG: ExportConfig = {
@@ -79,9 +80,9 @@ export default function EditorRecordingPage(): JSX.Element {
   const [tab, setTab] = useState<Tab>('export');
   const [title, setTitle] = useState('');
   const [upgradeOpen, setUpgradeOpen] = useState<false | 'pro' | 'max'>(false);
-  // 时间轴裁剪保留区间 [inMs, outMs]
-  const [inMs, setInMs] = useState(0);
-  const [outMs, setOutMs] = useState(0);
+  // 时间轴裁剪：保留段（源 ms）+ 播放头源时间
+  const [segments, setSegments] = useState<TimeSegment[]>([]);
+  const [playheadMs, setPlayheadMs] = useState(0);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -103,9 +104,8 @@ export default function EditorRecordingPage(): JSX.Element {
           setMeta(m);
           setTitle(m.title?.trim() || (en ? `Recording ${id.slice(0, 8)}` : `录制 ${id.slice(0, 8)}`));
           if (m.setup) setConfig(exportDefaultsFromSetup(m.setup));
-          const seg0 = m.segments?.[0];
-          setInMs(seg0 ? seg0.start : 0);
-          setOutMs(seg0 ? seg0.end : m.durationMs);
+          setSegments(normalizeSegments(m.segments, m.durationMs));
+          setPlayheadMs(0);
         }
       })
       .catch((err) => setLoadError(err instanceof Error ? err.message : 'load_failed'));
@@ -129,15 +129,15 @@ export default function EditorRecordingPage(): JSX.Element {
     void updateRecordingTitle(id, title);
   }, [id, title]);
 
-  // 裁剪区间 → 同步进 config.segments（导出用）+ 去抖持久化到 recording.segments
+  // 保留段 → 同步进 config.segments（导出用）+ 去抖持久化到 recording.segments
   useEffect(() => {
     if (!meta) return;
-    const trimmed = inMs > 0 || outMs < meta.durationMs;
-    const segs = trimmed ? [{ start: inMs, end: outMs }] : undefined;
+    const trimmed = isTrimmed(segments, meta.durationMs);
+    const segs = trimmed ? segments : undefined;
     setConfig((c) => (JSON.stringify(c.segments) === JSON.stringify(segs) ? c : { ...c, segments: segs }));
-    const tid = setTimeout(() => { void updateRecordingSegments(id, trimmed ? [{ start: inMs, end: outMs }] : []); }, 500);
+    const tid = setTimeout(() => { void updateRecordingSegments(id, trimmed ? segments : []); }, 500);
     return () => clearTimeout(tid);
-  }, [inMs, outMs, meta, id]);
+  }, [segments, meta, id]);
 
   const handleDelete = useCallback(async () => {
     if (!id) return;
@@ -250,27 +250,40 @@ export default function EditorRecordingPage(): JSX.Element {
         <div className="flex flex-1 flex-col overflow-auto p-6" style={{ borderRight: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}>
           <div className="flex flex-1 items-center justify-center">
             <div className="w-full" style={{ maxWidth: 760, ...CARD, padding: 14 }}>
-              <ExportPreview recordingId={id} metadata={meta} config={config} progress={exportProgress} />
+              <ExportPreview
+                recordingId={id}
+                metadata={meta}
+                config={config}
+                progress={exportProgress}
+                segments={segments}
+                playheadMs={playheadMs}
+                onPlayheadChange={setPlayheadMs}
+              />
             </div>
           </div>
 
-          {/* Timeline — 裁剪保留区间（导出按之输出） */}
+          {/* Timeline — 主流剪辑交互：播放头 scrub + Split + 选段删除 + 边缘 Trim */}
           <div className="mt-5">
             <Timeline
               durationMs={meta.durationMs}
-              inMs={inMs}
-              outMs={outMs}
-              onChange={(ni, no) => { setInMs(ni); setOutMs(no); }}
+              clips={segments}
+              playheadMs={playheadMs}
+              onScrub={setPlayheadMs}
+              onChange={(next) => setSegments(next.length ? next : segments)}
+              onReset={() => setSegments(normalizeSegments(undefined, meta.durationMs))}
               hasAudio={meta.hasAudio}
               hasCaptions={!!meta.subtitleSrt}
               labels={{
-                split: en ? 'Split' : '切分',
-                trim: en ? 'Trim' : '裁剪',
-                reset: en ? 'Reset' : '重置',
+                edit: en ? 'Edit' : '剪辑',
+                reset: en ? 'Reset' : '复原',
                 kept: en ? 'Kept' : '保留',
-                canvas: en ? 'Canvas' : '画面',
                 mic: en ? 'Mic' : '麦克风',
                 captions: en ? 'Captions' : '字幕',
+                split: en ? 'Split' : '切一刀',
+                deleteClip: en ? 'Delete' : '删片段',
+                hint: en
+                  ? 'Drag playhead/edges to scrub · Split (S) then Delete to cut any part'
+                  : '拖播放头/边缘实时预览 · 切一刀(S)后删片段即可剪掉任意段',
               }}
             />
           </div>
@@ -292,6 +305,7 @@ export default function EditorRecordingPage(): JSX.Element {
                   key={tb.id}
                   type="button"
                   onClick={() => setTab(tb.id)}
+                  className="press"
                   style={{
                     padding: '8px 12px', marginBottom: -1.5,
                     background: active ? 'var(--hi)' : 'transparent',
@@ -307,7 +321,8 @@ export default function EditorRecordingPage(): JSX.Element {
               );
             })}
           </div>
-          {tabContent}
+          {/* 切 Tab 内容淡入（key 变化重新触发入场） */}
+          <div key={tab} className="fade-in">{tabContent}</div>
         </aside>
       </div>
 

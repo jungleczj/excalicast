@@ -214,7 +214,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
       onClick={onClose}
     >
       <div
-        className="relative max-w-[92vw]"
+        className="pop-in relative max-w-[92vw]"
         style={{
           width: 500,
           background: 'var(--paper)',
@@ -298,7 +298,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
                     role="tab"
                     aria-selected={active}
                     onClick={() => setBilling(b)}
-                    className="flex flex-1 items-center justify-center gap-1.5"
+                    className="press flex flex-1 items-center justify-center gap-1.5"
                     style={{
                       padding: '7px 10px',
                       borderRadius: 2,

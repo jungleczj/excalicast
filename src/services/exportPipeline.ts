@@ -19,6 +19,7 @@ import {
   type WorkspaceShellRow,
 } from '@/types/recording';
 import { compileSubtitles, drawFrostedWatermark, drawSubtitle, subtitleLayout, chunkByWidth, subtitlePageIndex } from '@/utils/frameOverlays';
+import { normalizeSegments, keptDuration, isTrimmed, outputToSource } from '@/utils/segments';
 import { cueAt } from '@/utils/srtParser';
 import { createCameraFrameSource, type CameraFrameSource } from './webmCameraFrames';
 import { drawLaserOverlay } from '@/utils/laserRender';
@@ -293,12 +294,11 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const fps = opts.fps;
   const durationMs = metadata.durationMs;
 
-  // 时间轴裁剪：单 in/out 段（segments[0]）。缺省=整段。导出只输出 [trimIn,trimOut]，
-  // 帧的源时间从 trimIn 起算、输出时间从 0 起算。音频/摄像头用 ffmpeg -ss 对齐。
-  const trimIn = Math.max(0, Math.min(durationMs, opts.segments?.[0]?.start ?? 0));
-  const trimOut = Math.max(trimIn + 1, Math.min(durationMs, opts.segments?.[0]?.end ?? durationMs));
-  const trimmed = trimIn > 0 || trimOut < durationMs;
-  const outDurationMs = trimOut - trimIn;
+  // 时间轴裁剪：任意多段保留（segments）。缺省/整段=不裁。导出只输出保留段、按序拼接，
+  // 输出时间从 0 连续起算，每帧源时间 = outputToSource(kept, 输出时间)。
+  const kept = normalizeSegments(opts.segments, durationMs);
+  const trimmed = isTrimmed(kept, durationMs);
+  const outDurationMs = trimmed ? keptDuration(kept) : durationMs;
   const totalFrames = Math.max(1, Math.round((outDurationMs / 1000) * fps));
 
   const filesForExport: Record<string, unknown> = {};
@@ -340,7 +340,8 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
 
   // 相同帧去重：静止段（场景/外壳/字幕都没变）直接复用上一帧 PNG，跳过最贵的
   // exportToCanvas + 合成 + toBlob。有激光轨迹时逐帧不同，保守关闭去重以保正确。
-  const dedupEnabled = laserEvents.length === 0;
+  // 注：ffmpeg 兜底里若摄像头改走画布内合成（裁剪场景），逐帧含视频会再关掉去重。
+  let dedupEnabled = laserEvents.length === 0;
   let lastSig: string | null = null;
   let lastBuf: Uint8Array | null = null;
   // 基帧缓存：场景+外壳+水印只随 snapshot/shell 变化（与字幕无关）
@@ -380,7 +381,8 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
 
   // 单帧时变输入（便宜，可在去重前算）
   const frameInputs = (i: number) => {
-    const t = trimIn + (i / fps) * 1000;
+    // 输出时间（成片，从 0 连续）→ 源时间（裁剪映射）。不裁时即 i/fps*1000。
+    const t = trimmed ? outputToSource(kept, (i / fps) * 1000) : (i / fps) * 1000;
     const snap = snapshotAt(snapshots, t);
     const shellAtTframe = useShell ? (shellAt(decodedShells, t) as DecodedShell | null) : null;
     const cueAtT = cues.length > 0 ? cueAt(cues, t) : null;
@@ -540,9 +542,9 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
 
   // —— WebCodecs 硬件编码主路径：浏览器支持时启用，失败自动回退 ffmpeg ——
   // 含摄像头时尝试用 VideoDecoder+webm 解复用把摄像头帧在画布内合成；解码不可用/失败 → 回退。
-  // 裁剪时强制走 ffmpeg 兜底路径：WebCodecs 路径目前整段编码音频，无法按 in/out 裁音轨。
-  // ffmpeg 路径用 -ss 对音频/摄像头做精确裁剪，保证音画与帧的输出时间一致。
-  if (!trimmed && 'VideoEncoder' in globalThis && 'AudioEncoder' in globalThis) {
+  // 裁剪也走此路径：音频在解码后按保留段拼接 AudioBuffer（audioSegments），摄像头画布内
+  // getFrameAt(源时间) 合成 —— 多段输出映射到的源时间单调不减，与前进式解码器吻合。
+  if ('VideoEncoder' in globalThis && 'AudioEncoder' in globalThis) {
     try {
       if (cameraBlob) {
         cameraSource = await createCameraFrameSource(cameraBlob); // 失败抛错 → 回退 ffmpeg
@@ -555,6 +557,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         width: outputW,
         height: outputH,
         audioBlob: audioBlob ?? null,
+        audioSegments: trimmed ? kept : undefined,
         renderFrame: async (i) => composeFrame(frameInputs(i)),
         onProgress: (p) => opts.onProgress?.(0.08 + p * 0.9),
       });
@@ -578,6 +581,21 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   }
 
   // —— ffmpeg 兜底路径（JPEG 中间帧）——
+  // 裁剪场景下摄像头改走画布内合成（getFrameAt(源时间)），避免多段把连续摄像头流
+  // 用 overlay 重映射的复杂度；不裁时仍走下方 ffmpeg overlay 滤镜。
+  if (trimmed && cameraBlob && !compositeCamera) {
+    try {
+      cameraSource = await createCameraFrameSource(cameraBlob);
+      compositeCamera = true;
+      dedupEnabled = false; // 逐帧含摄像头视频，关掉整帧去重
+    } catch (err) {
+      cameraSource = null;
+      compositeCamera = false;
+      // eslint-disable-next-line no-console
+      console.warn('[export] ffmpeg trim path: camera decode unavailable, dropping bubble:', err);
+    }
+  }
+
   const ffmpeg = await getFfmpeg(opts.onLog);
   for (let i = 0; i < totalFrames; i++) {
     const inp = frameInputs(i);
@@ -606,7 +624,8 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   }
 
   let cameraFile: string | null = null;
-  if (cameraBlob) {
+  // 裁剪时摄像头改走画布内合成（见上），不再作为 ffmpeg overlay 输入；不裁时用 overlay 滤镜。
+  if (cameraBlob && !trimmed) {
     cameraFile = 'camera.webm';
     await ffmpeg.writeFile(cameraFile, new Uint8Array(await cameraBlob.arrayBuffer()));
   }
@@ -617,27 +636,23 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     opts.onProgress?.(0.72 + Math.min(1, Math.max(0, progress)) * 0.28);
   });
 
-  // 输入顺序：[0] 帧序列 [1] 音频?  [2] 摄像头?
+  // 输入顺序：[0] 帧序列 [1] 音频?  [2] 摄像头?(仅不裁时)
   // 注意：水印和字幕已在帧画布层画进 PNG，这里不再有水印 input
   const inputs: string[] = ['-framerate', String(fps), '-i', 'f_%06d.jpg'];
   let nextIdx = 1;
   let audioIdx: number | null = null;
   let cameraIdx: number | null = null;
-  // 裁剪时对音频/摄像头先 -ss 到 trimIn，使其源时间与帧的输出时间（从 0 起）对齐。
-  const ssArgs = trimmed ? ['-ss', (trimIn / 1000).toFixed(3)] : [];
-  if (audioFile) { inputs.push(...ssArgs, '-i', audioFile); audioIdx = nextIdx++; }
-  if (cameraFile) { inputs.push(...ssArgs, '-i', cameraFile); cameraIdx = nextIdx++; }
+  if (audioFile) { inputs.push('-i', audioFile); audioIdx = nextIdx++; }
+  if (cameraFile) { inputs.push('-i', cameraFile); cameraIdx = nextIdx++; }
 
-  // filter 链：仅保留 camera overlay（人像气泡用 ffmpeg 合成是为了用视频流，
-  // 不能简单 burn 进 PNG —— 摄像头视频独立时间线）
+  // filter 链：视频侧 camera overlay（仅不裁时）+ 音频侧裁剪拼接（atrim/concat）。
   const filterParts: string[] = [];
   let curLabel = '[0:v]';
   // 圆形 alpha mask 的 geq 表达式 —— 多段也复用同一段
   const geqMask = `format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(pow(X-W/2,2)+pow(Y-H/2,2),pow(W/2-1,2)),0,255)'`;
 
   if (cameraIdx !== null) {
-    // 摄像头气泡的有效边界：shell on 时跟随 letterboxed shell（用首张 shell 做基准，
-    // 避免单帧 shell 尺寸变化导致 enable 区间 x/y 不连续）；shell off 时整张 target。
+    // （未裁剪）摄像头气泡的有效边界：shell on 时跟随 letterboxed shell（用首张 shell 做基准）。
     let camBounds: CameraBounds = { offX: 0, offY: 0, w: outputW, h: outputH };
     if (useShell && decodedShells.length > 0) {
       const first = decodedShells[0];
@@ -651,13 +666,9 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         h: sh,
       };
     }
-    const rawSegments = buildCameraSegments(cameraEvents, durationMs, camBounds);
-    // 用绝对时间建段，再整体左移 trimIn 并钳到 [0,outDurationMs]，与 -ss 后的摄像头/帧输出时间对齐。
-    const segments = rawSegments
-      .map((seg) => ({ ...seg, startMs: Math.max(0, seg.startMs - trimIn), endMs: Math.min(outDurationMs, seg.endMs - trimIn) }))
-      .filter((seg) => seg.endMs - seg.startMs >= 50);
+    const segments = buildCameraSegments(cameraEvents, durationMs, camBounds);
 
-    if (rawSegments.length === 0) {
+    if (segments.length === 0) {
       // Legacy / 没有位置事件：静态右下角，落在 camBounds 内（shell 时即落在 letterboxed shell 区内）。
       const camSize = Math.max(16, Math.round(camBounds.h * 0.22));
       const overlayX = Math.round(camBounds.offX + camBounds.w - camSize - camBounds.w * 0.025);
@@ -667,7 +678,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       );
       filterParts.push(`${curLabel}[cam]overlay=${overlayX}:${overlayY}[v_with_cam]`);
       curLabel = '[v_with_cam]';
-    } else if (segments.length > 0) {
+    } else {
       // 1 路摄像头 split=N → 每段 scale + crop + hflip + geq → enable=between 叠加
       const labels = segments.map((_, i) => `[c${i}]`);
       filterParts.push(`[${cameraIdx}:v]split=${segments.length}${labels.join('')}`);
@@ -691,11 +702,31 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     }
   }
 
+  // 音频裁剪：按保留段 atrim + asetpts 归零，再 concat 拼成连续音轨 [aout]。
+  let audioOutLabel: string | null = null;
+  if (audioIdx !== null && trimmed) {
+    const aLabels: string[] = [];
+    kept.forEach((seg, i) => {
+      const s0 = (seg.start / 1000).toFixed(3);
+      const s1 = (seg.end / 1000).toFixed(3);
+      filterParts.push(`[${audioIdx}:a]atrim=start=${s0}:end=${s1},asetpts=PTS-STARTPTS[a${i}]`);
+      aLabels.push(`[a${i}]`);
+    });
+    if (aLabels.length === 1) {
+      audioOutLabel = aLabels[0];
+    } else {
+      filterParts.push(`${aLabels.join('')}concat=n=${aLabels.length}:v=0:a=1[aout]`);
+      audioOutLabel = '[aout]';
+    }
+  }
+
   const filter: string[] = [];
+  const haveVideoFilter = curLabel !== '[0:v]';
   if (filterParts.length > 0) {
     filter.push('-filter_complex', filterParts.join(';'));
-    filter.push('-map', curLabel);
-    if (audioIdx !== null) filter.push('-map', `${audioIdx}:a`);
+    filter.push('-map', haveVideoFilter ? curLabel : '0:v');
+    if (audioOutLabel) filter.push('-map', audioOutLabel);
+    else if (audioIdx !== null) filter.push('-map', `${audioIdx}:a`);
   } else if (audioIdx !== null) {
     filter.push('-map', '0:v', '-map', `${audioIdx}:a`);
   } else {
@@ -717,6 +748,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   try { await ffmpeg.deleteFile('output.mp4'); } catch { /* ignore */ }
   if (audioFile) { try { await ffmpeg.deleteFile(audioFile); } catch { /* ignore */ } }
   if (cameraFile) { try { await ffmpeg.deleteFile(cameraFile); } catch { /* ignore */ } }
+  try { cameraSource?.close(); } catch { /* */ } // 裁剪时画布内合成用过的摄像头解码器
   disposeShells(decodedShells);
 
   opts.onProgress?.(1);

@@ -8,10 +8,7 @@ import { RecordingBar } from '@/components/RecordingBar';
 import { RecordingSetup } from '@/components/RecordingSetup';
 import { CameraBubble } from '@/components/CameraBubble';
 import { AspectCropOverlay } from '@/components/AspectCropOverlay';
-import { LibraryDrawer } from '@/components/LibraryDrawer';
 import { I } from '@/components/icons';
-import { ProUpgradeModal } from '@/components/ProUpgradeModal';
-import { FirstRunGuide } from '@/components/onboarding/FirstRunGuide';
 import { useSubscription } from '@/hooks/useSubscription';
 import { startRecording, type SessionHandle } from '@/services/recordingSession';
 import { acquireMicStream } from '@/services/audioRecorder';
@@ -44,8 +41,22 @@ function cornerToXY(corner: CameraCorner, sizePx: number): { x: number; y: numbe
 
 const Whiteboard = dynamic(() => import('@/components/Whiteboard'), {
   ssr: false,
-  loading: () => <div className="grid h-full place-items-center text-text-tertiary">…</div>,
+  // 跳转后白板 chunk（连带 Excalidraw）还在加载时的占位骨架 —— 让「已进录制页、正在载入画板」体感明确。
+  loading: () => (
+    <div className="dots-fine grid h-full place-items-center" style={{ background: 'var(--paper-2)' }}>
+      <div className="fade-in flex flex-col items-center gap-3" style={{ color: 'var(--ink-3)' }}>
+        <span className="camera-idle-pulse" style={{ fontFamily: 'var(--font-hand)', fontSize: 22 }}>Excalicast</span>
+        <span className="label-mono" style={{ fontSize: 10 }}>loading board…</span>
+      </div>
+    </div>
+  ),
 });
+
+// 非关键组件懒加载：仅在打开时才载入对应 chunk，缩小 /app 首屏编译/首包。
+// 三者关闭时都 return null（无退出动画），渲染处用 `&&` 门控以真正延迟 chunk。
+const LibraryDrawer = dynamic(() => import('@/components/LibraryDrawer').then((m) => m.LibraryDrawer), { ssr: false });
+const ProUpgradeModal = dynamic(() => import('@/components/ProUpgradeModal').then((m) => m.ProUpgradeModal), { ssr: false });
+const FirstRunGuide = dynamic(() => import('@/components/onboarding/FirstRunGuide').then((m) => m.FirstRunGuide), { ssr: false });
 
 export default function HomePage(): JSX.Element {
   const t = useTranslations('workspace');
@@ -676,19 +687,23 @@ export default function HomePage(): JSX.Element {
         >
           <I.Library size={16} />
         </button>
-        <LibraryDrawer
-          open={libraryOpen}
-          onClose={() => setLibraryOpen(false)}
-          excalidrawApiRef={excalidrawApiRef}
-        />
+        {libraryOpen && (
+          <LibraryDrawer
+            open={libraryOpen}
+            onClose={() => setLibraryOpen(false)}
+            excalidrawApiRef={excalidrawApiRef}
+          />
+        )}
 
-        <ProUpgradeModal
-          open={proUpgradeOpen}
-          onClose={() => setProUpgradeOpen(false)}
-          onUpgraded={() => {
-            void subscription.refresh();
-          }}
-        />
+        {proUpgradeOpen && (
+          <ProUpgradeModal
+            open={proUpgradeOpen}
+            onClose={() => setProUpgradeOpen(false)}
+            onUpgraded={() => {
+              void subscription.refresh();
+            }}
+          />
+        )}
 
         {/* 录制前 Setup 面板 */}
         <RecordingSetup

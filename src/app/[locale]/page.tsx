@@ -123,7 +123,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, hasDemo, hasShots }:
           <Link href="/pricing" className="nav-link" style={navLink(false)}>{t('nav.pricing')}</Link>
         </nav>
         <div className="flex items-center gap-3">
-          <TrackedLink event="cta_start_recording" eventProps={{ surface: 'nav' }} href="/app" className="btn-sketch btn-sketch-primary btn-stamp" style={{ padding: '9px 16px' }}>
+          <TrackedLink event="cta_start_recording" eventProps={{ surface: 'nav' }} prefetchKind="whiteboard" href="/app" className="btn-sketch btn-sketch-primary btn-stamp" style={{ padding: '9px 16px' }}>
             <span className="rec-dot" style={{ width: 6, height: 6 }} />
             {t('nav.startRecording')}
           </TrackedLink>
@@ -148,7 +148,7 @@ function LandingContent({ oneTimePrice, proPrice, maxPrice, hasDemo, hasShots }:
             </h1>
             <p className="reveal-up" style={{ marginTop: 28, fontSize: 18, lineHeight: 1.55, color: 'var(--ink-2)', maxWidth: 520 }}>{t('hero.subtitle')}</p>
             <div className="reveal-up mt-9 flex flex-wrap items-center gap-3.5">
-              <TrackedLink event="cta_start_recording" eventProps={{ surface: 'hero' }} href="/app" className="btn-sketch btn-sketch-primary btn-stamp lift">
+              <TrackedLink event="cta_start_recording" eventProps={{ surface: 'hero' }} prefetchKind="whiteboard" href="/app" className="btn-sketch btn-sketch-primary btn-stamp lift">
                 <span className="rec-dot" style={{ width: 7, height: 7 }} />
                 {t('hero.ctaPrimary')}
               </TrackedLink>

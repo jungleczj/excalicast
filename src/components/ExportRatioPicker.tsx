@@ -39,7 +39,7 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
                 key={r}
                 type="button"
                 onClick={() => onChange({ ...config, aspectRatio: r })}
-                className="flex flex-col items-center justify-center gap-1.5 transition"
+                className="press flex flex-col items-center justify-center gap-1.5"
                 style={{
                   padding: '10px 8px',
                   background: active ? 'var(--hi)' : 'var(--paper)',
@@ -82,7 +82,7 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
                 key={m.value}
                 type="button"
                 onClick={() => onChange({ ...config, croppingMode: m.value })}
-                className="flex w-full items-start gap-3 p-3 text-left transition"
+                className="press flex w-full items-start gap-3 p-3 text-left"
                 style={{
                   background: active ? 'var(--hi-soft)' : 'var(--paper)',
                   border: '1.4px solid var(--ink)',

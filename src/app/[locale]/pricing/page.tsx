@@ -79,7 +79,7 @@ function PricingContent({ oneTimeCents, proCents, maxCents, proYearlyCents, maxY
           <Link href="/library" className="nav-link" style={navLink(false)}>{th('library')}</Link>
           <Link href="/pricing" className="nav-link is-active" style={navLink(true)}>{tl('nav.pricing')}</Link>
         </nav>
-        <TrackedLink event="cta_start_recording" eventProps={{ surface: 'nav' }} href="/app" className="btn-sketch btn-sketch-primary btn-stamp" style={{ padding: '9px 16px' }}>
+        <TrackedLink event="cta_start_recording" eventProps={{ surface: 'nav' }} prefetchKind="whiteboard" href="/app" className="btn-sketch btn-sketch-primary btn-stamp" style={{ padding: '9px 16px' }}>
           <span className="rec-dot" style={{ width: 6, height: 6 }} />
           {tl('nav.startRecording')}
         </TrackedLink>

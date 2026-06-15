@@ -17,6 +17,7 @@
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 import { Muxer as WebmMuxer, ArrayBufferTarget as WebmTarget } from 'webm-muxer';
 import { createCameraFrameSource } from './webmCameraFrames';
+import type { TimeSegment } from '@/types/recording';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -26,8 +27,35 @@ interface EncodeParams {
   width: number;
   height: number;
   audioBlob: Blob | null;
+  /** 源时间保留段（ms）；提供则导出前把音频按段拼接，与裁剪后的帧时间轴对齐。 */
+  audioSegments?: TimeSegment[];
   renderFrame: (i: number) => Promise<HTMLCanvasElement>;
   onProgress?: (p: number) => void; // 0..1
+}
+
+/** 按保留段（源 ms）把 AudioBuffer 拼接成连续音轨（用于时间轴裁剪）。 */
+function spliceAudioBuffer(ctx: any, src: AudioBuffer, segments: TimeSegment[]): AudioBuffer {
+  const sr = src.sampleRate;
+  const ch = src.numberOfChannels;
+  const ranges = segments.map((s) => {
+    const a = Math.max(0, Math.min(src.length, Math.floor((s.start / 1000) * sr)));
+    const b = Math.max(a, Math.min(src.length, Math.ceil((s.end / 1000) * sr)));
+    return { a, b };
+  });
+  let totalFrames = 0;
+  for (const r of ranges) totalFrames += r.b - r.a;
+  totalFrames = Math.max(1, totalFrames);
+  const out: AudioBuffer = ctx.createBuffer(ch, totalFrames, sr);
+  for (let c = 0; c < ch; c++) {
+    const dst = out.getChannelData(c);
+    const srcData = src.getChannelData(c);
+    let off = 0;
+    for (const r of ranges) {
+      dst.set(srcData.subarray(r.a, r.b), off);
+      off += r.b - r.a;
+    }
+  }
+  return out;
 }
 
 const G = globalThis as any;
@@ -43,7 +71,7 @@ function estimateBitrate(width: number, height: number, fps: number): number {
 }
 
 export async function encodeWebCodecsMp4(params: EncodeParams): Promise<Blob> {
-  const { totalFrames, fps, width, height, audioBlob, renderFrame, onProgress } = params;
+  const { totalFrames, fps, width, height, audioBlob, audioSegments, renderFrame, onProgress } = params;
   const VideoEncoderCtor = G.VideoEncoder;
   const AudioEncoderCtor = G.AudioEncoder;
   const VideoFrameCtor = G.VideoFrame;
@@ -56,7 +84,9 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<Blob> {
     try {
       const AC = G.AudioContext || G.webkitAudioContext;
       const ctx = new AC();
-      const decoded: AudioBuffer = await ctx.decodeAudioData(await audioBlob.arrayBuffer());
+      let decoded: AudioBuffer = await ctx.decodeAudioData(await audioBlob.arrayBuffer());
+      // 裁剪：按保留段拼接音频，与帧的输出时间轴对齐（须在 ctx.close 前 createBuffer）。
+      if (audioSegments && audioSegments.length > 0) decoded = spliceAudioBuffer(ctx, decoded, audioSegments);
       audio = { buffer: decoded, channels: Math.min(2, decoded.numberOfChannels), sampleRate: decoded.sampleRate };
       await ctx.close();
     } catch {

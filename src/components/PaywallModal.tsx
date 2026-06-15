@@ -159,7 +159,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
       onClick={onClose}
     >
       <div
-        className="relative max-w-[92vw]"
+        className="pop-in relative max-w-[92vw]"
         style={{
           width: 480,
           background: 'var(--paper)',

@@ -161,7 +161,7 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
               <button
                 type="button"
                 onClick={() => setFraming('default')}
-                className="flex w-full items-center text-left"
+                className="press flex w-full items-center text-left"
                 style={{
                   gap: 14,
                   padding: 16,
@@ -183,7 +183,7 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
               <button
                 type="button"
                 onClick={() => setFraming('custom')}
-                className="flex w-full items-center text-left"
+                className="press flex w-full items-center text-left"
                 style={{
                   gap: 14, padding: 16, border: '1.5px solid var(--ink)',
                   background: framing === 'custom' ? 'var(--hi)' : 'var(--paper)',
@@ -206,7 +206,7 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
                       key={id}
                       type="button"
                       onClick={() => setFraming(id)}
-                      className="flex items-center text-left"
+                      className="press flex items-center text-left"
                       style={{
                         gap: 12,
                         padding: 12,
@@ -400,9 +400,9 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
       onClick={() => onChange(!on)}
       role="switch"
       aria-checked={on}
-      style={{ width: 38, height: 22, borderRadius: 999, border: '1.4px solid var(--ink)', background: on ? 'var(--ink)' : 'var(--paper-2)', position: 'relative', cursor: 'pointer', padding: 0, flexShrink: 0 }}
+      style={{ width: 38, height: 22, borderRadius: 999, border: '1.4px solid var(--ink)', background: on ? 'var(--ink)' : 'var(--paper-2)', position: 'relative', cursor: 'pointer', padding: 0, flexShrink: 0, transition: 'background 150ms ease' }}
     >
-      <div style={{ position: 'absolute', top: 1, left: on ? 17 : 1, width: 16, height: 16, borderRadius: 999, background: on ? 'var(--hi)' : 'var(--paper)', border: '1.2px solid var(--ink)', transition: 'left 150ms' }} />
+      <div style={{ position: 'absolute', top: 1, left: on ? 17 : 1, width: 16, height: 16, borderRadius: 999, background: on ? 'var(--hi)' : 'var(--paper)', border: '1.2px solid var(--ink)', transition: 'left 150ms cubic-bezier(0.2,0.7,0.3,1), background 150ms ease' }} />
     </button>
   );
 }
@@ -417,6 +417,7 @@ function Segmented({ value, onChange, options }: { value: string; onChange: (v: 
             key={o.v}
             type="button"
             onClick={() => onChange(o.v)}
+            className="press"
             style={{ padding: '5px 12px', background: active ? 'var(--ink)' : 'transparent', color: active ? 'var(--paper)' : 'var(--ink-2)', border: 'none', borderRadius: 2, fontFamily: 'var(--font-mono)', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer' }}
           >
             {o.label}

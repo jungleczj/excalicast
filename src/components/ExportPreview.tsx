@@ -4,8 +4,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useTranslations } from 'next-intl';
 import { cameraPositionAt, renderPreviewFrame } from '@/services/exportPipeline';
 import { getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
-import type { CameraPositionEvent, ExportConfig, RecordingMetadata, ShellCanvasRect, ShellSize } from '@/types/recording';
+import type { CameraPositionEvent, ExportConfig, RecordingMetadata, ShellCanvasRect, ShellSize, TimeSegment } from '@/types/recording';
 import { ASPECT_PRESETS } from '@/types/recording';
+import { keptDuration, normalizeSegments, outputToSource, sourceToOutput } from '@/utils/segments';
 import { I } from '@/components/icons';
 import type { ExportProgressState } from '@/components/ExportPanel';
 
@@ -14,6 +15,11 @@ interface Props {
   metadata: RecordingMetadata;
   config: ExportConfig;
   progress?: ExportProgressState | null;
+  /** 保留段（源 ms）；播放 / 读数走「成片」时间，跳过被删段。 */
+  segments: TimeSegment[];
+  /** 受控播放头（源 ms）。 */
+  playheadMs: number;
+  onPlayheadChange: (srcMs: number) => void;
 }
 
 // 预览播放时，主帧画面的最小重渲染间隔（ms）。
@@ -24,12 +30,16 @@ const CANVAS_REDRAW_INTERVAL_MS = 200;
 // 预览盒子高度约束。宽度上限走 ResizeObserver 测量的真实父宽，不再硬编码。
 const PREVIEW_VH_PCT = 0.52;
 
-export function ExportPreview({ recordingId, metadata, config, progress }: Props): JSX.Element {
+export function ExportPreview({ recordingId, metadata, config, progress, segments, playheadMs, onPlayheadChange }: Props): JSX.Element {
   const t = useTranslations('exportPreview');
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const cameraRef = useRef<HTMLVideoElement>(null);
-  const [timeMs, setTimeMs] = useState<number>(0);
+  // 受控播放头（源时间）。播放/读数走「成片」输出时间（跳过被删段）。
+  const timeMs = playheadMs;
+  const setTimeMs = onPlayheadChange;
+  const kept = useMemo(() => normalizeSegments(segments, metadata.durationMs), [segments, metadata.durationMs]);
+  const keptDur = useMemo(() => keptDuration(kept), [kept]);
   const [rendering, setRendering] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -159,11 +169,12 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
       .finally(() => { if (renderToken.current === my) setRendering(false); });
   }, [recordingId, config]);
 
-  // 当 timeMs / config 变化时重绘（force=true 用于 scrub / config 切换）
+  // config 切换 或 暂停态下播放头被外部（时间轴）拖动 → 重绘该源帧。
+  // 播放中由播放循环负责重绘，这里跳过避免双重绘制。
   useEffect(() => {
-    drawFrame(timeMs, true);
+    if (!playing) drawFrame(timeMs, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recordingId, config]);
+  }, [recordingId, config, timeMs, playing]);
 
   // 播放循环：performance.now() 主时钟 + 节流 canvas 重绘
   useEffect(() => {
@@ -173,30 +184,33 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
       clockRef.current = null;
       return;
     }
-    clockRef.current = { perfStart: performance.now(), baseTime: timeMs };
+    // baseTime = 起播时刻的「成片输出时间」；循环走输出时间，映射回源时间渲染。
+    clockRef.current = { perfStart: performance.now(), baseTime: sourceToOutput(kept, timeMs) };
     const audio = audioRef.current;
     const camera = cameraRef.current;
     const tick = () => {
       const ref = clockRef.current;
       if (!ref) return;
-      const t = ref.baseTime + (performance.now() - ref.perfStart);
-      const dur = metadata.durationMs;
-      if (dur > 0 && t >= dur) {
-        setTimeMs(dur);
-        drawFrame(dur, true);
+      const outT = ref.baseTime + (performance.now() - ref.perfStart);
+      if (keptDur > 0 && outT >= keptDur) {
+        const endSrc = outputToSource(kept, keptDur);
+        setTimeMs(endSrc);
+        drawFrame(endSrc, true);
         setPlaying(false);
         if (audio) { try { audio.pause(); } catch { /* ignore */ } }
         if (camera) { try { camera.pause(); } catch { /* ignore */ } }
         return;
       }
-      setTimeMs(t);
-      drawFrame(t, false);
-      const tSec = t / 1000;
-      if (audio && isFinite(audio.currentTime) && Math.abs(audio.currentTime - tSec) > 0.3) {
-        try { audio.currentTime = tSec; } catch { /* ignore */ }
+      const src = outputToSource(kept, outT);
+      setTimeMs(src);
+      drawFrame(src, false);
+      const sSec = src / 1000;
+      // 段内自然播放；跨被删段（src 跳变）漂移 > 0.3s 时强制 seek 对齐。
+      if (audio && isFinite(audio.currentTime) && Math.abs(audio.currentTime - sSec) > 0.3) {
+        try { audio.currentTime = sSec; } catch { /* ignore */ }
       }
-      if (camera && isFinite(camera.currentTime) && Math.abs(camera.currentTime - tSec) > 0.3) {
-        try { camera.currentTime = tSec; } catch { /* ignore */ }
+      if (camera && isFinite(camera.currentTime) && Math.abs(camera.currentTime - sSec) > 0.3) {
+        try { camera.currentTime = sSec; } catch { /* ignore */ }
       }
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -205,27 +219,27 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, drawFrame, metadata.durationMs]);
+  }, [playing, drawFrame, kept, keptDur]);
 
   const togglePlay = useCallback(() => {
     setPlaying((prev) => {
       const next = !prev;
       const audio = audioRef.current;
       const camera = cameraRef.current;
-      const dur = metadata.durationMs;
       if (next) {
-        const restart = dur > 0 && timeMs >= dur - 50;
-        const startT = restart ? 0 : timeMs;
+        const curOut = sourceToOutput(kept, timeMs);
+        const restart = keptDur > 0 && curOut >= keptDur - 50;
+        const startSrc = restart ? outputToSource(kept, 0) : timeMs;
         if (restart) {
-          setTimeMs(0);
-          drawFrame(0, true);
+          setTimeMs(startSrc);
+          drawFrame(startSrc, true);
         }
         if (audio) {
-          try { audio.currentTime = startT / 1000; } catch { /* ignore */ }
+          try { audio.currentTime = startSrc / 1000; } catch { /* ignore */ }
           void audio.play().catch(() => { /* ignore */ });
         }
         if (camera) {
-          try { camera.currentTime = startT / 1000; } catch { /* ignore */ }
+          try { camera.currentTime = startSrc / 1000; } catch { /* ignore */ }
           void camera.play().catch(() => { /* ignore */ });
         }
       } else {
@@ -234,20 +248,10 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
       }
       return next;
     });
-  }, [metadata.durationMs, timeMs, drawFrame]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kept, keptDur, timeMs, drawFrame]);
 
-  const handleSeek = useCallback((t: number) => {
-    setTimeMs(t);
-    drawFrame(t, true);
-    const audio = audioRef.current;
-    const camera = cameraRef.current;
-    if (audio) { try { audio.currentTime = t / 1000; } catch { /* ignore */ } }
-    if (camera) { try { camera.currentTime = t / 1000; } catch { /* ignore */ } }
-    if (playing) {
-      clockRef.current = { perfStart: performance.now(), baseTime: t };
-    }
-  }, [drawFrame, playing]);
-
+  // scrub 由时间轴驱动（onPlayheadChange → playheadMs）；预览不再自带进度条。
   const preset = ASPECT_PRESETS[config.aspectRatio];
   const aspect = preset.width / preset.height;
 
@@ -363,7 +367,7 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
 
         {rendering && !exporting && !playing && (
           <span
-            className="absolute right-3 top-3"
+            className="fade-in absolute right-3 top-3"
             style={{
               padding: '2px 8px',
               background: 'var(--ink)',
@@ -379,7 +383,7 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
         )}
         {error && (
           <span
-            className="absolute inset-x-3 top-12"
+            className="fade-in absolute inset-x-3 top-12"
             style={{
               padding: '6px 12px',
               background: 'var(--rec)',
@@ -436,20 +440,12 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
                 flexShrink: 0,
               }}
             >
-              {(timeMs / 1000).toFixed(1)}s
+              {(sourceToOutput(kept, timeMs) / 1000).toFixed(1)}s
             </span>
-            <input
-              type="range"
-              min={0}
-              max={metadata.durationMs}
-              step={Math.max(1, Math.round(metadata.durationMs / 400))}
-              value={Math.min(timeMs, metadata.durationMs)}
-              onChange={(e) => handleSeek(Number(e.target.value))}
-              className="h-1 flex-1"
-              // minWidth: 0 关键 —— input[type=range] 浏览器内在 min-width ~150-200px，
-              // 默认 flex `min-width: auto` 会顶住 flex shrink，9:16 窄盒下滑块就不会缩。
-              style={{ accentColor: 'var(--hi)', minWidth: 0 }}
-            />
+            {/* 成片输出进度（只读；scrub 在下方时间轴） —— minWidth:0 保证 9:16 窄盒能缩 */}
+            <div className="h-1 flex-1" style={{ minWidth: 0, background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${keptDur > 0 ? Math.min(100, (sourceToOutput(kept, timeMs) / keptDur) * 100) : 0}%`, background: 'var(--hi)' }} />
+            </div>
             <span
               style={{
                 fontFamily: 'var(--font-mono)',
@@ -459,7 +455,7 @@ export function ExportPreview({ recordingId, metadata, config, progress }: Props
                 flexShrink: 0,
               }}
             >
-              {(metadata.durationMs / 1000).toFixed(1)}s
+              {(keptDur / 1000).toFixed(1)}s
             </span>
           </div>
         )}

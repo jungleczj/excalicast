@@ -1,9 +1,12 @@
 # PRD：白板录制工具
-**版本**：v0.6.5  
+**版本**：v0.6.8  
 **状态**：开发中  
 **作者**：—  
-**最后更新**：2026-06-08  
-**变更**：v0.6.5 - 导出页按 `editor.jsx` 1:1 重做为编辑器（顶栏可改名 + Share/Export · 左播放器 + 时间轴 · 右按 tier 分级 Tab）+ 功能性时间轴裁剪（单 in/out 段，`recording.segments`，导出按段裁剪、ffmpeg `-ss` 对齐音频/摄像头/字幕）。详见「## 十一」最新一条。  
+**最后更新**：2026-06-15  
+**变更**：v0.6.8 - 时间轴交互改为**主流剪辑方式**（对标 Clipchamp/NLE）：片段 block + 播放头实时 scrub 预览 + Split(✂/S) + 选中片段删除(Del) + 边缘 Trim；剪任意中间段＝Split 两刀再删中段。后端（多段导出/成片预览）完全复用未改。详见「## 十一」最新一条。  
+**历史变更**：v0.6.7 - 对标设计补齐遗漏动效：移植 `pulse-soft`/`sketchy-wiggle` keyframe、加按钮按下反馈/选项卡 `.press`/弹窗 `.pop-in`/时间轴手柄 hover，并把 `.lift`/`.fade-in`/封面 `group-hover:scale` 等应用到录制设置·控制·比例选项·导出 Tab·时间轴·录制库卡片·升级弹窗（全部走 reduced-motion 兜底）。详见「## 十一」。  
+**历史变更**：v0.6.6 - 时间轴升级为**任意多段裁剪**（框选删除、可删多处）+ 拖播放头/选区**实时预览** + 预览点播放**跳过被删段连播保留段**（成片）；导出管线认任意多段（WebCodecs 按段拼接 AudioBuffer + 画布内摄像头合成，ffmpeg 兜底 atrim/concat）。详见「## 十一」。  
+**历史变更**：v0.6.5 - 导出页按 `editor.jsx` 1:1 重做为编辑器（顶栏可改名 + Share/Export · 左播放器 + 时间轴 · 右按 tier 分级 Tab）+ 功能性时间轴裁剪（单 in/out 段，`recording.segments`，导出按段裁剪）。详见「## 十一」。  
 **历史变更**：v0.6.4 - 关键用户事件落库 Supabase（`analytics_events` + `/api/analytics` + 统一 `trackEvent` 双写）；后台分析 Dashboard `/admin/analytics`（漏斗/时序/排行，ADMIN_SECRET 鉴权）；Library 页 1:1 重做（搜索 + 筛选 + 排序 + grid/list 视图切换）。详见「## 十一」最新一条。  
 **历史变更**：v0.6.3 - 修 Excalidraw unpkg CDN ChunkLoadError（自托管资源）；裁切框升级为可拖拽移动 + 四角缩放（预设锁比例 / 自定义自由框选 + 框旁 W×H 实时联动），导出按框定区域输出；选定裁切框后摄像头限框内移动。详见「## 十一」。  
 **历史变更**：v0.6.2 - 设计重构 Phase 2：录制前 Setup 面板（比例分组 + 摄像头配置 + 麦克风 + 含工作区开关 + 3 秒倒计时）+ 比例集扩到 10 预设 + 配置随录制持久化 + 画布裁切框 viewfinder + 导出默认沿用。详见「## 十一」。  
@@ -845,9 +848,9 @@ Pro/Max 导出（订阅状态验证）：
 ```
 
 - **顶栏**：项目名内联可编辑（复用 `updateRecordingTitle`）；tier 标签；Share / Export 按钮切到 Export Tab。
-- **左列**：`ExportPreview` 播放器 + `Timeline`（时间轴裁剪，见下）+ 删除录制。
+- **左列**：`ExportPreview`「成片」播放器 + `Timeline`（任意多段裁剪，见下）+ 删除录制。
 - **右列分级 Tab**（按 `useSubscription().tier`）：Export（比例 + 工作区开关 + 水印 + 导出）所有档可见；Captions=Pro、Outline/Handout=Max，锁定档渲染升级块点开 `ProUpgradeModal`。
-- **功能性时间轴裁剪（单 in/out 段）**：拖左右手柄设保留区间 `[inMs,outMs]`，框外（裁掉部分）变暗；改动去抖写入 `recording.segments`，导出按段裁剪输出（见「## 十一」）。多段 Split 留作后续。
+- **功能性时间轴裁剪（主流剪辑交互，对标 Clipchamp/NLE）**：片段（clips=保留段）渲染成可点选 block，被删 gap 变暗；**拖播放头 / 拖片段边缘 / 点轨道 → 上方预览实时 scrub** 到对应帧；**Split（✂，快捷键 S，在播放头处把片段切两段）+ 选中片段删除（快捷键 Del，ripple）** 即可剪掉任意中间段；**片段两端 Trim 手柄**裁头尾；Reset 复原。保留段 = `recording.segments`，改动去抖持久化，导出按保留段拼接输出；预览点「播放」**跳过被删段、只连播保留段**（所见 = 成片，音/画同步）。（数据/导出/预览后端与上一版同，仅交互层换成主流方式。）
 - 导出页是最重要的付费转化入口，锁定功能用 LockBlock 升级块展示，保留可见性。
 - 水印预览实时渲染在播放器右下角，让用户直观感受"有水印 vs 无水印"差距。
 
@@ -896,6 +899,17 @@ Pro/Max 导出（订阅状态验证）：
 ## 十一、实现进展与变更记录（持续同步）
 
 > 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
+
+- **2026-06-15｜时间轴交互改为主流剪辑方式（对标 Clipchamp/NLE）**：上一版「拖选一段→删除」非常规，改为业界通用模型 —— **片段 block + 播放头（拖动/点轨道实时 scrub 预览）+ Split（✂/S，播放头处切片段）+ 选中片段删除（Del，ripple）+ 片段两端 Trim 手柄**；剪任意中间段＝播放头到起→Split→到终→Split→选中间→Delete（同 Clipchamp）。**后端完全复用**（`exportPipeline` 多段拼接输出、`ExportPreview` 受控播放头 + 跳删段播放 + `onScrub` 实时预览均未改）；`segments.ts` 加 `splitSegments`/`removeSegmentAt`/`trimSegmentEdge`（+`MIN_SEGMENT_MS`）。涉及：`src/components/editor/Timeline.tsx`（重写）、`src/utils/segments.ts`、`src/app/[locale]/export/[id]/page.tsx`。
+
+- **2026-06-14｜对标设计补齐遗漏动效（motion polish）**：在既有动效层（`.lift`/`.fade-in`/`.btn-sketch:hover`/`.rec-dot`/`.marker-sweep`/`.float-tilt`/`camera-idle-pulse`）基础上补齐设计遗漏项，集中在 `src/app/globals.css`：移植 `@keyframes pulse-soft`（`.animate-pulse-soft`）、`@keyframes sketchy-wiggle`（`.sketch-active`）；加按钮按下反馈 `.btn-sketch:active`/`.lift:active`、选项卡过渡 `.press`（transform+box-shadow+颜色）、弹窗入场 `@keyframes pop-in`（`.pop-in`）、时间轴手柄 `.tl-grip:hover`；全部纳入 `prefers-reduced-motion` 兜底。并把动效应用到交互组件（仅加类/过渡，不改结构）：录制设置开关 thumb 滑动 + Segmented/选项卡 `.press`、录制控制按钮 `.press`、比例/外壳选项 `.press`、导出页 Tab 切换 `.fade-in` + Tab 条 `.press`、时间轴删除条 `.fade-in` + 播放头手柄 hover、预览 rendering/error 标 `.fade-in`、字幕生成块 `.fade-in`、录制库卡片 hover 上浮 + 封面 `group-hover:scale-105`、升级/付费弹窗面板 `.pop-in`（遮罩已 `.fade-in`）+ 计费切换 `.press`。涉及 `globals.css` + `RecordingSetup`/`RecordingBar`/`ExportRatioPicker`/`WorkspaceShellToggle`/`editor/Timeline`/`ExportPreview`/`SubtitlePanel`/`RecordingsList`/`ProUpgradeModal`/`PaywallModal` + `export/[id]/page.tsx`。
+
+- **2026-06-08｜时间轴升级：任意多段裁剪（框选删除）+ 拖动实时预览 + 跳过被删段的成片播放**：
+  1. **共用工具** `src/utils/segments.ts`：`normalizeSegments`（排序/合并/钳位/缺省整段）、`subtractRange`（框选删除 → 从保留段挖区间）、`keptDuration`、`outputToSource`/`sourceToOutput`（成片↔源时间映射）。
+  2. **时间轴交互**（`Timeline.tsx` 重写）：x 轴 = 整段源时间；在轨道上拖出一段 → 浮「删除/取消」把这段挖掉（可重复删多处），被删段变暗；可拖**播放头**、拖选区、点轨道 → `onScrub` 实时预览；保留段去抖持久化 `recording.segments`（整段存 `[]`）。修掉上一版手柄拖拽坐标系 bug（`laneRef` 与定位同坐标）。
+  3. **预览成片播放器**（`ExportPreview.tsx` 受控化）：新增 `segments`/`playheadMs`/`onPlayheadChange`，移除自带整段进度条（时间轴成为唯一 scrubber）；播放循环走**输出（成片）时间**、`outputToSource` 映射回源时间渲染、**跳过被删段**只连播保留段，跨段边界对齐 audio/camera。
+  4. **导出管线认任意多段**（`exportPipeline.ts` + `webCodecsExport.ts`）：每帧源时间 = `outputToSource(kept, 输出时间)`；WebCodecs 路径（现也处理裁剪，去掉 3c 的 `!trimmed` 强制兜底）在解码后按段拼接 `AudioBuffer`（`audioSegments`），摄像头画布内 `getFrameAt(源时间)` 合成（多段源时间单调、与前进式解码器吻合）；ffmpeg 兜底音频用 `atrim`+`concat` 拼接、裁剪时摄像头改画布内合成（跳过 overlay 滤镜）。不裁时与现状一致。
+  涉及：`src/utils/segments.ts`（新）、`src/components/editor/Timeline.tsx`、`src/components/ExportPreview.tsx`、`src/services/{exportPipeline,webCodecsExport}.ts`、`src/app/[locale]/export/[id]/page.tsx`。
 
 - **2026-06-08｜导出页改编辑器 1:1 重做 + 功能性时间轴裁剪（设计 Phase 3）**：
   1. **编辑器外壳 + 分级 Tab**：`/export/[id]` 按 `editor.jsx` 重做为编辑器布局——顶栏（返回 + Logo + 内联可改项目名 `updateRecordingTitle` + tier 标 + Share/Export）· 左列（`ExportPreview` 播放器 + `Timeline` + 删除）· 右列分级 Tab（Export 全档可见；Captions=Pro；Outline/Handout=Max，锁定档 LockBlock 点开 `ProUpgradeModal`）。Export Tab 复用 `ExportRatioPicker` + `WorkspaceShellToggle` + `ExportPanel`（`showAdvanced` 控制是否含字幕/讲义/分享段；Tab 化后这里关掉、由独立 Tab 承载）。
