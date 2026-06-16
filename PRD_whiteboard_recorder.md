@@ -1,9 +1,11 @@
 # PRD：白板录制工具
-**版本**：v0.6.8  
+**版本**：v0.7.0  
 **状态**：开发中  
 **作者**：—  
 **最后更新**：2026-06-15  
-**变更**：v0.6.8 - 时间轴交互改为**主流剪辑方式**（对标 Clipchamp/NLE）：片段 block + 播放头实时 scrub 预览 + Split(✂/S) + 选中片段删除(Del) + 边缘 Trim；剪任意中间段＝Split 两刀再删中段。后端（多段导出/成片预览）完全复用未改。详见「## 十一」最新一条。  
+**变更**：v0.7.0 - 导出/录制 6 项：预览宽度对齐时间轴；录制「演示缩放」（开关 或 Alt/⌘+双击，双击画布放大/还原）；Outline 与 Handout 拆成两个功能页（大纲可跳转 / Markdown 文档）；摄像头跨比例缩放原则（相对裁切框存、按较短边缩放，预览=录制一致、竖屏不再过小）；导出比例**多选**（录一次出多比例、依次下载）+ 导出比例选项与录制 Setup 统一为全 10 预设。详见「## 十一」最新一条。  
+**历史变更**：v0.6.9 - 导出页新增「格式与清晰度」面板（清晰度 标清~4K / 格式 MP4·WebM·GIF / 帧率 / 画质码率）；录制端一律高采集（摄像头 1280²、外壳 2×）。详见「## 十一」。  
+**历史变更**：v0.6.8 - 时间轴交互改为**主流剪辑方式**（对标 Clipchamp/NLE）：片段 block + 播放头实时 scrub 预览 + Split(✂/S) + 选中片段删除(Del) + 边缘 Trim；剪任意中间段＝Split 两刀再删中段。后端（多段导出/成片预览）完全复用未改。详见「## 十一」。  
 **历史变更**：v0.6.7 - 对标设计补齐遗漏动效：移植 `pulse-soft`/`sketchy-wiggle` keyframe、加按钮按下反馈/选项卡 `.press`/弹窗 `.pop-in`/时间轴手柄 hover，并把 `.lift`/`.fade-in`/封面 `group-hover:scale` 等应用到录制设置·控制·比例选项·导出 Tab·时间轴·录制库卡片·升级弹窗（全部走 reduced-motion 兜底）。详见「## 十一」。  
 **历史变更**：v0.6.6 - 时间轴升级为**任意多段裁剪**（框选删除、可删多处）+ 拖播放头/选区**实时预览** + 预览点播放**跳过被删段连播保留段**（成片）；导出管线认任意多段（WebCodecs 按段拼接 AudioBuffer + 画布内摄像头合成，ffmpeg 兜底 atrim/concat）。详见「## 十一」。  
 **历史变更**：v0.6.5 - 导出页按 `editor.jsx` 1:1 重做为编辑器（顶栏可改名 + Share/Export · 左播放器 + 时间轴 · 右按 tier 分级 Tab）+ 功能性时间轴裁剪（单 in/out 段，`recording.segments`，导出按段裁剪）。详见「## 十一」。  
@@ -849,7 +851,8 @@ Pro/Max 导出（订阅状态验证）：
 
 - **顶栏**：项目名内联可编辑（复用 `updateRecordingTitle`）；tier 标签；Share / Export 按钮切到 Export Tab。
 - **左列**：`ExportPreview`「成片」播放器 + `Timeline`（任意多段裁剪，见下）+ 删除录制。
-- **右列分级 Tab**（按 `useSubscription().tier`）：Export（比例 + 工作区开关 + 水印 + 导出）所有档可见；Captions=Pro、Outline/Handout=Max，锁定档渲染升级块点开 `ProUpgradeModal`。
+- **右列分级 Tab**（按 `useSubscription().tier`）：Export（工作区开关 + 比例 + **格式与清晰度** + 水印 + 导出）所有档可见；Captions=Pro、Outline/Handout=Max，锁定档渲染升级块点开 `ProUpgradeModal`。
+- **格式与清晰度面板**（`ExportFormatPanel`，对标 `editor.jsx`「Format & resolution」）：**清晰度**下拉（标清 480p / 高清 720p / 全高清 1080p / 2K 1440p / 4K 2160p，按所选比例算出 W×H；白板矢量按所选分辨率重渲染＝真清晰）、**格式**（MP4·H.264 / WebM·VP9 / GIF 循环无声）、**帧率**（60/30/24/15）、**画质码率**（自动/高/中/低）。摄像头/工作区外壳为保证高分下同样清晰，**录制端一律高采集**（摄像头 1280²、外壳截图 2× 像素），导出只缩不放（旧录制因源分辨率低仍受限）。
 - **功能性时间轴裁剪（主流剪辑交互，对标 Clipchamp/NLE）**：片段（clips=保留段）渲染成可点选 block，被删 gap 变暗；**拖播放头 / 拖片段边缘 / 点轨道 → 上方预览实时 scrub** 到对应帧；**Split（✂，快捷键 S，在播放头处把片段切两段）+ 选中片段删除（快捷键 Del，ripple）** 即可剪掉任意中间段；**片段两端 Trim 手柄**裁头尾；Reset 复原。保留段 = `recording.segments`，改动去抖持久化，导出按保留段拼接输出；预览点「播放」**跳过被删段、只连播保留段**（所见 = 成片，音/画同步）。（数据/导出/预览后端与上一版同，仅交互层换成主流方式。）
 - 导出页是最重要的付费转化入口，锁定功能用 LockBlock 升级块展示，保留可见性。
 - 水印预览实时渲染在播放器右下角，让用户直观感受"有水印 vs 无水印"差距。
@@ -899,6 +902,17 @@ Pro/Max 导出（订阅状态验证）：
 ## 十一、实现进展与变更记录（持续同步）
 
 > 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
+
+- **2026-06-15｜导出/录制 6 项改进**：
+  1. **预览宽度对齐时间轴**：导出页左列把预览卡 + Timeline + 删除包进同一同宽列（`max-w`），左右边缘对齐；预览视频仍按比例 aspect-fit 居中。
+  2. **录制「演示缩放」**：录制条加开关（`I.Search`）；开关开启 或 `Alt/⌘+双击` 触发——捕获阶段 `dblclick` 拦截 Excalidraw 建文字，双击某点 rAF 平滑放大 ~2× 并居中、再双击还原（经 `excalidrawApiRef.updateScene` 改 zoom/scrollX/scrollY，scene 点由 appState 手算、不静态引 Excalidraw）。缩放写入快照 appState，`follow_viewport` 导出体现在成片（`default`/`fit_all_content` 不体现）。开关开启时切 `hand` 工具防误建文字。涉及 `app/page.tsx`、`RecordingBar.tsx`、`messages`（zoomOn/Off）。
+  3. **Outline / Handout 拆分**：`HandoutPanel` 加 `view:'outline'|'handout'`——Outline=章节大纲（点时间→`onJumpToTime` 跳转预览）+ keyframes；Handout=Markdown 渲染预览 + 下载(md/html/pdf)/复制。共用 `/api/handout`。导出页两 Tab 分别传 view + 区分锁定文案。
+  4. **摄像头跨比例缩放原则**：根因＝气泡 `rs` 原相对 shell 宽、导出按 outputW → 跨比例/竖屏被压小。改为**相对裁切框存**（录制端按裁切框 `fx/fy/fw/fh` 求 `rx=(x-fx)/fw, ry=(y-fy)/fh, rs=size/min(fw,fh)`；default 回退 shell）+ 导出/预览**按较短边缩放** `size=rs×min(W,H)` 并钳位（`exportPipeline` buildCameraSegments/composeFrame + `ExportPreview`）。→ 同比例＝与录制一致，跨比例协调；旧录制为尽量合理（重录精确）。`recordCameraMove` 加 `frame` 参数 + `CameraFrameRect`。
+  5. **多选导出**：`ExportRatioPicker` 改多选（✓ + × 取消，至少 1）；`ExportConfig.exportRatios[]`（缺省=[aspectRatio]，预览=主比例）；`ExportPanel` 遍历选中比例逐个 `exportRecording` 并依次下载、进度「第 x/N」；分辨率/格式/画质统一套用（cropWindow/customOutput 仅对主比例生效）。
+  6. **比例选项统一**：导出比例从 4 个扩到与录制 Setup 一致的全 10 预设（同 `ASPECT_PRESETS`，平台名取 `preset.platforms`）。
+  涉及：`src/app/[locale]/{export/[id],app}/page.tsx`、`src/components/{ExportRatioPicker,ExportPanel,RecordingBar,HandoutPanel,ExportPreview}.tsx`、`src/services/{recordingSession,exportPipeline}.ts`、`src/types/recording.ts`、`src/messages/{zh,en}.json`。
+
+- **2026-06-15｜导出页「格式与清晰度」面板 + 摄像头/外壳高分采集**：导出页右栏新增 `ExportFormatPanel`（对标 `editor.jsx`「Format & resolution」）四个下拉——清晰度 `sd/hd/fhd/qhd/uhd`（标清480p~4K2160p，按比例算 W×H）、格式 `mp4(H.264)/webm(VP9)/gif`、帧率 60/30/24/15、画质 auto/high/medium/low。`ExportConfig` 加 `resolution/format/quality`（+`RESOLUTION_SCALE`）；`exportPipeline` 按档缩放 `outputW/H`、按 quality 调 bitrate/CRF、按 format 分支输出 + mimetype/扩展名（WebM 走 WebCodecs VP9+Opus+webm-muxer 主路径、ffmpeg 兜底；GIF 走 ffmpeg palettegen/paletteuse、无音轨、强制 ffmpeg；HEVC 因浏览器编码不可靠本期省略）；`webCodecsExport` 泛化支持 webm（VP9 level 随分辨率）。**采集策略**（分析白板=导出时定/矢量无损、摄像头+外壳=采集时锁死）：录制端一律高采集——摄像头 `getUserMedia` 360²→1280²、外壳 `toPng pixelRatio` 1→2（长边超 4K 钳制），导出只缩不放，仅对新录制生效。涉及：`ExportFormatPanel.tsx`（新）、`types/recording.ts`、`services/{exportPipeline,webCodecsExport,cameraRecorder,workspaceShellCapture}.ts`、`components/ExportPanel.tsx`、`export/[id]/page.tsx`。
 
 - **2026-06-15｜时间轴交互改为主流剪辑方式（对标 Clipchamp/NLE）**：上一版「拖选一段→删除」非常规，改为业界通用模型 —— **片段 block + 播放头（拖动/点轨道实时 scrub 预览）+ Split（✂/S，播放头处切片段）+ 选中片段删除（Del，ripple）+ 片段两端 Trim 手柄**；剪任意中间段＝播放头到起→Split→到终→Split→选中间→Delete（同 Clipchamp）。**后端完全复用**（`exportPipeline` 多段拼接输出、`ExportPreview` 受控播放头 + 跳删段播放 + `onScrub` 实时预览均未改）；`segments.ts` 加 `splitSegments`/`removeSegmentAt`/`trimSegmentEdge`（+`MIN_SEGMENT_MS`）。涉及：`src/components/editor/Timeline.tsx`（重写）、`src/utils/segments.ts`、`src/app/[locale]/export/[id]/page.tsx`。
 

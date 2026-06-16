@@ -171,10 +171,15 @@ export class ShellCapturer {
     this.lastCaptureAt = now;
     try {
       const t = this.opts.getElapsedMs();
+      // 高分采集：2× 像素让高分辨率导出（含 4K）时外壳更锐；长边超 4K 时下调避免 OOM。
+      // 导出无法补采集时丢失的细节，故录制端一律采足够高（见 plan「录制端一律高采集」）。
+      const rect = this.opts.rootEl.getBoundingClientRect();
+      const longSide = Math.max(1, rect.width, rect.height);
+      const pr = Math.max(1, Math.min(2, 3840 / longSide));
       const dataUrl = await Promise.race([
         toPng(this.opts.rootEl, {
           cacheBust: false,
-          pixelRatio: 1,
+          pixelRatio: pr,
           filter: (node) => {
             // 过滤掉录制条 / 摄像头 / 用 rb-no-record 标记的节点
             if (!(node instanceof Element)) return true;

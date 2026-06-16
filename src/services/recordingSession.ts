@@ -8,6 +8,9 @@ import { startCameraRecorder, type CameraHandle } from '@/services/cameraRecorde
 import { ShellCapturer } from '@/services/workspaceShellCapture';
 import type { LaserEvent, RecordingMetadata, RecordingSetupConfig } from '@/types/recording';
 
+/** 裁切框 viewport 矩形（viewport 像素）。摄像头位置/尺寸相对它归一。 */
+export interface CameraFrameRect { x: number; y: number; w: number; h: number; }
+
 export interface SessionHandle {
   recordingId: string;
   startedAt: number;
@@ -25,12 +28,12 @@ export interface SessionHandle {
     files: Record<string, unknown>,
   ) => void;
   /**
-   * 记录摄像头气泡的位置变化（viewport 像素），节流后转换成 shell 比例存到
-   * cameraPositions 表。
-   *  - xPx/yPx：气泡左上角，相对于 workspaceRoot 的 viewport rect。
-   *  - sizePx：气泡边长（圆形即直径）。
+   * 记录摄像头气泡的位置变化（viewport 像素），节流后存到 cameraPositions 表。
+   *  - xPx/yPx：气泡左上角（viewport）。sizePx：气泡边长。
+   *  - frame：裁切框 viewport 矩形（固定比例时传入）→ 位置/尺寸相对裁切框存
+   *    （rs 按较短边），使导出与录制所见一致；不传（default 整画板）则相对 shell。
    */
-  recordCameraMove: (xPx: number, yPx: number, sizePx: number) => void;
+  recordCameraMove: (xPx: number, yPx: number, sizePx: number, frame?: CameraFrameRect | null) => void;
   /**
    * 软静音 / 取消静音麦克风。track.enabled toggle —— MediaRecorder 不停，
    * 静音区间录的是无声段，回放 / 导出都是静音。
@@ -145,8 +148,8 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
 
   // 摄像头气泡位置事件：节流写入 cameraPositions 表
   let lastCameraEventAt = -Infinity;
-  let pendingCameraMove: { x: number; y: number; s: number } | null = null;
-  let lastFlushedMove: { x: number; y: number; s: number } | null = null;
+  let pendingCameraMove: { x: number; y: number; s: number; frame?: CameraFrameRect | null } | null = null;
+  let lastFlushedMove: { x: number; y: number; s: number; frame?: CameraFrameRect | null } | null = null;
   let cameraMoveTimer: ReturnType<typeof setTimeout> | null = null;
 
   const flushCameraMove = async () => {
@@ -160,16 +163,19 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
     if (rect.width <= 0 || rect.height <= 0) return;
     const t = elapsed();
     lastCameraEventAt = t;
-    // 把 viewport 坐标转成相对于 workspaceRoot 的本地坐标，再除以 shell 尺寸
-    const localX = move.x - rect.left;
-    const localY = move.y - rect.top;
-    await db.cameraPositions.add({
-      recordingId,
-      timestamp: Math.max(0, t),
-      rx: localX / rect.width,
-      ry: localY / rect.height,
-      rs: move.s / rect.width,
-    });
+    let rx: number, ry: number, rs: number;
+    if (move.frame && move.frame.w > 0 && move.frame.h > 0) {
+      // 固定比例：相对裁切框存；尺寸按裁切框较短边归一 → 导出与录制所见一致、跨比例协调。
+      rx = (move.x - move.frame.x) / move.frame.w;
+      ry = (move.y - move.frame.y) / move.frame.h;
+      rs = move.s / Math.min(move.frame.w, move.frame.h);
+    } else {
+      // default（整画板）：相对 workspaceRoot（shell）。
+      rx = (move.x - rect.left) / rect.width;
+      ry = (move.y - rect.top) / rect.height;
+      rs = move.s / Math.min(rect.width, rect.height);
+    }
+    await db.cameraPositions.add({ recordingId, timestamp: Math.max(0, t), rx, ry, rs });
     lastFlushedMove = move;
   };
 
@@ -225,9 +231,9 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
       }
       void flushSnapshot();
     },
-    recordCameraMove(xPx, yPx, sizePx) {
+    recordCameraMove(xPx, yPx, sizePx, frame) {
       if (paused) return;
-      pendingCameraMove = { x: xPx, y: yPx, s: sizePx };
+      pendingCameraMove = { x: xPx, y: yPx, s: sizePx, frame: frame ?? null };
       const t = elapsed();
       if (t - lastCameraEventAt >= CAMERA_POS_THROTTLE_MS) {
         if (cameraMoveTimer !== null) {
@@ -270,13 +276,17 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
           if (rect.width > 0 && rect.height > 0) {
             const last = pendingCameraMove ?? lastFlushedMove;
             let rx: number, ry: number, rs: number;
-            if (last) {
+            if (last && last.frame && last.frame.w > 0 && last.frame.h > 0) {
+              rx = (last.x - last.frame.x) / last.frame.w;
+              ry = (last.y - last.frame.y) / last.frame.h;
+              rs = last.s / Math.min(last.frame.w, last.frame.h);
+            } else if (last) {
               rx = (last.x - rect.left) / rect.width;
               ry = (last.y - rect.top) / rect.height;
-              rs = last.s / rect.width;
+              rs = last.s / Math.min(rect.width, rect.height);
             } else {
-              // 默认右下角，160px 直径
-              rs = 160 / rect.width;
+              // 默认右下角，160px 直径（相对 shell 较短边）
+              rs = 160 / Math.min(rect.width, rect.height);
               rx = 1 - rs - 20 / rect.width;
               ry = 1 - (160 / rect.height) - 20 / rect.height;
             }

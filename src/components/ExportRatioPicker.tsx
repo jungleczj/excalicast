@@ -8,7 +8,9 @@ interface Props {
   onChange: (next: ExportConfig) => void;
 }
 
-const RATIOS: AspectRatio[] = ['16:9', '9:16', '1:1', '4:5'];
+// 与录制 Setup 一致的全部 10 个预设比例。
+const RATIOS: AspectRatio[] = ['16:9', '4:3', '21:9', '16:10', '3:2', '9:16', '4:5', '3:4', '2:3', '1:1'];
+const ORDER = (r: AspectRatio) => RATIOS.indexOf(r);
 
 export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
   const t = useTranslations('ratioPicker');
@@ -18,54 +20,73 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
     { value: 'fit_all_content', label: t('modes.fitAllLabel'),         hint: t('modes.fitAllHint') },
   ];
 
+  const selected = config.exportRatios ?? [config.aspectRatio];
+  const isSel = (r: AspectRatio) => selected.includes(r);
+  // 点格子＝设为预览并加入导出集；× ＝从导出集移除（至少留 1）。
+  const previewAndSelect = (r: AspectRatio) => {
+    const next = isSel(r) ? selected : [...selected, r].sort((a, b) => ORDER(a) - ORDER(b));
+    onChange({ ...config, aspectRatio: r, exportRatios: next });
+  };
+  const removeRatio = (r: AspectRatio) => {
+    if (selected.length <= 1) return;
+    const next = selected.filter((x) => x !== r);
+    onChange({ ...config, exportRatios: next, aspectRatio: config.aspectRatio === r ? next[0] : config.aspectRatio });
+  };
+
   return (
     <div className="space-y-5">
       <div>
         <div className="mb-3 flex items-baseline justify-between">
           <h3 className="label-mono" style={{ fontSize: 11 }}>{t('ratioHeading')}</h3>
-          <span
-            style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', letterSpacing: '0.04em' }}
-          >
-            {t('ratioSubheading')}
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', letterSpacing: '0.04em' }}>
+            {selected.length > 1 ? `× ${selected.length}` : t('ratioSubheading')}
           </span>
         </div>
         <div className="grid grid-cols-4 gap-2">
           {RATIOS.map((r) => {
             const preset = ASPECT_PRESETS[r];
-            const active = config.aspectRatio === r;
+            const sel = isSel(r);
+            const preview = config.aspectRatio === r;
             const max = Math.max(preset.width, preset.height);
             return (
               <button
                 key={r}
                 type="button"
-                onClick={() => onChange({ ...config, aspectRatio: r })}
-                className="press flex flex-col items-center justify-center gap-1.5"
+                onClick={() => previewAndSelect(r)}
+                className="press relative flex flex-col items-center justify-center gap-1.5"
+                title={preset.platforms}
                 style={{
-                  padding: '10px 8px',
-                  background: active ? 'var(--hi)' : 'var(--paper)',
+                  padding: '10px 6px',
+                  background: preview ? 'var(--hi)' : sel ? 'var(--hi-soft)' : 'var(--paper)',
                   border: '1.5px solid var(--ink)',
                   borderRadius: 3,
-                  boxShadow: active ? '2px 2px 0 var(--ink)' : 'none',
+                  boxShadow: preview ? '2px 2px 0 var(--ink)' : 'none',
                   color: 'var(--ink)',
                 }}
               >
+                {sel && (
+                  <span className="absolute left-1 top-1 grid h-3.5 w-3.5 place-items-center" style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: 2, fontSize: 9, lineHeight: 1 }}>✓</span>
+                )}
+                {sel && selected.length > 1 && (
+                  <span
+                    role="button"
+                    aria-label={`remove ${r}`}
+                    onClick={(e) => { e.stopPropagation(); removeRatio(r); }}
+                    className="absolute right-1 top-1 grid h-3.5 w-3.5 place-items-center"
+                    style={{ background: 'var(--paper)', border: '1px solid var(--ink)', borderRadius: 2, fontSize: 9, lineHeight: 1, cursor: 'pointer' }}
+                  >×</span>
+                )}
                 <div
                   style={{
-                    width: 28 * (preset.width / max),
-                    height: 28 * (preset.height / max),
-                    minWidth: 8,
-                    minHeight: 8,
+                    width: 26 * (preset.width / max),
+                    height: 26 * (preset.height / max),
+                    minWidth: 7, minHeight: 7,
                     border: '1.4px solid var(--ink)',
-                    background: active ? 'var(--paper)' : 'var(--paper-2)',
+                    background: preview ? 'var(--paper)' : 'var(--paper-2)',
                     borderRadius: 1,
                   }}
                 />
-                <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{r}</span>
-                <span
-                  style={{ fontSize: 9, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', letterSpacing: '0.04em', textTransform: 'uppercase' }}
-                >
-                  {t(`ratioHints.${r}` as never)}
-                </span>
+                <span style={{ fontSize: 11.5, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{r}</span>
               </button>
             );
           })}

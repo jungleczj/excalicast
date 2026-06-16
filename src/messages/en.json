@@ -404,7 +404,9 @@
     "unmuteCamera": "Show camera again",
     "enableCameraNow": "Turn on camera now",
     "laserOn": "Laser pointer on · click to turn off",
-    "laserOff": "Laser pointer (K) · click to turn on"
+    "laserOff": "Laser pointer (K) · click to turn on",
+    "zoomOn": "Presentation zoom on · double-click canvas to zoom/restore · click to turn off",
+    "zoomOff": "Presentation zoom · double-click canvas to zoom in (Alt+double-click works anytime)"
   },
   "recordingSetup": {
     "step": "step 1 of 1 — pre-flight",

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, type JSX } from 'react';
 import { useParams } from 'next/navigation';
 import { useLocale } from 'next-intl';
 import { ExportRatioPicker } from '@/components/ExportRatioPicker';
+import { ExportFormatPanel } from '@/components/ExportFormatPanel';
 import { ExportPreview } from '@/components/ExportPreview';
 import { ExportPanel, type ExportProgressState } from '@/components/ExportPanel';
 import { WorkspaceShellToggle } from '@/components/WorkspaceShellToggle';
@@ -178,6 +179,7 @@ export default function EditorRecordingPage(): JSX.Element {
     <div className="space-y-5">
       <WorkspaceShellToggle recordingId={id} config={config} onChange={handleConfigChange} />
       <ExportRatioPicker config={config} onChange={handleConfigChange} />
+      <ExportFormatPanel config={config} onChange={setConfig} en={en} />
       <div style={{ height: 1.5, background: 'var(--ink)', opacity: 0.4 }} />
       <ExportPanel recordingId={id} config={config} onConfigChange={setConfig} onPaidStateChange={handlePaidChange} onProgress={setExportProgress} />
     </div>
@@ -198,7 +200,8 @@ export default function EditorRecordingPage(): JSX.Element {
 
   const tabContent = (() => {
     if (tab === 'captions') return isPro ? <SubtitlePanel open recordingId={id} onClose={() => {}} /> : lockBlock('pro', en ? 'Captions are a Pro feature' : '字幕是 Pro 功能', en ? 'Generate accurate subtitles from your audio.' : '从音频生成精准字幕。');
-    if (tab === 'outline' || tab === 'handout') return isMax ? <HandoutPanel recordingId={id} config={config} /> : lockBlock('max', en ? 'Outline & handout are Max features' : '大纲与讲义是 Max 功能', en ? 'Auto chapters + Markdown handout from your recording.' : '自动章节 + Markdown 讲义。');
+    if (tab === 'outline') return isMax ? <HandoutPanel view="outline" recordingId={id} config={config} onJumpToTime={setPlayheadMs} /> : lockBlock('max', en ? 'Outline is a Max feature' : '大纲是 Max 功能', en ? 'Auto chapters with jump-to-time.' : '自动识别章节、点击跳转预览。');
+    if (tab === 'handout') return isMax ? <HandoutPanel view="handout" recordingId={id} config={config} /> : lockBlock('max', en ? 'Handout is a Max feature' : '讲义是 Max 功能', en ? 'Markdown handout — download / copy.' : '生成 Markdown 讲义，可下载 / 复制。');
     return exportTab;
   })();
 
@@ -248,8 +251,10 @@ export default function EditorRecordingPage(): JSX.Element {
       <div className="flex flex-1 overflow-hidden">
         {/* Left: player + timeline */}
         <div className="flex flex-1 flex-col overflow-auto p-6" style={{ borderRight: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}>
+          {/* 预览 + 时间轴 + 删除 共用全宽列：填满左列、两者等宽对齐 */}
+          <div className="flex w-full flex-1 flex-col">
           <div className="flex flex-1 items-center justify-center">
-            <div className="w-full" style={{ maxWidth: 760, ...CARD, padding: 14 }}>
+            <div className="w-full" style={{ ...CARD, padding: 14 }}>
               <ExportPreview
                 recordingId={id}
                 metadata={meta}
@@ -292,6 +297,7 @@ export default function EditorRecordingPage(): JSX.Element {
             <button onClick={handleDelete} className="btn-sketch" style={{ padding: '7px 12px', fontSize: 10, color: 'var(--rec)', borderColor: 'var(--rec)' }}>
               <I.Trash size={12} /> {en ? 'Delete recording' : '删除录制'}
             </button>
+          </div>
           </div>
         </div>
 

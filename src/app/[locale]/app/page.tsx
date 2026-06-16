@@ -10,7 +10,7 @@ import { CameraBubble } from '@/components/CameraBubble';
 import { AspectCropOverlay } from '@/components/AspectCropOverlay';
 import { I } from '@/components/icons';
 import { useSubscription } from '@/hooks/useSubscription';
-import { startRecording, type SessionHandle } from '@/services/recordingSession';
+import { startRecording, type SessionHandle, type CameraFrameRect } from '@/services/recordingSession';
 import { acquireMicStream } from '@/services/audioRecorder';
 import { acquireCameraStream } from '@/services/cameraRecorder';
 import { trackEvent } from '@/lib/analytics/track';
@@ -104,6 +104,11 @@ export default function HomePage(): JSX.Element {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const excalidrawApiRef = useRef<any>(null);
   const laserPointRef = useRef<((x: number, y: number, button: 'down' | 'up') => void) | null>(null);
+  // 演示缩放：双击画布放大/还原（开关 or Alt/⌘+双击）
+  const [zoomMode, setZoomMode] = useState(false);
+  const zoomedRef = useRef(false);
+  const prevViewportRef = useRef<{ zoom: number; scrollX: number; scrollY: number } | null>(null);
+  const zoomAnimRef = useRef<number | null>(null);
   const [laserActive, setLaserActive] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [paymentDone, setPaymentDone] = useState(false);
@@ -202,26 +207,29 @@ export default function HomePage(): JSX.Element {
   }, []);
 
   // 摄像头位置变更：(1) 录制中转发给 session；(2) debounced 写 localStorage
-  const handleCameraPositionChange = useCallback((p: { x: number; y: number }) => {
-    // 选定裁切框后（非 default）：把气泡钳制在裁切框屏幕矩形内
+  // 当前裁切框的 viewport 矩形（固定比例时；default 返回 null=相对 shell）
+  const getCropFrameRect = useCallback((): CameraFrameRect | null => {
     const cw = cropWindowRef.current;
     const area = canvasAreaRef.current;
-    if (cw && area && setupConfig.framing !== 'default') {
-      const r = area.getBoundingClientRect();
-      const fx = r.left + cw.rx * r.width;
-      const fy = r.top + cw.ry * r.height;
-      const fw = cw.rw * r.width;
-      const fh = cw.rh * r.height;
+    if (!cw || !area || setupConfig.framing === 'default') return null;
+    const r = area.getBoundingClientRect();
+    return { x: r.left + cw.rx * r.width, y: r.top + cw.ry * r.height, w: cw.rw * r.width, h: cw.rh * r.height };
+  }, [setupConfig.framing]);
+
+  const handleCameraPositionChange = useCallback((p: { x: number; y: number }) => {
+    // 选定裁切框后（非 default）：把气泡钳制在裁切框屏幕矩形内
+    const frame = getCropFrameRect();
+    if (frame) {
       p = {
-        x: Math.max(fx, Math.min(fx + fw - cameraSize, p.x)),
-        y: Math.max(fy, Math.min(fy + fh - cameraSize, p.y)),
+        x: Math.max(frame.x, Math.min(frame.x + frame.w - cameraSize, p.x)),
+        y: Math.max(frame.y, Math.min(frame.y + frame.h - cameraSize, p.y)),
       };
       setFramingWarn(false); // 钳制后必在框内，清除告警
     }
     setCameraPos(p);
-    // 录制中：把 viewport 坐标 + 当前 size 喂给 session，写到 cameraPositions 表
+    // 录制中：viewport 坐标 + size + 裁切框矩形 喂给 session（相对裁切框存）
     if (sessionRef.current) {
-      sessionRef.current.recordCameraMove(p.x, p.y, cameraSize);
+      sessionRef.current.recordCameraMove(p.x, p.y, cameraSize, frame);
     }
     // UX：跨刷新记住位置（debounce 250ms 避免拖拽时写爆 localStorage）
     if (cameraPosLsTimerRef.current !== null) clearTimeout(cameraPosLsTimerRef.current);
@@ -229,20 +237,81 @@ export default function HomePage(): JSX.Element {
       try { localStorage.setItem('excalicast.camera-pos', JSON.stringify(p)); }
       catch { /* quota / private mode */ }
     }, 250);
-  }, [cameraSize, setupConfig.framing]);
+  }, [cameraSize, getCropFrameRect]);
 
   // 摄像头尺寸变更：(1) 录制中转发给 session（位置不变、size 变）；(2) debounced 写 localStorage
   const handleCameraSizeChange = useCallback((next: number) => {
     setCameraSize(next);
     if (sessionRef.current) {
-      sessionRef.current.recordCameraMove(cameraPos.x, cameraPos.y, next);
+      sessionRef.current.recordCameraMove(cameraPos.x, cameraPos.y, next, getCropFrameRect());
     }
     if (cameraSizeLsTimerRef.current !== null) clearTimeout(cameraSizeLsTimerRef.current);
     cameraSizeLsTimerRef.current = setTimeout(() => {
       try { localStorage.setItem('excalicast.camera-size', String(next)); }
       catch { /* quota / private mode */ }
     }, 250);
-  }, [cameraPos.x, cameraPos.y]);
+  }, [cameraPos.x, cameraPos.y, getCropFrameRect]);
+
+  // 演示缩放：双击画布某点放大 ~2× 并居中、再双击还原；rAF 平滑过渡。
+  const zoomToPoint = useCallback((clientX: number, clientY: number) => {
+    const api = excalidrawApiRef.current;
+    if (!api?.getAppState || !api?.updateScene) return;
+    type VP = { zoom: number; scrollX: number; scrollY: number };
+    const animate = (from: VP, to: VP, ms = 180) => {
+      if (zoomAnimRef.current) cancelAnimationFrame(zoomAnimRef.current);
+      const start = performance.now();
+      const tick = (now: number) => {
+        const k = Math.min(1, (now - start) / ms);
+        const e = 1 - Math.pow(1 - k, 3); // easeOutCubic
+        api.updateScene({ appState: {
+          zoom: { value: from.zoom + (to.zoom - from.zoom) * e },
+          scrollX: from.scrollX + (to.scrollX - from.scrollX) * e,
+          scrollY: from.scrollY + (to.scrollY - from.scrollY) * e,
+        } });
+        if (k < 1) zoomAnimRef.current = requestAnimationFrame(tick);
+      };
+      zoomAnimRef.current = requestAnimationFrame(tick);
+    };
+    const app = api.getAppState();
+    const cur: VP = { zoom: app.zoom.value, scrollX: app.scrollX, scrollY: app.scrollY };
+    if (zoomedRef.current && prevViewportRef.current) {
+      animate(cur, prevViewportRef.current);
+      zoomedRef.current = false;
+      prevViewportRef.current = null;
+      return;
+    }
+    prevViewportRef.current = cur;
+    const z = app.zoom.value;
+    const sceneX = (clientX - (app.offsetLeft ?? 0)) / z - app.scrollX;
+    const sceneY = (clientY - (app.offsetTop ?? 0)) / z - app.scrollY;
+    const newZoom = Math.min(8, z * 2);
+    const w = app.width ?? window.innerWidth;
+    const h = app.height ?? window.innerHeight;
+    animate(cur, { zoom: newZoom, scrollX: w / 2 / newZoom - sceneX, scrollY: h / 2 / newZoom - sceneY });
+    zoomedRef.current = true;
+  }, []);
+
+  // 捕获阶段双击：缩放模式开 或 Alt/⌘ → 拦截 Excalidraw「双击建文字」并缩放。
+  useEffect(() => {
+    const el = canvasAreaRef.current;
+    if (!el) return;
+    const onDbl = (e: MouseEvent) => {
+      if (zoomMode || e.altKey || e.metaKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        zoomToPoint(e.clientX, e.clientY);
+      }
+    };
+    el.addEventListener('dblclick', onDbl, true);
+    return () => el.removeEventListener('dblclick', onDbl, true);
+  }, [zoomMode, zoomToPoint]);
+
+  // 缩放模式开启时切到 hand 工具（双击空白不再建文字），关闭还原选择工具。
+  useEffect(() => {
+    const api = excalidrawApiRef.current;
+    if (!api?.setActiveTool) return;
+    try { api.setActiveTool({ type: zoomMode ? 'hand' : 'selection' }); } catch { /* */ }
+  }, [zoomMode]);
 
   // 拖拽逻辑
   useEffect(() => {
@@ -635,11 +704,13 @@ export default function HomePage(): JSX.Element {
               audioMuted={audioMuted}
               cameraMuted={cameraMuted}
               laserActive={laserActive}
+              zoomActive={zoomMode}
               aspect={isRecording ? setupConfig.framing : undefined}
               onToggleCamera={handleToggleCamera}
               onToggleAudioMute={handleToggleAudioMute}
               onToggleCameraMute={handleToggleCameraMute}
               onToggleLaser={handleToggleLaser}
+              onToggleZoom={() => setZoomMode((v) => !v)}
               onStart={handleStart}
               onStop={handleStop}
               onDiscard={handleDiscard}

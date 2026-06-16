@@ -27,6 +27,10 @@ interface EncodeParams {
   width: number;
   height: number;
   audioBlob: Blob | null;
+  /** 容器/编码：'mp4'＝H.264+AAC+mp4-muxer；'webm'＝VP9+Opus+webm-muxer。缺省 mp4。 */
+  format?: 'mp4' | 'webm';
+  /** 码率倍率（质量档），乘到 estimateBitrate 上。缺省 1。 */
+  bitrateMultiplier?: number;
   /** 源时间保留段（ms）；提供则导出前把音频按段拼接，与裁剪后的帧时间轴对齐。 */
   audioSegments?: TimeSegment[];
   renderFrame: (i: number) => Promise<HTMLCanvasElement>;
@@ -66,12 +70,22 @@ function avcCodecString(width: number, height: number): string {
   return `avc1.4d00${level}`;
 }
 
+function vp9CodecString(width: number, height: number): string {
+  // profile 0 / 8-bit；按分辨率挑 level：≤1080p → 4.1，更大(含 1440p/4K) → 5.1。
+  // level 太低会被 isConfigSupported 拒（默认 1.0 仅 ~256×144）。
+  const level = width * height > 1920 * 1080 ? '51' : '41';
+  return `vp09.00.${level}.08`;
+}
+
 function estimateBitrate(width: number, height: number, fps: number): number {
   return Math.min(12_000_000, Math.max(1_500_000, Math.round(width * height * fps * 0.1)));
 }
 
 export async function encodeWebCodecsMp4(params: EncodeParams): Promise<Blob> {
   const { totalFrames, fps, width, height, audioBlob, audioSegments, renderFrame, onProgress } = params;
+  const format = params.format ?? 'mp4';
+  const bitrateMul = params.bitrateMultiplier ?? 1;
+  const isWebm = format === 'webm';
   const VideoEncoderCtor = G.VideoEncoder;
   const AudioEncoderCtor = G.AudioEncoder;
   const VideoFrameCtor = G.VideoFrame;
@@ -94,15 +108,11 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<Blob> {
     }
   }
 
-  // 2) 校验视频编码器配置（先试硬件，不支持再试默认）
-  const baseCfg: any = {
-    codec: avcCodecString(width, height),
-    width,
-    height,
-    bitrate: estimateBitrate(width, height, fps),
-    framerate: fps,
-    avc: { format: 'avc' },
-  };
+  // 2) 校验视频编码器配置（先试硬件，不支持再试默认）。mp4→H.264(avc1)；webm→VP9(vp09)。
+  const bitrate = Math.round(estimateBitrate(width, height, fps) * bitrateMul);
+  const baseCfg: any = isWebm
+    ? { codec: vp9CodecString(width, height), width, height, bitrate, framerate: fps }
+    : { codec: avcCodecString(width, height), width, height, bitrate, framerate: fps, avc: { format: 'avc' } };
   let videoCfg: any = { ...baseCfg, hardwareAcceleration: 'prefer-hardware' };
   let support = await VideoEncoderCtor.isConfigSupported(videoCfg);
   if (!support?.supported) {
@@ -113,15 +123,19 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<Blob> {
 
   const canAudio = !!audio && !!AudioEncoderCtor && !!AudioDataCtor;
 
-  // 3) muxer
-  const muxer = new Muxer({
-    target: new ArrayBufferTarget(),
-    fastStart: 'in-memory',
-    video: { codec: 'avc', width, height },
-    audio: canAudio
-      ? { codec: 'aac', numberOfChannels: audio!.channels, sampleRate: audio!.sampleRate }
-      : undefined,
-  });
+  // 3) muxer（mp4-muxer / webm-muxer），音频 mp4→AAC，webm→Opus
+  const muxer: any = isWebm
+    ? new WebmMuxer({
+        target: new WebmTarget(),
+        video: { codec: 'V_VP9', width, height, frameRate: fps },
+        audio: canAudio ? { codec: 'A_OPUS', numberOfChannels: audio!.channels, sampleRate: audio!.sampleRate } : undefined,
+      })
+    : new Muxer({
+        target: new ArrayBufferTarget(),
+        fastStart: 'in-memory',
+        video: { codec: 'avc', width, height },
+        audio: canAudio ? { codec: 'aac', numberOfChannels: audio!.channels, sampleRate: audio!.sampleRate } : undefined,
+      });
 
   // 4) 视频编码
   let encErr: unknown = null;
@@ -154,15 +168,15 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<Blob> {
   videoEncoder.close();
   if (encErr) throw encErr;
 
-  // 5) 音频编码（AAC）
+  // 5) 音频编码（mp4→AAC mp4a.40.2；webm→Opus）
   if (canAudio) {
-    await encodeAudioTrack(audio!.buffer, audio!.channels, AudioEncoderCtor, AudioDataCtor, muxer,
+    await encodeAudioTrack(audio!.buffer, audio!.channels, isWebm ? 'opus' : 'mp4a.40.2', AudioEncoderCtor, AudioDataCtor, muxer,
       (p) => onProgress?.(0.85 + p * 0.15));
   }
 
   muxer.finalize();
-  const { buffer } = muxer.target as ArrayBufferTarget;
-  return new Blob([buffer], { type: 'video/mp4' });
+  const { buffer } = muxer.target as { buffer: ArrayBuffer };
+  return new Blob([buffer], { type: isWebm ? 'video/webm' : 'video/mp4' });
 }
 
 /**
@@ -233,9 +247,10 @@ export async function transcodeCameraForUpload(blob: Blob): Promise<Blob> {
 async function encodeAudioTrack(
   buffer: AudioBuffer,
   channels: number,
+  audioCodec: string,
   AudioEncoderCtor: any,
   AudioDataCtor: any,
-  muxer: Muxer<ArrayBufferTarget>,
+  muxer: any,
   onProgress?: (p: number) => void,
 ): Promise<void> {
   const sampleRate = buffer.sampleRate;
@@ -244,7 +259,7 @@ async function encodeAudioTrack(
     output: (chunk: any, meta: any) => muxer.addAudioChunk(chunk, meta),
     error: (e: unknown) => { err = e; },
   });
-  audioEncoder.configure({ codec: 'mp4a.40.2', sampleRate, numberOfChannels: channels, bitrate: 128_000 });
+  audioEncoder.configure({ codec: audioCodec, sampleRate, numberOfChannels: channels, bitrate: 128_000 });
 
   const total = buffer.length;
   const block = 1024;

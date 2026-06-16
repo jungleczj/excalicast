@@ -135,35 +135,37 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
     }
     setBusy(true);
     setError(null);
-    setStatusMsg(t('exportingStatus', {
-      ratio: config.aspectRatio,
-      wm: config.withWatermark ? t('wmWithLabel') : t('wmCleanLabel'),
-    }));
+
+    // 多选导出：逐个比例生成并依次下载（分辨率/格式/画质统一套用）。
+    const ratios = (config.exportRatios && config.exportRatios.length > 0) ? config.exportRatios : [config.aspectRatio];
+    const wmTag = config.withWatermark ? 'wm' : 'clean';
+    const ext = config.format ?? 'mp4'; // mp4 / webm / gif
 
     let lastPhase = 'preparing';
     let lastRatio = 0;
     onProgress?.({ phase: lastPhase, ratio: 0 });
 
     try {
-      const blob = await exportRecording({
-        ...config,
-        recordingId,
-        onPhase: (p) => {
-          lastPhase = p;
-          onProgress?.({ phase: p, ratio: lastRatio });
-        },
-        onProgress: (r) => {
-          lastRatio = Math.min(1, Math.max(0, r));
-          onProgress?.({ phase: lastPhase, ratio: lastRatio });
-        },
-        onLog: (m) => {
-          if (process.env.NODE_ENV !== 'production') console.debug('[ffmpeg]', m);
-        },
-      });
-      const ratioTag = config.aspectRatio.replace(':', 'x');
-      const wmTag = config.withWatermark ? 'wm' : 'clean';
-      downloadBlob(blob, `excalicast_${recordingId.slice(0, 8)}_${ratioTag}_${wmTag}.mp4`);
-      trackEvent('export_success', { ratio: config.aspectRatio, watermark: config.withWatermark });
+      for (let i = 0; i < ratios.length; i++) {
+        const ar = ratios[i];
+        setStatusMsg(ratios.length > 1
+          ? t('exportingStatus', { ratio: `${ar} (${i + 1}/${ratios.length})`, wm: config.withWatermark ? t('wmWithLabel') : t('wmCleanLabel') })
+          : t('exportingStatus', { ratio: ar, wm: config.withWatermark ? t('wmWithLabel') : t('wmCleanLabel') }));
+        lastPhase = 'preparing'; lastRatio = 0;
+        const blob = await exportRecording({
+          ...config,
+          aspectRatio: ar,
+          // cropWindow/customOutput 只对其对应的（主）比例有效；其它比例用该比例的默认居中裁切。
+          cropWindow: ar === config.aspectRatio ? config.cropWindow : undefined,
+          customOutput: ar === config.aspectRatio ? config.customOutput : undefined,
+          recordingId,
+          onPhase: (p) => { lastPhase = p; onProgress?.({ phase: p, ratio: lastRatio }); },
+          onProgress: (r) => { lastRatio = Math.min(1, Math.max(0, r)); onProgress?.({ phase: lastPhase, ratio: lastRatio }); },
+          onLog: (m) => { if (process.env.NODE_ENV !== 'production') console.debug('[ffmpeg]', m); },
+        });
+        downloadBlob(blob, `excalicast_${recordingId.slice(0, 8)}_${ar.replace(':', 'x')}_${wmTag}.${ext}`);
+        trackEvent('export_success', { ratio: ar, watermark: config.withWatermark });
+      }
       setStatusMsg(t('doneStatus'));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'export_failed');

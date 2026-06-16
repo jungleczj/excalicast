@@ -132,11 +132,32 @@ export const ASPECT_PRESETS: Record<
 
 export type CroppingMode = 'follow_viewport' | 'fit_all_content';
 
+export type ExportResolution = 'sd' | 'hd' | 'fhd' | 'qhd' | 'uhd';
+export type ExportFormat = 'mp4' | 'webm' | 'gif';
+export type ExportQuality = 'auto' | 'high' | 'medium' | 'low';
+
+/** 清晰度档 → 相对 1080 预设的缩放系数。 */
+export const RESOLUTION_SCALE: Record<ExportResolution, number> = {
+  sd: 0.444,   // 480p
+  hd: 0.667,   // 720p
+  fhd: 1,      // 1080p（默认 = 预设原生）
+  qhd: 1.333,  // 1440p / 2K
+  uhd: 2,      // 2160p / 4K
+};
+
 export interface ExportConfig {
   aspectRatio: AspectRatio;
   croppingMode: CroppingMode;
   fps: number;
   withWatermark: boolean;
+  /** 多选导出比例（缺省=[aspectRatio]）；导出逐个生成下载。aspectRatio 仍为预览/主比例。 */
+  exportRatios?: AspectRatio[];
+  /** 清晰度档（缺省 fhd=预设原生）；缩放白板渲染与最终输出尺寸。 */
+  resolution?: ExportResolution;
+  /** 容器/编码格式（缺省 mp4）。 */
+  format?: ExportFormat;
+  /** 码率档（缺省 auto）。 */
+  quality?: ExportQuality;
   burnSubtitles?: boolean;
   includeWorkspaceShell?: boolean;
   /** 录制前框定的裁切框（follow_viewport 下覆盖默认居中 cover-crop）。 */

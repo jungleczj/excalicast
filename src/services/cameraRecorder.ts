@@ -39,9 +39,14 @@ function pickMimeType(): string {
  * 分段；中间断开的时间段无视频，配合 cameraPositions 表的 hidden 事件，导出/
  * 回放管线已知如何跳过气泡）。
  */
-/** 人头气泡摄像头约束：360p + 24fps（配合 VP9 + 300kbps 显著降存储）。 */
+/**
+ * 人头气泡摄像头约束：方形高分采集（ideal 1280²）+ 24fps。
+ * 气泡只占帧 15–25%，源采到 1280 后即便 4K 导出也清晰（导出无法补采集时丢失的细节，
+ * 故录制端一律采足够高，见 plan「录制端一律高采集」）。MediaRecorder VP8/9 压缩 +
+ * 上传前 transcodeCameraForUpload 降到 ~220kbps，落库/上传仍小。
+ */
 export const CAMERA_CONSTRAINTS: MediaStreamConstraints = {
-  video: { width: { ideal: 360 }, height: { ideal: 360 }, frameRate: { ideal: 24 }, facingMode: 'user' },
+  video: { width: { ideal: 1280 }, height: { ideal: 1280 }, frameRate: { ideal: 24 }, facingMode: 'user' },
   audio: false, // 音频独立采集，避免双流
 };
 

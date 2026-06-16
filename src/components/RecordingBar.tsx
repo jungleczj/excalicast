@@ -15,6 +15,8 @@ interface Props {
   cameraMuted?: boolean;
   /** 激光笔（Excalidraw laser tool）是否激活 */
   laserActive?: boolean;
+  /** 演示缩放模式是否激活（开启后双击画布放大/还原） */
+  zoomActive?: boolean;
   /** 当前锁定的画幅比例徽标（如 '16:9' / 'default'）；录制态显示 */
   aspect?: string;
   onToggleCamera: () => void;
@@ -29,6 +31,8 @@ interface Props {
   onToggleCameraMute?: () => void;
   /** 切换激光笔工具 */
   onToggleLaser?: () => void;
+  /** 切换演示缩放模式 */
+  onToggleZoom?: () => void;
   onStart: () => void;
   onStop: () => void;
   onDiscard?: () => void;
@@ -63,8 +67,8 @@ export function RecordingBar(props: Props): JSX.Element {
   const t = useTranslations('recordingBar');
   const {
     state, elapsedMs, hasAudio, hasCamera, cameraEnabled,
-    audioMuted, cameraMuted, laserActive, aspect,
-    onToggleCamera, onToggleAudioMute, onToggleCameraMute, onToggleLaser,
+    audioMuted, cameraMuted, laserActive, zoomActive, aspect,
+    onToggleCamera, onToggleAudioMute, onToggleCameraMute, onToggleLaser, onToggleZoom,
     onStart, onStop, onDiscard, onPause, onResume,
   } = props;
 
@@ -101,6 +105,23 @@ export function RecordingBar(props: Props): JSX.Element {
             title={laserActive ? t('laserOn') : t('laserOff')}
           >
             <I.Laser size={13} />
+          </button>
+        )}
+        {onToggleZoom && (
+          <button
+            type="button"
+            onClick={onToggleZoom}
+            className="grid h-7 w-7 place-items-center"
+            style={{
+              background: zoomActive ? 'var(--ok)' : 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: 3,
+              color: 'var(--paper)',
+              cursor: 'pointer',
+            }}
+            title={zoomActive ? t('zoomOn') : t('zoomOff')}
+          >
+            <I.Search size={13} />
           </button>
         )}
         <button

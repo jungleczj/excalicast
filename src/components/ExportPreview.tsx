@@ -28,7 +28,8 @@ interface Props {
 const CANVAS_REDRAW_INTERVAL_MS = 200;
 
 // 预览盒子高度约束。宽度上限走 ResizeObserver 测量的真实父宽，不再硬编码。
-const PREVIEW_VH_PCT = 0.52;
+// 抬高到 0.62：让 16:9 等横屏预览能长高到填满左列宽度（而非被高度限制后居中留白）。
+const PREVIEW_VH_PCT = 0.62;
 
 export function ExportPreview({ recordingId, metadata, config, progress, segments, playheadMs, onPlayheadChange }: Props): JSX.Element {
   const t = useTranslations('exportPreview');
@@ -134,22 +135,30 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
       };
     }
 
+    // 尺寸按 camBounds「较短边」归一（与导出 pipeline 同口径，跨比例协调）。
+    // 气泡为正方形：width 是占框宽的比例；按较短边换算成占宽比例 = rs × min(fracW, fracH/aspect)。
+    const aspect = preset.width / preset.height; // = boxW/boxH
     const pos = cameraPositionAt(cameraEvents, timeMs);
     if (pos) {
+      const wFrac = pos.rs * Math.min(bounds.fracW, bounds.fracH / aspect);
+      const hFrac = wFrac * aspect; // 正方形高度占框高的比例
+      const left = Math.max(bounds.offFracX, Math.min(bounds.offFracX + pos.rx * bounds.fracW, bounds.offFracX + bounds.fracW - wFrac));
+      const top = Math.max(bounds.offFracY, Math.min(bounds.offFracY + pos.ry * bounds.fracH, bounds.offFracY + bounds.fracH - hFrac));
       return {
-        left: `${(bounds.offFracX + pos.rx * bounds.fracW) * 100}%`,
-        top: `${(bounds.offFracY + pos.ry * bounds.fracH) * 100}%`,
-        width: `${pos.rs * bounds.fracW * 100}%`,
+        left: `${left * 100}%`,
+        top: `${top * 100}%`,
+        width: `${wFrac * 100}%`,
         // hidden=true（录制时用户软关闭过摄像头）期间不画气泡 —— 跟导出 MP4 一致
         display: pos.hidden ? 'none' : undefined,
       };
     }
-    // legacy fallback：camBounds 右下角，宽度约 18% of bounds
-    const w = bounds.fracW * 0.18;
+    // legacy fallback：右下角，按较短边 ~22%
+    const wFrac = Math.min(bounds.fracW, bounds.fracH / aspect) * 0.22;
+    const hFrac = wFrac * aspect;
     return {
-      left: `${(bounds.offFracX + bounds.fracW * (1 - 0.18) - bounds.fracW * 0.025) * 100}%`,
-      top: `${(bounds.offFracY + bounds.fracH * (1 - 0.18) - bounds.fracH * 0.04) * 100}%`,
-      width: `${w * 100}%`,
+      left: `${(bounds.offFracX + bounds.fracW - wFrac - bounds.fracW * 0.025) * 100}%`,
+      top: `${(bounds.offFracY + bounds.fracH - hFrac - bounds.fracH * 0.04) * 100}%`,
+      width: `${wFrac * 100}%`,
     };
   }, [cameraEvents, timeMs, firstShell, config.aspectRatio, config.includeWorkspaceShell]);
 

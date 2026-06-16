@@ -34,6 +34,8 @@ interface Props {
   config: ExportConfig;
   /** 切换时使用：父组件可监听章节点击跳转预览时间 */
   onJumpToTime?: (ms: number) => void;
+  /** outline=章节大纲（可点跳转）；handout=Markdown 文档+导出。缺省 handout。 */
+  view?: 'outline' | 'handout';
 }
 
 function fmtTime(ms: number): string {
@@ -46,7 +48,7 @@ function fmtTime(ms: number): string {
 const KEYFRAME_W = 640;
 const KEYFRAME_JPEG_Q = 0.8;
 
-export function HandoutPanel({ recordingId, config, onJumpToTime }: Props): JSX.Element {
+export function HandoutPanel({ recordingId, config, onJumpToTime, view = 'handout' }: Props): JSX.Element {
   const t = useTranslations('exportPanel');
   const [data, setData] = useState<HandoutResponse | null>(null);
   const [busy, setBusy] = useState(false);
@@ -353,6 +355,7 @@ export function HandoutPanel({ recordingId, config, onJumpToTime }: Props): JSX.
         )}
       </label>
 
+      {view === 'outline' && (
       <ol className="mt-3 space-y-2">
         {chapters.map((ch, i) => {
           const shots = withImages ? keyframesForChapter(ch) : [];
@@ -405,8 +408,20 @@ export function HandoutPanel({ recordingId, config, onJumpToTime }: Props): JSX.
           );
         })}
       </ol>
+      )}
 
-      {/* 导出：Markdown / HTML / PDF + 复制 */}
+      {/* Handout 视图：Markdown 渲染预览 */}
+      {view === 'handout' && (
+        <div
+          className="mt-3 px-3 py-2"
+          style={{ maxHeight: 360, overflow: 'auto', background: 'var(--paper-2)', border: '1.2px solid var(--rule-soft)', borderRadius: 3, fontSize: 12.5, lineHeight: 1.6, color: 'var(--ink)' }}
+          // 内容来自自有讲义 API + 本地关键帧 dataURL，预览用途
+          dangerouslySetInnerHTML={{ __html: marked.parse(assembleMarkdown(), { async: false }) as string }}
+        />
+      )}
+
+      {/* 导出：Markdown / HTML / PDF + 复制（仅 Handout 视图） */}
+      {view === 'handout' && (<>
       <div className="mt-4 grid grid-cols-3 gap-2">
         <button onClick={handleExportMd} className="btn-sketch btn-sketch-hi" style={{ justifyContent: 'center', fontSize: 11 }}>
           <I.Download size={12} /> {t('handoutExportMd')}
@@ -421,6 +436,7 @@ export function HandoutPanel({ recordingId, config, onJumpToTime }: Props): JSX.
       <button onClick={() => void handleCopy()} className="btn-sketch mt-2 w-full" style={{ justifyContent: 'center', fontSize: 11 }}>
         {copied ? t('handoutCopied') : t('handoutCopy')}
       </button>
+      </>)}
 
       {data.generatedAt && (
         <div className="mt-3" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>

@@ -12,8 +12,11 @@ import {
 } from '@/services/cropping';
 import {
   ASPECT_PRESETS,
+  RESOLUTION_SCALE,
   type CameraPositionEvent,
   type ExportConfig,
+  type ExportFormat,
+  type ExportQuality,
   type SceneRect,
   type WhiteboardSnapshot,
   type WorkspaceShellRow,
@@ -119,15 +122,13 @@ export function buildCameraSegments(
     const startMs = Math.max(0, events[i].timestamp);
     const endMs = i + 1 < events.length ? events[i + 1].timestamp : durationMs;
     if (endMs - startMs < 50) continue;
-    const sz = Math.round(events[i].rs * bounds.w);
-    const size = Math.max(16, sz);
-    raw.push({
-      startMs,
-      endMs,
-      x: Math.round(bounds.offX + events[i].rx * bounds.w),
-      y: Math.round(bounds.offY + events[i].ry * bounds.h),
-      size,
-    });
+    // 尺寸按「有效边界较短边」归一（rs 存的也是相对裁切框较短边）→ 跨比例协调、竖屏不再过小。
+    const shortSide = Math.min(bounds.w, bounds.h);
+    const size = Math.max(16, Math.min(Math.round(events[i].rs * shortSide), Math.round(shortSide)));
+    // 位置按宽/高分数定位并钳进边界，避免放大后溢出。
+    const x = Math.round(bounds.offX + Math.max(0, Math.min(events[i].rx * bounds.w, bounds.w - size)));
+    const y = Math.round(bounds.offY + Math.max(0, Math.min(events[i].ry * bounds.h, bounds.h - size)));
+    raw.push({ startMs, endMs, x, y, size });
   }
   if (raw.length === 0) return [];
 
@@ -293,6 +294,11 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const preset = ASPECT_PRESETS[opts.aspectRatio];
   const fps = opts.fps;
   const durationMs = metadata.durationMs;
+  const format: ExportFormat = opts.format ?? 'mp4';
+  const quality: ExportQuality = opts.quality ?? 'auto';
+  // 质量档 → ffmpeg CRF（越小越清晰/越大）。WebCodecs 用倍率乘 estimateBitrate。
+  const crfFor: Record<ExportQuality, number> = { auto: 23, high: 20, medium: 26, low: 30 };
+  const bitrateMul: Record<ExportQuality, number> = { auto: 1, high: 1.6, medium: 0.7, low: 0.4 };
 
   // 时间轴裁剪：任意多段保留（segments）。缺省/整段=不裁。导出只输出保留段、按序拼接，
   // 输出时间从 0 连续起算，每帧源时间 = outputToSource(kept, 输出时间)。
@@ -315,10 +321,13 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const rawShells = await getWorkspaceShells(opts.recordingId);
   const useShell = rawShells.length > 0 && (opts.includeWorkspaceShell ?? true);
   const decodedShells = useShell ? await decodeShells(rawShells) : [];
-  // Custom framing 用 customOutput 作输出尺寸（取偶，编码器要求）；否则用预设。
+  // Custom framing 用 customOutput 作输出尺寸；否则用预设。再按清晰度档缩放（白板矢量重渲染→真清晰）。取偶（编码器要求）。
   const evenize = (n: number) => Math.max(2, Math.round(n / 2) * 2);
-  const outputW = opts.customOutput ? evenize(opts.customOutput.width) : preset.width;
-  const outputH = opts.customOutput ? evenize(opts.customOutput.height) : preset.height;
+  const resScale = RESOLUTION_SCALE[opts.resolution ?? 'fhd'];
+  const baseW = opts.customOutput ? opts.customOutput.width : preset.width;
+  const baseH = opts.customOutput ? opts.customOutput.height : preset.height;
+  const outputW = evenize(baseW * resScale);
+  const outputH = evenize(baseH * resScale);
 
   const contentBox = computeContentBoundingBox(snapshots);
   const fallbackViewport = (() => {
@@ -530,9 +539,11 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
           const y = Math.round(camBounds.offY + camBounds.h - size - camBounds.h * 0.04);
           drawCameraBubble(targetCtx, frame, x, y, size);
         } else if (!pos.hidden) {
-          const size = Math.max(16, Math.round(pos.rs * camBounds.w));
-          const x = Math.round(camBounds.offX + pos.rx * camBounds.w);
-          const y = Math.round(camBounds.offY + pos.ry * camBounds.h);
+          // 尺寸按较短边归一；位置钳进边界（与 buildCameraSegments 同口径）。
+          const shortSide = Math.min(camBounds.w, camBounds.h);
+          const size = Math.max(16, Math.min(Math.round(pos.rs * shortSide), Math.round(shortSide)));
+          const x = Math.round(camBounds.offX + Math.max(0, Math.min(pos.rx * camBounds.w, camBounds.w - size)));
+          const y = Math.round(camBounds.offY + Math.max(0, Math.min(pos.ry * camBounds.h, camBounds.h - size)));
           drawCameraBubble(targetCtx, frame, x, y, size);
         }
       }
@@ -544,7 +555,8 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 含摄像头时尝试用 VideoDecoder+webm 解复用把摄像头帧在画布内合成；解码不可用/失败 → 回退。
   // 裁剪也走此路径：音频在解码后按保留段拼接 AudioBuffer（audioSegments），摄像头画布内
   // getFrameAt(源时间) 合成 —— 多段输出映射到的源时间单调不减，与前进式解码器吻合。
-  if ('VideoEncoder' in globalThis && 'AudioEncoder' in globalThis) {
+  // GIF 无视频编码器路径 → 强制走 ffmpeg（palettegen/paletteuse）。
+  if (format !== 'gif' && 'VideoEncoder' in globalThis && 'AudioEncoder' in globalThis) {
     try {
       if (cameraBlob) {
         cameraSource = await createCameraFrameSource(cameraBlob); // 失败抛错 → 回退 ffmpeg
@@ -552,6 +564,8 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       }
       const { encodeWebCodecsMp4 } = await import('./webCodecsExport');
       const blob = await encodeWebCodecsMp4({
+        format,
+        bitrateMultiplier: bitrateMul[quality],
         totalFrames,
         fps,
         width: outputW,
@@ -618,7 +632,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   }
 
   let audioFile: string | null = null;
-  if (audioBlob) {
+  if (audioBlob && format !== 'gif') { // GIF 无音轨
     audioFile = 'audio.webm';
     await ffmpeg.writeFile(audioFile, new Uint8Array(await audioBlob.arrayBuffer()));
   }
@@ -733,19 +747,47 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     filter.push('-map', '0:v');
   }
 
-  // veryfast + crf 23：相比 ultrafast 体积显著更小、清晰度更好，编码耗时相近（单线程核）。
-  const codec = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p'];
-  const audioCodec = audioFile ? ['-c:a', 'aac', '-shortest'] : [];
+  // 按格式选编码器/容器（crf 由质量档决定）；GIF 走调色板、无音轨。
+  const vmap = haveVideoFilter ? curLabel : '[0:v]';
+  let codec: string[];
+  let audioCodec: string[];
+  let outName: string;
+  let outMime: string;
+  if (format === 'gif') {
+    // 在已合成视频链后接 palettegen/paletteuse（filterParts 此时只含视频/无音频）。
+    const gifParts = [...filterParts,
+      `${vmap}split[__gv][__gp]`,
+      `[__gp]palettegen=stats_mode=diff[__pal]`,
+      `[__gv][__pal]paletteuse=dither=bayer:bayer_scale=3[__gif]`,
+    ];
+    filter.length = 0;
+    filter.push('-filter_complex', gifParts.join(';'), '-map', '[__gif]');
+    codec = [];
+    audioCodec = [];
+    outName = 'output.gif';
+    outMime = 'image/gif';
+  } else if (format === 'webm') {
+    codec = ['-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', String(crfFor[quality]), '-pix_fmt', 'yuv420p', '-row-mt', '1'];
+    audioCodec = audioFile ? ['-c:a', 'libopus', '-shortest'] : [];
+    outName = 'output.webm';
+    outMime = 'video/webm';
+  } else {
+    // veryfast + crf：相比 ultrafast 体积显著更小、清晰度更好，编码耗时相近（单线程核）。
+    codec = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(crfFor[quality]), '-pix_fmt', 'yuv420p'];
+    audioCodec = audioFile ? ['-c:a', 'aac', '-shortest'] : [];
+    outName = 'output.mp4';
+    outMime = 'video/mp4';
+  }
 
-  await ffmpeg.exec([...inputs, ...filter, ...codec, ...audioCodec, 'output.mp4']);
+  await ffmpeg.exec([...inputs, ...filter, ...codec, ...audioCodec, outName]);
 
-  const data = await ffmpeg.readFile('output.mp4');
+  const data = await ffmpeg.readFile(outName);
   const arr = data instanceof Uint8Array ? data : new TextEncoder().encode(String(data));
 
   for (let i = 0; i < totalFrames; i++) {
     try { await ffmpeg.deleteFile(`f_${String(i).padStart(6, '0')}.jpg`); } catch { /* ignore */ }
   }
-  try { await ffmpeg.deleteFile('output.mp4'); } catch { /* ignore */ }
+  try { await ffmpeg.deleteFile(outName); } catch { /* ignore */ }
   if (audioFile) { try { await ffmpeg.deleteFile(audioFile); } catch { /* ignore */ } }
   if (cameraFile) { try { await ffmpeg.deleteFile(cameraFile); } catch { /* ignore */ } }
   try { cameraSource?.close(); } catch { /* */ } // 裁剪时画布内合成用过的摄像头解码器
@@ -756,7 +798,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
 
   const buffer = new ArrayBuffer(arr.byteLength);
   new Uint8Array(buffer).set(arr);
-  return new Blob([buffer], { type: 'video/mp4' });
+  return new Blob([buffer], { type: outMime });
 }
 
 /**
