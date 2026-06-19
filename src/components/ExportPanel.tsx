@@ -288,18 +288,8 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
       <div style={{ height: 1.5, background: 'var(--ink)', opacity: 0.4 }} />
 
       <div>
-        <h3 className="mb-2 flex items-center gap-2 label-mono" style={{ fontSize: 11 }}>
+        <h3 className="mb-2 label-mono" style={{ fontSize: 11 }}>
           {t('advancedHeading')}
-          {!proUnlocked && (
-            <button
-              type="button"
-              onClick={() => openUpgrade('pro')}
-              className="ml-auto btn-sketch btn-sketch-hi"
-              style={{ padding: '5px 10px', fontSize: 10 }}
-            >
-              {t('upgradePro')}
-            </button>
-          )}
         </h3>
         <p className="mb-3" style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--ink-2)' }}>{t('advancedLede')}</p>
         <div className="space-y-2">

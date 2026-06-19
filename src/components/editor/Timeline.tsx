@@ -142,8 +142,8 @@ export function Timeline({
         {/* 标尺：拖动刮擦预览 */}
         <div onMouseDown={startScrub} style={{ height: 14, background: 'var(--paper-2)', border: '1.2px solid var(--ink)', borderBottom: 'none', borderRadius: '3px 3px 0 0', cursor: 'ew-resize' }} />
 
-        {/* 片段轨：clips=block，可点选 + 边缘 Trim；gap 变暗 */}
-        <div style={{ position: 'relative', height: 30, border: '1.2px solid var(--ink)', background: 'var(--paper-3)', overflow: 'hidden' }}>
+        {/* 片段轨：整轨可拖刮擦（空白/gap 处）；clips=block 可点选 + 边缘 Trim；gap 变暗 */}
+        <div onMouseDown={startScrub} style={{ position: 'relative', height: 30, border: '1.2px solid var(--ink)', background: 'var(--paper-3)', overflow: 'hidden', cursor: 'ew-resize' }}>
           {gaps.map((g, i) => (
             <div key={`g${i}`} style={{ position: 'absolute', top: 0, bottom: 0, left: `${pct(g.start)}%`, width: `${pct(g.end - g.start)}%`, background: 'rgba(26,26,26,0.34)', borderLeft: '1px dashed var(--ink)', borderRight: '1px dashed var(--ink)' }} />
           ))}
@@ -152,13 +152,13 @@ export function Timeline({
             return (
               <div
                 key={`c${i}`}
-                onMouseDown={(e) => { e.stopPropagation(); setSelectedIdx(i); onScrub(srcAtClientX(e.clientX)); }}
+                onMouseDown={(e) => { e.stopPropagation(); setSelectedIdx(i); startScrub(e); }}
                 style={{
                   position: 'absolute', top: 2, bottom: 2, left: `${pct(c.start)}%`, width: `${pct(c.end - c.start)}%`,
                   background: sel ? 'var(--hi)' : 'var(--hi-soft)',
                   border: `1.4px solid var(--ink)`, borderRadius: 2,
                   boxShadow: sel ? '2px 2px 0 var(--ink)' : 'none',
-                  cursor: 'pointer', overflow: 'hidden',
+                  cursor: 'ew-resize', overflow: 'hidden',
                 }}
               >
                 {/* 左右 Trim 手柄 */}

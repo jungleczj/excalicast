@@ -35,6 +35,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "uuid": "^10.0.0",
+    "vosk-browser": "^0.0.8",
     "webm-muxer": "^5.1.4"
   },
   "devDependencies": {

@@ -234,12 +234,6 @@ export default function EditorRecordingPage(): JSX.Element {
           />
         </div>
         <MonoTag variant={tierVariant as 'max' | 'pro' | 'soft'}>{tierLabel}</MonoTag>
-        <button type="button" className="btn-sketch hidden sm:inline-flex" onClick={() => setTab('export')} style={{ padding: '7px 12px' }}>
-          <I.Share size={13} /> {en ? 'Share' : '分享'}
-        </button>
-        <button type="button" className="btn-sketch btn-sketch-primary" onClick={() => setTab('export')} style={{ padding: '7px 14px' }}>
-          <I.Download size={13} /> {en ? 'Export' : '导出'}
-        </button>
       </div>
 
       {paymentDone && (

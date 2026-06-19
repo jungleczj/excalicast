@@ -20,3 +20,7 @@ playwright/.cache/
 # 自托管的 Excalidraw 资源（由 scripts/copy-excalidraw-assets.mjs 生成）
 public/excalidraw-assets/
 public/excalidraw-assets-dev/
+
+# 提词器跟读离线模型（大文件，运行 scripts/fetch-vosk-models.sh 生成）
+public/models/vosk/*.tar.gz
+public/models/vosk/.tmp/

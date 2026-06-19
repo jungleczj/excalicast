@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { AppHeader } from '@/components/AppHeader';
 import { RecordingBar } from '@/components/RecordingBar';
 import { RecordingSetup } from '@/components/RecordingSetup';
 import { CameraBubble } from '@/components/CameraBubble';
+import { Teleprompter } from '@/components/Teleprompter';
 import { AspectCropOverlay } from '@/components/AspectCropOverlay';
 import { I } from '@/components/icons';
 import { useSubscription } from '@/hooks/useSubscription';
@@ -104,6 +105,8 @@ export default function HomePage(): JSX.Element {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const excalidrawApiRef = useRef<any>(null);
   const laserPointRef = useRef<((x: number, y: number, button: 'down' | 'up') => void) | null>(null);
+  const en = useLocale() === 'en';
+  const [teleprompterOpen, setTeleprompterOpen] = useState(false);
   // 演示缩放：双击画布放大/还原（开关 or Alt/⌘+双击）
   const [zoomMode, setZoomMode] = useState(false);
   const zoomedRef = useRef(false);
@@ -705,12 +708,14 @@ export default function HomePage(): JSX.Element {
               cameraMuted={cameraMuted}
               laserActive={laserActive}
               zoomActive={zoomMode}
+              teleprompterActive={teleprompterOpen}
               aspect={isRecording ? setupConfig.framing : undefined}
               onToggleCamera={handleToggleCamera}
               onToggleAudioMute={handleToggleAudioMute}
               onToggleCameraMute={handleToggleCameraMute}
               onToggleLaser={handleToggleLaser}
               onToggleZoom={() => setZoomMode((v) => !v)}
+              onToggleTeleprompter={() => setTeleprompterOpen((v) => !v)}
               onStart={handleStart}
               onStop={handleStop}
               onDiscard={handleDiscard}
@@ -719,6 +724,9 @@ export default function HomePage(): JSX.Element {
             />
           </div>
         )}
+
+        {/* 提词器浮层（私有，不进录制）；open=false 时返回 null */}
+        <Teleprompter open={teleprompterOpen} onClose={() => setTeleprompterOpen(false)} en={en} autoFollow={isRecording && hasAudio && !audioMuted} micStream={micStream} />
 
         {paymentDone && (
           <div

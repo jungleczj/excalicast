@@ -406,7 +406,9 @@
     "laserOn": "Laser pointer on · click to turn off",
     "laserOff": "Laser pointer (K) · click to turn on",
     "zoomOn": "Presentation zoom on · double-click canvas to zoom/restore · click to turn off",
-    "zoomOff": "Presentation zoom · double-click canvas to zoom in (Alt+double-click works anytime)"
+    "zoomOff": "Presentation zoom · double-click canvas to zoom in (Alt+double-click works anytime)",
+    "teleprompterOn": "Teleprompter open · click to close",
+    "teleprompterOff": "Teleprompter · paste a script that auto-scrolls (not recorded)"
   },
   "recordingSetup": {
     "step": "step 1 of 1 — pre-flight",

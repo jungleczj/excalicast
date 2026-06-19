@@ -17,6 +17,8 @@ interface Props {
   laserActive?: boolean;
   /** 演示缩放模式是否激活（开启后双击画布放大/还原） */
   zoomActive?: boolean;
+  /** 提词器浮层是否打开 */
+  teleprompterActive?: boolean;
   /** 当前锁定的画幅比例徽标（如 '16:9' / 'default'）；录制态显示 */
   aspect?: string;
   onToggleCamera: () => void;
@@ -33,6 +35,8 @@ interface Props {
   onToggleLaser?: () => void;
   /** 切换演示缩放模式 */
   onToggleZoom?: () => void;
+  /** 切换提词器浮层 */
+  onToggleTeleprompter?: () => void;
   onStart: () => void;
   onStop: () => void;
   onDiscard?: () => void;
@@ -67,8 +71,8 @@ export function RecordingBar(props: Props): JSX.Element {
   const t = useTranslations('recordingBar');
   const {
     state, elapsedMs, hasAudio, hasCamera, cameraEnabled,
-    audioMuted, cameraMuted, laserActive, zoomActive, aspect,
-    onToggleCamera, onToggleAudioMute, onToggleCameraMute, onToggleLaser, onToggleZoom,
+    audioMuted, cameraMuted, laserActive, zoomActive, teleprompterActive, aspect,
+    onToggleCamera, onToggleAudioMute, onToggleCameraMute, onToggleLaser, onToggleZoom, onToggleTeleprompter,
     onStart, onStop, onDiscard, onPause, onResume,
   } = props;
 
@@ -122,6 +126,23 @@ export function RecordingBar(props: Props): JSX.Element {
             title={zoomActive ? t('zoomOn') : t('zoomOff')}
           >
             <I.Search size={13} />
+          </button>
+        )}
+        {onToggleTeleprompter && (
+          <button
+            type="button"
+            onClick={onToggleTeleprompter}
+            className="grid h-7 w-7 place-items-center"
+            style={{
+              background: teleprompterActive ? 'var(--ok)' : 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: 3,
+              color: 'var(--paper)',
+              cursor: 'pointer',
+            }}
+            title={teleprompterActive ? t('teleprompterOn') : t('teleprompterOff')}
+          >
+            <I.Text size={13} />
           </button>
         )}
         <button
@@ -271,6 +292,26 @@ export function RecordingBar(props: Props): JSX.Element {
           muted={!laserActive}
           title={laserActive ? t('laserOn') : t('laserOff')}
           onClick={onToggleLaser}
+        />
+      )}
+      {onToggleZoom && (
+        <SrcToggle
+          IconOn={I.Search}
+          IconOff={I.Search}
+          present={true}
+          muted={!zoomActive}
+          title={zoomActive ? t('zoomOn') : t('zoomOff')}
+          onClick={onToggleZoom}
+        />
+      )}
+      {onToggleTeleprompter && (
+        <SrcToggle
+          IconOn={I.Text}
+          IconOff={I.Text}
+          present={true}
+          muted={!teleprompterActive}
+          title={teleprompterActive ? t('teleprompterOn') : t('teleprompterOff')}
+          onClick={onToggleTeleprompter}
         />
       )}
     </div>

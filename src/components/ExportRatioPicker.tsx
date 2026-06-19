@@ -64,18 +64,15 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
                   color: 'var(--ink)',
                 }}
               >
-                {sel && (
-                  <span className="absolute left-1 top-1 grid h-3.5 w-3.5 place-items-center" style={{ background: 'var(--ink)', color: 'var(--paper)', borderRadius: 2, fontSize: 9, lineHeight: 1 }}>✓</span>
-                )}
-                {sel && selected.length > 1 && (
-                  <span
-                    role="button"
-                    aria-label={`remove ${r}`}
-                    onClick={(e) => { e.stopPropagation(); removeRatio(r); }}
-                    className="absolute right-1 top-1 grid h-3.5 w-3.5 place-items-center"
-                    style={{ background: 'var(--paper)', border: '1px solid var(--ink)', borderRadius: 2, fontSize: 9, lineHeight: 1, cursor: 'pointer' }}
-                  >×</span>
-                )}
+                {/* 复选框：点它切换选择（选中✓→取消，至少留 1；未选→加入并预览） */}
+                <span
+                  role="checkbox"
+                  aria-checked={sel}
+                  aria-label={r}
+                  onClick={(e) => { e.stopPropagation(); if (sel) removeRatio(r); else previewAndSelect(r); }}
+                  className="absolute left-1 top-1 grid h-4 w-4 place-items-center"
+                  style={{ background: sel ? 'var(--ink)' : 'var(--paper)', color: 'var(--paper)', border: '1.2px solid var(--ink)', borderRadius: 2, fontSize: 9, lineHeight: 1, cursor: 'pointer' }}
+                >{sel ? '✓' : ''}</span>
                 <div
                   style={{
                     width: 26 * (preset.width / max),

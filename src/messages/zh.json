@@ -406,7 +406,9 @@
     "laserOn": "激光笔已开启 · 点击关闭",
     "laserOff": "激光笔（K）· 点击开启",
     "zoomOn": "演示缩放已开启 · 双击画布放大/还原 · 点击关闭",
-    "zoomOff": "演示缩放 · 开启后双击画布放大（Alt+双击随时可用）"
+    "zoomOff": "演示缩放 · 开启后双击画布放大（Alt+双击随时可用）",
+    "teleprompterOn": "提词器已打开 · 点击关闭",
+    "teleprompterOff": "提词器 · 粘贴讲稿自动滚动（不进录制）"
   },
   "recordingSetup": {
     "step": "第 1 步 / 共 1 步 — 录制前准备",

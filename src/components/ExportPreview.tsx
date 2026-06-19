@@ -260,6 +260,29 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kept, keptDur, timeMs, drawFrame]);
 
+  // 预览进度条：可拖刮擦（成片输出时间 → 源时间），与底部时间轴等效
+  const barRef = useRef<HTMLDivElement>(null);
+  const scrubBarToClientX = useCallback((clientX: number) => {
+    const el = barRef.current;
+    if (!el || keptDur <= 0) return;
+    const r = el.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    setTimeMs(outputToSource(kept, ratio * keptDur));
+  }, [kept, keptDur, setTimeMs]);
+  const startBarScrub = useCallback((e: React.MouseEvent) => {
+    if (keptDur <= 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setPlaying(false);
+    if (audioRef.current) audioRef.current.pause();
+    if (cameraRef.current) cameraRef.current.pause();
+    scrubBarToClientX(e.clientX);
+    const move = (ev: MouseEvent) => scrubBarToClientX(ev.clientX);
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }, [keptDur, scrubBarToClientX]);
+
   // scrub 由时间轴驱动（onPlayheadChange → playheadMs）；预览不再自带进度条。
   const preset = ASPECT_PRESETS[config.aspectRatio];
   const aspect = preset.width / preset.height;
@@ -451,9 +474,16 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
             >
               {(sourceToOutput(kept, timeMs) / 1000).toFixed(1)}s
             </span>
-            {/* 成片输出进度（只读；scrub 在下方时间轴） —— minWidth:0 保证 9:16 窄盒能缩 */}
-            <div className="h-1 flex-1" style={{ minWidth: 0, background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${keptDur > 0 ? Math.min(100, (sourceToOutput(kept, timeMs) / keptDur) * 100) : 0}%`, background: 'var(--hi)' }} />
+            {/* 成片输出进度：可拖刮擦 —— 外层高 16px 做抓取热区、内层细条仅视觉；minWidth:0 保证 9:16 窄盒能缩 */}
+            <div
+              ref={barRef}
+              onMouseDown={startBarScrub}
+              className="flex flex-1 items-center"
+              style={{ minWidth: 0, height: 16, cursor: keptDur > 0 ? 'ew-resize' : 'default' }}
+            >
+              <div className="h-1 w-full" style={{ background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden', pointerEvents: 'none' }}>
+                <div style={{ height: '100%', width: `${keptDur > 0 ? Math.min(100, (sourceToOutput(kept, timeMs) / keptDur) * 100) : 0}%`, background: 'var(--hi)' }} />
+              </div>
             </div>
             <span
               style={{

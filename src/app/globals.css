@@ -5,6 +5,8 @@
 @tailwind utilities;
 
 :root {
+  /* 顶部安全区（MacBook 刘海/菜单栏）—— 提词器停靠基线读取，窗口态为 0。 */
+  --sat: env(safe-area-inset-top, 0px);
   /* ── Sketch-Minimalist Palette ─────────────────────────── */
   --paper:        #FBFBFA;
   --paper-2:      #F4F3EE;
@@ -342,6 +344,10 @@ body {
   50%      { opacity: 0.8; transform: scale(1.05); }
 }
 .animate-pulse-soft { animation: pulse-soft 1.8s ease-in-out infinite; }
+
+/* 提词器刘海条：隐藏滚动条（仍可程序化 scrollIntoView） */
+.tp-noscroll { scrollbar-width: none; -ms-overflow-style: none; }
+.tp-noscroll::-webkit-scrollbar { display: none; }
 
 /* 录制中「活动」元素的手绘轻抖（对标设计 sketchy-wiggle） */
 @keyframes sketchy-wiggle {
