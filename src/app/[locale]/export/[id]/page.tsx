@@ -199,7 +199,7 @@ export default function EditorRecordingPage(): JSX.Element {
   );
 
   const tabContent = (() => {
-    if (tab === 'captions') return isPro ? <SubtitlePanel open recordingId={id} onClose={() => {}} /> : lockBlock('pro', en ? 'Captions are a Pro feature' : '字幕是 Pro 功能', en ? 'Generate accurate subtitles from your audio.' : '从音频生成精准字幕。');
+    if (tab === 'captions') return isPro ? <SubtitlePanel open recordingId={id} onClose={() => setTab('export')} /> : lockBlock('pro', en ? 'Captions are a Pro feature' : '字幕是 Pro 功能', en ? 'Generate accurate subtitles from your audio.' : '从音频生成精准字幕。');
     if (tab === 'outline') return isMax ? <HandoutPanel view="outline" recordingId={id} config={config} onJumpToTime={setPlayheadMs} /> : lockBlock('max', en ? 'Outline is a Max feature' : '大纲是 Max 功能', en ? 'Auto chapters with jump-to-time.' : '自动识别章节、点击跳转预览。');
     if (tab === 'handout') return isMax ? <HandoutPanel view="handout" recordingId={id} config={config} /> : lockBlock('max', en ? 'Handout is a Max feature' : '讲义是 Max 功能', en ? 'Markdown handout — download / copy.' : '生成 Markdown 讲义，可下载 / 复制。');
     return exportTab;

@@ -117,6 +117,8 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
     setError(null);
     setStatusMsg(null);
     setBusy(true);
+    // 关键：在用户点击的同步阶段先开好标签页，避免 await fetch 之后再 window.open 被弹窗拦截。
+    const payWin = window.open('about:blank', '_blank');
     trackEvent('checkout_start', { kind: 'one_time' });
     try {
       const res = await fetch('/api/checkout/one-time', {
@@ -135,11 +137,13 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
       if (!res.ok) throw new Error(j.message ?? j.error ?? `checkout ${res.status}`);
 
       if (j.provider === 'creem' && j.redirectUrl) {
-        window.open(j.redirectUrl, '_blank', 'noopener,noreferrer');
+        if (payWin && !payWin.closed) payWin.location.href = j.redirectUrl;
+        else window.location.href = j.redirectUrl; // 预开标签被拦截 → 同标签跳转兜底
         setStatusMsg(t('creemRedirected'));
         void pollUntilPaid();
         return;
       }
+      payWin?.close();
       if (!paddle) {
         setError(t('errorPaddleNotInit'));
         setBusy(false);
@@ -147,6 +151,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
       }
       openCheckout({ paddle, recordingId });
     } catch (err) {
+      payWin?.close();
       setError(err instanceof Error ? err.message : 'unknown');
       setBusy(false);
     }

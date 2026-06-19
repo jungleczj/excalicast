@@ -1,9 +1,10 @@
 # PRD：白板录制工具
-**版本**：v0.8.3  
+**版本**：v0.8.4  
 **状态**：开发中  
 **作者**：—  
 **最后更新**：2026-06-19  
-**变更**：v0.8.3 - **首屏性能**：落地/定价/条款页由 `force-dynamic`（每访问 SSR+查 Supabase → TTFB 12s）改为 **ISR**（CDN 缓存，TTFB 降到边缘级）；价格准确性靠 admin 改价路由 `revalidatePath` 立即再生保持。详见「## 十一」最新一条。  
+**变更**：v0.8.4 - 支付/会员修复：字幕弹窗可关闭、登录即刷新会员档位（修 Max 登录仍显示未升级）、**Creem 付款页弹窗拦截修复**（点击同步开标签+同标签兜底）、新增独立测试环境 runbook（不切生产）。详见「## 十一」最新一条。  
+**历史变更**：v0.8.3 - **首屏性能**：落地/定价/条款页由 `force-dynamic`（每访问 SSR+查 Supabase → TTFB 12s）改为 **ISR**（CDN 缓存，TTFB 降到边缘级）；价格准确性靠 admin 改价路由 `revalidatePath` 立即再生保持。详见「## 十一」最新一条。  
 **历史变更**：v0.8.2 - 导出页 **CTA 去重/排版收敛**：删顶部两个假按钮（「分享」「导出」只切 Tab、不真执行）+ 删高级区重复「升级 Pro」小按钮；导出动作统一为面板真按钮，升级入口收敛为「解锁并下载 + PRO/MAX 套餐卡 + 各 Tab 锁定块」。详见「## 十一」最新一条。  
 **历史变更**：v0.8.1 - 提词器跟读**「Google 为首 + 离线 vosk 回落」编排**：新 Chrome 用 `start(audioTrack)` 共用录制麦克风、云端识别不占 CPU（修录制卡顿）；网络错/抢占/无结果时**看门狗自动回落 vosk**（取帧升级 **AudioWorklet** 不卡）；修**关→重开跟读失效**（生命周期幂等）；缓动前导滚动保留。真机 E2E（mock Google 零转写 + 中文假麦克风）回落+重开 3/3 通过。详见「## 十一」最新一条。  
 **历史变更**：v0.8.0 - 提词器智能跟读**改用离线 vosk-browser**：根因＝`webkitSpeechRecognition` 独占麦克风、不接受 MediaStream、录制时抢不到音频；改为与录制**共用同一路 MediaStream** 的离线 WASM 识别（本地/不传云/任意地区/动态懒加载 ~40MB 模型），并加**讲稿语言判定+手动语言选择**、**平滑前导滚动**、**刘海条可拖动/拉长**。真机 E2E（合成中文音频当假麦克风）「音频→vosk→高亮」全链 2/2 通过。详见「## 十一」最新一条。  
@@ -915,6 +916,7 @@ Pro/Max 导出（订阅状态验证）：
 
 > 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
 
+- **2026-06-19｜支付/会员修复：字幕弹窗可关 + 登录刷新档位 + Creem 付款页弹窗拦截修复 + 测试环境 runbook**：① **字幕弹窗关不掉**：`SubtitlePanel` 是全屏 modal，导出页传了空 `onClose` → 改 `onClose={() => setTab('export')}`（✕/遮罩可关、回导出 Tab）。② **Max 登录后仍显示未升级**：`useSubscription` 订阅浏览器 Supabase `auth.onAuthStateChange`，登录/登出/令牌刷新即 `refresh()`（修经 Header LoginModal 登录后档位停留旧 free）。③ **测试环境唤不起 Creem 付款页**：`ProUpgradeModal`/`PaywallModal` 原在 `await fetch` 之后才 `window.open('_blank')` → 被弹窗拦截；改为**点击同步阶段先开标签**、拿到 redirectUrl 再导航、被拦则**同标签跳转兜底**（与网站 mode 无关）。④ 新增 `docs/payment-staging.md`：**独立测试环境**正规做法（固定子域名 + Creem 测试密钥 + Supabase 测试库 + 测试卡），不切生产；代码已全 env 驱动故无需改。涉及 `export/[id]/page.tsx`、`useSubscription.ts`、`ProUpgradeModal.tsx`、`PaywallModal.tsx`、`docs/payment-staging.md`。
 - **2026-06-19｜首屏性能：落地/定价/条款页 force-dynamic → ISR（修 TTFB 12s）**：Vercel Real Experience Score 极差（TTFB 12.49s、FCP 18.12s、LCP 19.32s；INP/CLS/FID 全绿）→ 根因＝`[locale]/page.tsx`、`pricing`、`terms` 为 **`force-dynamic`** 且每次渲染 `await getActiveConfig()`（未缓存 Supabase 查询）→ 每访问都 SSR+查库+冷启动叠加。改为 **ISR**（`export const revalidate = 3600`，移除 force-dynamic）→ CDN 缓存 + stale-while-revalidate，TTFB 由十几秒降到 CDN 边缘级（构建后三页均为 `●` SSG）。**价格准确性保持**：admin 改价 / 切 mode 路由（`payment-config/route.ts`、`activate/route.ts`）成功后调 `revalidatePath('/', 'layout')` 立即再生，3600s 仅为兜底；既有 Supabase Realtime broadcast 仍即时更新在线客户端弹窗。涉及 `[locale]/page.tsx`、`pricing/page.tsx`、`terms/page.tsx`、`api/admin/payment-config/{route,activate}.ts`。
 - **2026-06-19｜导出页 CTA 去重 / 排版收敛**：导出页存在多个重复/相似按钮致困惑。① 删顶部栏两个**假按钮**「分享」「导出」（原 `onClick` 仅 `setTab('export')`、不真分享/不真导出；其中「导出」与右侧面板真导出按钮像两个"导出"）——导出动作统一由右侧面板真按钮承担、切页签靠 Tab 栏。② 删 `ExportPanel` 高级区标题旁重复的小「升级 Pro」按钮，高级功能升级入口**统一由 PRO/MAX 套餐卡**承担。收敛后 CTA 层级：导出动作=面板一个真按钮；升级入口=导出解锁「解锁并下载」+ 高级套餐卡 + 各 Tab lockBlock（上下文）。涉及 `app/[locale]/export/[id]/page.tsx`、`ExportPanel.tsx`。
 - **2026-06-17｜提词器跟读「Google 为首 + 离线回落」编排 + AudioWorklet 修卡顿 + 修重开失效**：用户定向「Google(webkitSpeechRecognition) 为首、大陆/出问题回落 vosk」。新增编排器 `src/services/readalongEngine.ts`：① **Primary=Google**，新 Chrome（`SpeechRecognition.available` 存在）用 **`rec.start(audioTrack)` 吃录制的 MediaStreamTrack**（共用麦克风、录制中可用、云端不占本地 CPU → 修「录制中非常卡」），旧版退回 `start()`；② **看门狗**：网络错(大陆不可达)/被拒/不支持/监听后 ~5s 无结果（抢占·静默失败）→ **自动回落离线 vosk**（喂同一路 `micStream`）。离线取帧从主线程 `ScriptProcessorNode` **升级 AudioWorklet**（`public/worklets/pcm-forwarder.js`，音频线程取帧不被主线程饿死 → 修卡顿）。修**关→开跟读失效**：编排器 `start()/stop()` 幂等清干净（停 Google `abort()` + 停离线断 worklet/`recognizer.remove()`/`audioCtx.close()` + 清看门狗；不停共享流）。**缓动前导滚动**保留（rAF 缓动，当前词落容器靠前）。**真机 E2E**：mock Google「绿灯零转写」+ 中文假麦克风 → 断言**自动回落 vosk 且高亮推进到全文(idx15)**、**关→重开后仍推进**，3/3 通过；匹配 9/9。sherpa-onnx 作为后续准确度升级（同接口）。涉及 `readalongEngine.ts`(新)、`voskRecognizer.ts`(AudioWorklet)、`Teleprompter.tsx`、`public/worklets/pcm-forwarder.js`(新)。

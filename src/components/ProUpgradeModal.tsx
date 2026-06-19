@@ -132,6 +132,8 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
 
   const openCheckoutForProvider = async () => {
     setBusy(true);
+    // 关键：在用户点击的同步阶段先开好标签页，避免 await fetch 之后再 window.open 被弹窗拦截（→ 付款页唤不起）。
+    const payWin = window.open('about:blank', '_blank');
     trackEvent('checkout_start', { kind: 'subscription', tier, billing: effectiveBilling });
     try {
       const res = await fetch('/api/checkout/pro', {
@@ -149,11 +151,13 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
       };
       if (!res.ok) throw new Error(j.message ?? j.error ?? `checkout ${res.status}`);
       if (j.provider === 'creem' && j.redirectUrl) {
-        window.open(j.redirectUrl, '_blank', 'noopener,noreferrer');
+        if (payWin && !payWin.closed) payWin.location.href = j.redirectUrl;
+        else window.location.href = j.redirectUrl; // 预开标签被拦截 → 同标签跳转兜底
         setStatusMsg(t('creemRedirected'));
         void pollUntilPro();
         return;
       }
+      payWin?.close(); // 非 creem 路径（Paddle 内嵌等）：关掉预开的空标签
       if (!user) {
         setError('unauthenticated');
         setBusy(false);
@@ -161,6 +165,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
       }
       openPaddleCheckout(user);
     } catch (err) {
+      payWin?.close();
       setError(err instanceof Error ? err.message : 'unknown');
       setBusy(false);
     }
