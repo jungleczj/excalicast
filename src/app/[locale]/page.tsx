@@ -17,8 +17,10 @@ interface Props {
   params: Promise<{ locale: string }>;
 }
 
-// 价格随 payment_config 实时变化：按请求渲染，避免静态预渲染把旧价烤进 HTML。
-export const dynamic = 'force-dynamic';
+// 价格随 payment_config 变化：用 ISR（CDN 缓存 + stale-while-revalidate，TTFB 快），
+// 而非 force-dynamic（每次访问都 SSR + 查 Supabase → TTFB 极差，冷启动叠加可达十几秒）。
+// 改价/切 mode 时 admin 路由会 revalidatePath 立即再生，故价格仍准；3600s 为兜底窗口。
+export const revalidate = 3600;
 
 export async function generateMetadata({ params }: Props) {
   const { locale } = await params;

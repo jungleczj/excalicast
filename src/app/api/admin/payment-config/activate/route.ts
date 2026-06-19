@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import { activateConfig, getActiveConfig, toPublic } from '@/lib/paymentConfig';
 import { createClient } from '@supabase/supabase-js';
 
@@ -47,6 +48,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   try {
     const row = await activateConfig(body.provider, body.mode);
     await broadcastActive();
+    revalidatePath('/', 'layout'); // 价格页走 ISR，切换 mode 后立即再生
     return NextResponse.json({ ok: true, active: row });
   } catch (err) {
     return NextResponse.json({

@@ -8,8 +8,8 @@ interface Props {
   params: Promise<{ locale: string }>;
 }
 
-// 价格随 payment_config 实时变化：按请求渲染，避免静态预渲染把旧价烤进 HTML。
-export const dynamic = 'force-dynamic';
+// 价格用 ISR（CDN 缓存，TTFB 快）而非 force-dynamic；改价时 admin 路由 revalidatePath 立即再生。
+export const revalidate = 3600;
 
 export async function generateMetadata({ params }: Props) {
   const { locale } = await params;

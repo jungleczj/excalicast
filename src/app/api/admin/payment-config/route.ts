@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 import {
   getActiveConfig,
   getConfigByProviderMode,
@@ -193,6 +194,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   try {
     const row = await upsertConfigRow(patch);
     await broadcastActive();
+    revalidatePath('/', 'layout'); // 价格页走 ISR，改价后立即再生（landing/pricing/terms 等）
     return NextResponse.json({ ok: true, row });
   } catch (err) {
     if (err instanceof PaymentConfigMismatchError) {
