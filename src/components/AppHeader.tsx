@@ -6,18 +6,13 @@ import { I, LogoMark } from '@/components/icons';
 import { useAuth } from '@/hooks/useAuth';
 import { LoginModal } from '@/components/LoginModal';
 import { LanguageToggle } from '@/components/LanguageToggle';
+import { TierBadge } from '@/components/TierBadge';
 import { Link, usePathname } from '@/i18n/navigation';
 
 interface Props {
   tier?: 'free' | 'pro' | 'max';
   onUpgradePro?: () => void;
 }
-
-const TIER_VARIANT: Record<NonNullable<Props['tier']>, string> = {
-  free: 'tag-mono-soft',
-  pro: 'tag-mono-pro',
-  max: 'tag-mono-max',
-};
 
 export function Brand(): JSX.Element {
   return (
@@ -35,8 +30,6 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
   const pathname = usePathname();
   const onLib = pathname?.startsWith('/library');
   const onRecord = pathname === '/app' || pathname?.startsWith('/export');
-  const badgeClass = TIER_VARIANT[tier];
-  const badgeLabel = tier === 'free' ? 'FREE' : tier === 'pro' ? 'PRO' : 'MAX';
 
   const { user, logout, loading } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
@@ -83,7 +76,7 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
               {t('upgradePro')}
             </button>
           )}
-          <span className={`tag-mono ${badgeClass}`}>{badgeLabel}</span>
+          <TierBadge tier={tier} />
 
           {loading ? (
             <div className="h-8 w-8 rounded-full" style={{ background: 'var(--paper-2)' }} />

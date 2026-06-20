@@ -1,17 +1,13 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { trackEvent } from '@/lib/analytics/track';
 import { exportRecording, downloadBlob } from '@/services/exportPipeline';
 import { isPaid } from '@/services/paymentClient';
-import { uploadRecording } from '@/services/cloudSync';
 import { I } from '@/components/icons';
 import { PaywallModal } from '@/components/PaywallModal';
 import { ProUpgradeModal } from '@/components/ProUpgradeModal';
-import { SubtitlePanel } from '@/components/SubtitlePanel';
-import { HandoutPanel } from '@/components/HandoutPanel';
-import { ShareLinkModal } from '@/components/ShareLinkModal';
 import { useSubscription } from '@/hooks/useSubscription';
 import { ProBadge } from '@/components/ProBadge';
 import type { ExportConfig } from '@/types/recording';
@@ -27,11 +23,9 @@ interface Props {
   onConfigChange: (next: ExportConfig) => void;
   onPaidStateChange?: (paid: boolean) => void;
   onProgress?: (state: ExportProgressState | null) => void;
-  /** 是否显示「进阶（字幕/讲义/分享）」捆绑区块。编辑器把这些拆到独立 Tab 时传 false。 */
-  showAdvanced?: boolean;
 }
 
-export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateChange, onProgress, showAdvanced = true }: Props): JSX.Element {
+export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateChange, onProgress }: Props): JSX.Element {
   const t = useTranslations('exportPanel');
   const subscription = useSubscription();
   const [paid, setPaid] = useState<boolean>(false);
@@ -41,71 +35,13 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
   const [paywallOpen, setPaywallOpen] = useState<boolean>(false);
   const [proUpgradeOpen, setProUpgradeOpen] = useState<boolean>(false);
   const [upgradeTier, setUpgradeTier] = useState<'pro' | 'max'>('pro');
-  const [subtitlePanelOpen, setSubtitlePanelOpen] = useState<boolean>(false);
   const [pendingExport, setPendingExport] = useState<boolean>(false);
   const [bgPolling, setBgPolling] = useState<boolean>(false);
-  // Max-only: handout + share
-  const [handoutOpen, setHandoutOpen] = useState<boolean>(false);
-  const [shareBusy, setShareBusy] = useState<boolean>(false);
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [shareExpiresAt, setShareExpiresAt] = useState<number>(0);
-  const [shareModalOpen, setShareModalOpen] = useState<boolean>(false);
-  const [maxFeatureMsg, setMaxFeatureMsg] = useState<string | null>(null);
-  const [shareNeedsCloud, setShareNeedsCloud] = useState<boolean>(false);
-  const [savingCloud, setSavingCloud] = useState<boolean>(false);
-
-  const maxUnlocked = subscription.permissions.handout && subscription.permissions.shareLink;
 
   const openUpgrade = useCallback((tier: 'pro' | 'max') => {
     setUpgradeTier(tier);
     setProUpgradeOpen(true);
   }, []);
-
-  const handleCreateShareLink = useCallback(async () => {
-    setShareBusy(true);
-    setMaxFeatureMsg(null);
-    try {
-      const res = await fetch('/api/share/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recordingId }),
-      });
-      const j = (await res.json().catch(() => ({}))) as { url?: string; expiresAt?: number; error?: string; message?: string };
-      if (!res.ok || !j.url) {
-        if (j.error === 'cloud_recording_required') {
-          setShareNeedsCloud(true);
-          setMaxFeatureMsg(j.message ?? 'cloud required');
-        } else {
-          setMaxFeatureMsg(j.message ?? j.error ?? `share ${res.status}`);
-        }
-        return;
-      }
-      setShareNeedsCloud(false);
-      setShareUrl(j.url);
-      setShareExpiresAt(j.expiresAt ?? 0);
-      setShareModalOpen(true);
-      trackEvent('share_create', { recordingId });
-    } catch (err) {
-      setMaxFeatureMsg(err instanceof Error ? err.message : 'unknown');
-    } finally {
-      setShareBusy(false);
-    }
-  }, [recordingId]);
-
-  // 「保存到云端并重试」：就地上云后自动重试创建分享，免去回录制库
-  const handleSaveCloudThenShare = useCallback(async () => {
-    setSavingCloud(true);
-    setMaxFeatureMsg(null);
-    try {
-      await uploadRecording(recordingId);
-      setShareNeedsCloud(false);
-      await handleCreateShareLink();
-    } catch (err) {
-      setMaxFeatureMsg(err instanceof Error ? err.message : 'upload_failed');
-    } finally {
-      setSavingCloud(false);
-    }
-  }, [recordingId, handleCreateShareLink]);
 
   const proUnlocked = subscription.permissions.exportWithoutWatermark;
   const effectivelyUnlocked = paid || proUnlocked;
@@ -284,126 +220,6 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
         )}
       </div>
 
-      {showAdvanced && (<>
-      <div style={{ height: 1.5, background: 'var(--ink)', opacity: 0.4 }} />
-
-      <div>
-        <h3 className="mb-2 label-mono" style={{ fontSize: 11 }}>
-          {t('advancedHeading')}
-        </h3>
-        <p className="mb-3" style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--ink-2)' }}>{t('advancedLede')}</p>
-        <div className="space-y-2">
-          <BundleCard
-            bandColor="var(--pro)"
-            pill="PRO"
-            headerIcon={<I.Sparkles size={16} />}
-            title={t('proBundleTitle')}
-            desc={t('proBundleDesc')}
-            unlockLabel={t('proBundleUnlock')}
-            unlocked={subscription.permissions.subtitle}
-            onUpgrade={() => openUpgrade('pro')}
-            rows={[
-              {
-                icon: <I.Subtitles size={14} />,
-                action: {
-                  title: t('subtitleTitle'),
-                  desc: t('subtitleDesc'),
-                  actionLabel: subscription.permissions.subtitle ? t('subtitleAction') : t('subtitleActionLocked'),
-                  onAction: () => {
-                    trackEvent('feature_click', { feature: 'subtitle', gated: !subscription.permissions.subtitle });
-                    setSubtitlePanelOpen((v) => !v);
-                  },
-                },
-              },
-              {
-                icon: <I.Cloud size={14} />,
-                // 被动权益：无动作按钮（actionLabel 空）
-                action: { title: t('cloudTemplateTitle'), desc: t('cloudTemplateDesc'), actionLabel: '', onAction: () => {} },
-              },
-            ]}
-          />
-          <BundleCard
-            bandColor="var(--max)"
-            pill="MAX"
-            headerIcon={<I.Sparkles size={16} />}
-            title={t('maxBundleTitle')}
-            desc={t('maxBundleDesc')}
-            unlockLabel={t('maxBundleUnlock')}
-            unlocked={maxUnlocked}
-            onUpgrade={() => openUpgrade('max')}
-            rows={[
-              {
-                icon: <I.Sparkles size={14} />,
-                action: {
-                  title: t('handoutTitle'),
-                  desc: t('handoutDesc'),
-                  actionLabel: handoutOpen ? t('handoutTitle') : t('handoutGenerate'),
-                  onAction: () => {
-                    trackEvent('feature_click', { feature: 'handout', gated: !subscription.permissions.handout });
-                    setHandoutOpen((v) => !v);
-                  },
-                },
-              },
-              {
-                icon: <I.Share size={14} />,
-                action: {
-                  title: t('shareTitle'),
-                  desc: t('shareDesc'),
-                  actionLabel: shareBusy ? t('shareCreating') : t('shareCreate'),
-                  onAction: () => {
-                    trackEvent('feature_click', { feature: 'share', gated: !subscription.permissions.shareLink });
-                    void handleCreateShareLink();
-                  },
-                  busy: shareBusy,
-                },
-              },
-            ]}
-          />
-        </div>
-
-        {maxUnlocked && handoutOpen && (
-          <HandoutPanel recordingId={recordingId} config={config} />
-        )}
-        {maxFeatureMsg && (
-          <div className="mt-3 space-y-2">
-            <div
-              className="px-3 py-2"
-              style={{
-                background: 'var(--rec-soft)',
-                border: '1.4px solid var(--rec)',
-                borderRadius: 3,
-                fontSize: 12,
-                color: 'var(--rec)',
-                fontFamily: 'var(--font-mono)',
-              }}
-            >
-              {maxFeatureMsg}
-            </div>
-            {shareNeedsCloud && (
-              <button
-                type="button"
-                onClick={() => { void handleSaveCloudThenShare(); }}
-                disabled={savingCloud}
-                className="btn-sketch btn-sketch-primary w-full"
-                style={{ justifyContent: 'center' }}
-              >
-                {savingCloud ? t('savingToCloud') : t('saveToCloudAndRetry')}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-      </>)}
-
-      {shareUrl && (
-        <ShareLinkModal
-          open={shareModalOpen}
-          url={shareUrl}
-          expiresAt={shareExpiresAt}
-          onClose={() => setShareModalOpen(false)}
-        />
-      )}
-
       {(statusMsg || error || bgPolling) && (
         <div
           className="p-3"
@@ -451,11 +267,6 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
           setStatusMsg(t('proActivatedStatus'));
           void subscription.refresh();
         }}
-      />
-      <SubtitlePanel
-        open={subtitlePanelOpen}
-        recordingId={recordingId}
-        onClose={() => setSubtitlePanelOpen(false)}
       />
     </div>
   );
@@ -510,155 +321,3 @@ function RadioCard({ selected, onClick, title, meta, hint, accent }: RadioCardPr
   );
 }
 
-interface MaxBundleAction {
-  title: string;
-  desc: string;
-  actionLabel: string;
-  onAction: () => void;
-  busy?: boolean;
-}
-
-/**
- * 套件卡片（Pro / Max 共用）—— 头部色带（图标 + 标题 + 档位徽标 + 未解锁时升级锁按钮）
- * + 若干行（MaxBundleRow，行的 actionLabel 为空则不渲染按钮，用于被动权益）。
- */
-function BundleCard({
-  bandColor,
-  pill,
-  headerIcon,
-  title,
-  desc,
-  unlockLabel,
-  unlocked,
-  onUpgrade,
-  rows,
-}: {
-  bandColor: string;
-  pill: string;
-  headerIcon: React.ReactNode;
-  title: string;
-  desc: string;
-  unlockLabel: string;
-  unlocked: boolean;
-  onUpgrade: () => void;
-  rows: Array<{ icon: React.ReactNode; action: MaxBundleAction }>;
-}): JSX.Element {
-  return (
-    <div style={{ background: 'var(--paper)', border: '1.4px solid var(--ink)', borderRadius: 3 }}>
-      {/* Header band */}
-      <div
-        className="flex items-center gap-3 px-3 py-3"
-        style={{ background: bandColor, borderBottom: '1.4px solid var(--ink)', borderTopLeftRadius: 3, borderTopRightRadius: 3 }}
-      >
-        <div
-          className="grid h-8 w-8 flex-shrink-0 place-items-center"
-          style={{ background: 'var(--paper)', border: '1.4px solid var(--ink)', borderRadius: 3, color: 'var(--ink)' }}
-        >
-          {headerIcon}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink)' }}>{title}</span>
-            <span
-              style={{
-                padding: '1px 6px', background: 'var(--paper)', border: '1px solid var(--ink)',
-                borderRadius: 999, fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 700,
-                letterSpacing: '0.08em', color: 'var(--ink)',
-              }}
-            >
-              {pill}
-            </span>
-          </div>
-          <div className="mt-0.5" style={{ fontSize: 11, color: 'var(--ink-2)', lineHeight: 1.4 }}>{desc}</div>
-        </div>
-        {!unlocked && (
-          <button
-            type="button"
-            onClick={onUpgrade}
-            className="flex items-center gap-1"
-            style={{
-              padding: '5px 10px', background: 'var(--ink)', color: 'var(--paper)',
-              border: '1.3px solid var(--ink)', borderRadius: 3, fontFamily: 'var(--font-mono)',
-              fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', cursor: 'pointer',
-            }}
-          >
-            <I.Lock size={10} />
-            {unlockLabel}
-          </button>
-        )}
-      </div>
-
-      {rows.map((r, i) => (
-        <Fragment key={i}>
-          {i > 0 && <div style={{ height: 1, background: 'var(--rule-faint)' }} />}
-          <MaxBundleRow icon={r.icon} action={r.action} unlocked={unlocked} onLockedClick={onUpgrade} />
-        </Fragment>
-      ))}
-    </div>
-  );
-}
-
-function MaxBundleRow({
-  icon,
-  action,
-  unlocked,
-  onLockedClick,
-}: {
-  icon: React.ReactNode;
-  action: MaxBundleAction;
-  unlocked: boolean;
-  onLockedClick: () => void;
-}): JSX.Element {
-  return (
-    <div
-      className="flex items-center gap-3 px-3 py-2.5"
-      style={{ opacity: unlocked ? 1 : 0.55 }}
-    >
-      <div
-        className="grid h-6 w-6 flex-shrink-0 place-items-center"
-        style={{
-          background: 'var(--paper-2)',
-          border: '1.2px solid var(--ink)',
-          borderRadius: 3,
-          color: 'var(--ink)',
-        }}
-      >
-        {icon}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>{action.title}</div>
-        <div style={{ fontSize: 10.5, color: 'var(--ink-3)', lineHeight: 1.4 }}>{action.desc}</div>
-      </div>
-      {action.actionLabel ? (
-        <button
-          type="button"
-          onClick={() => (unlocked ? action.onAction() : onLockedClick())}
-          disabled={action.busy}
-          className="flex items-center gap-1"
-          style={{
-            padding: '4px 9px',
-            background: unlocked ? 'var(--ink)' : 'var(--paper)',
-            color: unlocked ? 'var(--paper)' : 'var(--ink)',
-            border: '1.3px solid var(--ink)',
-            borderRadius: 3,
-            fontFamily: 'var(--font-mono)',
-            fontSize: 9.5,
-            fontWeight: 600,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            cursor: action.busy ? 'not-allowed' : 'pointer',
-            flexShrink: 0,
-          }}
-        >
-          {!unlocked && <I.Lock size={10} />}
-          {action.actionLabel}
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * Pro 套件卡片 —— 与 MaxBundleCard 同布局（头部色带 + 行）。
- * 行1 字幕（可点）；行2 跨设备云端保存模板（被动权益，无按钮）。
- */

@@ -50,7 +50,8 @@ function describeError(
 interface Props {
   open: boolean;
   recordingId: string;
-  onClose: () => void;
+  /** 旧调用方兼容（现已内联进「字幕」Tab，无关闭按钮）。 */
+  onClose?: () => void;
   onSaved?: (srt: string) => void;
 }
 
@@ -59,7 +60,7 @@ type Phase = 'idle' | 'uploading' | 'pending' | 'running' | 'done' | 'failed';
 const POLL_INTERVAL_MS = 2500;
 const POLL_MAX = 240;
 
-export function SubtitlePanel({ open, recordingId, onClose, onSaved }: Props): JSX.Element | null {
+export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Element | null {
   const t = useTranslations('subtitlePanel');
   const [phase, setPhase] = useState<Phase>('idle');
   const [srt, setSrt] = useState<string>('');
@@ -188,22 +189,9 @@ export function SubtitlePanel({ open, recordingId, onClose, onSaved }: Props): J
 
   return (
     <div
-      className="fade-in fixed inset-0 z-50 grid place-items-center"
-      style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(4px)' }}
-      onClick={onClose}
+      className="fade-in relative flex w-full flex-col rounded-2xl bg-bg-primary p-6"
+      style={{ border: '1.6px solid var(--ink)', boxShadow: '4px 4px 0 var(--ink)' }}
     >
-      <div
-        className="relative w-[640px] max-w-[92vw] max-h-[80vh] rounded-2xl bg-bg-primary p-7 shadow-2xl flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={onClose}
-          className="absolute right-3 top-3 grid h-7 w-7 place-items-center rounded-md text-text-tertiary hover:bg-bg-tertiary hover:text-text-primary"
-          aria-label={t('closeAria')}
-        >
-          ✕
-        </button>
-
         <div className="flex items-center gap-3 mb-3">
           <div
             className="grid h-12 w-12 place-items-center rounded-2xl text-white"
@@ -303,7 +291,6 @@ export function SubtitlePanel({ open, recordingId, onClose, onSaved }: Props): J
         )}
 
         <p className="mt-4 text-center text-[10px] text-text-tertiary">{t('footer')}</p>
-      </div>
     </div>
   );
 }

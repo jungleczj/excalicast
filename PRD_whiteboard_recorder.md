@@ -1,9 +1,10 @@
 # PRD：白板录制工具
-**版本**：v0.8.4  
+**版本**：v0.8.5  
 **状态**：开发中  
 **作者**：—  
-**最后更新**：2026-06-19  
-**变更**：v0.8.4 - 支付/会员修复：字幕弹窗可关闭、登录即刷新会员档位（修 Max 登录仍显示未升级）、**Creem 付款页弹窗拦截修复**（点击同步开标签+同标签兜底）、新增独立测试环境 runbook（不切生产）。详见「## 十一」最新一条。  
+**最后更新**：2026-06-20  
+**变更**：v0.8.5 - 导出页信息架构整理：字幕做成内联（进「字幕」Tab、不再弹窗）、删右侧高级功能卡片（功能归各自 Tab）、分享按钮移到顶栏会员标左侧、会员标统一为单一来源 `TierBadge`（修各页文案/样式不一致）。详见「## 十一」最新一条。  
+**历史变更**：v0.8.4 - 支付/会员修复：字幕弹窗可关闭、登录即刷新会员档位（修 Max 登录仍显示未升级）、**Creem 付款页弹窗拦截修复**（点击同步开标签+同标签兜底）、新增独立测试环境 runbook（不切生产）。详见「## 十一」最新一条。  
 **历史变更**：v0.8.3 - **首屏性能**：落地/定价/条款页由 `force-dynamic`（每访问 SSR+查 Supabase → TTFB 12s）改为 **ISR**（CDN 缓存，TTFB 降到边缘级）；价格准确性靠 admin 改价路由 `revalidatePath` 立即再生保持。详见「## 十一」最新一条。  
 **历史变更**：v0.8.2 - 导出页 **CTA 去重/排版收敛**：删顶部两个假按钮（「分享」「导出」只切 Tab、不真执行）+ 删高级区重复「升级 Pro」小按钮；导出动作统一为面板真按钮，升级入口收敛为「解锁并下载 + PRO/MAX 套餐卡 + 各 Tab 锁定块」。详见「## 十一」最新一条。  
 **历史变更**：v0.8.1 - 提词器跟读**「Google 为首 + 离线 vosk 回落」编排**：新 Chrome 用 `start(audioTrack)` 共用录制麦克风、云端识别不占 CPU（修录制卡顿）；网络错/抢占/无结果时**看门狗自动回落 vosk**（取帧升级 **AudioWorklet** 不卡）；修**关→重开跟读失效**（生命周期幂等）；缓动前导滚动保留。真机 E2E（mock Google 零转写 + 中文假麦克风）回落+重开 3/3 通过。详见「## 十一」最新一条。  
@@ -916,6 +917,7 @@ Pro/Max 导出（订阅状态验证）：
 
 > 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
 
+- **2026-06-20｜导出页信息架构整理：字幕内联 + 去高级卡片 + 分享上移顶栏 + 会员标统一**：① **字幕内联**：`SubtitlePanel` 由全屏 modal（`fixed inset-0 z-50` + ✕/遮罩）改为**内联卡片**，直接嵌「字幕」Tab；`onClose` 改可选。② **去高级功能卡片**：删 `ExportPanel` 的 `showAdvanced` 段（PRO/MAX `BundleCard` + `BundleCard`/`MaxBundleRow` 定义 + 字幕/讲义/分享 state/handler/import）；功能已各有 Tab（字幕→captions、讲义/大纲→handout/outline）；`ExportPanel` 精简为含/无水印选择 + 真导出按钮 + 解锁提示。③ **分享上移顶栏**：新增 `ShareButton`（迁移原分享逻辑：`/api/share/create` + `ShareLinkModal` + 云端必需→保存重试），放导出页顶栏会员标**左侧**；非 Max 点击触发 Max 升级。④ **会员标统一**：新增 `TierBadge`（单一来源：`FREE/PRO/MAX` + MonoTag variant），导出页顶栏与 `AppHeader` 都改用它（修之前「MAX PLAN」vs「MAX」、`MonoTag` vs `tag-mono` 不一致）。涉及 `SubtitlePanel.tsx`、`ExportPanel.tsx`、`export/[id]/page.tsx`、`AppHeader.tsx`、新增 `ShareButton.tsx`/`TierBadge.tsx`。
 - **2026-06-19｜支付/会员修复：字幕弹窗可关 + 登录刷新档位 + Creem 付款页弹窗拦截修复 + 测试环境 runbook**：① **字幕弹窗关不掉**：`SubtitlePanel` 是全屏 modal，导出页传了空 `onClose` → 改 `onClose={() => setTab('export')}`（✕/遮罩可关、回导出 Tab）。② **Max 登录后仍显示未升级**：`useSubscription` 订阅浏览器 Supabase `auth.onAuthStateChange`，登录/登出/令牌刷新即 `refresh()`（修经 Header LoginModal 登录后档位停留旧 free）。③ **测试环境唤不起 Creem 付款页**：`ProUpgradeModal`/`PaywallModal` 原在 `await fetch` 之后才 `window.open('_blank')` → 被弹窗拦截；改为**点击同步阶段先开标签**、拿到 redirectUrl 再导航、被拦则**同标签跳转兜底**（与网站 mode 无关）。④ 新增 `docs/payment-staging.md`：**独立测试环境**正规做法（固定子域名 + Creem 测试密钥 + Supabase 测试库 + 测试卡），不切生产；代码已全 env 驱动故无需改。涉及 `export/[id]/page.tsx`、`useSubscription.ts`、`ProUpgradeModal.tsx`、`PaywallModal.tsx`、`docs/payment-staging.md`。
 - **2026-06-19｜首屏性能：落地/定价/条款页 force-dynamic → ISR（修 TTFB 12s）**：Vercel Real Experience Score 极差（TTFB 12.49s、FCP 18.12s、LCP 19.32s；INP/CLS/FID 全绿）→ 根因＝`[locale]/page.tsx`、`pricing`、`terms` 为 **`force-dynamic`** 且每次渲染 `await getActiveConfig()`（未缓存 Supabase 查询）→ 每访问都 SSR+查库+冷启动叠加。改为 **ISR**（`export const revalidate = 3600`，移除 force-dynamic）→ CDN 缓存 + stale-while-revalidate，TTFB 由十几秒降到 CDN 边缘级（构建后三页均为 `●` SSG）。**价格准确性保持**：admin 改价 / 切 mode 路由（`payment-config/route.ts`、`activate/route.ts`）成功后调 `revalidatePath('/', 'layout')` 立即再生，3600s 仅为兜底；既有 Supabase Realtime broadcast 仍即时更新在线客户端弹窗。涉及 `[locale]/page.tsx`、`pricing/page.tsx`、`terms/page.tsx`、`api/admin/payment-config/{route,activate}.ts`。
 - **2026-06-19｜导出页 CTA 去重 / 排版收敛**：导出页存在多个重复/相似按钮致困惑。① 删顶部栏两个**假按钮**「分享」「导出」（原 `onClick` 仅 `setTab('export')`、不真分享/不真导出；其中「导出」与右侧面板真导出按钮像两个"导出"）——导出动作统一由右侧面板真按钮承担、切页签靠 Tab 栏。② 删 `ExportPanel` 高级区标题旁重复的小「升级 Pro」按钮，高级功能升级入口**统一由 PRO/MAX 套餐卡**承担。收敛后 CTA 层级：导出动作=面板一个真按钮；升级入口=导出解锁「解锁并下载」+ 高级套餐卡 + 各 Tab lockBlock（上下文）。涉及 `app/[locale]/export/[id]/page.tsx`、`ExportPanel.tsx`。

@@ -13,7 +13,8 @@ import { HandoutPanel } from '@/components/HandoutPanel';
 import { ProUpgradeModal } from '@/components/ProUpgradeModal';
 import { Timeline } from '@/components/editor/Timeline';
 import { I, LogoMark } from '@/components/icons';
-import { MonoTag } from '@/components/ui';
+import { TierBadge } from '@/components/TierBadge';
+import { ShareButton } from '@/components/ShareButton';
 import { useSubscription } from '@/hooks/useSubscription';
 import { getRecording, deleteRecording, updateRecordingTitle, updateRecordingSegments } from '@/lib/db-client';
 import { getCurrentOwnerKey } from '@/lib/ownerKey';
@@ -172,8 +173,6 @@ export default function EditorRecordingPage(): JSX.Element {
     );
   }
 
-  const tierLabel = subscription.tier === 'max' ? 'MAX PLAN' : subscription.tier === 'pro' ? 'PRO PLAN' : 'FREE';
-  const tierVariant = subscription.tier === 'max' ? 'max' : subscription.tier === 'pro' ? 'pro' : 'soft';
 
   const exportTab = (
     <div className="space-y-5">
@@ -199,7 +198,7 @@ export default function EditorRecordingPage(): JSX.Element {
   );
 
   const tabContent = (() => {
-    if (tab === 'captions') return isPro ? <SubtitlePanel open recordingId={id} onClose={() => setTab('export')} /> : lockBlock('pro', en ? 'Captions are a Pro feature' : '字幕是 Pro 功能', en ? 'Generate accurate subtitles from your audio.' : '从音频生成精准字幕。');
+    if (tab === 'captions') return isPro ? <SubtitlePanel open recordingId={id} /> : lockBlock('pro', en ? 'Captions are a Pro feature' : '字幕是 Pro 功能', en ? 'Generate accurate subtitles from your audio.' : '从音频生成精准字幕。');
     if (tab === 'outline') return isMax ? <HandoutPanel view="outline" recordingId={id} config={config} onJumpToTime={setPlayheadMs} /> : lockBlock('max', en ? 'Outline is a Max feature' : '大纲是 Max 功能', en ? 'Auto chapters with jump-to-time.' : '自动识别章节、点击跳转预览。');
     if (tab === 'handout') return isMax ? <HandoutPanel view="handout" recordingId={id} config={config} /> : lockBlock('max', en ? 'Handout is a Max feature' : '讲义是 Max 功能', en ? 'Markdown handout — download / copy.' : '生成 Markdown 讲义，可下载 / 复制。');
     return exportTab;
@@ -233,7 +232,8 @@ export default function EditorRecordingPage(): JSX.Element {
             style={{ border: 'none', fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}
           />
         </div>
-        <MonoTag variant={tierVariant as 'max' | 'pro' | 'soft'}>{tierLabel}</MonoTag>
+        <ShareButton recordingId={id} isMax={isMax} onUpgrade={() => setUpgradeOpen('max')} />
+        <TierBadge tier={subscription.tier} />
       </div>
 
       {paymentDone && (
