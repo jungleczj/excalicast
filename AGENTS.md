@@ -1,4 +1,4 @@
-# claude.md — 白板 录制增强工具
+# AGENTS.md — 白板 录制增强工具
 
 本文件是 AI 编程助手的项目上下文文件。每次对话开始前请先读取本文件。
 
@@ -744,7 +744,7 @@ ${fullTranscript}
       'Deepseek-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'Codex-sonnet-4-20250514',
       max_tokens: 2000,
       messages: [{ role: 'user', content: prompt }],
     }),
