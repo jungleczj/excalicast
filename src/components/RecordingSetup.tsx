@@ -85,7 +85,7 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
   return (
     <div
       className="fade-in fixed inset-0 z-50 grid place-items-center"
-      style={{ background: 'rgba(26,26,26,0.45)' }}
+      style={{ background: 'var(--overlay)' }}
       onClick={onCancel}
     >
       <div
@@ -93,9 +93,9 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
         style={{
           width: 760,
           background: 'var(--paper)',
-          border: '1.8px solid var(--ink)',
+          border: '2px solid var(--ink)',
           borderRadius: 5,
-          boxShadow: '6px 6px 0 var(--ink)',
+          boxShadow: 'var(--hard-lg)',
           color: 'var(--ink)',
         }}
         onClick={(e) => e.stopPropagation()}

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { createClient } from '@/lib/supabase/client';
+import { Modal } from '@/components/ui';
 import { Link } from '@/i18n/navigation';
 
 interface Props {
@@ -71,23 +72,7 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
   };
 
   return (
-    <div
-      className="fade-in fixed inset-0 z-50 grid place-items-center"
-      style={{ background: 'rgba(26, 26, 26, 0.45)' }}
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="relative max-w-[92vw]"
-        style={{
-          width: 440,
-          background: 'var(--paper)',
-          border: '2px solid var(--ink)',
-          borderRadius: 5,
-          boxShadow: '6px 6px 0 var(--ink)',
-          overflow: 'hidden',
-        }}
-      >
+    <Modal open={open} onClose={onClose} width={440}>
         <div
           style={{
             padding: '24px 28px',
@@ -96,23 +81,6 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
             position: 'relative',
           }}
         >
-          <button
-            type="button"
-            onClick={onClose}
-            className="absolute right-3 top-3 grid place-items-center"
-            style={{
-              width: 30,
-              height: 30,
-              border: '1.4px solid var(--ink)',
-              background: 'var(--paper)',
-              borderRadius: 3,
-              color: 'var(--ink)',
-              cursor: 'pointer',
-            }}
-            aria-label="close"
-          >
-            ✕
-          </button>
           <div className="label-mono" style={{ fontSize: 10 }}>// SIGN IN</div>
           <h2
             className="mt-2"
@@ -264,8 +232,7 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
           </Link>
           {t('ackSuffix')}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 

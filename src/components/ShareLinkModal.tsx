@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
+import { Modal } from '@/components/ui';
 
 interface Props {
   open: boolean;
@@ -27,23 +28,7 @@ export function ShareLinkModal({ open, url, expiresAt, onClose }: Props): JSX.El
   };
 
   return (
-    <div
-      className="fade-in fixed inset-0 z-50 grid place-items-center"
-      style={{ background: 'rgba(26, 26, 26, 0.45)' }}
-      onClick={onClose}
-    >
-      <div
-        className="relative max-w-[92vw]"
-        style={{
-          width: 500,
-          background: 'var(--paper)',
-          border: '2px solid var(--ink)',
-          borderRadius: 5,
-          boxShadow: '6px 6px 0 var(--ink)',
-          overflow: 'hidden',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Modal open={open} onClose={onClose} width={500} hideClose>
         <div
           style={{
             padding: 24,
@@ -119,7 +104,6 @@ export function ShareLinkModal({ open, url, expiresAt, onClose }: Props): JSX.El
             {t('shareClose')}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

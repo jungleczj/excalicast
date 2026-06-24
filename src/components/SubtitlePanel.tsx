@@ -189,19 +189,19 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
 
   return (
     <div
-      className="fade-in relative flex w-full flex-col rounded-2xl bg-bg-primary p-6"
-      style={{ border: '1.6px solid var(--ink)', boxShadow: '4px 4px 0 var(--ink)' }}
+      className="fade-in relative flex w-full flex-col p-6"
+      style={{ background: 'var(--paper)', border: '1.6px solid var(--ink)', borderRadius: 4, boxShadow: 'var(--hard)' }}
     >
         <div className="flex items-center gap-3 mb-3">
           <div
-            className="grid h-12 w-12 place-items-center rounded-2xl text-white"
-            style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }}
+            className="grid h-12 w-12 place-items-center"
+            style={{ background: 'var(--hi)', border: '1.6px solid var(--ink)', borderRadius: 4, color: 'var(--ink)' }}
           >
             <I.Subtitles size={22} />
           </div>
           <div>
-            <h2 className="text-[20px] font-bold leading-tight text-text-primary">{t('title')}</h2>
-            <p className="text-[12px] text-text-secondary">{t('subtitle')}</p>
+            <h2 className="leading-tight" style={{ fontSize: 20, fontWeight: 700, color: 'var(--ink)' }}>{t('title')}</h2>
+            <p style={{ fontSize: 12, color: 'var(--ink-2)' }}>{t('subtitle')}</p>
           </div>
         </div>
 
@@ -209,20 +209,24 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
           <button
             type="button"
             onClick={() => void startJob()}
-            className="mt-2 flex items-center justify-center gap-2 rounded-md px-4 py-3 text-[13px] font-semibold text-white shadow-md"
-            style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }}
+            className="btn-sketch btn-sketch-primary mt-2"
+            style={{ justifyContent: 'center', padding: '12px 16px' }}
           >
             <I.Sparkles size={14} /> {t('start')}
           </button>
         )}
 
         {(phase === 'uploading' || phase === 'pending' || phase === 'running') && (
-          <div className="fade-in mt-2 flex items-center gap-3 rounded-md border border-border-default bg-bg-secondary p-3">
+          <div
+            className="fade-in mt-2 flex items-center gap-3 p-3"
+            style={{ border: '1.4px solid var(--ink)', background: 'var(--paper-2)', borderRadius: 3 }}
+          >
             <span
-              className="inline-block h-4 w-4 flex-shrink-0 animate-spin rounded-full border-2 border-primary-300 border-t-primary-700"
+              className="inline-block h-4 w-4 flex-shrink-0 animate-spin rounded-full"
+              style={{ border: '2px solid var(--rule-soft)', borderTopColor: 'var(--ink)' }}
               aria-hidden
             />
-            <span className="text-[12px] text-text-primary">
+            <span style={{ fontSize: 12, color: 'var(--ink)' }}>
               {phase === 'uploading' && t('uploading')}
               {phase === 'pending' && t('pending')}
               {phase === 'running' && t('running')}
@@ -233,43 +237,43 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
         {phase === 'done' && (
           <>
             {mockReason && (
-              <div className="mt-2 rounded-md bg-yellow-50 border border-yellow-200 px-3 py-2 text-[11px] text-yellow-900">
+              <div className="mt-2 px-3 py-2" style={{ background: 'var(--hi-soft)', border: '1.4px solid var(--ink)', borderRadius: 3, fontSize: 11, color: 'var(--ink)' }}>
                 ⚠️ {mockReason}
               </div>
             )}
             {hasPersistedSrt && (
-              <div className="mt-2 rounded-md border border-success-300 bg-success-50 px-3 py-2 text-[12px] text-success-700">
+              <div className="mt-2 px-3 py-2" style={{ background: 'var(--pro)', border: '1.4px solid var(--ink)', borderRadius: 3, fontSize: 12, color: 'var(--ink)' }}>
                 {t('savedHint')}
               </div>
             )}
             <div className="mt-3 flex items-center justify-between gap-2">
-              <span className="text-[12px] font-semibold text-text-primary">{t('preview')}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>{t('preview')}</span>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void startJob()}
-                  className="flex items-center gap-1 rounded-md border border-border-strong bg-bg-primary px-3 py-1.5 text-[11px] font-semibold text-text-secondary hover:bg-bg-tertiary"
-                >
+                <button type="button" onClick={() => void startJob()} className="btn-sketch" style={{ padding: '6px 10px', fontSize: 10.5 }}>
                   <I.Sparkles size={11} /> {t('regenerate')}
                 </button>
                 <button
                   type="button"
                   onClick={() => downloadSrt(srt, `excalicast_${recordingId.slice(0, 8)}.srt`)}
-                  className="flex items-center gap-1 rounded-md px-3 py-1.5 text-[12px] font-semibold text-white"
-                  style={{ background: 'var(--primary-600)' }}
+                  className="btn-sketch btn-sketch-primary"
+                  style={{ padding: '6px 10px', fontSize: 11 }}
                 >
                   <I.Download size={12} /> {t('download')}
                 </button>
               </div>
             </div>
-            <pre className="mt-2 flex-1 overflow-auto rounded-md border border-border-default bg-bg-secondary p-3 text-[11px] leading-relaxed text-text-primary font-mono whitespace-pre-wrap">
+            <pre
+              className="mt-2 flex-1 overflow-auto p-3 font-mono whitespace-pre-wrap"
+              style={{ border: '1.4px solid var(--ink)', background: 'var(--paper-2)', borderRadius: 3, fontSize: 11, lineHeight: 1.6, color: 'var(--ink)' }}
+            >
               {srt}
             </pre>
             {hasPersistedSrt && (
               <button
                 type="button"
                 onClick={() => void handleRemove()}
-                className="mt-3 self-start text-[11px] text-text-tertiary underline-offset-2 hover:text-recording-strong hover:underline"
+                className="mt-3 self-start underline-offset-2 hover:underline"
+                style={{ fontSize: 11, color: 'var(--ink-3)' }}
               >
                 {t('removeFromRecording')}
               </button>
@@ -278,19 +282,16 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
         )}
 
         {phase === 'failed' && (
-          <div className="mt-2 rounded-md border border-recording-strong bg-red-50 p-3 text-[12px] text-recording-strong">
+          <div className="mt-2 p-3" style={{ background: 'var(--rec-soft)', border: '1.4px solid var(--rec)', borderRadius: 3, fontSize: 12, color: 'var(--rec)' }}>
             <div className="font-semibold mb-1">{t('failedTitle')}</div>
             <div>{describeError(error, t as (key: string) => string)}</div>
-            <button
-              onClick={() => void startJob()}
-              className="mt-3 rounded-md border border-current px-3 py-1 text-[11px] font-semibold"
-            >
+            <button onClick={() => void startJob()} className="btn-sketch mt-3" style={{ padding: '5px 10px', fontSize: 11 }}>
               {t('retry')}
             </button>
           </div>
         )}
 
-        <p className="mt-4 text-center text-[10px] text-text-tertiary">{t('footer')}</p>
+        <p className="mt-4 text-center" style={{ fontSize: 10, color: 'var(--ink-3)' }}>{t('footer')}</p>
     </div>
   );
 }

@@ -1,9 +1,10 @@
 # PRD：白板录制工具
-**版本**：v0.8.5  
+**版本**：v0.8.6  
 **状态**：开发中  
 **作者**：—  
-**最后更新**：2026-06-20  
-**变更**：v0.8.5 - 导出页信息架构整理：字幕做成内联（进「字幕」Tab、不再弹窗）、删右侧高级功能卡片（功能归各自 Tab）、分享按钮移到顶栏会员标左侧、会员标统一为单一来源 `TierBadge`（修各页文案/样式不一致）。详见「## 十一」最新一条。  
+**最后更新**：2026-06-21  
+**变更**：v0.8.6 - UI 统一(P0+P1)：字幕面板/档位徽标调色并入手绘纸-墨令牌（去蓝色渐变与 Tailwind 语义色）；抽共享 `Modal` 壳（`--overlay` 令牌）统一 5 个弹窗的遮罩/阴影/圆角/关闭钮。详见「## 十一」最新一条。  
+**历史变更**：v0.8.5 - 导出页信息架构整理：字幕做成内联（进「字幕」Tab、不再弹窗）、删右侧高级功能卡片（功能归各自 Tab）、分享按钮移到顶栏会员标左侧、会员标统一为单一来源 `TierBadge`（修各页文案/样式不一致）。详见「## 十一」最新一条。  
 **历史变更**：v0.8.4 - 支付/会员修复：字幕弹窗可关闭、登录即刷新会员档位（修 Max 登录仍显示未升级）、**Creem 付款页弹窗拦截修复**（点击同步开标签+同标签兜底）、新增独立测试环境 runbook（不切生产）。详见「## 十一」最新一条。  
 **历史变更**：v0.8.3 - **首屏性能**：落地/定价/条款页由 `force-dynamic`（每访问 SSR+查 Supabase → TTFB 12s）改为 **ISR**（CDN 缓存，TTFB 降到边缘级）；价格准确性靠 admin 改价路由 `revalidatePath` 立即再生保持。详见「## 十一」最新一条。  
 **历史变更**：v0.8.2 - 导出页 **CTA 去重/排版收敛**：删顶部两个假按钮（「分享」「导出」只切 Tab、不真执行）+ 删高级区重复「升级 Pro」小按钮；导出动作统一为面板真按钮，升级入口收敛为「解锁并下载 + PRO/MAX 套餐卡 + 各 Tab 锁定块」。详见「## 十一」最新一条。  
@@ -917,6 +918,7 @@ Pro/Max 导出（订阅状态验证）：
 
 > 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
 
+- **2026-06-21｜UI 统一 P0+P1：手绘调色对齐 + 共享弹窗壳**：全局 UI 审计后做两类统一。**P0 调色**：① `SubtitlePanel` 原整套蓝色渐变 + Tailwind 语义色（`#3b82f6`/`bg-bg-primary`/`bg-yellow-50`/`success-*`/`recording-strong`/`--primary-600`，靠 globals 遗留兼容层渲染）→ 全部换成纸-墨令牌与 `.btn-sketch`，并入手绘体系；② `ProBadge` 蓝/紫渐变 → `--pro`/`--max` 令牌底 + 墨描边，与 `TierBadge`/`MonoTag` 一致。**P1 弹窗壳**：新增 `src/components/ui/Modal.tsx`（遮罩走新 `--overlay` 令牌、阴影 `--hard-lg`、统一 30×30 ✕、`dismissable`/`hideClose`/`width` 可配），5 个弹窗接入：`LoginModal`(用壳 ✕)、`ShareLinkModal`/`PaywallModal`/`ProUpgradeModal`(各自 flex 头部带 ✕ → `hideClose` 保留)，删除各自重复的遮罩/容器/✕/`rgba(26,26,26,0.45)`/`6px6px0`/`borderRadius:5` 硬编码；`RecordingSetup` 因是可滚动高面板（`overflow:auto`）不套壳、仅采用 `--overlay`+`--hard-lg` 对齐。涉及 `SubtitlePanel.tsx`、`ProBadge.tsx`、新增 `ui/Modal.tsx`、`globals.css`(`--overlay`)、`LoginModal/PaywallModal/ProUpgradeModal/ShareLinkModal/RecordingSetup.tsx`。
 - **2026-06-20｜导出页信息架构整理：字幕内联 + 去高级卡片 + 分享上移顶栏 + 会员标统一**：① **字幕内联**：`SubtitlePanel` 由全屏 modal（`fixed inset-0 z-50` + ✕/遮罩）改为**内联卡片**，直接嵌「字幕」Tab；`onClose` 改可选。② **去高级功能卡片**：删 `ExportPanel` 的 `showAdvanced` 段（PRO/MAX `BundleCard` + `BundleCard`/`MaxBundleRow` 定义 + 字幕/讲义/分享 state/handler/import）；功能已各有 Tab（字幕→captions、讲义/大纲→handout/outline）；`ExportPanel` 精简为含/无水印选择 + 真导出按钮 + 解锁提示。③ **分享上移顶栏**：新增 `ShareButton`（迁移原分享逻辑：`/api/share/create` + `ShareLinkModal` + 云端必需→保存重试），放导出页顶栏会员标**左侧**；非 Max 点击触发 Max 升级。④ **会员标统一**：新增 `TierBadge`（单一来源：`FREE/PRO/MAX` + MonoTag variant），导出页顶栏与 `AppHeader` 都改用它（修之前「MAX PLAN」vs「MAX」、`MonoTag` vs `tag-mono` 不一致）。涉及 `SubtitlePanel.tsx`、`ExportPanel.tsx`、`export/[id]/page.tsx`、`AppHeader.tsx`、新增 `ShareButton.tsx`/`TierBadge.tsx`。
 - **2026-06-19｜支付/会员修复：字幕弹窗可关 + 登录刷新档位 + Creem 付款页弹窗拦截修复 + 测试环境 runbook**：① **字幕弹窗关不掉**：`SubtitlePanel` 是全屏 modal，导出页传了空 `onClose` → 改 `onClose={() => setTab('export')}`（✕/遮罩可关、回导出 Tab）。② **Max 登录后仍显示未升级**：`useSubscription` 订阅浏览器 Supabase `auth.onAuthStateChange`，登录/登出/令牌刷新即 `refresh()`（修经 Header LoginModal 登录后档位停留旧 free）。③ **测试环境唤不起 Creem 付款页**：`ProUpgradeModal`/`PaywallModal` 原在 `await fetch` 之后才 `window.open('_blank')` → 被弹窗拦截；改为**点击同步阶段先开标签**、拿到 redirectUrl 再导航、被拦则**同标签跳转兜底**（与网站 mode 无关）。④ 新增 `docs/payment-staging.md`：**独立测试环境**正规做法（固定子域名 + Creem 测试密钥 + Supabase 测试库 + 测试卡），不切生产；代码已全 env 驱动故无需改。涉及 `export/[id]/page.tsx`、`useSubscription.ts`、`ProUpgradeModal.tsx`、`PaywallModal.tsx`、`docs/payment-staging.md`。
 - **2026-06-19｜首屏性能：落地/定价/条款页 force-dynamic → ISR（修 TTFB 12s）**：Vercel Real Experience Score 极差（TTFB 12.49s、FCP 18.12s、LCP 19.32s；INP/CLS/FID 全绿）→ 根因＝`[locale]/page.tsx`、`pricing`、`terms` 为 **`force-dynamic`** 且每次渲染 `await getActiveConfig()`（未缓存 Supabase 查询）→ 每访问都 SSR+查库+冷启动叠加。改为 **ISR**（`export const revalidate = 3600`，移除 force-dynamic）→ CDN 缓存 + stale-while-revalidate，TTFB 由十几秒降到 CDN 边缘级（构建后三页均为 `●` SSG）。**价格准确性保持**：admin 改价 / 切 mode 路由（`payment-config/route.ts`、`activate/route.ts`）成功后调 `revalidatePath('/', 'layout')` 立即再生，3600s 仅为兜底；既有 Supabase Realtime broadcast 仍即时更新在线客户端弹窗。涉及 `[locale]/page.tsx`、`pricing/page.tsx`、`terms/page.tsx`、`api/admin/payment-config/{route,activate}.ts`。

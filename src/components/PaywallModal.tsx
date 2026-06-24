@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { trackEvent } from '@/lib/analytics/track';
 import { I } from '@/components/icons';
+import { Modal } from '@/components/ui';
 import { isPaid } from '@/services/paymentClient';
 import { openCheckout, closeCheckout } from '@/services/paddleClient';
 import { usePaddle } from '@/components/providers/PaddleProvider';
@@ -158,23 +159,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
   };
 
   return (
-    <div
-      className="fade-in fixed inset-0 z-50 grid place-items-center"
-      style={{ background: 'rgba(26, 26, 26, 0.45)' }}
-      onClick={onClose}
-    >
-      <div
-        className="pop-in relative max-w-[92vw]"
-        style={{
-          width: 480,
-          background: 'var(--paper)',
-          border: '2px solid var(--ink)',
-          borderRadius: 5,
-          boxShadow: '6px 6px 0 var(--ink)',
-          overflow: 'hidden',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <Modal open={open} onClose={onClose} width={480} hideClose>
         {/* Header band */}
         <div
           style={{
@@ -335,7 +320,6 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
             {t('footer')}
           </p>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

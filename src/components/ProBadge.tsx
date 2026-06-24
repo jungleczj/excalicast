@@ -4,9 +4,9 @@ import { useLocale } from 'next-intl';
 import type { SubscriptionTier } from '@/types/user';
 
 const styles: Record<SubscriptionTier, { bg: string; text: string }> = {
-  free: { bg: 'rgba(148,163,184,0.18)', text: '#cbd5e1' },
-  pro:  { bg: 'linear-gradient(135deg,#3b82f6,#2563eb)', text: '#fff' },
-  max:  { bg: 'linear-gradient(135deg,#a855f7,#7c3aed)', text: '#fff' },
+  free: { bg: 'var(--paper-2)', text: 'var(--ink-2)' },
+  pro:  { bg: 'var(--pro)', text: 'var(--ink)' },
+  max:  { bg: 'var(--max)', text: 'var(--ink)' },
 };
 
 export function ProBadge({ tier, size = 'sm' }: { tier: SubscriptionTier; size?: 'sm' | 'md' }): JSX.Element {
@@ -26,11 +26,11 @@ export function ProBadge({ tier, size = 'sm' }: { tier: SubscriptionTier; size?:
       style={{
         background: s.bg,
         color: s.text,
+        border: '1.2px solid var(--ink)',
         borderRadius: 999,
         padding,
         fontSize,
         letterSpacing: '0.06em',
-        boxShadow: tier !== 'free' ? '0 2px 8px rgba(59,130,246,0.35)' : 'none',
       }}
     >
       {label}

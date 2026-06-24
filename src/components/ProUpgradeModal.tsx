@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { trackEvent } from '@/lib/analytics/track';
 import { I } from '@/components/icons';
+import { Modal } from '@/components/ui';
 import { LoginModal } from '@/components/LoginModal';
 import { openProSubscriptionCheckout, closeCheckout } from '@/services/paddleClient';
 import { usePaddle } from '@/components/providers/PaddleProvider';
@@ -213,23 +214,8 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
   const features = t.raw('features') as string[];
 
   return (
-    <div
-      className="fade-in fixed inset-0 z-50 grid place-items-center"
-      style={{ background: 'rgba(26, 26, 26, 0.45)' }}
-      onClick={onClose}
-    >
-      <div
-        className="pop-in relative max-w-[92vw]"
-        style={{
-          width: 500,
-          background: 'var(--paper)',
-          border: '2px solid var(--ink)',
-          borderRadius: 5,
-          boxShadow: '6px 6px 0 var(--ink)',
-          overflow: 'hidden',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <>
+    <Modal open={open} onClose={onClose} width={500} hideClose>
         <div
           style={{
             padding: 24,
@@ -426,7 +412,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
                 : t('footnotePaddle')}
           </p>
         </div>
-      </div>
+    </Modal>
 
       <LoginModal
         open={loginOpen}
@@ -435,6 +421,6 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
           if (!user) setResumeUpgradeAfterLogin(false);
         }}
       />
-    </div>
+    </>
   );
 }

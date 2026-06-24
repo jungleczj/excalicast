@@ -27,6 +27,7 @@
   --ok:           #2F8A3F;
   --pro:          #B7E0C8;
   --max:          #C9B8FF;
+  --overlay:      rgba(26, 26, 26, 0.45);  /* 弹窗遮罩单一来源（Modal 壳用） */
 
   /* ── Legacy tokens still used by some components ─────── */
   --primary-50:  #fef8e6;
