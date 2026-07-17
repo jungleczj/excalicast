@@ -9,6 +9,7 @@ import { I } from '@/components/icons';
 import { PaywallModal } from '@/components/PaywallModal';
 import { ProUpgradeModal } from '@/components/ProUpgradeModal';
 import { useSubscription } from '@/hooks/useSubscription';
+import { formatPrice, usePaymentConfig } from '@/hooks/usePaymentConfig';
 import { ProBadge } from '@/components/ProBadge';
 import type { ExportConfig } from '@/types/recording';
 
@@ -28,6 +29,7 @@ interface Props {
 export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateChange, onProgress }: Props): JSX.Element {
   const t = useTranslations('exportPanel');
   const subscription = useSubscription();
+  const { config: paymentCfg } = usePaymentConfig();
   const [paid, setPaid] = useState<boolean>(false);
   const [busy, setBusy] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +47,9 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
 
   const proUnlocked = subscription.permissions.exportWithoutWatermark;
   const effectivelyUnlocked = paid || proUnlocked;
+  const oneTimePriceLabel = paymentCfg
+    ? formatPrice(paymentCfg.oneTimePriceCents, paymentCfg.currency)
+    : '…';
 
   const refreshPaid = useCallback(async () => {
     try {
@@ -163,7 +168,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
             selected={!config.withWatermark}
             onClick={() => onConfigChange({ ...config, withWatermark: false })}
             title={t('cleanTitle')}
-            meta={proUnlocked ? t('cleanMetaPro') : paid ? t('cleanMetaPaid') : t('cleanMetaLocked')}
+            meta={proUnlocked ? t('cleanMetaPro') : paid ? t('cleanMetaPaid') : t('cleanMetaLocked', { price: oneTimePriceLabel })}
             hint={proUnlocked ? t('cleanHintPro') : paid ? t('cleanHintPaid') : t('cleanHintLocked')}
             accent={!config.withWatermark}
           />
@@ -193,7 +198,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
           {isCleanLocked ? (
             <>
               <I.Lock size={14} />
-              {t('buttonUnlock')}
+              {t('buttonUnlock', { price: oneTimePriceLabel })}
             </>
           ) : (
             <>

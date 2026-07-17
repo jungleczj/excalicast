@@ -6062,8 +6062,14 @@ body {
 
 .app-craft-modal-overlay,
 .setup-craft-overlay {
+  display: grid !important;
+  place-items: center !important;
+  align-items: center !important;
+  justify-items: center !important;
   isolation: isolate;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: clamp(16px, 3vw, 32px) !important;
   background:
     radial-gradient(520px 320px at 17% 14%, rgba(219, 238, 255, 0.72), transparent 72%),
     radial-gradient(460px 280px at 86% 18%, rgba(255, 216, 112, 0.24), transparent 70%),
@@ -6092,6 +6098,9 @@ body {
 .setup-craft-card {
   position: relative;
   z-index: 1;
+  margin: auto !important;
+  max-height: calc(100dvh - 48px) !important;
+  overflow: auto !important;
   border: var(--craft-hairline) !important;
   border-radius: 36px !important;
   background: rgba(255, 253, 248, 0.92) !important;

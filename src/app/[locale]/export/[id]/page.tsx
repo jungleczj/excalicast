@@ -246,9 +246,9 @@ export default function EditorRecordingPage(): JSX.Element {
         {/* Left: player + timeline */}
         <div className="editor-craft-main flex flex-1 flex-col overflow-auto p-6" style={{ borderRight: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}>
           {/* 预览 + 时间轴 + 删除 共用全宽列：填满左列、两者等宽对齐 */}
-          <div className="flex w-full flex-1 flex-col">
-          <div className="flex flex-1 items-center justify-center">
-            <div className="editor-craft-card editor-craft-preview-shell w-full" style={{ ...CARD, padding: 0 }}>
+          <div className="flex min-h-0 w-full flex-1 flex-col">
+          <div className="flex min-h-0 flex-1 items-center justify-center">
+            <div className="editor-craft-card editor-craft-preview-shell flex h-full min-h-0 w-full items-center justify-center" style={{ ...CARD, padding: 0 }}>
               <ExportPreview
                 recordingId={id}
                 metadata={meta}

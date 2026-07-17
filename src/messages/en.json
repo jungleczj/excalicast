@@ -660,8 +660,7 @@
       "encoding": "Encoding video",
       "done": "Done",
       "preparing": "Preparing"
-    },
-    "caption": "Preview renders a single frame, not real playback. Ratio / crop / watermark changes refresh it instantly."
+    }
   },
   "exportPanel": {
     "title": "Export MP4",

@@ -660,8 +660,7 @@
       "encoding": "视频编码",
       "done": "完成",
       "preparing": "准备"
-    },
-    "caption": "预览是「按时刻渲染」而非真实回放。比例 / 框选 / 水印改变会即时刷新。"
+    }
   },
   "exportPanel": {
     "title": "导出 MP4",

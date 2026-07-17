@@ -27,9 +27,9 @@ interface Props {
 // 这里把它限到 ~5fps，足以让用户感知白板进度，又不会卡 UI。
 const CANVAS_REDRAW_INTERVAL_MS = 200;
 
-// 预览盒子高度约束。宽度上限走 ResizeObserver 测量的真实父宽，不再硬编码。
-// 抬高到 0.62：让 16:9 等横屏预览能长高到填满左列宽度（而非被高度限制后居中留白）。
-const PREVIEW_VH_PCT = 0.62;
+// 预览盒子优先按父容器真实宽高 contain-fit。
+// 父容器拿不到高度时才回退到 viewport 比例，避免盖到底部时间轴/编辑工具栏。
+const PREVIEW_FALLBACK_VH_PCT = 0.68;
 
 export function ExportPreview({ recordingId, metadata, config, progress, segments, playheadMs, onPlayheadChange }: Props): JSX.Element {
   const t = useTranslations('exportPreview');
@@ -52,9 +52,9 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
   const [viewportH, setViewportH] = useState<number>(() =>
     typeof window === 'undefined' ? 800 : window.innerHeight,
   );
-  // 真实父容器宽度 —— 由 ResizeObserver 实时测量，picker 改变时盒子才有可见的窄/宽对比
+  // 真实父容器宽高 —— 由 ResizeObserver 实时测量，预览只能在时间轴上方区域内放大
   const parentRef = useRef<HTMLDivElement>(null);
-  const [parentW, setParentW] = useState(0);
+  const [parentBox, setParentBox] = useState({ w: 0, h: 0 });
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -69,12 +69,16 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
   useLayoutEffect(() => {
     const el = parentRef.current;
     if (!el) return;
-    const measure = () => setParentW(el.clientWidth);
+    const measure = () => {
+      setParentBox({ w: el.clientWidth, h: el.clientHeight });
+    };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width ?? el.clientWidth;
-      if (w > 0) setParentW(w);
+      const box = entries[0]?.contentRect;
+      const w = box?.width ?? el.clientWidth;
+      const h = box?.height ?? el.clientHeight;
+      if (w > 0 || h > 0) setParentBox({ w, h });
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -292,11 +296,13 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
   // 高度 transition 卡住（9:16 高 ≈ viewportH*0.52 一旦先被定为 0，某些浏览器后续
   // 不再触发 ResizeObserver 通知）。
   const previewBox = useMemo(() => {
-    const maxH = viewportH * PREVIEW_VH_PCT;
-    const effectiveW = parentW > 0 ? parentW : Math.min(640, viewportH * 0.6);
-    if (effectiveW / aspect <= maxH) return { w: effectiveW, h: effectiveW / aspect };
-    return { w: maxH * aspect, h: maxH };
-  }, [aspect, viewportH, parentW]);
+    const maxW = parentBox.w > 0 ? parentBox.w : Math.min(960, viewportH * 1.2);
+    const maxH = parentBox.h > 0 ? parentBox.h : viewportH * PREVIEW_FALLBACK_VH_PCT;
+    const safeW = Math.max(120, Math.floor(maxW));
+    const safeH = Math.max(90, Math.floor(maxH));
+    if (safeW / aspect <= safeH) return { w: safeW, h: Math.floor(safeW / aspect) };
+    return { w: Math.floor(safeH * aspect), h: safeH };
+  }, [aspect, viewportH, parentBox]);
 
   const exporting = progress != null;
   const pct = exporting ? Math.round((progress?.ratio ?? 0) * 100) : 0;
@@ -313,9 +319,9 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
   // 摄像头气泡位置/尺寸由 cameraOverlayStyle 计算（events → 动态；无事件 → 右下角 18% 宽度）
 
   return (
-    <div className="space-y-3">
+    <div className="export-preview-craft-wrap flex h-full min-h-0 w-full items-center justify-center">
       {/* 外层 wrapper 用 ref + ResizeObserver 实时拿父容器宽度，picker 切换时 previewBox 才会跟着变 */}
-      <div ref={parentRef} className="w-full">
+      <div ref={parentRef} className="flex h-full min-h-0 w-full items-center justify-center">
       <div
         className="export-preview-craft-stage relative mx-auto overflow-hidden"
         style={{
@@ -560,13 +566,6 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
         )}
       </div>
       </div>
-
-      <p
-        className="export-preview-craft-caption"
-        style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.04em' }}
-      >
-        {t('caption')}
-      </p>
     </div>
   );
 }
