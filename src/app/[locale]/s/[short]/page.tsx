@@ -119,11 +119,11 @@ export default function PublicSharePage(): JSX.Element {
 
   if (stage === 'error') {
     return (
-      <div className="flex h-full flex-col" style={{ background: 'var(--paper)' }}>
+      <div className="app-craft-screen player-craft-shell flex h-full flex-col" style={{ background: 'var(--paper)' }}>
         <PublicHeader title="Excalicast" />
         <div className="grid flex-1 place-items-center">
           <div
-            className="px-8 py-6 text-center"
+            className="share-craft-state px-8 py-6 text-center"
             style={{
               background: 'var(--paper)',
               border: '1.6px solid var(--ink)',
@@ -148,7 +148,7 @@ export default function PublicSharePage(): JSX.Element {
 
   if (stage === 'loading' || !meta) {
     return (
-      <div className="flex h-full flex-col" style={{ background: 'var(--paper)' }}>
+      <div className="app-craft-screen player-craft-shell flex h-full flex-col" style={{ background: 'var(--paper)' }}>
         <PublicHeader title="Excalicast" />
         <div
           className="grid flex-1 place-items-center"
@@ -163,7 +163,7 @@ export default function PublicSharePage(): JSX.Element {
   const title = meta.title?.trim() || `Recording ${meta.recordingId.slice(0, 8)}`;
 
   return (
-    <div className="flex h-full flex-col" style={{ background: 'var(--paper-2)' }}>
+    <div className="app-craft-screen player-craft-shell flex h-full flex-col" style={{ background: 'var(--paper-2)' }}>
       <PublicHeader title={title} />
       <SharedPlayer
         durationMs={meta.durationMs}
@@ -189,7 +189,7 @@ export default function PublicSharePage(): JSX.Element {
 function PublicHeader({ title }: { title: string }): JSX.Element {
   return (
     <header
-      className="flex h-14 flex-shrink-0 items-center justify-between px-6"
+      className="share-craft-header flex h-14 flex-shrink-0 items-center justify-between px-6"
       style={{ background: 'var(--paper)', borderBottom: '2px solid var(--ink)' }}
     >
       <a href="/" className="flex items-center gap-2.5" style={{ textDecoration: 'none' }}>

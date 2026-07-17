@@ -66,9 +66,9 @@ export function MarketplaceBrowser({ onImported, canCloud }: Props): JSX.Element
   };
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="marketplace-craft-browser flex flex-1 flex-col overflow-hidden">
       {/* 搜索 */}
-      <div style={{ padding: '8px 12px' }}>
+      <div className="marketplace-craft-search" style={{ padding: '8px 12px' }}>
         <input
           type="text"
           value={query}
@@ -88,14 +88,14 @@ export function MarketplaceBrowser({ onImported, canCloud }: Props): JSX.Element
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto" style={{ padding: '4px 12px 14px' }}>
+      <div className="marketplace-craft-list flex-1 overflow-y-auto" style={{ padding: '4px 12px 14px' }}>
         {loading && (
-          <div style={{ padding: '24px 6px', fontSize: 11.5, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
+          <div className="marketplace-craft-state" style={{ padding: '24px 6px', fontSize: 11.5, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}>
             {t('loading')}
           </div>
         )}
         {error && (
-          <div style={{ padding: '24px 6px', fontSize: 11.5, color: 'var(--rec)', fontFamily: 'var(--font-mono)' }}>
+          <div className="marketplace-craft-state marketplace-craft-state-error" style={{ padding: '24px 6px', fontSize: 11.5, color: 'var(--rec)', fontFamily: 'var(--font-mono)' }}>
             {t('loadError')}
           </div>
         )}
@@ -112,7 +112,7 @@ export function MarketplaceBrowser({ onImported, canCloud }: Props): JSX.Element
                   onClick={() => handleImport(entry)}
                   disabled={!!importingId}
                   title={entry.name}
-                  className="group relative text-left"
+                  className="marketplace-craft-entry group relative text-left"
                   style={{
                     minWidth: 0,
                     width: '100%',
@@ -130,12 +130,14 @@ export function MarketplaceBrowser({ onImported, canCloud }: Props): JSX.Element
                       src={`${MARKET_BASE}${entry.preview}`}
                       alt={entry.name}
                       loading="lazy"
+                      className="marketplace-craft-preview"
                       style={{ width: '100%', aspectRatio: '16 / 10', objectFit: 'contain', display: 'block', background: '#fff' }}
                     />
                   ) : (
-                    <div style={{ width: '100%', aspectRatio: '16 / 10', background: 'var(--paper-2,#f3f3f0)' }} />
+                    <div className="marketplace-craft-preview" style={{ width: '100%', aspectRatio: '16 / 10', background: 'var(--paper-2,#f3f3f0)' }} />
                   )}
                   <div
+                    className="marketplace-craft-entry-title"
                     style={{
                       marginTop: 6,
                       fontSize: 12,
@@ -153,6 +155,7 @@ export function MarketplaceBrowser({ onImported, canCloud }: Props): JSX.Element
                   </div>
                   {author && !busy && (
                     <div
+                      className="marketplace-craft-entry-meta"
                       style={{
                         marginTop: 1,
                         fontSize: 10,

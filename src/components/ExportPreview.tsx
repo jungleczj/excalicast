@@ -317,7 +317,7 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
       {/* 外层 wrapper 用 ref + ResizeObserver 实时拿父容器宽度，picker 切换时 previewBox 才会跟着变 */}
       <div ref={parentRef} className="w-full">
       <div
-        className="relative mx-auto overflow-hidden"
+        className="export-preview-craft-stage relative mx-auto overflow-hidden"
         style={{
           // 直接用 JS 算出来的像素尺寸，绕开 CSS aspect-ratio + max-* 三件套
           // 在某些浏览器下不能同步收 width 的坑 —— 进度条、canvas、摄像头叠加层
@@ -380,7 +380,7 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
         )}
 
         <div
-          className="absolute left-3 top-3 flex items-center gap-1.5"
+          className="export-preview-craft-badge absolute left-3 top-3 flex items-center gap-1.5"
           style={{
             padding: '3px 10px',
             background: config.withWatermark ? 'var(--hi)' : 'var(--pro)',
@@ -399,7 +399,7 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
 
         {rendering && !exporting && !playing && (
           <span
-            className="fade-in absolute right-3 top-3"
+            className="export-preview-craft-rendering fade-in absolute right-3 top-3"
             style={{
               padding: '2px 8px',
               background: 'var(--ink)',
@@ -415,7 +415,7 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
         )}
         {error && (
           <span
-            className="fade-in absolute inset-x-3 top-12"
+            className="export-preview-craft-error fade-in absolute inset-x-3 top-12"
             style={{
               padding: '6px 12px',
               background: 'var(--rec)',
@@ -432,7 +432,7 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
 
         {!exporting && (
           <div
-            className="absolute inset-x-4 bottom-3 flex items-center gap-3"
+            className="export-preview-craft-controls absolute inset-x-4 bottom-3 flex items-center gap-3"
             style={{
               background: 'var(--ink)',
               color: 'var(--paper)',
@@ -505,7 +505,7 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
             style={{ background: 'rgba(26, 26, 26, 0.55)' }}
           >
             <div
-              className="w-[80%] max-w-[340px] px-5 py-4"
+              className="export-preview-craft-progress-card w-[80%] max-w-[340px] px-5 py-4"
               style={{
                 background: 'var(--paper)',
                 border: '1.8px solid var(--ink)',
@@ -547,7 +547,7 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
                 </div>
               </div>
               <div
-                className="mt-3 h-1.5 overflow-hidden"
+                className="export-preview-craft-progress-track mt-3 h-1.5 overflow-hidden"
                 style={{ background: 'var(--paper-3)', border: '1px solid var(--ink)', borderRadius: 999 }}
               >
                 <div
@@ -562,6 +562,7 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
       </div>
 
       <p
+        className="export-preview-craft-caption"
         style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--ink-3)', letterSpacing: '0.04em' }}
       >
         {t('caption')}

@@ -57,8 +57,8 @@ export default function AdminAnalyticsPage(): JSX.Element {
 
   if (!data) {
     return (
-      <div className="grid min-h-screen place-items-center" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
-        <div style={{ width: 340, background: 'var(--paper)', border: '1.8px solid var(--ink)', borderRadius: 5, boxShadow: '6px 6px 0 var(--ink)', padding: 24 }}>
+      <div className="admin-craft-page grid min-h-screen place-items-center" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
+        <div className="admin-craft-card" style={{ width: 340, background: 'var(--paper)', border: '1.8px solid var(--ink)', borderRadius: 5, boxShadow: '6px 6px 0 var(--ink)', padding: 24 }}>
           <div className="label-mono" style={{ marginBottom: 8 }}>// admin</div>
           <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>Analytics</h1>
           <input
@@ -84,13 +84,13 @@ export default function AdminAnalyticsPage(): JSX.Element {
   const funnelTop = Math.max(1, data.funnel[0]?.users ?? 1);
 
   return (
-    <div className="min-h-screen px-8 py-8" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
+    <div className="admin-craft-page min-h-screen px-8 py-8" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
       <div className="mx-auto" style={{ maxWidth: 1100 }}>
         {/* Header */}
         <div className="mb-6 flex items-end justify-between">
           <div>
             <div className="label-mono" style={{ marginBottom: 6 }}>// admin · analytics{data.capped ? ' · capped' : ''}</div>
-            <h1 style={{ fontSize: 34, fontWeight: 700, letterSpacing: '-0.03em', margin: 0 }}>User analytics</h1>
+            <h1 className="admin-craft-title" style={{ fontSize: 34, fontWeight: 700, letterSpacing: '-0.03em', margin: 0 }}>User analytics</h1>
           </div>
           <div className="flex items-center gap-2">
             {[7, 30, 90].map((r) => (
@@ -202,6 +202,10 @@ export default function AdminAnalyticsPage(): JSX.Element {
 }
 
 const card: React.CSSProperties = {
-  background: 'var(--paper)', border: '1.6px solid var(--ink)', borderRadius: 4, boxShadow: '3px 3px 0 var(--ink)', padding: 18,
+  background: 'rgba(255,253,248,0.82)',
+  border: '1px solid var(--craft-line)',
+  borderRadius: 28,
+  boxShadow: 'var(--craft-shadow)',
+  padding: 18,
 };
 const h2: React.CSSProperties = { fontSize: 15, fontWeight: 700, letterSpacing: '-0.01em', margin: 0 };

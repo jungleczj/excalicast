@@ -18,7 +18,7 @@ export function Brand(): JSX.Element {
   return (
     <Link href="/" className="flex items-center gap-2.5">
       <LogoMark size={28} />
-      <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', color: 'var(--ink)' }}>
+      <span className="app-craft-brand-word" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', color: 'var(--ink)' }}>
         Excalicast
       </span>
     </Link>
@@ -45,21 +45,23 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
     return () => window.removeEventListener('mousedown', onClickAway);
   }, [menuOpen]);
 
+  useEffect(() => {
+    if (loading || user || typeof window === 'undefined') return;
+    const next = new URL(window.location.href);
+    if (next.searchParams.get('login') !== '1') return;
+    setLoginOpen(true);
+    next.searchParams.delete('login');
+    window.history.replaceState(null, '', `${next.pathname}${next.search}${next.hash}`);
+  }, [loading, user]);
+
   const initial = user?.email?.[0]?.toUpperCase() ?? '?';
 
   return (
     <>
-      <header
-        className="flex h-14 flex-shrink-0 items-center justify-between px-6"
-        style={{
-          background: 'var(--paper)',
-          borderBottom: '2px solid var(--ink)',
-          color: 'var(--ink)',
-        }}
-      >
+      <header className="app-craft-header flex h-16 flex-shrink-0 items-center justify-between px-6">
         <div className="flex items-center gap-8">
           <Brand />
-          <nav className="flex items-center gap-6">
+          <nav className="app-craft-main-nav flex items-center gap-2">
             <NavItem href="/library" active={onLib}>{t('library')}</NavItem>
             <NavItem href="/app" active={onRecord}>{t('record')}</NavItem>
           </nav>
@@ -70,8 +72,7 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
             <button
               type="button"
               onClick={onUpgradePro}
-              className="btn-sketch btn-sketch-hi"
-              style={{ padding: '8px 14px', fontSize: 11 }}
+              className="app-craft-upgrade"
             >
               {t('upgradePro')}
             </button>
@@ -86,10 +87,11 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
                 onClick={() => setMenuOpen((v) => !v)}
                 className="grid h-9 w-9 place-items-center rounded-full text-[12px] font-bold"
                 style={{
-                  background: 'var(--paper)',
+                  background: 'rgba(255,255,255,0.72)',
                   color: 'var(--ink)',
-                  border: '1.5px solid var(--ink)',
+                  border: '1px solid rgba(31,34,37,0.08)',
                   fontFamily: 'var(--font-mono)',
+                  boxShadow: '0 10px 24px rgba(39,28,18,0.08), inset 0 1px 0 rgba(255,255,255,0.82)',
                 }}
                 title={user.email}
               >
@@ -97,12 +99,12 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
               </button>
               {menuOpen && (
                 <div
-                  className="absolute right-0 top-[calc(100%+8px)] z-50 w-[240px] p-2"
+                  className="app-craft-menu absolute right-0 top-[calc(100%+8px)] z-50 w-[240px] p-2"
                   style={{
-                    background: 'var(--paper)',
-                    border: '1.6px solid var(--ink)',
-                    borderRadius: 4,
-                    boxShadow: '4px 4px 0 var(--ink)',
+                    background: 'rgba(255,253,248,0.94)',
+                    border: '1px solid rgba(31,34,37,0.08)',
+                    borderRadius: 22,
+                    boxShadow: '0 14px 36px rgba(48,38,26,0.09), inset 0 1px 0 rgba(255,255,255,0.74)',
                   }}
                 >
                   <div className="px-3 py-2">
@@ -118,8 +120,8 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
                   <button
                     type="button"
                     onClick={async () => { await logout(); setMenuOpen(false); }}
-                    className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-[13px]"
-                    style={{ color: 'var(--rec)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.06em' }}
+                    className="flex w-full items-center gap-2 rounded-full px-3 py-2 text-[13px]"
+                    style={{ color: 'var(--rec)', fontFamily: 'var(--font-sans)', letterSpacing: '-0.01em' }}
                   >
                     {t('logout')}
                   </button>
@@ -130,8 +132,7 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
             <button
               type="button"
               onClick={() => setLoginOpen(true)}
-              className="btn-sketch btn-sketch-primary"
-              style={{ padding: '8px 14px', fontSize: 11 }}
+              className="app-craft-login"
             >
               {t('loginRegister')}
             </button>
@@ -147,18 +148,18 @@ function NavItem({ href, active, children }: { href: string; active?: boolean; c
   return (
     <Link
       href={href}
+      className={active ? 'is-active' : undefined}
       style={{
         position: 'relative',
-        fontFamily: 'var(--font-mono)',
-        fontSize: 12,
-        fontWeight: 600,
-        textTransform: 'uppercase',
-        letterSpacing: '0.08em',
+        fontFamily: 'var(--font-sans)',
+        fontSize: 15,
+        fontWeight: active ? 650 : 500,
+        letterSpacing: '-0.02em',
         color: 'var(--ink)',
-        opacity: active ? 1 : 0.55,
+        opacity: active ? 1 : 0.68,
         textDecoration: 'none',
-        paddingBottom: 4,
-        borderBottom: active ? '2px solid var(--ink)' : '2px solid transparent',
+        padding: '8px 16px',
+        borderRadius: 999,
       }}
     >
       {children}

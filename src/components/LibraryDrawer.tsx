@@ -161,7 +161,7 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
 
   return (
     <div
-      className="rb-no-record fixed right-0 z-40 flex flex-col"
+      className="library-drawer-craft rb-no-record fixed right-0 z-40 flex flex-col"
       style={{
         top: 56, // 对齐到 AppHeader（h-14=56px）底部黑线之下，不盖导航栏
         bottom: 0,
@@ -174,7 +174,7 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
     >
       {/* Header */}
       <div
-        className="flex items-center gap-2"
+        className="library-drawer-craft-header flex items-center gap-2"
         style={{
           padding: '12px 14px',
           borderBottom: '1.5px solid var(--ink)',
@@ -185,7 +185,7 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
             type="button"
             onClick={() => setView('mine')}
             title={t('back')}
-            className="grid place-items-center"
+            className="library-drawer-craft-icon grid place-items-center"
             style={{
               width: 24, height: 24, background: 'var(--paper)', border: '1.4px solid var(--ink)',
               borderRadius: 3, color: 'var(--ink)', cursor: 'pointer', padding: 0,
@@ -207,7 +207,7 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
           type="button"
           onClick={onClose}
           title={t('close')}
-          className="grid place-items-center"
+          className="library-drawer-craft-icon grid place-items-center"
           style={{
             width: 26, height: 26, background: 'var(--paper)', border: '1.4px solid var(--ink)',
             borderRadius: 3, color: 'var(--ink)', cursor: 'pointer', padding: 0,
@@ -222,13 +222,13 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
       ) : (
         <>
           {/* Actions */}
-          <div className="flex flex-col gap-2" style={{ padding: '10px 12px' }}>
+          <div className="library-drawer-craft-actions flex flex-col gap-2" style={{ padding: '10px 12px' }}>
             <button
               type="button"
               onClick={handleAddSelected}
               disabled={!canAdd}
               title={canAdd ? t('addSelected') : t('addSelectedHint')}
-              className="flex items-center justify-center gap-2"
+              className="library-drawer-craft-button flex items-center justify-center gap-2"
               style={{
                 padding: '7px 10px',
                 background: canAdd ? 'var(--hi)' : 'rgba(0,0,0,0.04)',
@@ -253,7 +253,7 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
               type="button"
               onClick={() => setView('market')}
               title={t('browse')}
-              className="flex items-center justify-center gap-2"
+              className="library-drawer-craft-button flex items-center justify-center gap-2"
               style={{
                 padding: '7px 10px',
                 background: 'var(--paper)',
@@ -273,6 +273,7 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
             </button>
             {!canAdd && (
               <div
+                className="library-drawer-craft-hint"
                 style={{
                   fontSize: 10.5,
                   lineHeight: 1.5,
@@ -286,9 +287,10 @@ export function LibraryDrawer({ open, onClose, excalidrawApiRef }: Props): JSX.E
           </div>
 
           {/* List */}
-          <div className="flex-1 overflow-y-auto" style={{ padding: '4px 12px 14px' }}>
+          <div className="library-drawer-craft-list flex-1 overflow-y-auto" style={{ padding: '4px 12px 14px' }}>
             {items.length === 0 ? (
               <div
+                className="library-drawer-craft-empty"
                 style={{
                   padding: '24px 6px',
                   fontSize: 11.5,

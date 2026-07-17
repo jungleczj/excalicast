@@ -359,10 +359,10 @@ export function SharedPlayer({
   const ready = snapshots.length > 0 || durationMs > 0;
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="player-craft-surface flex flex-1 flex-col overflow-hidden">
       {(title || backHref || rightActions) && (
         <div
-          className="flex items-center gap-3 px-6 py-3"
+          className="player-craft-toolbar flex items-center gap-3 px-6 py-3"
           style={{ background: 'var(--paper)', borderBottom: '1.5px solid var(--ink)' }}
         >
           {backHref && (
@@ -397,7 +397,7 @@ export function SharedPlayer({
         </div>
       )}
 
-      <div ref={stageRef} className="relative flex-1 bg-canvas-bg">
+      <div ref={stageRef} className="player-craft-stage relative flex-1 bg-canvas-bg">
         <Excalidraw
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           excalidrawAPI={onApi as any}
@@ -445,14 +445,14 @@ export function SharedPlayer({
       </div>
 
       <div
-        className="px-6 py-4"
+        className="player-craft-controls px-6 py-4"
         style={{ background: 'var(--paper)', borderTop: '1.5px solid var(--ink)' }}
       >
         <div className="flex items-center gap-3">
           <button
             onClick={togglePlay}
             disabled={!ready || durationMs === 0}
-            className="grid place-items-center transition"
+            className="player-craft-play grid place-items-center transition"
             style={{
               width: 40,
               height: 40,
@@ -533,7 +533,7 @@ function SharedCameraBubble({
 
   return (
     <div
-      className="pointer-events-none absolute z-40 overflow-hidden transition-[left,top,width] duration-100"
+      className="player-craft-camera-bubble pointer-events-none absolute z-40 overflow-hidden transition-[left,top,width] duration-100"
       style={{
         ...styleAndHidden.style,
         display: styleAndHidden.hidden ? 'none' : undefined,

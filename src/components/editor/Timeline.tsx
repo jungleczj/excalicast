@@ -117,53 +117,51 @@ export function Timeline({
   const canDelete = selectedIdx != null && clips.length > 1;
 
   return (
-    <div style={{ background: 'var(--paper)', border: '1.8px solid var(--ink)', borderRadius: 4, boxShadow: '4px 4px 0 var(--ink)', padding: 10 }}>
-      <div className="mb-2 flex items-center justify-between">
+    <div className="timeline-craft-panel">
+      <div className="timeline-craft-toolbar mb-2 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9.5, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-2)', marginRight: 4 }}>
+          <span className="timeline-craft-label" style={{ marginRight: 4 }}>
             {labels.edit}
           </span>
-          <button type="button" onClick={doSplit} className="btn-sketch" style={{ padding: '3px 9px', fontSize: 9 }} title={`${labels.split} (S)`}>
+          <button type="button" onClick={doSplit} className="timeline-craft-action btn-sketch" style={{ padding: '3px 9px' }} title={`${labels.split} (S)`}>
             <span style={{ fontSize: 11 }}>✂</span> {labels.split}
           </button>
-          <button type="button" onClick={doDelete} disabled={!canDelete} className="btn-sketch" style={{ padding: '3px 9px', fontSize: 9, color: canDelete ? 'var(--rec)' : undefined, borderColor: canDelete ? 'var(--rec)' : undefined }} title={`${labels.deleteClip} (Del)`}>
+          <button type="button" onClick={doDelete} disabled={!canDelete} className="timeline-craft-action timeline-craft-danger btn-sketch" style={{ padding: '3px 9px' }} title={`${labels.deleteClip} (Del)`}>
             <I.Trash size={11} /> {labels.deleteClip}
           </button>
           {trimmed && (
-            <button type="button" onClick={() => { onReset(); setSelectedIdx(null); }} className="btn-sketch" style={{ padding: '3px 8px', fontSize: 9 }}>
+            <button type="button" onClick={() => { onReset(); setSelectedIdx(null); }} className="timeline-craft-action btn-sketch" style={{ padding: '3px 8px' }}>
               {labels.reset}
             </button>
           )}
         </div>
-        <span className="label-mono">{labels.kept} · {fmt(kept)} / {fmt(durationMs)}</span>
+        <span className="timeline-craft-kept label-mono">{labels.kept} · {fmt(kept)} / {fmt(durationMs)}</span>
       </div>
 
-      <div ref={laneRef} style={{ position: 'relative', userSelect: 'none' }}>
+      <div ref={laneRef} className="timeline-craft-lane" style={{ position: 'relative', userSelect: 'none' }}>
         {/* 标尺：拖动刮擦预览 */}
-        <div onMouseDown={startScrub} style={{ height: 14, background: 'var(--paper-2)', border: '1.2px solid var(--ink)', borderBottom: 'none', borderRadius: '3px 3px 0 0', cursor: 'ew-resize' }} />
+        <div className="timeline-craft-ruler" onMouseDown={startScrub} style={{ height: 14, cursor: 'ew-resize' }} />
 
         {/* 片段轨：整轨可拖刮擦（空白/gap 处）；clips=block 可点选 + 边缘 Trim；gap 变暗 */}
-        <div onMouseDown={startScrub} style={{ position: 'relative', height: 30, border: '1.2px solid var(--ink)', background: 'var(--paper-3)', overflow: 'hidden', cursor: 'ew-resize' }}>
+        <div className="timeline-craft-track" onMouseDown={startScrub} style={{ position: 'relative', height: 30, overflow: 'hidden', cursor: 'ew-resize' }}>
           {gaps.map((g, i) => (
-            <div key={`g${i}`} style={{ position: 'absolute', top: 0, bottom: 0, left: `${pct(g.start)}%`, width: `${pct(g.end - g.start)}%`, background: 'rgba(26,26,26,0.34)', borderLeft: '1px dashed var(--ink)', borderRight: '1px dashed var(--ink)' }} />
+            <div key={`g${i}`} className="timeline-craft-gap" style={{ position: 'absolute', top: 0, bottom: 0, left: `${pct(g.start)}%`, width: `${pct(g.end - g.start)}%` }} />
           ))}
           {clips.map((c, i) => {
             const sel = selectedIdx === i;
             return (
               <div
                 key={`c${i}`}
+                className={`timeline-craft-clip${sel ? ' is-selected' : ''}`}
                 onMouseDown={(e) => { e.stopPropagation(); setSelectedIdx(i); startScrub(e); }}
                 style={{
                   position: 'absolute', top: 2, bottom: 2, left: `${pct(c.start)}%`, width: `${pct(c.end - c.start)}%`,
-                  background: sel ? 'var(--hi)' : 'var(--hi-soft)',
-                  border: `1.4px solid var(--ink)`, borderRadius: 2,
-                  boxShadow: sel ? '2px 2px 0 var(--ink)' : 'none',
                   cursor: 'ew-resize', overflow: 'hidden',
                 }}
               >
                 {/* 左右 Trim 手柄 */}
-                <div onMouseDown={startEdgeDrag(i, 'start')} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: 7, cursor: 'ew-resize', background: 'var(--ink)', opacity: sel ? 0.9 : 0.55 }} />
-                <div onMouseDown={startEdgeDrag(i, 'end')} style={{ position: 'absolute', top: 0, bottom: 0, right: 0, width: 7, cursor: 'ew-resize', background: 'var(--ink)', opacity: sel ? 0.9 : 0.55 }} />
+                <div className="timeline-craft-edge" onMouseDown={startEdgeDrag(i, 'start')} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, cursor: 'ew-resize', opacity: sel ? 0.9 : 0.55 }} />
+                <div className="timeline-craft-edge" onMouseDown={startEdgeDrag(i, 'end')} style={{ position: 'absolute', top: 0, bottom: 0, right: 0, cursor: 'ew-resize', opacity: sel ? 0.9 : 0.55 }} />
               </div>
             );
           })}
@@ -174,16 +172,16 @@ export function Timeline({
         {hasCaptions && <MirrorBar clips={clips} pct={pct} fill="var(--pro)" icon={<I.Subtitles size={10} />} label={labels.captions} />}
 
         {/* 播放头：竖线贯穿 + 标尺上的三角手柄 */}
-        <div style={{ position: 'absolute', top: 0, bottom: 0, left: `calc(${pct(playheadMs)}% - 1px)`, width: 2, background: 'var(--ink)', pointerEvents: 'none', zIndex: 5 }} />
+        <div className="timeline-craft-playhead" style={{ position: 'absolute', top: 0, bottom: 0, left: `calc(${pct(playheadMs)}% - 1px)`, pointerEvents: 'none', zIndex: 5 }} />
         <div
           onMouseDown={startScrub}
-          className="tl-grip"
-          style={{ position: 'absolute', top: -4, left: `calc(${pct(playheadMs)}% - 6px)`, width: 12, height: 12, background: 'var(--hi)', border: '1.6px solid var(--ink)', borderRadius: 2, cursor: 'ew-resize', zIndex: 6 }}
+          className="timeline-craft-grip tl-grip"
+          style={{ position: 'absolute', top: -4, left: `calc(${pct(playheadMs)}% - 6px)`, width: 12, height: 12, cursor: 'ew-resize', zIndex: 6 }}
           aria-label="playhead"
         />
       </div>
 
-      <div className="mt-1.5 flex items-center justify-between" style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--ink-3)' }}>
+      <div className="timeline-craft-hint mt-1.5 flex items-center justify-between">
         <span>{labels.hint}</span>
         <span>{fmt(playheadMs)}</span>
       </div>
@@ -195,11 +193,11 @@ function MirrorBar({ clips, pct, fill, icon, label }: {
   clips: TimeSegment[]; pct: (ms: number) => number; fill: string; icon: React.ReactNode; label: string;
 }): JSX.Element {
   return (
-    <div style={{ position: 'relative', height: 12, marginTop: 3 }}>
-      <div className="flex items-center gap-1" style={{ position: 'absolute', left: 3, top: 0, bottom: 0, zIndex: 2, fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--ink-3)', pointerEvents: 'none' }}>
+    <div className="timeline-craft-mirror" style={{ position: 'relative', height: 12, marginTop: 3 }}>
+      <div className="flex items-center gap-1 timeline-craft-label" style={{ position: 'absolute', left: 3, top: 0, bottom: 0, zIndex: 2, fontSize: 8, pointerEvents: 'none' }}>
         {icon}
       </div>
-      <div style={{ position: 'absolute', inset: 0, border: '1px solid var(--ink)', borderRadius: 2, background: 'var(--paper-3)', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
         {clips.map((c, i) => (
           <div key={i} style={{ position: 'absolute', top: 1, bottom: 1, left: `${pct(c.start)}%`, width: `${pct(c.end - c.start)}%`, background: fill, opacity: 0.7 }} title={label} />
         ))}

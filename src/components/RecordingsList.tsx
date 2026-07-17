@@ -108,7 +108,7 @@ function defaultTitle(m: { id: string; title?: string }, locale: string): string
 function Pill({ children, hi = false }: { children: React.ReactNode; hi?: boolean }): JSX.Element {
   return (
     <span
-      className="inline-flex items-center gap-1"
+      className="library-craft-pill inline-flex items-center gap-1"
       style={{
         padding: '2px 8px',
         border: '1px solid var(--ink)',
@@ -124,6 +124,20 @@ function Pill({ children, hi = false }: { children: React.ReactNode; hi?: boolea
     >
       {children}
     </span>
+  );
+}
+
+function RecordingThumbnail({ meta, className = '' }: { meta: DisplayMeta; className?: string }): JSX.Element {
+  if (meta.thumbnail) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img src={meta.thumbnail} alt="" className={`h-full w-full object-cover ${className}`} />
+    );
+  }
+  return (
+    <div className={`h-full w-full ${className}`}>
+      <ThumbScene seed={meta.id} />
+    </div>
   );
 }
 
@@ -371,7 +385,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
   if (!loaded) {
     return (
       <div
-        className="py-12 text-center"
+        className="library-craft-note py-12 text-center"
         style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}
       >
         {t('loading')}
@@ -382,7 +396,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
   if (items.length === 0) {
     return (
       <div
-        className="p-16 text-center"
+        className="library-craft-empty p-16 text-center"
         style={{
           background: 'var(--paper)',
           border: '2px dashed var(--ink)',
@@ -402,7 +416,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
           <I.Logo size={28} />
         </div>
         <h2 style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--ink)' }}>{t('empty')}</h2>
-        <Link href="/app" className="btn-sketch btn-sketch-primary mt-6 inline-flex">
+        <Link href="/app" className="app-craft-login mt-6 inline-flex">
           <span className="recording-indicator h-1.5 w-1.5 rounded-full" style={{ background: 'white' }} />
           {t('newRecording')}
         </Link>
@@ -417,7 +431,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
     <div>
       {canCloud && (
         <div
-          className="mb-4 px-4 py-3"
+          className="library-craft-note mb-4 px-4 py-3"
           style={{
             background: 'var(--hi-soft)',
             border: '1.4px solid var(--ink)',
@@ -433,7 +447,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
 
       {canCloud && (
         <div
-          className="mb-4 flex flex-wrap items-center gap-3 px-4 py-2.5"
+          className="library-craft-bulk mb-4 flex flex-wrap items-center gap-3 px-4 py-2.5"
           style={{
             background: 'var(--paper-2)',
             border: '1.5px solid var(--ink)',
@@ -495,7 +509,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
               disabled={
                 (selectedPendingIds.length === 0 && eligibleForBulkBackup.length === 0)
               }
-              className="btn-sketch btn-sketch-primary"
+              className="app-craft-login"
               style={{ padding: '7px 12px', fontSize: 10.5 }}
             >
               <I.CloudUpload size={13} />
@@ -514,7 +528,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
         <div className="mb-4 space-y-2">
           {statusMsg && (
             <div
-              className="px-3 py-2"
+              className="library-craft-message px-3 py-2"
               style={{
                 background: 'var(--paper-2)',
                 border: '1.4px solid var(--ink)',
@@ -529,7 +543,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
           )}
           {errorMsg && (
             <div
-              className="px-3 py-2"
+              className="library-craft-message library-craft-danger px-3 py-2"
               style={{
                 background: 'var(--rec-soft)',
                 border: '1.4px solid var(--rec)',
@@ -547,7 +561,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
 
       {/* 控制栏：筛选 chip + 排序 + 视图切换 */}
       <div
-        className="mb-5 flex flex-wrap items-center justify-between gap-3 px-4 py-2.5"
+        className="library-craft-toolbar mb-5 flex flex-wrap items-center justify-between gap-3 px-4 py-2.5"
         style={{ background: 'var(--paper-2)', border: '1.5px solid var(--ink)', borderRadius: 4, boxShadow: '3px 3px 0 var(--ink)' }}
       >
         <div className="flex flex-wrap items-center gap-1.5">
@@ -602,7 +616,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
       </div>
 
       {visibleItems.length === 0 ? (
-        <div className="p-12 text-center" style={{ border: '2px dashed var(--ink)', borderRadius: 4, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+        <div className="library-craft-nomatch p-12 text-center" style={{ border: '2px dashed var(--ink)', borderRadius: 4, fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
           {t('noMatch')}
         </div>
       ) : view === 'list' ? (
@@ -613,14 +627,9 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
             const hasCloud = !!it.cloud;
             const itemBusy = busy[d.id];
             const row = (
-              <div className="flex items-center gap-4 px-3 py-2.5" style={{ background: 'var(--paper)', border: '1.5px solid var(--ink)', borderRadius: 4, boxShadow: '2px 2px 0 var(--ink)' }}>
-                <div className="relative flex-shrink-0 overflow-hidden" style={{ width: 88, height: 50, background: 'var(--paper-2)', border: '1.2px solid var(--ink)', borderRadius: 2 }}>
-                  {d.thumbnail ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={d.thumbnail} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="absolute inset-0 dots-fine-bg" style={{ opacity: 0.4 }} />
-                  )}
+              <div className="library-craft-row flex items-center gap-4 px-3 py-2.5" style={{ background: 'var(--paper)', border: '1.5px solid var(--ink)', borderRadius: 4, boxShadow: '2px 2px 0 var(--ink)' }}>
+                <div className="library-craft-thumb relative flex-shrink-0 overflow-hidden" style={{ width: 88, height: 50, background: 'var(--paper-2)', border: '1.2px solid var(--ink)', borderRadius: 2 }}>
+                  <RecordingThumbnail meta={d} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="truncate" style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{defaultTitle(d, locale)}</div>
@@ -635,12 +644,12 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
                   </div>
                 </div>
                 {hasLocal && (
-                  <Link href={`/export/${d.id}` as never} onClick={(e) => e.stopPropagation()} className="grid h-7 w-7 flex-shrink-0 place-items-center" style={{ background: 'var(--paper)', border: '1.3px solid var(--ink)', color: 'var(--ink)', borderRadius: 3 }} title={t('export')} aria-label={t('export')}>
+                  <Link href={`/export/${d.id}` as never} onClick={(e) => e.stopPropagation()} className="library-craft-icon-button grid h-7 w-7 flex-shrink-0 place-items-center" style={{ background: 'var(--paper)', border: '1.3px solid var(--ink)', color: 'var(--ink)', borderRadius: 3 }} title={t('export')} aria-label={t('export')}>
                     <I.Download size={13} />
                   </Link>
                 )}
                 {hasLocal && (
-                  <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); void handleDelete(d.id); }} className="grid h-7 w-7 flex-shrink-0 place-items-center" style={{ background: 'var(--paper)', border: '1.3px solid var(--rec)', color: 'var(--rec)', borderRadius: 3 }} title={t('delete')} aria-label={t('delete')}>
+                  <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); void handleDelete(d.id); }} className="library-craft-icon-button library-craft-danger grid h-7 w-7 flex-shrink-0 place-items-center" style={{ background: 'var(--paper)', border: '1.3px solid var(--rec)', color: 'var(--rec)', borderRadius: 3 }} title={t('delete')} aria-label={t('delete')}>
                     <I.Trash size={13} />
                   </button>
                 )}
@@ -706,13 +715,13 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
           const tileInner = (
             <>
               <div
-                className="relative overflow-hidden"
+                className="library-craft-thumb relative overflow-hidden"
                 style={{ aspectRatio: '16/9', margin: 12, background: 'var(--paper-3)', border: '1.4px solid var(--ink)', borderRadius: 3 }}
               >
                 <div className="absolute inset-0 dots-fine" style={{ opacity: 0.5 }} />
                 {/* 封面 hover 轻放大（被 overflow-hidden 裁切，对标设计 group-hover:scale） */}
                 <div className="absolute inset-0 transition-transform duration-300 ease-out group-hover:scale-105">
-                  <ThumbScene seed={d.id} />
+                  <RecordingThumbnail meta={d} />
                 </div>
                 <span
                   className="absolute right-2 top-2 group-hover:opacity-0"
@@ -908,7 +917,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
           return (
             <div
               key={d.id}
-              className="group relative overflow-hidden transition hover:-translate-y-[2px]"
+              className="library-craft-card group relative overflow-hidden transition hover:-translate-y-[2px]"
               style={{
                 background: 'var(--paper)',
                 border: '1.6px solid var(--ink)',
@@ -951,7 +960,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
                   <Link
                     href={`/export/${d.id}` as never}
                     onClick={(e) => e.stopPropagation()}
-                    className="grid h-7 w-7 place-items-center"
+                    className="library-craft-icon-button grid h-7 w-7 place-items-center"
                     style={{
                       background: 'var(--paper)',
                       border: '1.3px solid var(--ink)',
@@ -973,7 +982,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
                       if (cloudIcon.onClick) cloudIcon.onClick();
                     }}
                     disabled={!cloudIcon.onClick}
-                    className="grid h-7 w-7 place-items-center transition disabled:cursor-default"
+                    className="library-craft-icon-button grid h-7 w-7 place-items-center transition disabled:cursor-default"
                     style={{ ...cloudIcon.style, border: '1.3px solid var(--ink)', borderRadius: 3 }}
                     title={cloudIcon.tooltip}
                     aria-label={cloudIcon.tooltip}
@@ -985,7 +994,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
                   <button
                     type="button"
                     onClick={(e) => { e.preventDefault(); e.stopPropagation(); void handleDelete(d.id); }}
-                    className="grid h-7 w-7 place-items-center"
+                    className="library-craft-icon-button library-craft-danger grid h-7 w-7 place-items-center"
                     style={{
                       background: 'var(--paper)',
                       border: '1.3px solid var(--rec)',

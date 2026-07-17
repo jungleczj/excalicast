@@ -1,8 +1,135 @@
 {
   "landing": {
     "meta": {
-      "title": "Excalicast — 白板录制工具",
-      "description": "录制白板操作 + 麦克风音频，一次录制导出多种比例的 MP4 视频。"
+      "title": "Excalicast — 一站式录制内容工作台",
+      "description": "从白板录制、剪辑、字幕、多平台导出到云端归档，一次讲解沉淀为可复用的内容资产。"
+    },
+    "craft": {
+      "nav": {
+        "home": "主页",
+        "library": "录制库",
+        "pricing": "价格",
+        "login": "登录 / 注册",
+        "menu": "菜单",
+        "plans": "方案",
+        "start": "开始录制"
+      },
+      "hero": {
+        "eyebrow": "浏览器内运行 · 本地优先",
+        "title": "让讲过的内容，\n有可以留下的位置",
+        "body": "Excalicast 保留一段讲解的结构：白板、声音、节奏与版本。录制结束后，它仍然可以被整理、重导出，并回到可重查的位置。",
+        "primary": "开始录制",
+        "secondary": "查看价格",
+        "microcopy": "无需下载。无需把内容交出去。",
+        "toolbarLabel": "录制白板工具栏",
+        "productAlt": "Excalicast 录制工作台矢量演示图"
+      },
+      "controls": {
+        "label": "录制控制条",
+        "pause": "暂停",
+        "stop": "停止",
+        "mic": "麦克风",
+        "camera": "摄像头",
+        "laser": "激光笔",
+        "zoom": "缩放",
+        "prompt": "提词器"
+      },
+      "capabilities": {
+        "heading": "不只是录屏，是让讲解继续成为内容。",
+        "body": "录制之后的整理、字幕、导出与归档，不必散落在不同工具之间。",
+        "record": { "title": "录制", "body": "白板、声音与节奏，留在同一段结构里。" },
+        "edit": { "title": "整理", "body": "剪辑、画幅和版本，仍围绕同一条录制。" },
+        "caption": { "title": "字幕", "body": "声音被转成可读、可改、可发布的文字。" },
+        "distribute": { "title": "发布", "body": "同一段内容，可以去往不同平台。" },
+        "archive": { "title": "归档", "body": "讲过的内容，回到可以查找的位置。" }
+      },
+      "personas": {
+        "heading": "人们如何使用 Excalicast",
+        "body": "它不是为一种视频格式准备的，而是为那些值得被保存、整理和再次使用的表达。",
+        "teacher": { "role": "老师", "title": "课程讲解与课后复看", "use": "录下课堂推导，整理字幕，留给学生回看。" },
+        "architect": { "role": "架构师", "title": "系统图与异步评审", "use": "把一次白板推演，变成团队可以反复查看的说明。" },
+        "pm": { "role": "产品经理", "title": "流程说明与团队同步", "use": "记录路线图、用户流程和决策背景。" },
+        "creator": { "role": "创作者", "title": "长视频与短内容分发", "use": "一次录制，整理成不同平台需要的版本。" },
+        "course": { "role": "课程团队", "title": "字幕、大纲与讲义", "use": "围绕同一条录制，生成后续学习材料。" },
+        "team": { "role": "团队", "title": "新人培训与知识沉淀", "use": "把讲过的内容放进后来者找得到的位置。" }
+      },
+      "features": {
+        "record": {
+          "kicker": "录制",
+          "title": "从一次讲解\n到可留存的结构",
+          "body": "Excalicast 记录画板事件和麦克风音频，而不是屏幕像素。你留下的是表达本身，而不是一段被窗口和通知打断的视频。",
+          "cta": "打开录制工作台"
+        },
+        "organize": {
+          "kicker": "整理",
+          "title": "从录制完成\n到再次使用",
+          "body": "时间线、画幅、字幕和导出设置都留在同一处。录完之后，工作不用被拆到另一套流程里。",
+          "cta": "查看工作流"
+        },
+        "distribute": {
+          "kicker": "分发",
+          "title": "从一个来源\n到多处发布",
+          "body": "同一段录制可以重新渲染成横屏、竖屏、方形和社媒画幅。平台会变化，内容不必重录。",
+          "cta": "开始一次录制"
+        },
+        "archive": {
+          "kicker": "归档",
+          "title": "让内容整理\n跟上表达本身",
+          "body": "标题、标签、时间和本地/云端状态一起形成索引。讲过的内容不再散落，也不再只存在记忆里。",
+          "cta": "进入录制库"
+        },
+        "publish": {
+          "kicker": "发布",
+          "title": "为发布而导出\n为复用而留下",
+          "body": "字幕、大纲、讲义、分享链接和无水印导出围绕同一条录制展开。内容离开工作台之前，已经有了归处。",
+          "cta": "查看发布方式"
+        }
+      },
+      "visuals": {
+        "youtube": "长视频",
+        "shorts": "短视频",
+        "feed": "信息流",
+        "social": "社媒",
+        "oneTake": "一次录制，可以依次产出多个平台需要的比例。",
+        "librarySearch": "搜索标题、标签、讲解内容…",
+        "backup": "备份到云端",
+        "assets": "素材库",
+        "cloudSaved": "已云端备份",
+        "localFirst": "本地优先",
+        "export": "导出",
+        "captions": "字幕",
+        "outline": "大纲",
+        "handout": "讲义",
+        "watermark": "带水印导出与渲染下载放在一起；升级后可导出无水印版本。",
+        "render": "渲染并下载"
+      },
+      "pricing": {
+        "kicker": "价格",
+        "heading": "你的节奏，\n你的发布方式",
+        "body": "偶尔录一条，或把它变成日常内容流程。先免费开始，需要发布和复用时再升级。",
+        "startKicker": "开始",
+        "startTitle": "先把一次讲解留下来。",
+        "publishTitle": "专为持续发布、复用和沉淀而设。"
+      },
+      "faq": {
+        "heading": "重要的事，\n先说清楚",
+        "body": "本地优先、价格、导出、字幕和云端备份，用尽量少的话讲明白。"
+      },
+      "final": {
+        "heading": "把下一次讲解，\n留成以后还能使用的东西",
+        "body": "从录制开始，到整理、导出、分享和归档，都在 Excalicast 里完成。",
+        "primary": "开始录制",
+        "secondary": "联系支持"
+      },
+      "footer": {
+        "pricing": "价格",
+        "product": "产品",
+        "company": "条款",
+        "support": "支持",
+        "heading": "讲过的内容，最后都能回到这里。",
+        "tagline": "一站式录制内容工作台。浏览器内录制，本地优先渲染，把讲过的变成可查、可复用、可发布的内容资产。",
+        "rights": "保留所有权利"
+      }
     },
     "faq": {
       "heading": "常见问题，直白回答。",
@@ -316,7 +443,7 @@
   },
   "login": {
     "title": "登录 Excalicast",
-    "subtitle": "登录账号以解锁未来 Pro / Max 功能。录制 + 单次购买无需登录。",
+    "subtitle": "登录账号以解锁 Pro 功能。录制 + 单次购买无需登录。",
     "google": "Continue with Google",
     "or": "OR",
     "emailPlaceholder": "Enter your email",
@@ -389,6 +516,7 @@
     "cameraOnTooltip": "摄像头已开启 · 点击关闭",
     "cameraOffTooltip": "摄像头已关闭 · 点击开启",
     "start": "开始录制",
+    "fromTemplate": "从模板开始",
     "pause": "暂停",
     "resume": "继续",
     "stop": "停止",

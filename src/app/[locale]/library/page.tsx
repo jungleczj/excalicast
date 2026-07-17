@@ -58,58 +58,51 @@ export default function LibraryPage(): JSX.Element {
     : '每条录制都保留在本机，直到你主动导出。Pro / Max 用户还会看到云端备份。';
 
   return (
-    <div className="flex h-full flex-col" style={{ background: 'var(--paper)' }}>
+    <div className="app-craft-screen library-craft-page flex h-full flex-col">
       <AppHeader tier="free" />
 
-      <div className="flex-1 overflow-auto px-12 py-10">
-        <div className="mx-auto" style={{ maxWidth: 1200 }}>
+      <div className="library-craft-main flex-1 overflow-auto">
+        <div className="library-craft-wrap">
           {/* Title row */}
-          <div className="mb-8 flex items-end justify-between">
+          <div className="library-craft-title-row mb-6 flex items-end justify-between">
             <div>
-              <div className="label-mono mb-2">{subline}</div>
-              <h1
-                style={{
-                  fontSize: 44,
-                  fontWeight: 700,
-                  letterSpacing: '-0.03em',
-                  margin: 0,
-                  lineHeight: 1,
-                  color: 'var(--ink)',
-                }}
-              >
+              <div className="library-craft-kicker label-mono">{subline}</div>
+              <h1 className="library-craft-heading">
                 {heading}
               </h1>
               <p
-                className="mt-3"
+                className="library-craft-description"
                 style={{ fontSize: 14, color: 'var(--ink-2)', maxWidth: 460, lineHeight: 1.5 }}
               >
                 {description}
               </p>
             </div>
+          </div>
 
-            <div className="flex items-center gap-3">
-              <div
-                className="flex items-center gap-2"
-                style={{ padding: '9px 14px', border: '1.5px solid var(--ink)', borderRadius: 3, background: 'var(--paper)', width: 280, boxShadow: '2px 2px 0 var(--ink)' }}
-              >
-                <I.Search size={14} />
-                <input
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') submitSearch(); }}
-                  placeholder={t('searchPlaceholder')}
-                  className="w-full bg-transparent outline-none"
-                  style={{ border: 'none', fontSize: 13, fontFamily: 'var(--font-sans)', color: 'var(--ink)' }}
-                />
-              </div>
-              <button
-                type="button"
-                onClick={submitSearch}
-                className="btn-sketch btn-sketch-primary"
-              >
-                <I.Search size={13} />
-                {t('searchButton')}
-              </button>
+          <div className="library-craft-search-row mb-4 flex justify-end">
+            <div className="library-craft-actions flex items-center gap-3">
+            <div
+              className="library-craft-search flex items-center gap-2"
+              style={{ padding: '9px 14px', border: '1.5px solid var(--ink)', borderRadius: 3, background: 'var(--paper)', width: 280, boxShadow: '2px 2px 0 var(--ink)' }}
+            >
+              <I.Search size={14} />
+              <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') submitSearch(); }}
+                placeholder={t('searchPlaceholder')}
+                className="w-full bg-transparent outline-none"
+                style={{ border: 'none', fontSize: 13, fontFamily: 'var(--font-sans)', color: 'var(--ink)' }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={submitSearch}
+              className="library-craft-search-button"
+            >
+              <I.Search size={13} />
+              {t('searchButton')}
+            </button>
             </div>
           </div>
 

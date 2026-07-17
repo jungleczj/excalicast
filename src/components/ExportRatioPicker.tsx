@@ -53,7 +53,9 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
                 key={r}
                 type="button"
                 onClick={() => previewAndSelect(r)}
-                className="press relative flex flex-col items-center justify-center gap-1.5"
+                className="editor-craft-ratio-card press relative flex flex-col items-center justify-center gap-1.5"
+                data-active={preview}
+                data-selected={sel}
                 title={preset.platforms}
                 style={{
                   padding: '10px 6px',
@@ -70,10 +72,11 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
                   aria-checked={sel}
                   aria-label={r}
                   onClick={(e) => { e.stopPropagation(); if (sel) removeRatio(r); else previewAndSelect(r); }}
-                  className="absolute left-1 top-1 grid h-4 w-4 place-items-center"
+                  className="editor-craft-ratio-check absolute left-1 top-1 grid h-4 w-4 place-items-center"
                   style={{ background: sel ? 'var(--ink)' : 'var(--paper)', color: 'var(--paper)', border: '1.2px solid var(--ink)', borderRadius: 2, fontSize: 9, lineHeight: 1, cursor: 'pointer' }}
                 >{sel ? '✓' : ''}</span>
                 <div
+                  className="editor-craft-ratio-shape"
                   style={{
                     width: 26 * (preset.width / max),
                     height: 26 * (preset.height / max),
@@ -100,7 +103,8 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
                 key={m.value}
                 type="button"
                 onClick={() => onChange({ ...config, croppingMode: m.value })}
-                className="press flex w-full items-start gap-3 p-3 text-left"
+                className="editor-craft-segment-card press flex w-full items-start gap-3 p-3 text-left"
+                data-active={active}
                 style={{
                   background: active ? 'var(--hi-soft)' : 'var(--paper)',
                   border: '1.4px solid var(--ink)',
@@ -109,7 +113,7 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
                 }}
               >
                 <span
-                  className="mt-0.5 grid h-4 w-4 flex-shrink-0 place-items-center rounded-full"
+                  className="editor-craft-radio-dot mt-0.5 grid h-4 w-4 flex-shrink-0 place-items-center rounded-full"
                   style={{
                     border: '1.6px solid var(--ink)',
                     background: 'var(--paper)',

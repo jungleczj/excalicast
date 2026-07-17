@@ -64,11 +64,11 @@ export default function PlayPage(): JSX.Element {
 
   if (error) {
     return (
-      <div className="flex h-full flex-col" style={{ background: 'var(--paper)' }}>
+      <div className="app-craft-screen player-craft-shell flex h-full flex-col" style={{ background: 'var(--paper)' }}>
         <AppHeader tier="free" />
         <div className="grid flex-1 place-items-center">
           <div
-            className="px-8 py-6 text-center"
+            className="share-craft-state px-8 py-6 text-center"
             style={{
               background: 'var(--paper)',
               border: '1.6px solid var(--ink)',
@@ -99,14 +99,14 @@ export default function PlayPage(): JSX.Element {
     <>
       <Link
         href={`/export/${id}` as never}
-        className="btn-sketch btn-sketch-primary"
+        className="app-craft-login player-craft-action"
         style={{ padding: '7px 12px', fontSize: 10.5 }}
       >
         <I.Download size={12} /> {downloadLabel}
       </Link>
       <button
         onClick={handleDelete}
-        className="btn-sketch"
+        className="player-craft-action library-craft-danger"
         style={{ padding: '7px 12px', fontSize: 10.5, color: 'var(--rec)', borderColor: 'var(--rec)' }}
       >
         <I.Trash size={12} /> {deleteLabel}
@@ -115,7 +115,7 @@ export default function PlayPage(): JSX.Element {
   );
 
   return (
-    <div className="flex h-full flex-col" style={{ background: 'var(--paper-2)' }}>
+    <div className="app-craft-screen player-craft-shell flex h-full flex-col" style={{ background: 'var(--paper-2)' }}>
       <AppHeader tier="free" />
       <SharedPlayer
         durationMs={meta?.durationMs ?? 0}

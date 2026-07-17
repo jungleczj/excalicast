@@ -55,8 +55,9 @@ export default async function UseCasePage({ params }: Props): Promise<JSX.Elemen
       <SectionHeading>{locale === 'zh' ? '步骤' : 'Steps'}</SectionHeading>
       <ol style={{ marginTop: 8, paddingLeft: 0, listStyle: 'none', counterReset: 'step' }}>
         {entry.steps.map((s, i) => (
-          <li key={i} style={{ display: 'flex', gap: 16, marginTop: 18 }}>
+          <li key={i} className="content-craft-step" style={{ display: 'flex', gap: 16, marginTop: 18 }}>
             <span
+              className="content-craft-step-index"
               style={{
                 flexShrink: 0,
                 width: 34,

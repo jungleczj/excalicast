@@ -2,9 +2,9 @@ import type { CSSProperties, ReactNode, JSX } from 'react';
 import { I } from '@/components/icons';
 
 /**
- * Sketch-Minimalist UI primitives, ported 1:1 from the ExcalidrawRec design
- * (`project/parts/shared.jsx`). Presentational only (no hooks) so they work in
- * Server Components. Visuals rely on tokens/classes in `globals.css`.
+ * Shared UI primitives. They keep the old component API for compatibility,
+ * but the presentation now follows the Craft-inspired system: quiet paper
+ * surfaces, low-contrast hairlines, soft shadows, and restrained pills.
  */
 
 /** Hard-offset card with hover lift. */
@@ -23,12 +23,14 @@ export function SketchCard({
 }): JSX.Element {
   return (
     <div
-      className={[hover ? 'lift' : '', className].filter(Boolean).join(' ')}
+      className={['craft-ui-card', hover ? 'lift' : '', className].filter(Boolean).join(' ')}
       style={{
-        background: 'var(--paper)',
-        border: '1.6px solid var(--ink)',
-        borderRadius: 4,
-        boxShadow: accent ? '5px 5px 0 0 var(--hi)' : '3px 3px 0 0 var(--ink)',
+        background: accent
+          ? 'linear-gradient(180deg, rgba(219,238,255,0.54), rgba(255,253,248,0.86))'
+          : 'var(--craft-surface, rgba(255,253,248,0.86))',
+        border: '1px solid var(--craft-line, rgba(24,25,26,0.09))',
+        borderRadius: 30,
+        boxShadow: 'var(--craft-shadow, 0 18px 46px rgba(48,38,26,0.08))',
         position: 'relative',
         ...style,
       }}
@@ -54,11 +56,12 @@ export function Marker({
         {
           padding: '0 8px',
           display: 'inline-block',
-          transform: `rotate(${rotate}deg)`,
-          borderRadius: 2,
-          // 设计稿：实心黄条 + 两侧 4px 外延（box-decoration-break 让换行也连续）
-          background: color,
-          boxShadow: `4px 0 0 ${color}, -4px 0 0 ${color}`,
+          transform: rotate ? `rotate(${rotate / 4}deg)` : 'none',
+          borderRadius: 4,
+          background: color === 'var(--hi)'
+            ? 'linear-gradient(180deg, transparent 58%, rgba(255,216,112,0.46) 58% 84%, transparent 84%)'
+            : `linear-gradient(180deg, transparent 58%, ${color} 58% 84%, transparent 84%)`,
+          boxShadow: 'none',
           WebkitBoxDecorationBreak: 'clone',
           boxDecorationBreak: 'clone',
         } as CSSProperties
@@ -89,16 +92,16 @@ export function TapeLabel({
       style={
         {
           display: 'inline-block',
-          padding: '5px 14px',
-          fontFamily: 'var(--font-hand)',
-          fontWeight: 600,
-          fontSize: 17,
-          background: color,
-          color: 'var(--ink)',
-          border: '1.4px solid var(--ink)',
-          transform: `rotate(${rotate}deg)`,
-          boxShadow: '2px 2px 0 0 rgba(0,0,0,0.12)',
-          borderRadius: 2,
+          padding: '6px 14px',
+          fontFamily: 'var(--font-sans)',
+          fontWeight: 650,
+          fontSize: 13,
+          background: color === 'var(--hi)' ? 'rgba(219,238,255,0.72)' : color,
+          color: 'rgba(24,25,26,0.72)',
+          border: '1px solid var(--craft-line, rgba(24,25,26,0.09))',
+          transform: rotate ? `rotate(${rotate / 5}deg)` : 'none',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.72)',
+          borderRadius: 999,
           '--rot': `${rotate}deg`,
           '--tilt': `${rotate}deg`,
           ...style,
@@ -121,12 +124,12 @@ export function MonoTag({
   variant?: MonoTagVariant;
 }): JSX.Element {
   const styles: Record<MonoTagVariant, CSSProperties> = {
-    default: { background: 'var(--paper)', color: 'var(--ink)', border: '1.2px solid var(--ink)' },
-    hi: { background: 'var(--hi)', color: 'var(--ink)', border: '1.2px solid var(--ink)' },
-    rec: { background: 'var(--rec)', color: 'white', border: '1.2px solid var(--rec)' },
-    pro: { background: 'var(--pro)', color: 'var(--ink)', border: '1.2px solid var(--ink)' },
-    max: { background: 'var(--max)', color: 'var(--ink)', border: '1.2px solid var(--ink)' },
-    soft: { background: 'var(--paper-2)', color: 'var(--ink-2)', border: '1.2px solid var(--rule-soft)' },
+    default: { background: 'rgba(255,253,248,0.76)', color: 'rgba(24,25,26,0.66)', border: '1px solid var(--craft-line, rgba(24,25,26,0.09))' },
+    hi: { background: 'rgba(219,238,255,0.72)', color: 'rgba(24,25,26,0.72)', border: '1px solid rgba(84,156,220,0.16)' },
+    rec: { background: 'rgba(255,245,241,0.92)', color: 'var(--craft-danger, #df3f3b)', border: '1px solid rgba(223,63,59,0.18)' },
+    pro: { background: 'rgba(202,234,211,0.56)', color: 'rgba(24,25,26,0.72)', border: '1px solid rgba(47,138,63,0.14)' },
+    max: { background: 'rgba(221,210,242,0.58)', color: 'rgba(24,25,26,0.72)', border: '1px solid rgba(118,92,180,0.14)' },
+    soft: { background: 'rgba(24,25,26,0.045)', color: 'rgba(24,25,26,0.52)', border: '1px solid var(--craft-line, rgba(24,25,26,0.09))' },
   };
   return (
     <span
@@ -135,11 +138,11 @@ export function MonoTag({
         alignItems: 'center',
         gap: 6,
         padding: '3px 8px',
-        fontFamily: 'var(--font-mono)',
-        fontSize: 10,
-        fontWeight: 500,
-        letterSpacing: '0.08em',
-        textTransform: 'uppercase',
+        fontFamily: 'var(--font-sans)',
+        fontSize: 12,
+        fontWeight: 650,
+        letterSpacing: '-0.01em',
+        textTransform: 'none',
         borderRadius: 999,
         ...styles[variant],
       }}
@@ -166,9 +169,9 @@ export function CheckRow({
           width: 18,
           height: 18,
           marginTop: 2,
-          border: '1.4px solid var(--ink)',
-          borderRadius: 3,
-          background: on ? color || 'var(--hi)' : 'var(--paper)',
+          border: '1px solid var(--craft-line, rgba(24,25,26,0.09))',
+          borderRadius: 999,
+          background: on ? color || 'rgba(219,238,255,0.72)' : 'rgba(255,253,248,0.78)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',

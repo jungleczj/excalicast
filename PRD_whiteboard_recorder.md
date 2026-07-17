@@ -1,9 +1,10 @@
 # PRD：白板录制工具
-**版本**：v0.8.6  
-**状态**：开发中  
-**作者**：—  
-**最后更新**：2026-06-21  
-**变更**：v0.8.6 - UI 统一(P0+P1)：字幕面板/档位徽标调色并入手绘纸-墨令牌（去蓝色渐变与 Tailwind 语义色）；抽共享 `Modal` 壳（`--overlay` 令牌）统一 5 个弹窗的遮罩/阴影/圆角/关闭钮。详见「## 十一」最新一条。  
+**版本**：v0.8.7
+**状态**：开发中
+**作者**：—
+**最后更新**：2026-06-29
+**变更**：v0.8.7 - 落地页 UI 基准切换为严格对标 Craft.do：浮动胶囊导航、满屏纸感 Hero、居中衬线叙事、五能力入口、人物跑马灯、大叙事卡片、价格/FAQ/页脚节奏；Hero 产品图固定使用用户指定资产，人物资产包仅用于跑马灯。详见「## 十一」最新一条。
+**历史变更**：v0.8.6 - UI 统一(P0+P1)：字幕面板/档位徽标调色并入手绘纸-墨令牌（去蓝色渐变与 Tailwind 语义色）；抽共享 `Modal` 壳（`--overlay` 令牌）统一 5 个弹窗的遮罩/阴影/圆角/关闭钮。详见「## 十一」最新一条。
 **历史变更**：v0.8.5 - 导出页信息架构整理：字幕做成内联（进「字幕」Tab、不再弹窗）、删右侧高级功能卡片（功能归各自 Tab）、分享按钮移到顶栏会员标左侧、会员标统一为单一来源 `TierBadge`（修各页文案/样式不一致）。详见「## 十一」最新一条。  
 **历史变更**：v0.8.4 - 支付/会员修复：字幕弹窗可关闭、登录即刷新会员档位（修 Max 登录仍显示未升级）、**Creem 付款页弹窗拦截修复**（点击同步开标签+同标签兜底）、新增独立测试环境 runbook（不切生产）。详见「## 十一」最新一条。  
 **历史变更**：v0.8.3 - **首屏性能**：落地/定价/条款页由 `force-dynamic`（每访问 SSR+查 Supabase → TTFB 12s）改为 **ISR**（CDN 缓存，TTFB 降到边缘级）；价格准确性靠 admin 改价路由 `revalidatePath` 立即再生保持。详见「## 十一」最新一条。  
@@ -771,11 +772,22 @@ Pro/Max 导出（订阅状态验证）：
 
 ### 设计风格定位
 
-参考 Excalicord（同类产品）的 UI 风格进行**借鉴而非抄袭**，核心设计语言：
+### 落地页设计基准：严格对标 Craft.do
 
-- **深色模式为主**：录制工具类产品深色背景更聚焦，减少视觉干扰
-- **克制的半透明浮层**：录制控制栏、人像窗口、字幕层均以半透明毛玻璃风格叠加在白板上，不遮挡创作区域
-- **操作极简**：录制核心操作（开始 / 暂停 / 停止）一键触达，录制中界面尽可能干净
+Excalicast 落地页以 Craft.do 当前官网首页为硬参考进行重构，目标是“编辑式产品叙事页”，而不是功能说明书。必须严格对标 Craft 的布局节奏、字体层级、留白密度、导航形态、卡片层级和动效语法；但文案、Logo、产品图、人物图和业务资产必须是 Excalicast 原创。
+
+核心设计语言：
+
+- **浮动胶囊导航**：顶部居中，Logo / 导航 / CTA 三段式，轻玻璃背景与柔和阴影。
+- **满屏纸感 Hero**：大圆角、奶油纸色、淡蓝云层、居中衬线标题、单一主 CTA。
+- **低信息密度叙事**：少解释、多定位；少功能堆叠、多场景表达。
+- **能力入口克制**：五个能力以图标 + 短标题呈现，不做复杂卡片说明。
+- **人物跑马灯**：用户提供的人物资产包只用于“人们如何使用”横向跑马灯/场景区，不进入 Hero。
+- **大叙事卡片**：录制、整理、分发、归档、发布使用大留白和柔和色卡/纸张拼贴，不使用花哨渐变。
+- **Hero 产品图边界**：Hero 产品图固定使用用户指定的产品图资产，可做高清/响应式加载，但不重画、不替换、不修改图片内部元素。
+- **业务边界**：仅改落地页 UI、文案和静态展示资产；API、数据库、Hooks、录制/导出、支付、云同步逻辑保持不变。
+
+工作台、录制控制、弹窗等应用内界面仍遵循“克制浮层 + 操作极简”的原则：录制核心操作一键触达，录制中界面尽可能干净，不用营销页的装饰节奏干扰白板操作。
 
 ---
 
@@ -918,6 +930,7 @@ Pro/Max 导出（订阅状态验证）：
 
 > 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
 
+- **2026-06-29｜落地页 UI 基准切换为严格对标 Craft.do**：将「## 十、UI 设计参考」的落地页视觉基准从旧的手绘/深色录制工具风格，更新为 Craft.do 当前官网首页式编辑叙事：浮动胶囊导航、满屏纸感 Hero、居中衬线标题、单主 CTA、五能力入口、人物跑马灯、大叙事卡片、价格/FAQ/页脚大留白节奏。同步写入 `CLAUDE.md` 项目级长期记忆：后续落地页必须严格对标 Craft；Hero 产品图固定使用用户指定资产（仅做高清/响应式加载，不重画内部元素）；人物资产包只用于“人们如何使用”跑马灯；不得修改 API、数据库、Hooks、录制/导出、支付、云同步等业务逻辑。涉及 `CLAUDE.md`、`PRD_whiteboard_recorder.md`、`src/app/[locale]/page.tsx`、`src/app/globals.css`、`public/landing/*`。
 - **2026-06-21｜UI 统一 P0+P1：手绘调色对齐 + 共享弹窗壳**：全局 UI 审计后做两类统一。**P0 调色**：① `SubtitlePanel` 原整套蓝色渐变 + Tailwind 语义色（`#3b82f6`/`bg-bg-primary`/`bg-yellow-50`/`success-*`/`recording-strong`/`--primary-600`，靠 globals 遗留兼容层渲染）→ 全部换成纸-墨令牌与 `.btn-sketch`，并入手绘体系；② `ProBadge` 蓝/紫渐变 → `--pro`/`--max` 令牌底 + 墨描边，与 `TierBadge`/`MonoTag` 一致。**P1 弹窗壳**：新增 `src/components/ui/Modal.tsx`（遮罩走新 `--overlay` 令牌、阴影 `--hard-lg`、统一 30×30 ✕、`dismissable`/`hideClose`/`width` 可配），5 个弹窗接入：`LoginModal`(用壳 ✕)、`ShareLinkModal`/`PaywallModal`/`ProUpgradeModal`(各自 flex 头部带 ✕ → `hideClose` 保留)，删除各自重复的遮罩/容器/✕/`rgba(26,26,26,0.45)`/`6px6px0`/`borderRadius:5` 硬编码；`RecordingSetup` 因是可滚动高面板（`overflow:auto`）不套壳、仅采用 `--overlay`+`--hard-lg` 对齐。涉及 `SubtitlePanel.tsx`、`ProBadge.tsx`、新增 `ui/Modal.tsx`、`globals.css`(`--overlay`)、`LoginModal/PaywallModal/ProUpgradeModal/ShareLinkModal/RecordingSetup.tsx`。
 - **2026-06-20｜导出页信息架构整理：字幕内联 + 去高级卡片 + 分享上移顶栏 + 会员标统一**：① **字幕内联**：`SubtitlePanel` 由全屏 modal（`fixed inset-0 z-50` + ✕/遮罩）改为**内联卡片**，直接嵌「字幕」Tab；`onClose` 改可选。② **去高级功能卡片**：删 `ExportPanel` 的 `showAdvanced` 段（PRO/MAX `BundleCard` + `BundleCard`/`MaxBundleRow` 定义 + 字幕/讲义/分享 state/handler/import）；功能已各有 Tab（字幕→captions、讲义/大纲→handout/outline）；`ExportPanel` 精简为含/无水印选择 + 真导出按钮 + 解锁提示。③ **分享上移顶栏**：新增 `ShareButton`（迁移原分享逻辑：`/api/share/create` + `ShareLinkModal` + 云端必需→保存重试），放导出页顶栏会员标**左侧**；非 Max 点击触发 Max 升级。④ **会员标统一**：新增 `TierBadge`（单一来源：`FREE/PRO/MAX` + MonoTag variant），导出页顶栏与 `AppHeader` 都改用它（修之前「MAX PLAN」vs「MAX」、`MonoTag` vs `tag-mono` 不一致）。涉及 `SubtitlePanel.tsx`、`ExportPanel.tsx`、`export/[id]/page.tsx`、`AppHeader.tsx`、新增 `ShareButton.tsx`/`TierBadge.tsx`。
 - **2026-06-19｜支付/会员修复：字幕弹窗可关 + 登录刷新档位 + Creem 付款页弹窗拦截修复 + 测试环境 runbook**：① **字幕弹窗关不掉**：`SubtitlePanel` 是全屏 modal，导出页传了空 `onClose` → 改 `onClose={() => setTab('export')}`（✕/遮罩可关、回导出 Tab）。② **Max 登录后仍显示未升级**：`useSubscription` 订阅浏览器 Supabase `auth.onAuthStateChange`，登录/登出/令牌刷新即 `refresh()`（修经 Header LoginModal 登录后档位停留旧 free）。③ **测试环境唤不起 Creem 付款页**：`ProUpgradeModal`/`PaywallModal` 原在 `await fetch` 之后才 `window.open('_blank')` → 被弹窗拦截；改为**点击同步阶段先开标签**、拿到 redirectUrl 再导航、被拦则**同标签跳转兜底**（与网站 mode 无关）。④ 新增 `docs/payment-staging.md`：**独立测试环境**正规做法（固定子域名 + Creem 测试密钥 + Supabase 测试库 + 测试卡），不切生产；代码已全 env 驱动故无需改。涉及 `export/[id]/page.tsx`、`useSubscription.ts`、`ProUpgradeModal.tsx`、`PaywallModal.tsx`、`docs/payment-staging.md`。
@@ -1112,4 +1125,3 @@ Pro/Max 导出（订阅状态验证）：
 
 ### 12.4 衡量
 Vercel Analytics（来源/转化）+ Google Search Console / Bing Webmaster（查询曝光、索引覆盖）。重点盯 `/compare/*`、`/use-cases/*` 曝光起势，按 Search Console 已有曝光词补页。GEO 每两周抽测（Perplexity/ChatGPT 问「Loom alternative for whiteboard」等是否引用）。
-

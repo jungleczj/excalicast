@@ -181,15 +181,17 @@ export const I = {
         height={size}
         viewBox="0 0 32 32"
         fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
+        stroke="none"
         strokeLinecap="round"
         strokeLinejoin="round"
         style={{ flexShrink: 0 }}
         {...(p as Omit<IconProps, 'size' | 'sw'>)}
       >
-        <path d="M3 8.5 q1 -2 3 -2 q11 -0.4 22 0.2 q2 0.4 2.2 2.2 q0.3 7 0 14 q -0.1 2 -2.2 2.2 q -11 0.4 -22 0 q -2 -0.3 -2.3 -2.2 q -0.3 -7 0.3 -14.4 z" />
-        <circle cx="16" cy="16" r="4.5" fill="#FFD166" stroke="currentColor" />
+        <rect x="3.6" y="3.4" width="24.8" height="25" rx="6.2" fill="#FFFCF5" />
+        <path d="M9.2 22.6 L14.3 16.7 c1.1 -1.3 2.5 -1.2 3.5 0.1 l2.1 2.7 l2.9 -3.5 c0.9 -1.1 2.1 -1 3 0.2 l2.1 2.9 v4.4 c0 1.9 -1 2.9 -3 2.9 H7.2 c-1.7 0 -2.7 -0.8 -2.9 -2.2 c1.5 -0.4 3.1 -0.9 4.9 -1.6 z" fill="#BFE0F5" />
+        <path d="M16.8 26.4 L21.8 18.2 c0.8 -1.3 2.2 -1.3 3 0 l3.1 5 v0.6 c0 1.7 -0.9 2.6 -2.6 2.6 z" fill="#F9D05A" />
+        <circle cx="10.1" cy="9.1" r="2.6" fill="#F0443E" />
+        <rect x="3.6" y="3.4" width="24.8" height="25" rx="6.2" fill="none" stroke="#1F2225" strokeWidth="2.35" />
       </svg>
     );
   },
@@ -336,15 +338,17 @@ export function LogoMark({ size = 28, className }: LogoMarkProps): JSX.Element {
       height={size}
       viewBox="0 0 32 32"
       fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
+      stroke="none"
       strokeLinecap="round"
       strokeLinejoin="round"
       className={className}
       style={{ flexShrink: 0 }}
     >
-      <path d="M3 8.5 q1 -2 3 -2 q11 -0.4 22 0.2 q2 0.4 2.2 2.2 q0.3 7 0 14 q -0.1 2 -2.2 2.2 q -11 0.4 -22 0 q -2 -0.3 -2.3 -2.2 q -0.3 -7 0.3 -14.4 z" />
-      <circle cx="16" cy="16" r="4.5" fill="#FFD166" stroke="currentColor" />
+      <rect x="3.6" y="3.4" width="24.8" height="25" rx="6.2" fill="#FFFCF5" />
+      <path d="M9.2 22.6 L14.3 16.7 c1.1 -1.3 2.5 -1.2 3.5 0.1 l2.1 2.7 l2.9 -3.5 c0.9 -1.1 2.1 -1 3 0.2 l2.1 2.9 v4.4 c0 1.9 -1 2.9 -3 2.9 H7.2 c-1.7 0 -2.7 -0.8 -2.9 -2.2 c1.5 -0.4 3.1 -0.9 4.9 -1.6 z" fill="#BFE0F5" />
+      <path d="M16.8 26.4 L21.8 18.2 c0.8 -1.3 2.2 -1.3 3 0 l3.1 5 v0.6 c0 1.7 -0.9 2.6 -2.6 2.6 z" fill="#F9D05A" />
+      <circle cx="10.1" cy="9.1" r="2.6" fill="#F0443E" />
+      <rect x="3.6" y="3.4" width="24.8" height="25" rx="6.2" fill="none" stroke="#1F2225" strokeWidth="2.35" />
     </svg>
   );
 }

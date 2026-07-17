@@ -18,8 +18,8 @@ interface Props {
 }
 
 /**
- * 统一弹窗壳 —— 遮罩 + 容器 + ✕ 关闭钮，全站弹窗共用，确保遮罩/阴影/圆角/关闭钮一致
- * （遮罩走 `var(--overlay)`，阴影走 `var(--hard-lg)`，手绘纸-墨风）。内部内容原样传入。
+ * 统一弹窗壳 —— 遮罩 + 容器 + ✕ 关闭钮，全站弹窗共用，确保遮罩/阴影/圆角/关闭钮一致。
+ * 视觉由 Craft scope 覆盖为纸面、hairline、柔和阴影；内部内容原样传入。
  */
 export function Modal({
   open,
@@ -34,13 +34,13 @@ export function Modal({
   if (!open) return null;
   return (
     <div
-      className="fade-in fixed inset-0 z-50 grid place-items-center"
+      className="app-craft-modal-overlay fade-in fixed inset-0 z-50 grid place-items-center"
       style={{ background: 'var(--overlay)' }}
       onClick={dismissable ? onClose : undefined}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="relative max-w-[92vw]"
+        className="app-craft-modal-card relative max-w-[92vw]"
         style={{
           width,
           background: 'var(--paper)',
@@ -55,7 +55,7 @@ export function Modal({
           <button
             type="button"
             onClick={onClose}
-            className="absolute right-3 top-3 z-10 grid place-items-center"
+            className="app-craft-modal-close absolute right-3 top-3 z-10 grid place-items-center"
             style={{
               width: 30,
               height: 30,

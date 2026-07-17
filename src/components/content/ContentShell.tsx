@@ -17,9 +17,9 @@ export async function ContentShell({
 }): Promise<JSX.Element> {
   const t = await getTranslations({ locale, namespace: 'landing' });
   return (
-    <div className="flex h-full flex-col" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
+    <div className="app-craft-screen content-craft-page flex h-full flex-col" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
       <header
-        className="flex h-16 flex-shrink-0 items-center justify-between px-6 sm:px-10"
+        className="content-craft-header flex h-16 flex-shrink-0 items-center justify-between px-6 sm:px-10"
         style={{ background: 'var(--paper)', borderBottom: '2px solid var(--ink)' }}
       >
         <Link href="/" className="flex items-center gap-2.5">
@@ -34,16 +34,16 @@ export async function ContentShell({
         </Link>
       </header>
 
-      <main className="flex-1 overflow-auto">
+      <main className="content-craft-main flex-1 overflow-auto">
         <article
-          className="mx-auto px-6 py-12 sm:px-8 sm:py-16"
+          className="content-craft-article mx-auto px-6 py-12 sm:px-8 sm:py-16"
           style={{ maxWidth: 860, lineHeight: 1.6 }}
         >
           {children}
         </article>
 
         <footer
-          className="px-6 py-10 sm:px-8"
+          className="content-craft-footer px-6 py-10 sm:px-8"
           style={{ borderTop: '2px solid var(--ink)', fontSize: 13, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}
         >
           <div className="mx-auto flex flex-wrap items-center gap-x-6 gap-y-2" style={{ maxWidth: 860 }}>

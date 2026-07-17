@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1430 754" role="img" aria-label="Excalicast whiteboard recording interface preview">
+  <defs>
+    <clipPath id="clean-card-clip">
+      <rect x="0" y="0" width="1430" height="754" rx="38" ry="38"/>
+    </clipPath>
+    <filter id="label-soften" x="-20%" y="-60%" width="140%" height="220%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="0.4"/>
+      <feOffset dy="0.2"/>
+      <feComposite in2="SourceAlpha" operator="out"/>
+      <feColorMatrix values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .24 0"/>
+      <feBlend in2="SourceGraphic"/>
+    </filter>
+    <style>
+      .ui-label {
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+        font-weight: 760;
+        letter-spacing: -0.02em;
+      }
+    </style>
+  </defs>
+
+  <g clip-path="url(#clean-card-clip)">
+    <image href="/landing/hero-product@2x.png" x="-18" y="-10" width="1466" height="773" preserveAspectRatio="none"/>
+  </g>
+
+  <g class="ui-label" filter="url(#label-soften)">
+    <rect x="1188" y="50" width="104" height="48" rx="17" fill="#fffdf9"/>
+    <rect x="1298" y="50" width="118" height="48" rx="17" fill="#fffdf9"/>
+    <text x="1234" y="80" text-anchor="middle" font-size="20" fill="#1f2225">16:9</text>
+    <path d="M1265 68l8 8 8-8" fill="none" stroke="#1f2225" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="1357" y="80" text-anchor="middle" font-size="20" fill="#1f2225">Assets</text>
+
+    <g text-anchor="middle" font-size="15" fill="rgba(255,255,255,0.86)">
+      <rect x="388" y="679" width="760" height="47" rx="20" fill="#050505"/>
+      <text x="439" y="711">Pause</text>
+      <text x="547" y="711">Stop</text>
+      <text x="659" y="711">Mic</text>
+      <text x="771" y="711">Camera</text>
+      <text x="873" y="711">Pen</text>
+      <text x="985" y="711">Zoom</text>
+      <text x="1095" y="711">Notes</text>
+    </g>
+  </g>
+</svg>

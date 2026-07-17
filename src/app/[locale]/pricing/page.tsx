@@ -6,7 +6,7 @@ import { setRequestLocale, getTranslations } from 'next-intl/server';
 import { getActiveConfig } from '@/lib/paymentConfig';
 import { buildAlternates } from '@/lib/seo/alternates';
 import { TrackedLink } from '@/components/analytics/TrackedLink';
-import { Marker, MonoTag, FooterBar } from '@/components/ui';
+import { FooterBar } from '@/components/ui';
 import { PricingTiers } from './PricingTiers';
 
 interface Props {
@@ -68,9 +68,9 @@ function PricingContent({ oneTimeCents, proCents, maxCents, proYearlyCents, maxY
   const th = useTranslations('header');
 
   return (
-    <div className="flex h-full flex-col" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
+    <div className="app-craft-screen pricing-craft-page flex h-full flex-col" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
       {/* Header */}
-      <header className="flex h-16 flex-shrink-0 items-center justify-between px-4 sm:px-10" style={{ background: 'var(--paper)', borderBottom: '2px solid var(--ink)' }}>
+      <header className="pricing-craft-header flex h-16 flex-shrink-0 items-center justify-between px-4 sm:px-10" style={{ background: 'var(--paper)', borderBottom: '2px solid var(--ink)' }}>
         <Link href="/" className="flex items-center gap-2.5" style={{ textDecoration: 'none', color: 'var(--ink)' }}>
           <LogoMark size={30} />
           <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 20, letterSpacing: '-0.02em' }}>Excalicast</span>
@@ -88,28 +88,28 @@ function PricingContent({ oneTimeCents, proCents, maxCents, proYearlyCents, maxY
 
       <main className="flex-1 overflow-auto">
         {/* Hero */}
-        <section className="px-6 pb-10 pt-16 text-center sm:px-10 lg:px-20 lg:pt-20">
+        <section className="pricing-craft-hero px-6 pb-10 pt-16 text-center sm:px-10 lg:px-20 lg:pt-20">
           <div className="label-mono mb-3.5">{t('kicker')}</div>
-          <h1 className="mx-auto" style={{ fontSize: 'clamp(32px, 6.5vw, 60px)', fontWeight: 700, letterSpacing: '-0.035em', lineHeight: 1.05, margin: 0, maxWidth: 880 }}>
-            {t('title')} <Marker>{t('titleMark')}</Marker>
+          <h1 className="pricing-craft-title mx-auto" style={{ fontSize: 'clamp(32px, 6.5vw, 60px)', fontWeight: 700, letterSpacing: '-0.035em', lineHeight: 1.05, margin: 0, maxWidth: 880 }}>
+            {t('title')} <span className="pricing-craft-title-mark">{t('titleMark')}</span>
           </h1>
           <p className="mx-auto" style={{ fontSize: 17, color: 'var(--ink-2)', lineHeight: 1.5, marginTop: 22, maxWidth: 620 }}>{t('sub')}</p>
         </section>
 
         {/* Tiers (client island: billing toggle) */}
-        <section className="px-6 pb-16 sm:px-10 lg:px-20">
+        <section className="pricing-craft-tier-section px-6 pb-16 sm:px-10 lg:px-20">
           <PricingTiers oneTimeCents={oneTimeCents} proCents={proCents} maxCents={maxCents} proYearlyCents={proYearlyCents} maxYearlyCents={maxYearlyCents} yearlyAvailable={yearlyAvailable} currency={currency} />
         </section>
 
         {/* Feature matrix */}
-        <section className="px-6 py-12 sm:px-10 lg:px-20" style={{ borderTop: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}>
+        <section className="pricing-craft-matrix-section px-6 py-12 sm:px-10 lg:px-20" style={{ borderTop: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}>
           <h2 style={{ fontSize: 'clamp(22px, 4vw, 28px)', fontWeight: 700, letterSpacing: '-0.025em', margin: 0 }}>{t('matrix.heading')}</h2>
           <p style={{ color: 'var(--ink-2)', fontSize: 14, marginTop: 8, marginBottom: 24, maxWidth: 720 }}>{t('matrix.note')}</p>
           <FeatureMatrix t={t} tl={tl} />
         </section>
 
         {/* FAQ */}
-        <section className="px-6 py-16 sm:px-10 lg:px-20 lg:py-20">
+        <section className="pricing-craft-faq-section px-6 py-16 sm:px-10 lg:px-20 lg:py-20">
           <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1fr_2fr] lg:gap-14">
             <div className="lg:sticky lg:top-5 lg:self-start">
               <div className="label-mono mb-2.5">// answers</div>
@@ -145,9 +145,9 @@ function MatrixCell({ value, isMax }: { value: boolean | string; isMax: boolean 
 function FeatureMatrix({ t, tl }: { t: ReturnType<typeof useTranslations>; tl: ReturnType<typeof useTranslations> }): JSX.Element {
   const cols = 'grid grid-cols-[1.6fr_repeat(4,1fr)] sm:grid-cols-[2fr_repeat(4,1fr)]';
   return (
-    <div style={{ border: '1.5px solid var(--ink)', borderRadius: 4, overflow: 'hidden', background: 'var(--paper)', boxShadow: '4px 4px 0 var(--ink)' }}>
+    <div className="pricing-craft-matrix" style={{ border: '1.5px solid var(--ink)', borderRadius: 4, overflow: 'hidden', background: 'var(--paper)', boxShadow: '4px 4px 0 var(--ink)' }}>
       {/* header */}
-      <div className={cols} style={{ background: 'var(--ink)', color: 'var(--paper)', padding: '14px 16px', fontFamily: 'var(--font-mono)', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+      <div className={`${cols} pricing-craft-matrix-head`} style={{ background: 'var(--ink)', color: 'var(--paper)', padding: '14px 16px', fontFamily: 'var(--font-mono)', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
         <span>{t('matrix.feature')}</span>
         <span className="text-center">{tl('pricing.free.label')}</span>
         <span className="text-center">{tl('pricing.oneTime.label')}</span>
@@ -158,11 +158,11 @@ function FeatureMatrix({ t, tl }: { t: ReturnType<typeof useTranslations>; tl: R
         const labels = t.raw(`matrix.rows.${g.cat}`) as string[];
         return (
           <div key={g.cat}>
-            <div style={{ padding: '10px 16px', background: 'var(--paper-2)', borderTop: '1.3px solid var(--ink)', borderBottom: '1px solid var(--rule-soft)', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--ink-2)' }}>
+            <div className="pricing-craft-matrix-group" style={{ padding: '10px 16px', background: 'var(--paper-2)', borderTop: '1.3px solid var(--ink)', borderBottom: '1px solid var(--rule-soft)', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: 'var(--ink-2)' }}>
               {t(`matrix.cats.${g.cat}`)}
             </div>
             {g.vals.map((row, i) => (
-              <div key={i} className={cols} style={{ padding: '10px 16px', borderBottom: i < g.vals.length - 1 ? '1px solid var(--rule-faint)' : 'none', alignItems: 'center', fontSize: 13, background: i % 2 === 0 ? 'var(--paper)' : 'transparent' }}>
+              <div key={i} className={`${cols} pricing-craft-matrix-row`} style={{ padding: '10px 16px', borderBottom: i < g.vals.length - 1 ? '1px solid var(--rule-faint)' : 'none', alignItems: 'center', fontSize: 13, background: i % 2 === 0 ? 'var(--paper)' : 'transparent' }}>
                 <span>{labels[i]}</span>
                 {row.map((v, ci) => (
                   <span key={ci} className="text-center"><MatrixCell value={v} isMax={ci === 3} /></span>
@@ -178,7 +178,7 @@ function FeatureMatrix({ t, tl }: { t: ReturnType<typeof useTranslations>; tl: R
 
 function PricingFaq({ q, a, open }: { q: string; a: string; open: boolean }): JSX.Element {
   return (
-    <details open={open} className="reveal-up lift" style={{ border: '1.5px solid var(--ink)', borderRadius: 4, padding: '16px 20px', background: open ? 'var(--hi-soft)' : 'var(--paper)', boxShadow: open ? '3px 3px 0 var(--ink)' : 'none' }}>
+    <details open={open} className="pricing-craft-faq reveal-up lift" style={{ border: '1.5px solid var(--ink)', borderRadius: 4, padding: '16px 20px', background: open ? 'var(--hi-soft)' : 'var(--paper)', boxShadow: open ? '3px 3px 0 var(--ink)' : 'none' }}>
       <summary style={{ cursor: 'pointer', listStyle: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, fontSize: 15, fontWeight: 600 }}>
         <span>{q}</span>
         <span className="faq-icon" style={{ flexShrink: 0, width: 26, height: 26, borderRadius: 3, border: '1.3px solid var(--ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: open ? 'var(--ink)' : 'var(--paper)', color: open ? 'var(--paper)' : 'var(--ink)' }}>

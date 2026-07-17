@@ -286,7 +286,7 @@ export function HandoutPanel({ recordingId, config, onJumpToTime, view = 'handou
   if (!data) {
     return (
       <div
-        className="mt-4 p-4"
+        className="handout-craft-panel mt-4 p-4"
         style={{ background: 'var(--paper)', border: '1.4px solid var(--ink)', borderRadius: 3 }}
       >
         <div className="label-mono" style={{ fontSize: 11, marginBottom: 6 }}>{t('handoutTitle')}</div>
@@ -301,7 +301,7 @@ export function HandoutPanel({ recordingId, config, onJumpToTime, view = 'handou
         </button>
         {error && (
           <div
-            className="mt-3 px-3 py-2"
+            className="handout-craft-error mt-3 px-3 py-2"
             style={{ background: 'var(--rec-soft)', border: '1.4px solid var(--rec)', borderRadius: 3, fontSize: 11.5, color: 'var(--rec)', fontFamily: 'var(--font-mono)' }}
           >
             {error}
@@ -323,7 +323,7 @@ export function HandoutPanel({ recordingId, config, onJumpToTime, view = 'handou
 
   return (
     <div
-      className="mt-4 p-4"
+      className="handout-craft-panel mt-4 p-4"
       style={{ background: 'var(--paper)', border: '1.4px solid var(--ink)', borderRadius: 3 }}
     >
       <div className="flex items-center justify-between">
@@ -364,7 +364,7 @@ export function HandoutPanel({ recordingId, config, onJumpToTime, view = 'handou
               <button
                 type="button"
                 onClick={() => onJumpToTime?.(ch.startMs)}
-                className="flex w-full items-start gap-3 px-2 py-2 text-left transition hover:bg-[var(--hi-soft)]"
+                className="handout-craft-outline-card flex w-full items-start gap-3 px-2 py-2 text-left transition hover:bg-[var(--hi-soft)]"
                 style={{ border: '1.2px solid var(--rule-soft)', borderRadius: 3, background: 'var(--paper-2)' }}
               >
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, fontWeight: 700, color: 'var(--ink)', letterSpacing: '0.04em', flexShrink: 0, minWidth: 42 }}>
@@ -413,7 +413,7 @@ export function HandoutPanel({ recordingId, config, onJumpToTime, view = 'handou
       {/* Handout 视图：Markdown 渲染预览 */}
       {view === 'handout' && (
         <div
-          className="mt-3 px-3 py-2"
+          className="handout-craft-preview mt-3 px-3 py-2"
           style={{ maxHeight: 360, overflow: 'auto', background: 'var(--paper-2)', border: '1.2px solid var(--rule-soft)', borderRadius: 3, fontSize: 12.5, lineHeight: 1.6, color: 'var(--ink)' }}
           // 内容来自自有讲义 API + 本地关键帧 dataURL，预览用途
           dangerouslySetInnerHTML={{ __html: marked.parse(assembleMarkdown(), { async: false }) as string }}
@@ -439,13 +439,13 @@ export function HandoutPanel({ recordingId, config, onJumpToTime, view = 'handou
       </>)}
 
       {data.generatedAt && (
-        <div className="mt-3" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+        <div className="handout-craft-meta mt-3" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
           {t('handoutGeneratedAt', { date: new Date(data.generatedAt).toLocaleString() })}
         </div>
       )}
 
       {error && (
-        <div className="mt-3 px-3 py-2" style={{ background: 'var(--rec-soft)', border: '1.4px solid var(--rec)', borderRadius: 3, fontSize: 11.5, color: 'var(--rec)', fontFamily: 'var(--font-mono)' }}>
+        <div className="handout-craft-error mt-3 px-3 py-2" style={{ background: 'var(--rec-soft)', border: '1.4px solid var(--rec)', borderRadius: 3, fontSize: 11.5, color: 'var(--rec)', fontFamily: 'var(--font-mono)' }}>
           {error}
         </div>
       )}

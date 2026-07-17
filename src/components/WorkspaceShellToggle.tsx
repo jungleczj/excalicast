@@ -37,7 +37,7 @@ export function WorkspaceShellToggle({ recordingId, config, onChange }: Props): 
   if (count === 0) {
     return (
       <div
-        className="px-3 py-2.5"
+        className="workspace-shell-craft-empty px-3 py-2.5"
         style={{
           background: 'var(--paper)',
           border: '1.4px solid var(--ink)',
@@ -60,7 +60,7 @@ export function WorkspaceShellToggle({ recordingId, config, onChange }: Props): 
     <button
       type="button"
       onClick={() => onChange({ ...config, includeWorkspaceShell: !checked })}
-      className="press w-full px-3 py-2.5 text-left"
+      className="workspace-shell-craft-toggle press w-full px-3 py-2.5 text-left"
       style={{
         background: checked ? 'var(--hi)' : 'var(--paper)',
         border: '1.5px solid var(--ink)',

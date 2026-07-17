@@ -37,8 +37,10 @@ interface Props {
   onToggleZoom?: () => void;
   /** 切换提词器浮层 */
   onToggleTeleprompter?: () => void;
+  /** 打开模板库，从模板开始 */
+  onOpenTemplates?: () => void;
   onStart: () => void;
-  onStop: () => void;
+  onStop: () => void | Promise<void>;
   onDiscard?: () => void;
   onPause?: () => void;
   onResume?: () => void;
@@ -56,15 +58,15 @@ function fmt(ms: number): string {
 const BAR_STYLE: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 8,
-  padding: '8px 10px',
-  background: 'var(--ink)',
-  color: 'var(--paper)',
-  border: '1.8px solid var(--ink)',
-  borderRadius: 5,
-  boxShadow: '4px 4px 0 var(--hi)',
-  fontFamily: 'var(--font-mono)',
-  fontSize: 12,
+  gap: 6,
+  padding: '6px 12px',
+  background: 'linear-gradient(180deg, rgba(28,28,28,0.98), rgba(10,10,10,0.98))',
+  color: '#fffdf8',
+  border: '1px solid rgba(255,255,255,0.08)',
+  borderRadius: 999,
+  boxShadow: '0 24px 58px rgba(0,0,0,0.24), 0 6px 16px rgba(0,0,0,0.16), inset 0 1px 0 rgba(255,255,255,0.12)',
+  fontFamily: 'var(--font-sans)',
+  fontSize: 11,
 };
 
 export function RecordingBar(props: Props): JSX.Element {
@@ -73,7 +75,7 @@ export function RecordingBar(props: Props): JSX.Element {
     state, elapsedMs, hasAudio, hasCamera, cameraEnabled,
     audioMuted, cameraMuted, laserActive, zoomActive, teleprompterActive, aspect,
     onToggleCamera, onToggleAudioMute, onToggleCameraMute, onToggleLaser, onToggleZoom, onToggleTeleprompter,
-    onStart, onStop, onDiscard, onPause, onResume,
+    onOpenTemplates, onStart, onStop, onDiscard, onPause, onResume,
   } = props;
 
   if (state === 'idle') {
@@ -84,10 +86,10 @@ export function RecordingBar(props: Props): JSX.Element {
           onClick={onToggleCamera}
           className="grid h-7 w-7 place-items-center"
           style={{
-            background: cameraEnabled ? 'var(--ok)' : 'rgba(255,255,255,0.08)',
-            border: '1px solid rgba(255,255,255,0.2)',
-            borderRadius: 3,
-            color: 'var(--paper)',
+            background: cameraEnabled ? 'rgba(84,173,105,0.9)' : 'rgba(255,255,255,0.08)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: 999,
+            color: '#fffdf8',
             cursor: 'pointer',
           }}
           title={cameraEnabled ? t('cameraOnTooltip') : t('cameraOffTooltip')}
@@ -100,10 +102,10 @@ export function RecordingBar(props: Props): JSX.Element {
             onClick={onToggleLaser}
             className="grid h-7 w-7 place-items-center"
             style={{
-              background: laserActive ? 'var(--ok)' : 'rgba(255,255,255,0.08)',
-              border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: 3,
-              color: 'var(--paper)',
+              background: laserActive ? 'rgba(84,173,105,0.9)' : 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: 999,
+              color: '#fffdf8',
               cursor: 'pointer',
             }}
             title={laserActive ? t('laserOn') : t('laserOff')}
@@ -117,10 +119,10 @@ export function RecordingBar(props: Props): JSX.Element {
             onClick={onToggleZoom}
             className="grid h-7 w-7 place-items-center"
             style={{
-              background: zoomActive ? 'var(--ok)' : 'rgba(255,255,255,0.08)',
-              border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: 3,
-              color: 'var(--paper)',
+              background: zoomActive ? 'rgba(84,173,105,0.9)' : 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: 999,
+              color: '#fffdf8',
               cursor: 'pointer',
             }}
             title={zoomActive ? t('zoomOn') : t('zoomOff')}
@@ -134,10 +136,10 @@ export function RecordingBar(props: Props): JSX.Element {
             onClick={onToggleTeleprompter}
             className="grid h-7 w-7 place-items-center"
             style={{
-              background: teleprompterActive ? 'var(--ok)' : 'rgba(255,255,255,0.08)',
-              border: '1px solid rgba(255,255,255,0.2)',
-              borderRadius: 3,
-              color: 'var(--paper)',
+              background: teleprompterActive ? 'rgba(84,173,105,0.9)' : 'rgba(255,255,255,0.08)',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: 999,
+              color: '#fffdf8',
               cursor: 'pointer',
             }}
             title={teleprompterActive ? t('teleprompterOn') : t('teleprompterOff')}
@@ -145,21 +147,41 @@ export function RecordingBar(props: Props): JSX.Element {
             <I.Text size={13} />
           </button>
         )}
+        {onOpenTemplates && (
+          <button
+            type="button"
+            onClick={onOpenTemplates}
+            className="grid place-items-center"
+            style={{
+              width: 30,
+              height: 30,
+              padding: 0,
+              background: 'rgba(255,255,255,0.08)',
+              color: '#fffdf8',
+              border: '1px solid rgba(255,255,255,0.12)',
+              borderRadius: 999,
+              cursor: 'pointer',
+            }}
+            title={t('fromTemplate')}
+            aria-label={t('fromTemplate')}
+          >
+            <I.Library size={13} />
+          </button>
+        )}
         <button
           type="button"
           onClick={onStart}
           className="flex items-center gap-2"
           style={{
-            padding: '7px 14px',
+            padding: '7px 16px',
             background: 'var(--rec)',
-            color: 'var(--paper)',
+            color: '#fffdf8',
             border: 'none',
-            borderRadius: 3,
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
+            borderRadius: 999,
+            fontFamily: 'var(--font-sans)',
+            fontSize: 12,
             fontWeight: 700,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
+            letterSpacing: '-0.02em',
             cursor: 'pointer',
           }}
         >
@@ -176,11 +198,10 @@ export function RecordingBar(props: Props): JSX.Element {
         style={{
           ...BAR_STYLE,
           padding: '12px 22px',
-          fontFamily: 'var(--font-mono)',
+          fontFamily: 'var(--font-sans)',
           fontSize: 11,
           fontWeight: 600,
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
+          letterSpacing: '-0.01em',
         }}
       >
         {t('processing')}
@@ -197,9 +218,9 @@ export function RecordingBar(props: Props): JSX.Element {
           display: 'flex',
           alignItems: 'center',
           gap: 8,
-          background: isRec ? 'var(--rec)' : 'rgba(255,255,255,0.1)',
-          padding: '4px 12px',
-          borderRadius: 3,
+          background: 'rgba(255,255,255,0.08)',
+          padding: '8px 12px',
+          borderRadius: 999,
         }}
       >
         <span
@@ -207,14 +228,14 @@ export function RecordingBar(props: Props): JSX.Element {
           style={{
             width: 8,
             height: 8,
-            background: isRec ? 'white' : 'rgba(255,255,255,0.5)',
+            background: isRec ? 'var(--rec)' : 'rgba(255,255,255,0.5)',
             borderRadius: 999,
           }}
         />
-        <span style={{ fontWeight: 700, letterSpacing: '0.08em', fontSize: 10 }}>
+        <span style={{ fontWeight: 700, letterSpacing: '0.02em', fontSize: 12 }}>
           {isRec ? t('rec') : t('paused')}
         </span>
-        <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: 12.5 }}>
+        <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, fontSize: 13 }}>
           {fmt(elapsedMs)}
         </span>
       </div>
@@ -234,12 +255,12 @@ export function RecordingBar(props: Props): JSX.Element {
           onClick={onDiscard}
           title={t('discardTooltip')}
           style={{
-            width: 28,
-            height: 28,
+            width: 34,
+            height: 34,
             background: 'rgba(255,255,255,0.06)',
-            border: '1px solid rgba(255,255,255,0.18)',
-            color: 'var(--paper)',
-            borderRadius: 3,
+            border: '1px solid rgba(255,255,255,0.12)',
+            color: '#fffdf8',
+            borderRadius: 999,
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
@@ -257,10 +278,10 @@ export function RecordingBar(props: Props): JSX.Element {
           style={{
             padding: '4px 8px',
             background: 'rgba(255,255,255,0.08)',
-            borderRadius: 3,
-            fontSize: 10,
+            borderRadius: 999,
+            fontSize: 11,
             fontWeight: 600,
-            letterSpacing: '0.06em',
+            letterSpacing: '0.02em',
           }}
         >
           {aspect}
@@ -319,7 +340,7 @@ export function RecordingBar(props: Props): JSX.Element {
 }
 
 function Divider() {
-  return <div style={{ width: 1.5, height: 22, background: 'rgba(255,255,255,0.15)' }} />;
+  return <div style={{ width: 1, height: 32, background: 'rgba(255,255,255,0.14)' }} />;
 }
 
 function CtrlBtn({
@@ -340,22 +361,25 @@ function CtrlBtn({
       className={tone === 'rec' ? 'press sketch-active' : 'press'}
       style={{
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
-        gap: 6,
-        padding: '6px 11px',
-        background: tone === 'rec' ? 'var(--rec)' : 'rgba(255,255,255,0.08)',
-        color: 'var(--paper)',
+        justifyContent: 'center',
+        gap: 2,
+        minWidth: 58,
+        minHeight: 44,
+        padding: '4px 9px',
+        background: tone === 'rec' ? 'var(--rec)' : 'transparent',
+        color: '#fffdf8',
         border: 'none',
-        borderRadius: 3,
-        fontFamily: 'var(--font-mono)',
-        fontSize: 10.5,
+        borderRadius: 999,
+        fontFamily: 'var(--font-sans)',
+        fontSize: 10,
         fontWeight: 600,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
+        letterSpacing: '-0.01em',
         cursor: 'pointer',
       }}
     >
-      <Icon size={12} />
+      <Icon size={17} />
       {label}
     </button>
   );
@@ -383,7 +407,7 @@ function SrcToggle({
   onClick?: () => void;
 }) {
   const greyBg = 'rgba(255,255,255,0.06)';
-  const bg = present && !muted ? 'var(--ok)' : greyBg;
+  const bg = present && !muted ? 'rgba(84,173,105,0.92)' : greyBg;
   const Icon = present && muted ? IconOff : IconOn;
   const clickable = present && !!onClick;
   return (
@@ -393,20 +417,20 @@ function SrcToggle({
       disabled={!clickable}
       title={title}
       style={{
-        width: 26,
-        height: 26,
+        width: 34,
+        height: 34,
         borderRadius: 999,
         background: bg,
-        border: '1px solid rgba(255,255,255,0.2)',
+        border: '1px solid rgba(255,255,255,0.12)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        color: 'white',
+        color: '#fffdf8',
         cursor: clickable ? 'pointer' : 'default',
         padding: 0,
       }}
     >
-      <Icon size={12} />
+      <Icon size={16} />
     </button>
   );
 }

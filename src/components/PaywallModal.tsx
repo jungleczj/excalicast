@@ -159,134 +159,61 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
   };
 
   return (
-    <Modal open={open} onClose={onClose} width={480} hideClose>
-        {/* Header band */}
-        <div
-          style={{
-            padding: 24,
-            background: 'var(--hi-soft)',
-            borderBottom: '1.6px solid var(--ink)',
-            position: 'relative',
-          }}
-        >
-          <div className="flex items-start justify-between">
-            <span className="tag-mono tag-mono-hi">ONE-TIME · {priceLabel}</span>
-            <button
-              onClick={onClose}
-              className="grid place-items-center"
-              style={{
-                width: 30,
-                height: 30,
-                border: '1.4px solid var(--ink)',
-                background: 'var(--paper)',
-                borderRadius: 3,
-                color: 'var(--ink)',
-                cursor: 'pointer',
-              }}
-              aria-label="close"
-            >
-              <I.Close size={13} />
-            </button>
+    <Modal open={open} onClose={onClose} width={620} hideClose>
+        <div className="commerce-craft-modal">
+          <button
+            onClick={onClose}
+            className="app-craft-modal-close commerce-craft-close grid place-items-center"
+            aria-label="close"
+          >
+            <I.Close size={14} />
+          </button>
+
+          <div className="commerce-craft-header">
+            <span className="commerce-craft-badge is-one-time">One-time · {priceLabel}</span>
+            <div className="commerce-craft-icon is-one-time">
+              <I.Lock size={28} sw={1.7} />
+            </div>
+            <h2 className="app-craft-modal-title commerce-craft-title">{t('title')}</h2>
+            <p className="commerce-craft-subtitle">
+              {t.rich('subtitle', { strong: (chunks) => <strong>{chunks}</strong> })}
+            </p>
           </div>
 
-          <div
-            className="mt-4 mb-4 grid h-14 w-14 place-items-center"
-            style={{
-              background: 'var(--paper)',
-              border: '1.6px solid var(--ink)',
-              borderRadius: 4,
-              boxShadow: '3px 3px 0 var(--ink)',
-              color: 'var(--ink)',
-            }}
-          >
-            <I.Lock size={26} sw={1.6} />
-          </div>
-          <h2
-            style={{
-              fontSize: 24,
-              fontWeight: 700,
-              letterSpacing: '-0.025em',
-              lineHeight: 1.15,
-              margin: 0,
-              color: 'var(--ink)',
-            }}
-          >
-            {t('title')}
-          </h2>
-        </div>
-
-        <div className="p-6">
-          <p style={{ fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.55, margin: 0 }}>
-            {t.rich('subtitle', { strong: (chunks) => <strong style={{ color: 'var(--ink)' }}>{chunks}</strong> })}
-          </p>
-
-          <div
-            className="mt-5 flex items-end gap-2 p-4"
-            style={{
-              background: 'var(--paper-2)',
-              border: '1.4px solid var(--ink)',
-              borderRadius: 3,
-            }}
-          >
-            <span
-              style={{
-                fontFamily: 'var(--font-display)',
-                fontSize: 38,
-                fontWeight: 700,
-                letterSpacing: '-0.025em',
-                color: 'var(--ink)',
-                lineHeight: 1,
-              }}
-            >
-              {priceLabel}
-            </span>
-            <span
-              className="pb-1"
-              style={{ fontSize: 12, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', letterSpacing: '0.04em' }}
-            >
-              {t('priceUnit')}
-            </span>
+          <div className="commerce-craft-body">
+          <div className="commerce-craft-price-card">
+            <span className="commerce-craft-price">{priceLabel}</span>
+            <span className="commerce-craft-price-note">{t('priceUnit')}</span>
           </div>
 
-          <ul className="mt-5 space-y-2.5" style={{ fontSize: 13, color: 'var(--ink)' }}>
+          <ul className="commerce-craft-features">
             {[t('bullet1'), t('bullet2'), t('bullet3'), provider === 'creem' ? t('bulletPaymentCreem') : t('bulletPaymentPaddle')].map((line) => (
-              <li key={line} className="flex items-start gap-2">
-                <I.Check size={14} sw={2.4} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--ok)' }} />
+              <li key={line}>
+                <span className="commerce-craft-check"><I.Check size={14} sw={2.2} /></span>
                 <span>{line}</span>
               </li>
             ))}
           </ul>
 
           {(statusMsg || error) && (
-            <div
-              className="mt-4 px-3 py-2"
-              style={{
-                background: 'var(--paper-2)',
-                border: '1.4px solid var(--ink)',
-                borderRadius: 3,
-                fontSize: 12,
-                fontFamily: 'var(--font-mono)',
-              }}
-            >
-              {statusMsg && <div style={{ color: 'var(--ink)' }}>{statusMsg}</div>}
-              {error && <div className="mt-1" style={{ color: 'var(--rec)' }}>{t('errorPrefix', { message: error })}</div>}
+            <div className="commerce-craft-status">
+              {statusMsg && <div>{statusMsg}</div>}
+              {error && <div className="commerce-craft-error">{t('errorPrefix', { message: error })}</div>}
             </div>
           )}
 
-          <div className="mt-6 flex gap-3">
+          <div className="app-craft-modal-actions commerce-craft-actions">
             <button
               onClick={onClose}
               disabled={busy}
-              className="btn-sketch flex-1"
-              style={{ justifyContent: 'center' }}
+              className="app-craft-secondary-button"
             >
               {t('ctaCancel')}
             </button>
             <button
               onClick={() => void handleUnlock()}
               disabled={busy || (provider === 'paddle' && !paddle)}
-              className="btn-sketch btn-sketch-primary"
-              style={{ flex: 1.5, justifyContent: 'center' }}
+              className="app-craft-login commerce-craft-primary"
             >
               <I.Lock size={13} />
               {busy ? t('openingCheckout', { provider: providerLabel }) : t('ctaPay', { price: priceLabel })}
@@ -300,26 +227,17 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
                 onUpgradePro();
               }}
               disabled={busy}
-              className="btn-sketch btn-sketch-hi mt-3 w-full"
-              style={{ justifyContent: 'center' }}
+              className="app-craft-secondary-button commerce-craft-full"
             >
               {t('upgradeAlt', { price: proPriceLabel })}
             </button>
           )}
 
-          <p
-            className="mt-4 text-center"
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: 10,
-              color: 'var(--ink-3)',
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-            }}
-          >
+          <p className="commerce-craft-footnote">
             {t('footer')}
           </p>
         </div>
+      </div>
     </Modal>
   );
 }

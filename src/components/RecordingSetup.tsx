@@ -84,12 +84,12 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
 
   return (
     <div
-      className="fade-in fixed inset-0 z-50 grid place-items-center"
+      className="setup-craft-overlay fade-in fixed inset-0 z-50 grid place-items-center"
       style={{ background: 'var(--overlay)' }}
       onClick={onCancel}
     >
       <div
-        className="max-h-[92vh] max-w-[94vw] overflow-auto"
+        className="setup-craft-card max-h-[92vh] max-w-[94vw] overflow-auto"
         style={{
           width: 760,
           background: 'var(--paper)',
@@ -102,12 +102,12 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
       >
         {/* Header */}
         <div
-          className="flex items-center justify-between"
+          className="setup-craft-header flex items-center justify-between"
           style={{ padding: '20px 28px', borderBottom: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}
         >
           <div>
             <div className="label-mono" style={{ fontSize: 10 }}>// {t('step')}</div>
-            <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em', marginTop: 6 }}>{t('title')}</div>
+            <div className="setup-craft-title" style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em', marginTop: 6 }}>{t('title')}</div>
           </div>
           <button
             type="button"
@@ -310,7 +310,7 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
 
         {/* Footer */}
         <div
-          className="flex items-center justify-between"
+          className="setup-craft-footer flex items-center justify-between"
           style={{ background: 'var(--paper-2)', borderTop: '1.5px solid var(--ink)', padding: '16px 28px' }}
         >
           <div
@@ -427,4 +427,3 @@ function Segmented({ value, onChange, options }: { value: string; onChange: (v: 
     </div>
   );
 }
-

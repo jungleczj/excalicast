@@ -21,6 +21,17 @@ playwright/.cache/
 public/excalidraw-assets/
 public/excalidraw-assets-dev/
 
+# Landing Craft pass: keep generated leftovers out of commits.
+# The page intentionally references Hero vector art, one HD recording mock, and six original persona PNGs.
+public/landing/hero-product.png
+public/landing/personas/*.png
+!public/landing/personas/female-01.png
+!public/landing/personas/female-05.png
+!public/landing/personas/female-07.png
+!public/landing/personas/male-03.png
+!public/landing/personas/male-06.png
+!public/landing/personas/male-08.png
+
 # 提词器跟读离线模型（大文件，运行 scripts/fetch-vosk-models.sh 生成）
 public/models/vosk/*.tar.gz
 public/models/vosk/.tmp/

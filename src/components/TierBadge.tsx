@@ -8,5 +8,5 @@ import { MonoTag } from '@/components/ui';
 export function TierBadge({ tier }: { tier: 'free' | 'pro' | 'max' }): JSX.Element {
   const label = tier === 'max' ? 'MAX' : tier === 'pro' ? 'PRO' : 'FREE';
   const variant = tier === 'max' ? 'max' : tier === 'pro' ? 'pro' : 'soft';
-  return <MonoTag variant={variant}>{label}</MonoTag>;
+  return <span className="app-craft-tier-badge"><MonoTag variant={variant}>{label}</MonoTag></span>;
 }

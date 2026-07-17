@@ -36,9 +36,9 @@ const navLink: CSSProperties = {
 export async function LegalLayout({ title, lastUpdated, kind, summary, children }: Props): Promise<JSX.Element> {
   const t = await getTranslations('legal');
   return (
-    <div className="flex h-full flex-col" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
+    <div className="app-craft-screen legal-craft-page flex h-full flex-col" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
       {/* Header */}
-      <header className="flex h-16 flex-shrink-0 items-center justify-between px-4 sm:px-10" style={{ background: 'var(--paper)', borderBottom: '2px solid var(--ink)' }}>
+      <header className="legal-craft-header flex h-16 flex-shrink-0 items-center justify-between px-4 sm:px-10" style={{ background: 'var(--paper)', borderBottom: '2px solid var(--ink)' }}>
         <Link href="/" className="flex items-center gap-2.5" style={{ textDecoration: 'none', color: 'var(--ink)' }}>
           <LogoMark size={30} />
           <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 20, letterSpacing: '-0.02em' }}>Excalicast</span>
@@ -55,7 +55,7 @@ export async function LegalLayout({ title, lastUpdated, kind, summary, children 
 
       <main className="flex-1 overflow-auto">
         {/* Doc header */}
-        <section className="px-6 py-10 sm:px-10 lg:px-20" style={{ borderBottom: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}>
+        <section className="legal-craft-hero px-6 py-10 sm:px-10 lg:px-20" style={{ borderBottom: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}>
           <nav aria-label="Breadcrumb" className="mb-3.5 flex items-center gap-2" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-3)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
             <Link href="/" style={{ color: 'var(--ink-3)', textDecoration: 'none' }}>{t('nav.home')}</Link>
             <span aria-hidden>›</span>
@@ -74,10 +74,10 @@ export async function LegalLayout({ title, lastUpdated, kind, summary, children 
         </section>
 
         {/* Prose */}
-        <article className="mx-auto px-6 py-12 sm:px-10" style={{ maxWidth: 820 }}>
+        <article className="legal-craft-article mx-auto px-6 py-12 sm:px-10" style={{ maxWidth: 820 }}>
           <div className="legal-prose">{children}</div>
 
-          <div className="mt-12 text-center" style={{ border: '1.5px solid var(--ink)', background: 'var(--paper)', borderRadius: 4, boxShadow: '3px 3px 0 var(--ink)', padding: 20 }}>
+          <div className="legal-craft-contact mt-12 text-center" style={{ border: '1.5px solid var(--ink)', background: 'var(--paper)', borderRadius: 4, boxShadow: '3px 3px 0 var(--ink)', padding: 20 }}>
             <p style={{ color: 'var(--ink-2)', fontSize: 13, margin: 0 }}>{t('questionsCta')}</p>
             <a href="mailto:support@excalicast.cn" className="mt-1 inline-block" style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, color: 'var(--ink)', borderBottom: '1.5px solid var(--hi)', textDecoration: 'none' }}>
               support@excalicast.cn

@@ -61,7 +61,6 @@ const FirstRunGuide = dynamic(() => import('@/components/onboarding/FirstRunGuid
 
 export default function HomePage(): JSX.Element {
   const t = useTranslations('workspace');
-  const ti = useTranslations('appIntro');
   const router = useRouter();
   const subscription = useSubscription();
   const [state, setState] = useState<'idle' | 'framing' | 'recording' | 'paused' | 'processing'>('idle');
@@ -97,6 +96,7 @@ export default function HomePage(): JSX.Element {
   const [draggingBar, setDraggingBar] = useState(false);
 
   const sessionRef = useRef<SessionHandle | null>(null);
+  const stoppingRef = useRef(false);
   const changeRef = useRef<WhiteboardChangeFn | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const workspaceRootRef = useRef<HTMLDivElement | null>(null);
@@ -121,6 +121,7 @@ export default function HomePage(): JSX.Element {
   // 首次访问引导：仅当未看过时显示（localStorage 记忆）
   useEffect(() => {
     try {
+      if (new URLSearchParams(window.location.search).get('login') === '1') return;
       if (!localStorage.getItem('excalicast.seenAppIntro')) setShowIntro(true);
     } catch { /* private mode */ }
   }, []);
@@ -575,7 +576,8 @@ export default function HomePage(): JSX.Element {
 
   const handleStop = useCallback(async () => {
     const s = sessionRef.current;
-    if (!s) return;
+    if (!s || stoppingRef.current) return;
+    stoppingRef.current = true;
     setState('processing');
     try {
       const meta = await s.stop();
@@ -602,7 +604,6 @@ export default function HomePage(): JSX.Element {
       setHasAudio(false);
       setAudioMuted(false);
       setCameraMuted(false);
-      setState('idle');
       router.push(`/export/${meta.id}` as never);
     } catch (err) {
       alert(t('stopFailed', { message: err instanceof Error ? err.message : 'unknown' }));
@@ -610,6 +611,8 @@ export default function HomePage(): JSX.Element {
       changeRef.current = null;
       laserPointRef.current = null;
       setState('idle');
+    } finally {
+      stoppingRef.current = false;
     }
   }, [router, t, setupConfig, customOutput]);
 
@@ -635,10 +638,10 @@ export default function HomePage(): JSX.Element {
   const isRecording = state === 'recording' || state === 'paused';
 
   return (
-    <div className="flex h-full flex-col" ref={workspaceRootRef}>
+    <div className="app-craft-screen workspace-craft-shell flex h-full flex-col" ref={workspaceRootRef}>
       {/* AppHeader 全程可见，以便录制时被 shell capturer 抓到（之前会在录制时隐藏） */}
       <AppHeader tier={subscription.tier} onUpgradePro={() => setProUpgradeOpen(true)} />
-      <div className="relative flex-1 overflow-hidden" ref={canvasAreaRef}>
+      <div className="workspace-craft-canvas relative flex-1 overflow-hidden" ref={canvasAreaRef}>
         <Whiteboard
           onChangeRef={changeRef}
           onApiReady={(api) => { excalidrawApiRef.current = api; }}
@@ -716,6 +719,7 @@ export default function HomePage(): JSX.Element {
               onToggleLaser={handleToggleLaser}
               onToggleZoom={() => setZoomMode((v) => !v)}
               onToggleTeleprompter={() => setTeleprompterOpen((v) => !v)}
+              onOpenTemplates={() => setLibraryOpen(true)}
               onStart={handleStart}
               onStop={handleStop}
               onDiscard={handleDiscard}
@@ -751,7 +755,7 @@ export default function HomePage(): JSX.Element {
           type="button"
           onClick={() => setLibraryOpen((o) => !o)}
           title={t('libraryToggle')}
-          className="rb-no-record fixed right-3 top-16 z-30 grid place-items-center"
+          className="workspace-craft-floating-button rb-no-record fixed right-3 top-16 z-30 grid place-items-center"
           style={{
             width: 34,
             height: 34,
@@ -794,9 +798,9 @@ export default function HomePage(): JSX.Element {
 
         {/* 开录倒计时 3-2-1 */}
         {countdown !== null && countdown > 0 && (
-          <div className="fade-in fixed inset-0 z-[60] grid place-items-center" style={{ background: 'rgba(26,26,26,0.55)' }}>
+          <div className="workspace-craft-countdown fade-in fixed inset-0 z-[60] grid place-items-center" style={{ background: 'rgba(26,26,26,0.55)' }}>
             <div
-              className="grid place-items-center"
+              className="workspace-craft-countdown-ring grid place-items-center"
               style={{
                 width: 140, height: 140, borderRadius: '50%',
                 background: 'var(--paper)', border: '2px solid var(--ink)',
@@ -805,18 +809,6 @@ export default function HomePage(): JSX.Element {
               }}
             >
               {countdown}
-            </div>
-          </div>
-        )}
-
-        {/* 空画布提示：idle + 画布空 + 引导已关 时显示，不阻挡作画 */}
-        {!showIntro && isCanvasEmpty && state === 'idle' && (
-          <div className="rb-no-record pointer-events-none absolute inset-0 z-20 grid place-items-center" style={{ paddingBottom: 140 }}>
-            <div className="fade-in flex flex-col items-center gap-3 text-center">
-              <div style={{ fontFamily: 'var(--font-hand)', fontSize: 22, color: 'var(--ink-3)' }}>{ti('emptyHint')}</div>
-              <button type="button" className="btn-sketch btn-stamp pointer-events-auto" onClick={() => setLibraryOpen(true)}>
-                <I.Library size={14} /> {ti('emptyCta')}
-              </button>
             </div>
           </div>
         )}
@@ -856,7 +848,7 @@ function FramingBar({
 }): JSX.Element {
   return (
     <div
-      className="flex items-center gap-3"
+      className="workspace-craft-framing flex items-center gap-3"
       style={{
         padding: '10px 14px',
         background: 'var(--paper)',

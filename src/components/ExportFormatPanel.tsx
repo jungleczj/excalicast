@@ -22,8 +22,8 @@ const RES_NAME: Record<ExportResolution, { zh: string; en: string }> = {
   sd: { zh: '标清 480p', en: 'SD 480p' },
   hd: { zh: '高清 720p', en: 'HD 720p' },
   fhd: { zh: '全高清 1080p', en: 'Full HD 1080p' },
-  qhd: { zh: '2K 1440p', en: '2K 1440p' },
-  uhd: { zh: '4K 2160p', en: '4K 2160p' },
+  qhd: { zh: '2K 超清 1440p', en: '2K QHD 1440p' },
+  uhd: { zh: '4K 超高清 2160p', en: '4K UHD 2160p' },
 };
 const RES_ORDER: ExportResolution[] = ['sd', 'hd', 'fhd', 'qhd', 'uhd'];
 
@@ -75,7 +75,7 @@ function Row({ label, value, onChange, options }: {
   label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[];
 }): JSX.Element {
   return (
-    <div className="flex items-center justify-between" style={{ padding: '6px 12px 6px 14px', border: '1.3px solid var(--ink)', borderRadius: 3, background: 'var(--paper)' }}>
+    <div className="editor-craft-setting-row flex items-center justify-between" style={{ padding: '6px 12px 6px 14px', border: '1.3px solid var(--ink)', borderRadius: 3, background: 'var(--paper)' }}>
       <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--ink-2)', fontWeight: 600 }}>{label}</span>
       <select
         value={value}

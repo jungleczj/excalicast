@@ -132,7 +132,7 @@ export function FooterBar({
   if (variant === 'minimal') {
     return (
       <footer
-        className="flex flex-col items-start gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-10"
+        className="footerbar-craft footerbar-craft-minimal flex flex-col items-start gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-10"
         style={{ width: '100%', background: 'var(--foot-bg)', borderTop: '1.5px solid var(--ink)', fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--foot-dim)', letterSpacing: '0.06em', textTransform: 'uppercase' }}
       >
         <div className="flex items-center gap-3" style={{ color: 'var(--foot-text)' }}>
@@ -148,7 +148,7 @@ export function FooterBar({
   }
 
   return (
-    <footer style={{ width: '100%', background: 'var(--foot-bg)', borderTop: '2px solid var(--ink)', color: 'var(--foot-text)', position: 'relative' }}>
+    <footer className="footerbar-craft" style={{ width: '100%', background: 'var(--foot-bg)', borderTop: '2px solid var(--ink)', color: 'var(--foot-text)', position: 'relative' }}>
       {/* highlighter keyline seam */}
       <div style={{ position: 'absolute', top: -2, left: 0, right: 0, height: 2, background: 'var(--foot-accent)', opacity: 0.9, pointerEvents: 'none' }} />
       {/* warm dot grid */}
@@ -159,7 +159,7 @@ export function FooterBar({
         {/* brand block */}
         <div className="col-span-2 sm:col-span-3 lg:col-span-1">
           <div className="mb-3.5 flex items-center gap-2.5">
-            <div style={{ width: 36, height: 36, borderRadius: 4, background: 'var(--paper)', border: '1.5px solid var(--ink)', boxShadow: '2px 2px 0 var(--ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink)' }}>
+            <div className="footerbar-craft-logo" style={{ width: 36, height: 36, borderRadius: 4, background: 'var(--paper)', border: '1.5px solid var(--ink)', boxShadow: '2px 2px 0 var(--ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink)' }}>
               <LogoMark size={24} />
             </div>
             <div>
@@ -173,7 +173,7 @@ export function FooterBar({
             <span className="foot-chip">GDPR ready</span>
             <span className="foot-chip">Local-first</span>
           </div>
-          <div className="tape-wiggle float-tilt mt-5 inline-block" style={{ padding: '6px 12px', background: 'var(--hi)', border: '1.3px solid var(--ink)', fontFamily: 'var(--font-hand)', fontSize: 18, fontWeight: 600, transform: 'rotate(-1.5deg)', boxShadow: '2px 2px 0 var(--ink)', color: 'var(--ink)', ['--tilt' as string]: '-1.5deg', ['--rot' as string]: '-1.5deg' } as CSSProperties}>
+          <div className="footerbar-craft-note tape-wiggle float-tilt mt-5 inline-block" style={{ padding: '6px 12px', background: 'var(--hi)', border: '1.3px solid var(--ink)', fontFamily: 'var(--font-hand)', fontSize: 18, fontWeight: 600, transform: 'rotate(-1.5deg)', boxShadow: '2px 2px 0 var(--ink)', color: 'var(--ink)', ['--tilt' as string]: '-1.5deg', ['--rot' as string]: '-1.5deg' } as CSSProperties}>
             made by humans · in 2026
           </div>
         </div>

@@ -24,6 +24,29 @@ const HOOK_ERROR_PATTERNS = [
   /Hooks can only be called inside the body of a function component/i,
   /change in the order of Hooks/i,
 ];
+const baseOrigin = new URL(process.env.E2E_BASE_URL ?? 'http://localhost:3002').origin;
+
+test.use({
+  locale: 'zh-CN',
+  extraHTTPHeaders: {
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+  },
+});
+
+test.beforeEach(async ({ context, page }) => {
+  await context.addCookies([
+    {
+      name: 'NEXT_LOCALE',
+      value: 'zh',
+      url: baseOrigin,
+      sameSite: 'Lax',
+    },
+  ]);
+
+  await page.addInitScript(() => {
+    window.localStorage.setItem('excalicast.seenAppIntro', '1');
+  });
+});
 
 function attachConsoleCollector(page: Page): { errors: string[] } {
   const errors: string[] = [];

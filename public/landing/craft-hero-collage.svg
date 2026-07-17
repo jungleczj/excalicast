@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 820" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <filter id="grain" x="-12%" y="-12%" width="124%" height="124%">
+      <feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="4" seed="47"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer>
+        <feFuncA type="table" tableValues="0 .19"/>
+      </feComponentTransfer>
+    </filter>
+    <filter id="paper-lift" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="9" stdDeviation="9" flood-color="#1b3444" flood-opacity=".10"/>
+    </filter>
+    <filter id="cloud-blur" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+    <pattern id="half-dot" width="9" height="9" patternUnits="userSpaceOnUse">
+      <circle cx="2.15" cy="2.15" r="1.15" fill="#ffffff" opacity=".92"/>
+    </pattern>
+    <pattern id="paper-dot-dark" width="13" height="13" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r=".75" fill="#1f2225" opacity=".08"/>
+    </pattern>
+    <pattern id="paper-lines" width="72" height="34" patternUnits="userSpaceOnUse">
+      <path d="M0 22H72" stroke="#a88f31" stroke-width="1.2" opacity=".42"/>
+      <path d="M36 0V34" stroke="#a88f31" stroke-width=".8" opacity=".12"/>
+    </pattern>
+    <pattern id="grid" width="42" height="42" patternUnits="userSpaceOnUse">
+      <path d="M0 0H42M0 0V42" stroke="#1f2225" stroke-width="1" opacity=".13"/>
+    </pattern>
+    <linearGradient id="sky" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#83cff0"/>
+      <stop offset=".48" stop-color="#bee7f6"/>
+      <stop offset="1" stop-color="#fdf8ed"/>
+    </linearGradient>
+    <linearGradient id="sand" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#f4dfbc"/>
+      <stop offset="1" stop-color="#e8cda0"/>
+    </linearGradient>
+    <linearGradient id="lavender" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#d9c5ef"/>
+      <stop offset="1" stop-color="#bfa4dd"/>
+    </linearGradient>
+    <linearGradient id="yellow" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#fff2a0"/>
+      <stop offset="1" stop-color="#f2d955"/>
+    </linearGradient>
+    <linearGradient id="mint" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#d7f1d5"/>
+      <stop offset="1" stop-color="#accb9f"/>
+    </linearGradient>
+
+    <path id="left-cloud" d="M-28 120c28-40 78-58 133-48 15-31 49-53 93-57 48-4 84 13 112 48 29-20 70-24 115-13 50 12 87 43 113 88 41-3 77 8 108 32 28 22 45 48 50 80-62 9-115 8-160-3-44 16-97 15-158-3-47 19-100 17-159-6-44 15-93 12-148-8-37 10-75 8-114-6-32-12-55-29-71-52 14-20 33-37 58-52z"/>
+    <path id="right-cloud" d="M1262 154c25-52 72-80 141-82 18-30 53-50 105-59 55-9 101 3 137 36 43-27 99-30 153-8 49 20 79 55 90 105 47 1 87 19 119 56 26 30 37 63 31 96-55 10-104 8-148-7-44 16-95 14-154-6-57 20-113 17-169-10-48 18-101 17-158-4-45 12-89 10-131-5-31-11-54-27-68-47 11-24 28-44 52-61z"/>
+    <clipPath id="left-cloud-clip"><use href="#left-cloud"/></clipPath>
+    <clipPath id="right-cloud-clip"><use href="#right-cloud"/></clipPath>
+
+    <path id="left-sand" d="M-88 234l42-54 41-12 34-42 53-28 45 0 42-24 62-10 44 24 43 8 34 36 50 20 48 34 44 22 42 44 44 22 28 58-28 46-54 26-52-8-42 20-59-4-40 23-62-8-44 18-60-4-48 20-52-5-53-25-43-3-36-30z"/>
+    <clipPath id="left-sand-clip"><use href="#left-sand"/></clipPath>
+    <path id="left-lavender" d="M-48 426l50-52 54-8 42-38 58-24 60 5 46-22 62-2 50 18 54-5 52 22 32 45 52 24 46 42 40 58-12 86-744 0z"/>
+    <clipPath id="left-lavender-clip"><use href="#left-lavender"/></clipPath>
+    <path id="left-yellow" d="M-18 610l54-18 42 6 50-16 44 3 46-12 52 8 40-18 48 4 52-12 36 13 28 56v196H-18z"/>
+    <clipPath id="left-yellow-clip"><use href="#left-yellow"/></clipPath>
+
+    <path id="right-sand" d="M1238 282l50-42 32-40 52-28 42-4 38-36 54-28 50 4 42-24 58-10 44 20 43 2 34 30 45 18 42 42 42 28 40 54 32 26 38 64-6 462h-780z"/>
+    <clipPath id="right-sand-clip"><use href="#right-sand"/></clipPath>
+    <path id="right-yellow" d="M1118 540l58-22 46 4 48-20 58-8 44-26 56-10 52-25 58-8 56-24 46-4 52-20 54 8 32 438h-692z"/>
+    <clipPath id="right-yellow-clip"><use href="#right-yellow"/></clipPath>
+    <path id="right-mint" d="M1036 580l52-24 36-34 50-18 38-34 56-22 56 5 42 22 50 5 36 34 42 30 34 52 48 28 36 58 28 138h-612z"/>
+    <clipPath id="right-mint-clip"><use href="#right-mint"/></clipPath>
+    <path id="right-black" d="M1078 520l52-20 48 4 42-22 58-3 44-26 54-2 48 19 48-11 42 14 42-7 42 18 36 4 50 34 18 292h-664z"/>
+    <clipPath id="right-black-clip"><use href="#right-black"/></clipPath>
+
+    <path id="white-ridge-a" d="M-80 490l58-8 48 4 70-20 58 5 64-18 62 6 78-24 58 2 80-28 56 6 64-18 60 8 74-24 58 6 72-18 60 4 66-14 52 10 68-12 58 18 64-8 72 22 60-2 74 28 64 8 72 22 70 16 0 116H-80z"/>
+    <path id="white-ridge-b" d="M-90 566l66-14 48 6 72-12 58 12 64 20 58 4 68 22 58 8 70 24 64 6 82 24 74 8 80 28 78-3 74-18 68-5 76-28 60-8 70-24 64-2 62-20 72 6 50 20v202H-90z"/>
+  </defs>
+
+  <rect width="1600" height="820" rx="28" fill="url(#sky)"/>
+  <rect width="1600" height="820" rx="28" filter="url(#grain)" opacity=".72"/>
+
+  <g opacity=".18" fill="none" stroke="#1f2225" stroke-width="1.2">
+    <path d="M92 454c-4-90 49-157 139-176 78-17 144 14 204-11 48-20 91-25 132-13"/>
+    <path d="M520 258h232v318H520z"/>
+    <path d="M680 234c128 21 213 104 242 230 15 67 5 130-28 188"/>
+    <path d="M1078 290h372v140h-108v258h-264z"/>
+    <path d="M-22 448c0-115 72-190 184-190h186v126H202c-50 0-80 28-80 72s30 72 80 72h168"/>
+  </g>
+
+  <g filter="url(#cloud-blur)" opacity=".94">
+    <use href="#left-cloud" fill="#fff"/>
+    <use href="#right-cloud" fill="#fff"/>
+  </g>
+  <g clip-path="url(#left-cloud-clip)" opacity=".86">
+    <rect x="-40" y="30" width="760" height="260" fill="url(#half-dot)"/>
+  </g>
+  <g clip-path="url(#right-cloud-clip)" opacity=".84">
+    <rect x="1220" y="10" width="710" height="320" fill="url(#half-dot)"/>
+  </g>
+
+  <use href="#left-sand" fill="url(#sand)" opacity=".94" filter="url(#paper-lift)"/>
+  <g clip-path="url(#left-sand-clip)" opacity=".40"><rect x="-90" y="60" width="730" height="360" filter="url(#grain)"/></g>
+  <use href="#left-lavender" fill="url(#lavender)" opacity=".82" filter="url(#paper-lift)"/>
+  <g clip-path="url(#left-lavender-clip)" opacity=".45"><rect x="-60" y="270" width="760" height="330" filter="url(#grain)"/></g>
+  <use href="#left-yellow" fill="url(#yellow)" opacity=".70" filter="url(#paper-lift)"/>
+  <g clip-path="url(#left-yellow-clip)" opacity=".62"><rect x="-20" y="540" width="560" height="280" fill="url(#paper-lines)"/></g>
+
+  <use href="#right-sand" fill="url(#sand)" opacity=".95" filter="url(#paper-lift)"/>
+  <g clip-path="url(#right-sand-clip)" opacity=".42"><rect x="1190" y="80" width="860" height="740" filter="url(#grain)"/></g>
+  <use href="#right-yellow" fill="url(#yellow)" opacity=".88" filter="url(#paper-lift)"/>
+  <g clip-path="url(#right-yellow-clip)" opacity=".78"><rect x="1100" y="370" width="720" height="450" fill="url(#paper-lines)"/></g>
+  <use href="#right-mint" fill="url(#mint)" opacity=".55" filter="url(#paper-lift)"/>
+  <g clip-path="url(#right-mint-clip)" opacity=".55"><rect x="1000" y="438" width="700" height="382" fill="url(#grid)"/></g>
+  <use href="#right-black" fill="#171819" opacity=".88" filter="url(#paper-lift)"/>
+  <g clip-path="url(#right-black-clip)" opacity=".16"><rect x="1040" y="430" width="700" height="390" filter="url(#grain)"/></g>
+
+  <use href="#white-ridge-a" fill="#fffdf8" opacity=".92"/>
+  <g opacity=".34"><use href="#white-ridge-a" fill="url(#paper-dot-dark)"/></g>
+  <use href="#white-ridge-b" fill="#fffdf8" opacity=".96"/>
+
+  <path d="M442 344l62-18 62 9 70-24 62 8 74-20 74 4 66-18 76 18 78-2 82 26 72 6 84 28 92 14 84 42 82 36v364H420z" fill="#eef7fa" opacity=".40"/>
+  <g opacity=".18" fill="url(#paper-dot-dark)">
+    <rect x="480" y="300" width="1030" height="280"/>
+  </g>
+</svg>

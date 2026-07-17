@@ -48,7 +48,7 @@ export function LibraryItemCard({ item, onDelete, deleteTooltip }: Props): JSX.E
     <div
       draggable
       onDragStart={handleDragStart}
-      className="group relative"
+      className="library-item-craft-card group relative"
       style={{
         background: 'var(--paper)',
         border: '1.5px solid var(--ink)',
@@ -62,6 +62,7 @@ export function LibraryItemCard({ item, onDelete, deleteTooltip }: Props): JSX.E
     >
       {dataUrl ? (
         <img
+          className="library-item-craft-preview"
           src={dataUrl}
           alt={item.name ?? ''}
           style={{
@@ -75,6 +76,7 @@ export function LibraryItemCard({ item, onDelete, deleteTooltip }: Props): JSX.E
         />
       ) : (
         <div
+          className="library-item-craft-preview"
           style={{
             width: '100%',
             aspectRatio: '1 / 1',
@@ -89,7 +91,7 @@ export function LibraryItemCard({ item, onDelete, deleteTooltip }: Props): JSX.E
           onDelete(item.id);
         }}
         title={deleteTooltip}
-        className="absolute opacity-0 transition group-hover:opacity-100"
+        className="library-item-craft-delete absolute opacity-0 transition group-hover:opacity-100"
         style={{
           top: 4,
           right: 4,

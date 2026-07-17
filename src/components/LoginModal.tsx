@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { createClient } from '@/lib/supabase/client';
 import { Modal } from '@/components/ui';
 import { Link } from '@/i18n/navigation';
+import { LogoMark } from '@/components/icons';
 
 interface Props {
   open: boolean;
@@ -72,31 +73,36 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
   };
 
   return (
-    <Modal open={open} onClose={onClose} width={440}>
+    <Modal open={open} onClose={onClose} width={620}>
         <div
+          className="app-craft-modal-header login-craft-header"
           style={{
-            padding: '24px 28px',
+            padding: '48px 54px 28px',
             background: 'var(--hi-soft)',
             borderBottom: '1.6px solid var(--ink)',
             position: 'relative',
           }}
         >
-          <div className="label-mono" style={{ fontSize: 10 }}>// SIGN IN</div>
+          <div className="login-craft-brand mx-auto flex items-center justify-center gap-3">
+            <LogoMark size={56} />
+            <span>Excalicast</span>
+          </div>
+          <div className="label-mono mt-8 text-center" style={{ fontSize: 10 }}>// SIGN IN</div>
           <h2
-            className="mt-2"
+            className="app-craft-modal-title login-craft-title mt-2 text-center"
             style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--ink)', margin: 0, lineHeight: 1.2 }}
           >
             {t('title')}
           </h2>
-          <p className="mt-1" style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5 }}>{t('subtitle')}</p>
+          <p className="login-craft-subtitle mx-auto mt-3 text-center" style={{ fontSize: 12.5, color: 'var(--ink-2)', lineHeight: 1.5 }}>{t('subtitle')}</p>
         </div>
 
-        <div className="px-7 pb-6 pt-6">
+        <div className="login-craft-body px-7 pb-6 pt-6">
           <button
             type="button"
             onClick={handleGoogle}
             disabled={busy !== null}
-            className="flex w-full items-center justify-center gap-3"
+            className="app-craft-secondary-button login-craft-google flex w-full items-center justify-center gap-3"
             style={{
               padding: '12px 18px',
               background: 'var(--paper)',
@@ -114,7 +120,7 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
             {t('google')}
           </button>
 
-          <div className="my-5 flex items-center gap-3">
+          <div className="login-craft-divider my-5 flex items-center gap-3">
             <div className="h-px flex-1" style={{ background: 'var(--rule-soft)' }} />
             <span
               style={{
@@ -133,7 +139,7 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
 
           {sentTo ? (
             <div
-              className="px-4 py-4 text-center"
+              className="app-craft-message px-4 py-4 text-center"
               style={{
                 background: 'var(--hi-soft)',
                 border: '1.4px solid var(--ink)',
@@ -172,7 +178,7 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder={t('emailPlaceholder')}
-                className="w-full outline-none transition"
+                className="app-craft-input login-craft-input w-full outline-none transition"
                 style={{
                   padding: '12px 14px',
                   background: 'var(--paper)',
@@ -187,7 +193,7 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
               <button
                 type="submit"
                 disabled={busy !== null || !email}
-                className="btn-sketch btn-sketch-primary w-full"
+                className="app-craft-login login-craft-submit w-full"
                 style={{ justifyContent: 'center', padding: '13px 18px' }}
               >
                 {busy === 'email' ? t('sending') : t('sendMagicLink')}
@@ -197,7 +203,7 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
 
           {error && (
             <div
-              className="mt-3 px-3 py-2"
+              className="app-craft-message library-craft-danger mt-3 px-3 py-2"
               style={{
                 background: 'var(--rec-soft)',
                 border: '1.4px solid var(--rec)',
@@ -213,7 +219,7 @@ export function LoginModal({ open, onClose }: Props): JSX.Element | null {
         </div>
 
         <div
-          className="px-7 py-3.5"
+          className="app-craft-modal-footer login-craft-footer px-7 py-3.5"
           style={{
             borderTop: '1.5px solid var(--ink)',
             background: 'var(--paper-2)',

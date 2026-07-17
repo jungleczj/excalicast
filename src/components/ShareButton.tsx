@@ -85,10 +85,10 @@ export function ShareButton({ recordingId, isMax, onUpgrade }: Props): JSX.Eleme
       </button>
       {msg && (
         <div
-          className="absolute right-0 top-[calc(100%+6px)] z-50 w-64 space-y-2 p-3"
+          className="share-button-craft-popover absolute right-0 top-[calc(100%+6px)] z-50 w-64 space-y-2 p-3"
           style={{ background: 'var(--paper)', border: '1.4px solid var(--rec)', borderRadius: 4, boxShadow: '3px 3px 0 var(--ink)' }}
         >
-          <div style={{ fontSize: 12, color: 'var(--rec)', fontFamily: 'var(--font-mono)', lineHeight: 1.4 }}>{msg}</div>
+          <div className="share-button-craft-message" style={{ fontSize: 12, color: 'var(--rec)', fontFamily: 'var(--font-mono)', lineHeight: 1.4 }}>{msg}</div>
           {needsCloud && (
             <button
               type="button"

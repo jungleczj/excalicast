@@ -373,7 +373,7 @@ export function Teleprompter({ open, onClose, en, embedded = false, autoFollow =
     return (
       <>
       <div
-        className="rb-no-record"
+        className="rb-no-record teleprompter-craft-dock"
         style={embedded ? {
           position: 'relative', width: '100%', height: DOCK_H,
           display: 'flex', alignItems: 'center', gap: 7, padding: '0 10px 0 12px',
@@ -449,7 +449,7 @@ export function Teleprompter({ open, onClose, en, embedded = false, autoFollow =
       </div>
       {/* 实时识别反馈：看得到字＝识别在工作；看不到＋状态非绿＝麦克风/模型问题 */}
       {!embedded && mode === 'voice' && (voiceStatus === 'listening' || voiceStatus === 'loading') && heard && (
-        <div className="rb-no-record" style={{
+        <div className="rb-no-record teleprompter-craft-heard" style={{
           position: 'fixed', top: `calc(env(safe-area-inset-top, 0px) + ${DOCK_H}px + 3px)`,
           ...(dockLeft != null ? { left: dockLeft, transform: 'none' } : { left: '50%', transform: 'translateX(-50%)' }),
           zIndex: 60, maxWidth: 'min(900px, calc(100vw - 24px))', background: 'rgba(8,8,8,0.82)', color: 'rgba(255,255,255,0.72)',
@@ -469,7 +469,7 @@ export function Teleprompter({ open, onClose, en, embedded = false, autoFollow =
         ...(pipWin || embedded ? { position: 'static', width: '100%' } : { position: 'fixed', left: pos.x, top: pos.y, width: PANEL_W, zIndex: 60, borderRadius: 6, boxShadow: '4px 4px 0 rgba(0,0,0,0.25)' }),
         background: `rgba(20,20,20,${opacity})`, border: '1.6px solid var(--ink)', overflow: 'hidden', color: '#fff',
       }}
-      className="rb-no-record"
+      className="rb-no-record teleprompter-craft-panel"
     >
       <div onMouseDown={startDrag} className="flex items-center gap-1.5" style={{ padding: '6px 8px', cursor: (pipWin || embedded) ? 'default' : 'move', background: 'rgba(255,255,255,0.06)', borderBottom: '1px solid rgba(255,255,255,0.12)' }}>
         <I.Text size={13} />

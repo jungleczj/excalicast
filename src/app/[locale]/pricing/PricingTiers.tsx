@@ -4,7 +4,7 @@ import { useState, type JSX } from 'react';
 import { useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
 import { formatPrice } from '@/lib/formatPrice';
-import { MonoTag, TapeLabel } from '@/components/ui';
+import { MonoTag } from '@/components/ui';
 import { TrackedLink } from '@/components/analytics/TrackedLink';
 
 interface Tier {
@@ -62,7 +62,7 @@ export function PricingTiers({
     <>
       {yearlyAvailable && (
         <div className="mb-7 flex flex-wrap items-center justify-center gap-2.5">
-          <div style={{ display: 'inline-flex', padding: 4, border: '1.5px solid var(--ink)', borderRadius: 999, background: 'var(--paper)', boxShadow: '2px 2px 0 var(--ink)' }}>
+          <div className="pricing-craft-billing-toggle" style={{ display: 'inline-flex', padding: 4, border: '1.5px solid var(--ink)', borderRadius: 999, background: 'var(--paper)', boxShadow: '2px 2px 0 var(--ink)' }}>
             {(['monthly', 'yearly'] as const).map((m) => {
               const active = (m === 'yearly') === yearly;
               return (
@@ -70,6 +70,7 @@ export function PricingTiers({
                   key={m}
                   type="button"
                   onClick={() => setYearly(m === 'yearly')}
+                  data-active={active}
                   style={{ padding: '8px 18px', background: active ? 'var(--ink)' : 'transparent', color: active ? 'var(--paper)' : 'var(--ink)', border: 'none', borderRadius: 999, fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer' }}
                 >
                   {t(m)}
@@ -81,20 +82,20 @@ export function PricingTiers({
         </div>
       )}
 
-      <div className="stagger grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" style={{ alignItems: 'start' }}>
+      <div className="pricing-craft-tier-grid stagger grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" style={{ alignItems: 'start' }}>
         {TIERS.map((tier) => {
           const { price, unit } = priceFor(tier.key);
           const features = t.raw(`tiers.${tier.key}.features`) as string[];
           return (
-            <div key={tier.key} className="reveal-up" style={{ position: 'relative', background: tier.color, border: '1.8px solid var(--ink)', borderRadius: 4, boxShadow: tier.primary ? '6px 6px 0 var(--ink)' : '3px 3px 0 var(--ink)', padding: 28, display: 'flex', flexDirection: 'column' }}>
+            <div key={tier.key} className="pricing-craft-tier reveal-up" data-tier={tier.key} data-primary={tier.primary} style={{ position: 'relative', background: tier.color, border: '1.8px solid var(--ink)', borderRadius: 4, boxShadow: tier.primary ? '6px 6px 0 var(--ink)' : '3px 3px 0 var(--ink)', padding: 28, display: 'flex', flexDirection: 'column' }}>
               {tier.primary && (
                 <div style={{ position: 'absolute', top: -16, right: 18 }}>
-                  <TapeLabel rotate={5}>★ {t('tiers.max.badge')}</TapeLabel>
+                  <span className="pricing-craft-badge">★ {t('tiers.max.badge')}</span>
                 </div>
               )}
-              <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>{nameFor(tier.key)}</div>
+              <div className="pricing-craft-tier-name" style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>{nameFor(tier.key)}</div>
               <div style={{ marginTop: 10, marginBottom: 14 }}>
-                <span style={{ fontFamily: 'var(--font-display)', fontSize: 44, fontWeight: 700, letterSpacing: '-0.025em' }}>{price}</span>
+                <span className="pricing-craft-price" style={{ fontFamily: 'var(--font-display)', fontSize: 44, fontWeight: 700, letterSpacing: '-0.025em' }}>{price}</span>
                 <span style={{ marginLeft: 6, fontSize: 13, color: 'var(--ink-2)' }}>{unit}</span>
               </div>
               <p style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.5, margin: 0, marginBottom: 18, minHeight: 60 }}>{t(`tiers.${tier.key}.tagline`)}</p>
@@ -107,7 +108,7 @@ export function PricingTiers({
               >
                 {t(`tiers.${tier.key}.cta`)} <I.ArrowRight size={13} />
               </TrackedLink>
-              <div style={{ height: 1.5, background: 'var(--ink)', opacity: 0.3, marginBottom: 16 }} />
+              <div className="pricing-craft-divider" style={{ height: 1.5, background: 'var(--ink)', opacity: 0.3, marginBottom: 16 }} />
               <div style={{ display: 'grid', gap: 4 }}>
                 {features.map((f, i) => {
                   const on = tier.on[i] ?? true;

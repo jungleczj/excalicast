@@ -149,16 +149,17 @@ export function AspectCropOverlay({ framing, value, onChange, customOutput, onCu
 
   const dim = (l: number, tp: number, w: number, h: number): CSSProperties => ({
     position: 'absolute', left: l, top: tp, width: Math.max(0, w), height: Math.max(0, h),
-    background: 'rgba(245,243,235,0.5)', pointerEvents: 'none', zIndex: 15,
+    background: 'rgba(252,249,244,0.54)', pointerEvents: 'none', zIndex: 15,
   });
 
   const handleStyle: CSSProperties = {
-    position: 'absolute', width: 16, height: 16, background: 'var(--paper)',
-    border: '2px solid var(--ink)', borderRadius: 2, zIndex: 24, pointerEvents: 'auto',
+    position: 'absolute', width: 16, height: 16, background: 'rgba(255,253,248,0.96)',
+    border: '1px solid rgba(84,156,220,0.52)', borderRadius: 999, zIndex: 24, pointerEvents: 'auto',
+    boxShadow: '0 10px 24px rgba(48,38,26,0.10)',
   };
 
   return (
-    <div ref={ref} className="rb-no-record pointer-events-none absolute inset-0 z-20">
+    <div ref={ref} className="crop-craft-overlay rb-no-record pointer-events-none absolute inset-0 z-20">
       {frame && size && (
         <>
           {/* 框外蒙层 */}
@@ -169,9 +170,10 @@ export function AspectCropOverlay({ framing, value, onChange, customOutput, onCu
 
           {/* 虚线框（纯视觉，不拦截点击 —— 保证框内作画/工具栏可用） */}
           <div
+            className="crop-craft-frame"
             style={{
               position: 'absolute', left: frame.x, top: frame.y, width: frame.w, height: frame.h,
-              border: '2px dashed var(--ink)', borderRadius: 3, zIndex: 20,
+              border: '1.5px dashed rgba(84,156,220,0.74)', borderRadius: 18, zIndex: 20,
               pointerEvents: 'none', background: 'transparent',
             }}
           />
@@ -198,8 +200,8 @@ export function AspectCropOverlay({ framing, value, onChange, customOutput, onCu
             { c: 'br' as Corner, left: frame.x + frame.w - 10, top: frame.y + frame.h - 10, path: 'M16 0 L16 16 L0 16', cursor: 'nwse-resize' },
           ]).map((c) => (
             <div key={c.c}>
-              <svg width="18" height="18" style={{ position: 'absolute', left: c.left, top: c.top, zIndex: 22, pointerEvents: 'none' }}>
-                <path d={c.path} stroke="var(--ink)" strokeWidth="2.4" fill="none" strokeLinecap="round" />
+              <svg className="crop-craft-corner" width="18" height="18" style={{ position: 'absolute', left: c.left, top: c.top, zIndex: 22, pointerEvents: 'none' }}>
+                <path d={c.path} stroke="rgba(84,156,220,0.88)" strokeWidth="2.2" fill="none" strokeLinecap="round" />
               </svg>
               {interactive && (
                 <div
@@ -217,6 +219,7 @@ export function AspectCropOverlay({ framing, value, onChange, customOutput, onCu
           {/* 比例徽标：预设始终显示；Custom 非取景态显示折叠徽标 */}
           {(!isCustom || !interactive) && (
             <div
+              className="crop-craft-badge"
               style={{
                 position: 'absolute', left: frame.x + 12, top: frame.y + 12,
                 padding: '4px 10px', background: 'var(--hi)', border: '1.4px solid var(--ink)', borderRadius: 2,
@@ -232,7 +235,7 @@ export function AspectCropOverlay({ framing, value, onChange, customOutput, onCu
           {/* Custom 框旁 W×H 输入：仅取景态可调 */}
           {isCustom && interactive && (
             <div
-              className="flex items-center"
+              className="crop-craft-dim-popover flex items-center"
               style={{
                 position: 'absolute',
                 left: Math.min(size.w - 196, frame.x + frame.w + 8),
@@ -257,6 +260,7 @@ function DimInput({ label, value, onCommit }: { label: string; value: number; on
     <label className="flex flex-col" style={{ gap: 2 }}>
       <span className="label-mono" style={{ fontSize: 8 }}>{label}</span>
       <input
+        className="crop-craft-dim-input"
         type="number"
         min={120}
         max={4096}

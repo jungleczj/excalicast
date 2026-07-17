@@ -189,12 +189,12 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
 
   return (
     <div
-      className="fade-in relative flex w-full flex-col p-6"
+      className="subtitle-craft-panel fade-in relative flex w-full flex-col p-6"
       style={{ background: 'var(--paper)', border: '1.6px solid var(--ink)', borderRadius: 4, boxShadow: 'var(--hard)' }}
     >
         <div className="flex items-center gap-3 mb-3">
           <div
-            className="grid h-12 w-12 place-items-center"
+            className="subtitle-craft-icon grid h-12 w-12 place-items-center"
             style={{ background: 'var(--hi)', border: '1.6px solid var(--ink)', borderRadius: 4, color: 'var(--ink)' }}
           >
             <I.Subtitles size={22} />
@@ -218,7 +218,7 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
 
         {(phase === 'uploading' || phase === 'pending' || phase === 'running') && (
           <div
-            className="fade-in mt-2 flex items-center gap-3 p-3"
+            className="subtitle-craft-status fade-in mt-2 flex items-center gap-3 p-3"
             style={{ border: '1.4px solid var(--ink)', background: 'var(--paper-2)', borderRadius: 3 }}
           >
             <span
@@ -237,12 +237,12 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
         {phase === 'done' && (
           <>
             {mockReason && (
-              <div className="mt-2 px-3 py-2" style={{ background: 'var(--hi-soft)', border: '1.4px solid var(--ink)', borderRadius: 3, fontSize: 11, color: 'var(--ink)' }}>
+              <div className="subtitle-craft-notice mt-2 px-3 py-2" style={{ background: 'var(--hi-soft)', border: '1.4px solid var(--ink)', borderRadius: 3, fontSize: 11, color: 'var(--ink)' }}>
                 ⚠️ {mockReason}
               </div>
             )}
             {hasPersistedSrt && (
-              <div className="mt-2 px-3 py-2" style={{ background: 'var(--pro)', border: '1.4px solid var(--ink)', borderRadius: 3, fontSize: 12, color: 'var(--ink)' }}>
+              <div className="subtitle-craft-notice is-success mt-2 px-3 py-2" style={{ background: 'var(--pro)', border: '1.4px solid var(--ink)', borderRadius: 3, fontSize: 12, color: 'var(--ink)' }}>
                 {t('savedHint')}
               </div>
             )}
@@ -263,7 +263,7 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
               </div>
             </div>
             <pre
-              className="mt-2 flex-1 overflow-auto p-3 font-mono whitespace-pre-wrap"
+              className="subtitle-craft-preview mt-2 flex-1 overflow-auto p-3 font-mono whitespace-pre-wrap"
               style={{ border: '1.4px solid var(--ink)', background: 'var(--paper-2)', borderRadius: 3, fontSize: 11, lineHeight: 1.6, color: 'var(--ink)' }}
             >
               {srt}
@@ -282,7 +282,7 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
         )}
 
         {phase === 'failed' && (
-          <div className="mt-2 p-3" style={{ background: 'var(--rec-soft)', border: '1.4px solid var(--rec)', borderRadius: 3, fontSize: 12, color: 'var(--rec)' }}>
+          <div className="subtitle-craft-error mt-2 p-3" style={{ background: 'var(--rec-soft)', border: '1.4px solid var(--rec)', borderRadius: 3, fontSize: 12, color: 'var(--rec)' }}>
             <div className="font-semibold mb-1">{t('failedTitle')}</div>
             <div>{describeError(error, t as (key: string) => string)}</div>
             <button onClick={() => void startJob()} className="btn-sketch mt-3" style={{ padding: '5px 10px', fontSize: 11 }}>

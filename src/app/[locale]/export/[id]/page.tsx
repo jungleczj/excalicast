@@ -214,8 +214,8 @@ export default function EditorRecordingPage(): JSX.Element {
   return (
     <Shell>
       {/* Editor top bar */}
-      <div className="flex h-14 flex-shrink-0 items-center gap-3 px-4 sm:px-6" style={{ borderBottom: '1.8px solid var(--ink)', background: 'var(--paper)' }}>
-        <Link href="/library" className="grid h-8 w-8 place-items-center" style={{ border: '1.4px solid var(--ink)', background: 'var(--paper)', borderRadius: 3, color: 'var(--ink)' }} aria-label={en ? 'Back' : '返回'}>
+      <div className="editor-craft-topbar flex h-14 flex-shrink-0 items-center gap-3 px-4 sm:px-6" style={{ borderBottom: '1.8px solid var(--ink)', background: 'var(--paper)' }}>
+        <Link href="/library" className="editor-craft-back grid h-8 w-8 place-items-center" style={{ border: '1.4px solid var(--ink)', background: 'var(--paper)', borderRadius: 3, color: 'var(--ink)' }} aria-label={en ? 'Back' : '返回'}>
           <I.ChevronLeft size={14} />
         </Link>
         <LogoMark size={26} />
@@ -242,13 +242,13 @@ export default function EditorRecordingPage(): JSX.Element {
         </div>
       )}
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="editor-craft-body flex flex-1 overflow-hidden">
         {/* Left: player + timeline */}
-        <div className="flex flex-1 flex-col overflow-auto p-6" style={{ borderRight: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}>
+        <div className="editor-craft-main flex flex-1 flex-col overflow-auto p-6" style={{ borderRight: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}>
           {/* 预览 + 时间轴 + 删除 共用全宽列：填满左列、两者等宽对齐 */}
           <div className="flex w-full flex-1 flex-col">
           <div className="flex flex-1 items-center justify-center">
-            <div className="w-full" style={{ ...CARD, padding: 14 }}>
+            <div className="editor-craft-card editor-craft-preview-shell w-full" style={{ ...CARD, padding: 0 }}>
               <ExportPreview
                 recordingId={id}
                 metadata={meta}
@@ -288,7 +288,7 @@ export default function EditorRecordingPage(): JSX.Element {
           </div>
 
           <div className="mt-4 flex justify-end">
-            <button onClick={handleDelete} className="btn-sketch" style={{ padding: '7px 12px', fontSize: 10, color: 'var(--rec)', borderColor: 'var(--rec)' }}>
+            <button onClick={handleDelete} className="editor-craft-delete btn-sketch" style={{ padding: '7px 12px', fontSize: 10, color: 'var(--rec)', borderColor: 'var(--rec)' }}>
               <I.Trash size={12} /> {en ? 'Delete recording' : '删除录制'}
             </button>
           </div>
@@ -296,14 +296,15 @@ export default function EditorRecordingPage(): JSX.Element {
         </div>
 
         {/* Right: tabbed panel */}
-        <aside className="flex-shrink-0 overflow-y-auto p-6" style={{ width: 420, background: 'var(--paper)' }}>
-          <div className="mb-5 flex gap-1" style={{ borderBottom: '1.5px solid var(--ink)' }}>
+        <aside className="editor-craft-side flex-shrink-0 overflow-y-auto p-6" style={{ width: 420, background: 'var(--paper)' }}>
+          <div className="editor-craft-tabs mb-5 flex gap-1" style={{ borderBottom: '1.5px solid var(--ink)' }}>
             {tabs.map((tb) => {
               const active = tab === tb.id;
               return (
                 <button
                   key={tb.id}
                   type="button"
+                  data-active={active}
                   onClick={() => setTab(tb.id)}
                   className="press"
                   style={{
@@ -337,9 +338,9 @@ export default function EditorRecordingPage(): JSX.Element {
 }
 
 const CARD: React.CSSProperties = {
-  background: 'var(--paper)', border: '1.8px solid var(--ink)', borderRadius: 4, boxShadow: '4px 4px 0 var(--ink)',
+  background: '#fffdf8', border: '1px solid rgba(24,25,26,0.08)', borderRadius: 28, boxShadow: '0 14px 36px rgba(48,38,26,0.09), inset 0 1px 0 rgba(255,255,255,0.74)',
 };
 
 function Shell({ children }: { children: React.ReactNode }): JSX.Element {
-  return <div className="flex h-full flex-col" style={{ background: 'var(--paper-2)' }}>{children}</div>;
+  return <div className="app-craft-screen editor-craft-shell flex h-full flex-col" style={{ background: 'var(--paper-2)' }}>{children}</div>;
 }

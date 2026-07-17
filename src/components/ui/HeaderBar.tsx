@@ -28,14 +28,15 @@ export function HeaderBar({
   const fg = dark ? 'var(--paper)' : 'var(--ink)';
   return (
     <header
-      className="flex items-center justify-between px-4 sm:px-10"
+      className="craft-shared-header flex items-center justify-between px-4 sm:px-10"
       style={{
         width: '100%',
-        borderBottom: '2px solid var(--ink)',
-        background: dark ? 'var(--ink)' : 'var(--paper)',
+        borderBottom: '1px solid var(--craft-line)',
+        background: dark ? '#050505' : 'rgba(255,253,248,0.86)',
         color: fg,
-        height: 64,
+        height: 76,
         boxSizing: 'border-box',
+        boxShadow: '0 16px 44px rgba(48,38,26,0.06), inset 0 1px 0 rgba(255,255,255,0.74)',
       }}
     >
       <Link href="/" className="flex items-center gap-2.5" style={{ textDecoration: 'none', color: fg }}>
@@ -52,11 +53,11 @@ export function HeaderBar({
             href={item.href}
             className={'nav-link' + (item.label === active ? ' is-active' : '')}
             style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: 12,
+              fontFamily: 'var(--font-sans)',
+              fontSize: 14,
               fontWeight: 500,
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
+              textTransform: 'none',
+              letterSpacing: '-0.01em',
               color: 'currentColor',
               opacity: item.label === active ? 1 : 0.6,
               textDecoration: 'none',
@@ -78,11 +79,11 @@ export function HeaderBar({
           style={{
             width: 34,
             height: 34,
-            border: '1.5px solid var(--ink)',
+            border: '1px solid var(--craft-line)',
             borderRadius: 999,
             alignItems: 'center',
             justifyContent: 'center',
-            background: dark ? 'var(--ink)' : 'var(--paper)',
+            background: dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,253,248,0.82)',
             color: fg,
           }}
         >

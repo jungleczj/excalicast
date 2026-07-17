@@ -173,7 +173,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
           type="button"
           onClick={handleExport}
           disabled={busy}
-          className="mt-4 flex w-full items-center justify-center gap-2 transition"
+          className="editor-craft-export-button mt-4 flex w-full items-center justify-center gap-2 transition"
           style={{
             padding: '14px 18px',
             background: 'var(--ink)',
@@ -222,7 +222,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
 
       {(statusMsg || error || bgPolling) && (
         <div
-          className="p-3"
+          className="editor-craft-panel-message p-3"
           style={{
             background: 'var(--paper-2)',
             border: '1.4px solid var(--ink)',
@@ -285,7 +285,8 @@ function RadioCard({ selected, onClick, title, meta, hint, accent }: RadioCardPr
   return (
     <button
       onClick={onClick}
-      className="flex w-full items-start gap-3 p-3 text-left transition"
+      aria-pressed={selected}
+      className="editor-craft-radio flex w-full items-start gap-3 p-3 text-left transition"
       style={{
         background: selected ? (accent ? 'var(--hi)' : 'var(--hi-soft)') : 'var(--paper)',
         border: '1.4px solid var(--ink)',
@@ -294,7 +295,7 @@ function RadioCard({ selected, onClick, title, meta, hint, accent }: RadioCardPr
       }}
     >
       <span
-        className="mt-0.5 grid h-[18px] w-[18px] flex-shrink-0 place-items-center rounded-full"
+        className="editor-craft-radio-dot mt-0.5 grid h-[18px] w-[18px] flex-shrink-0 place-items-center rounded-full"
         style={{ border: '1.6px solid var(--ink)', background: 'var(--paper)' }}
       >
         {selected && <span className="h-2 w-2 rounded-full" style={{ background: 'var(--ink)' }} />}
@@ -320,4 +321,3 @@ function RadioCard({ selected, onClick, title, meta, hint, accent }: RadioCardPr
     </button>
   );
 }
-

@@ -211,74 +211,36 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
 
   const isPaddleSandbox = process.env.NEXT_PUBLIC_PADDLE_ENV === 'sandbox';
   const subscriptionEnvLabel = isPaddleSandbox ? t('sandbox') : t('secure');
-  const features = t.raw('features') as string[];
+  const features = (t.raw('features') as string[]).map((line) => line.replace(/^✅\s*/, ''));
 
   return (
     <>
-    <Modal open={open} onClose={onClose} width={500} hideClose>
-        <div
-          style={{
-            padding: 24,
-            background: isMax ? 'var(--max)' : 'var(--pro)',
-            borderBottom: '1.6px solid var(--ink)',
-            position: 'relative',
-          }}
-        >
-          <div className="flex items-start justify-between">
-            <span className={`tag-mono ${isMax ? 'tag-mono-max' : 'tag-mono-pro'}`}>{isMax ? 'MAX' : 'PRO'} · {priceLabel}</span>
-            <button
-              onClick={onClose}
-              className="grid place-items-center"
-              style={{
-                width: 30,
-                height: 30,
-                border: '1.4px solid var(--ink)',
-                background: 'var(--paper)',
-                borderRadius: 3,
-                color: 'var(--ink)',
-                cursor: 'pointer',
-              }}
-              aria-label="close"
-            >
-              <I.Close size={13} />
-            </button>
+    <Modal open={open} onClose={onClose} width={620} hideClose>
+        <div className="commerce-craft-modal">
+          <button
+            onClick={onClose}
+            className="app-craft-modal-close commerce-craft-close grid place-items-center"
+            aria-label="close"
+          >
+            <I.Close size={14} />
+          </button>
+
+          <div className="commerce-craft-header">
+            <span className={`commerce-craft-badge ${isMax ? 'is-max' : 'is-pro'}`}>
+              {isMax ? 'Max' : 'Pro'} · {priceLabel}
+            </span>
+            <div className={`commerce-craft-icon ${isMax ? 'is-max' : 'is-pro'}`}>
+              {isMax ? <I.Sparkles size={28} sw={1.7} /> : <I.Captions size={28} sw={1.7} />}
+            </div>
+            <h2 className="app-craft-modal-title commerce-craft-title">{t('title')}</h2>
+            <p className="commerce-craft-subtitle">{t('subtitle')}</p>
           </div>
 
-          <div
-            className="mt-4 mb-4 grid h-14 w-14 place-items-center"
-            style={{
-              background: 'var(--paper)',
-              border: '1.6px solid var(--ink)',
-              borderRadius: 4,
-              boxShadow: '3px 3px 0 var(--ink)',
-              color: 'var(--ink)',
-            }}
-          >
-            {isMax ? <I.Sparkles size={26} sw={1.6} /> : <I.Captions size={26} sw={1.6} />}
-          </div>
-          <h2
-            style={{
-              fontSize: 26,
-              fontWeight: 700,
-              letterSpacing: '-0.025em',
-              lineHeight: 1.15,
-              margin: 0,
-              color: 'var(--ink)',
-            }}
-          >
-            {t('title')}
-          </h2>
-        </div>
-
-        <div className="p-6">
-          <p style={{ fontSize: 13.5, color: 'var(--ink-2)', lineHeight: 1.55, margin: 0 }}>
-            {t('subtitle')}
-          </p>
+          <div className="commerce-craft-body">
 
           {yearlyAvailable && (
             <div
-              className="mt-5 flex items-center gap-1 p-1"
-              style={{ background: 'var(--paper-2)', border: '1.4px solid var(--ink)', borderRadius: 3 }}
+              className="commerce-craft-billing"
               role="tablist"
             >
               {(['monthly', 'yearly'] as const).map((b) => {
@@ -289,27 +251,12 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
                     role="tab"
                     aria-selected={active}
                     onClick={() => setBilling(b)}
-                    className="press flex flex-1 items-center justify-center gap-1.5"
-                    style={{
-                      padding: '7px 10px',
-                      borderRadius: 2,
-                      fontSize: 12.5,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      border: active ? '1.3px solid var(--ink)' : '1.3px solid transparent',
-                      background: active ? 'var(--paper)' : 'transparent',
-                      color: 'var(--ink)',
-                      boxShadow: active ? '2px 2px 0 var(--ink)' : 'none',
-                    }}
+                    className="press"
+                    data-active={active}
                   >
                     {b === 'monthly' ? t('billingMonthly') : t('billingYearly')}
                     {b === 'yearly' && (
-                      <span
-                        className="tag-mono tag-mono-pro"
-                        style={{ fontSize: 9.5, padding: '1px 5px' }}
-                      >
-                        {t('saveBadge')}
-                      </span>
+                      <span>{t('saveBadge')}</span>
                     )}
                   </button>
                 );
@@ -317,74 +264,42 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
             </div>
           )}
 
-          <div
-            className="mt-5 flex items-end gap-2 p-4"
-            style={{
-              background: 'var(--paper-2)',
-              border: '1.4px solid var(--ink)',
-              borderRadius: 3,
-            }}
-          >
-            <span
-              style={{
-                fontFamily: 'var(--font-display)',
-                fontSize: 36,
-                fontWeight: 700,
-                letterSpacing: '-0.025em',
-                color: 'var(--ink)',
-                lineHeight: 1,
-              }}
-            >
-              {priceLabel}
-            </span>
-            <span
-              className="pb-1"
-              style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', letterSpacing: '0.04em' }}
-            >
+          <div className="commerce-craft-price-card">
+            <span className="commerce-craft-price">{priceLabel}</span>
+            <span className="commerce-craft-price-note">
               {t('subscriptionTag', { provider: providerLabel, env: subscriptionEnvLabel })}
             </span>
           </div>
 
-          <ul className="mt-5 space-y-2.5" style={{ fontSize: 13, color: 'var(--ink)' }}>
+          <ul className="commerce-craft-features">
             {features.map((line) => (
-              <li key={line} className="flex items-start gap-2">
-                <I.Check size={14} sw={2.4} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--ok)' }} />
+              <li key={line}>
+                <span className="commerce-craft-check"><I.Check size={14} sw={2.2} /></span>
                 <span>{line}</span>
               </li>
             ))}
           </ul>
 
           {(statusMsg || error || needLogin) && (
-            <div
-              className="mt-4 px-3 py-2"
-              style={{
-                background: 'var(--paper-2)',
-                border: '1.4px solid var(--ink)',
-                borderRadius: 3,
-                fontSize: 12,
-                fontFamily: 'var(--font-mono)',
-              }}
-            >
-              {needLogin && <div style={{ color: 'var(--ink)' }}>{t('needLogin')}</div>}
-              {statusMsg && <div style={{ color: 'var(--ink)' }}>{statusMsg}</div>}
-              {error && <div className="mt-1" style={{ color: 'var(--rec)' }}>{t('errorPrefix', { message: error })}</div>}
+            <div className="commerce-craft-status">
+              {needLogin && <div>{t('needLogin')}</div>}
+              {statusMsg && <div>{statusMsg}</div>}
+              {error && <div className="commerce-craft-error">{t('errorPrefix', { message: error })}</div>}
             </div>
           )}
 
-          <div className="mt-6 flex gap-3">
+          <div className="app-craft-modal-actions commerce-craft-actions">
             <button
               onClick={onClose}
               disabled={busy}
-              className="btn-sketch flex-1"
-              style={{ justifyContent: 'center' }}
+              className="app-craft-secondary-button"
             >
               {t('ctaCancel')}
             </button>
             <button
               onClick={handleUpgrade}
               disabled={busy || (provider === 'paddle' && !paddle && !needLogin)}
-              className="btn-sketch btn-sketch-primary"
-              style={{ flex: 1.5, justifyContent: 'center' }}
+              className="app-craft-login commerce-craft-primary"
             >
               <I.Sparkles size={14} />
               {needLogin
@@ -395,16 +310,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
             </button>
           </div>
 
-          <p
-            className="mt-4 text-center"
-            style={{
-              fontFamily: 'var(--font-mono)',
-              fontSize: 10,
-              color: 'var(--ink-3)',
-              letterSpacing: '0.06em',
-              textTransform: 'uppercase',
-            }}
-          >
+          <p className="commerce-craft-footnote">
             {provider === 'creem'
               ? t('footnoteCreem')
               : isPaddleSandbox
@@ -412,6 +318,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
                 : t('footnotePaddle')}
           </p>
         </div>
+      </div>
     </Modal>
 
       <LoginModal

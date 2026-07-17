@@ -1,8 +1,135 @@
 {
   "landing": {
     "meta": {
-      "title": "Excalicast — Whiteboard Recorder",
-      "description": "Record whiteboard activity + mic audio. One take, exported to multiple aspect ratios."
+      "title": "Excalicast — One workspace for recorded content",
+      "description": "Record, edit, caption, export for multiple platforms, and archive every explanation as a reusable content asset."
+    },
+    "craft": {
+      "nav": {
+        "home": "Home",
+        "library": "Library",
+        "pricing": "Pricing",
+        "login": "Sign in",
+        "menu": "Menu",
+        "plans": "Plans",
+        "start": "Start recording"
+      },
+      "hero": {
+        "eyebrow": "Runs in the browser · local-first",
+        "title": "Give every explanation\na place to stay",
+        "body": "Excalicast keeps the shape of a walkthrough: canvas, voice, rhythm, and versions. After recording, it can still be shaped, exported again, and returned to a place you can search.",
+        "primary": "Start recording",
+        "secondary": "See pricing",
+        "microcopy": "No download. No need to hand over the work.",
+        "toolbarLabel": "Recording whiteboard toolbar",
+        "productAlt": "Vector preview of the Excalicast recording workspace"
+      },
+      "controls": {
+        "label": "Recording controls",
+        "pause": "Pause",
+        "stop": "Stop",
+        "mic": "Mic",
+        "camera": "Camera",
+        "laser": "Laser",
+        "zoom": "Zoom",
+        "prompt": "Script"
+      },
+      "capabilities": {
+        "heading": "Beyond capture, explanations become content.",
+        "body": "The work after recording no longer has to scatter across editors, caption tools, drives, and publishing dashboards.",
+        "record": { "title": "Record", "body": "Canvas, voice, and timing stay in one structure." },
+        "edit": { "title": "Shape", "body": "Cuts, frames, and versions still belong to the same take." },
+        "caption": { "title": "Caption", "body": "Speech becomes text you can read, refine, and publish." },
+        "distribute": { "title": "Publish", "body": "The same source can travel to different platforms." },
+        "archive": { "title": "Archive", "body": "What you explained returns to a place you can find." }
+      },
+      "personas": {
+        "heading": "How people use Excalicast",
+        "body": "It is not made for one video format. It is made for explanations worth saving, shaping, and using again.",
+        "teacher": { "role": "Teacher", "title": "Lessons and review", "use": "Record a derivation, refine captions, leave it for students." },
+        "architect": { "role": "Architect", "title": "System maps and async review", "use": "Turn a whiteboard walkthrough into a reference the team can replay." },
+        "pm": { "role": "Product manager", "title": "Flows and team alignment", "use": "Keep roadmaps, user journeys, and decision context together." },
+        "creator": { "role": "Creator", "title": "Long-form and short-form publishing", "use": "Shape one recording into the formats each platform expects." },
+        "course": { "role": "Course team", "title": "Captions, outlines, handouts", "use": "Generate learning material around the same recording." },
+        "team": { "role": "Team", "title": "Onboarding and shared context", "use": "Put explained knowledge where the next person can find it." }
+      },
+      "features": {
+        "record": {
+          "kicker": "Record",
+          "title": "From one walkthrough\nto a lasting structure",
+          "body": "Excalicast records canvas events and microphone audio, not pixels. What remains is the explanation itself, not a screen recording interrupted by windows and alerts.",
+          "cta": "Open the recorder"
+        },
+        "organize": {
+          "kicker": "Organize",
+          "title": "From recorded once\nto used again",
+          "body": "Timeline edits, frames, captions, and export settings stay together. The work after recording does not need a second workflow.",
+          "cta": "See the workflow"
+        },
+        "distribute": {
+          "kicker": "Distribute",
+          "title": "From one source\nto many places",
+          "body": "The same recording can render as landscape, vertical, square, and social cuts. Platforms change; the source does not need to be recorded again.",
+          "cta": "Record once"
+        },
+        "archive": {
+          "kicker": "Archive",
+          "title": "Let the archive\nkeep pace with the idea",
+          "body": "Titles, tags, time, and local/cloud state become an index. What you explained is no longer scattered or left to memory.",
+          "cta": "Open the library"
+        },
+        "publish": {
+          "kicker": "Publish",
+          "title": "Export to publish\nkeep it to reuse",
+          "body": "Captions, outlines, handouts, share links, and watermark-free exports all orbit the same recording. Before it leaves the workspace, it already has a home.",
+          "cta": "See publishing options"
+        }
+      },
+      "visuals": {
+        "youtube": "Long-form",
+        "shorts": "Shorts",
+        "feed": "Feed",
+        "social": "Social",
+        "oneTake": "One recording can become the ratios each platform expects.",
+        "librarySearch": "Search titles, tags, explanations…",
+        "backup": "Back up to cloud",
+        "assets": "Assets",
+        "cloudSaved": "Cloud saved",
+        "localFirst": "Local-first",
+        "export": "Export",
+        "captions": "Captions",
+        "outline": "Outline",
+        "handout": "Handout",
+        "watermark": "Watermarked export sits with render and download; upgrade for watermark-free output.",
+        "render": "Render and download"
+      },
+      "pricing": {
+        "kicker": "Pricing",
+        "heading": "Your rhythm,\nyour way to publish",
+        "body": "Record occasionally, or make it part of a daily content workflow. Start free, then upgrade when publishing and reuse matter.",
+        "startKicker": "Start",
+        "startTitle": "Keep the first explanation.",
+        "publishTitle": "Designed for publishing, reuse, and a growing content archive."
+      },
+      "faq": {
+        "heading": "The important things,\nsaid first",
+        "body": "Local-first recording, pricing, exports, captions, and cloud backup — explained without making you hunt."
+      },
+      "final": {
+        "heading": "Make the next explanation\nuseful long after it is spoken",
+        "body": "Record, shape, export, share, and archive from one Excalicast workspace.",
+        "primary": "Start recording",
+        "secondary": "Contact support"
+      },
+      "footer": {
+        "pricing": "Pricing",
+        "product": "Product",
+        "company": "Terms",
+        "support": "Support",
+        "heading": "What you explained can always come back here.",
+        "tagline": "A one-stop workspace for recorded explanations. Record in the browser, render local-first, and turn what you said into searchable, reusable, publishable assets.",
+        "rights": "All rights reserved"
+      }
     },
     "faq": {
       "heading": "Questions, plainly answered.",
@@ -389,6 +516,7 @@
     "cameraOnTooltip": "Camera on · click to turn off",
     "cameraOffTooltip": "Camera off · click to turn on",
     "start": "Start recording",
+    "fromTemplate": "Start from a template",
     "pause": "Pause",
     "resume": "Resume",
     "stop": "Stop",

@@ -8,7 +8,7 @@ import { pick } from '@/content/types';
 /** Page H1 with the brand marker underline. */
 export function PageTitle({ children }: { children: React.ReactNode }): JSX.Element {
   return (
-    <h1 style={{ fontSize: 38, fontWeight: 800, lineHeight: 1.15, letterSpacing: '-0.025em', margin: 0 }}>
+    <h1 className="content-craft-title" style={{ fontSize: 38, fontWeight: 800, lineHeight: 1.15, letterSpacing: '-0.025em', margin: 0 }}>
       {children}
     </h1>
   );
@@ -17,13 +17,13 @@ export function PageTitle({ children }: { children: React.ReactNode }): JSX.Elem
 /** Lead paragraph — also the GEO definition sentence; rendered prominently. */
 export function Lead({ children }: { children: React.ReactNode }): JSX.Element {
   return (
-    <p style={{ marginTop: 20, fontSize: 19, lineHeight: 1.6, color: 'var(--ink-2)' }}>{children}</p>
+    <p className="content-craft-lead" style={{ marginTop: 20, fontSize: 19, lineHeight: 1.6, color: 'var(--ink-2)' }}>{children}</p>
   );
 }
 
 export function SectionHeading({ children }: { children: React.ReactNode }): JSX.Element {
   return (
-    <h2 style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em', marginTop: 44, marginBottom: 12 }}>
+    <h2 className="content-craft-section-title" style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em', marginTop: 44, marginBottom: 12 }}>
       {children}
     </h2>
   );
@@ -32,9 +32,9 @@ export function SectionHeading({ children }: { children: React.ReactNode }): JSX
 /** FAQ list, rendered as visible <h3>/<p> (the JSON-LD is emitted separately). */
 export function FaqList({ faqs, locale }: { faqs: FaqItem[]; locale: string }): JSX.Element {
   return (
-    <div style={{ marginTop: 16 }}>
+    <div className="content-craft-faq-list" style={{ marginTop: 16 }}>
       {faqs.map((f, i) => (
-        <div key={i} style={{ marginTop: 20 }}>
+        <div key={i} className="content-craft-faq-item" style={{ marginTop: 20 }}>
           <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>{pick(f.q, locale)}</h3>
           <p style={{ marginTop: 8, fontSize: 16, lineHeight: 1.6, color: 'var(--ink-2)' }}>
             {pick(f.a, locale)}
@@ -62,7 +62,7 @@ export async function CtaRow({
   const t = await getTranslations({ locale, namespace: 'landing' });
   return (
     <div
-      className="mt-12 flex flex-wrap items-center gap-3"
+      className="content-craft-cta-row mt-12 flex flex-wrap items-center gap-3"
       style={{ borderTop: '2px solid var(--ink)', paddingTop: 28 }}
     >
       <TrackedLink
@@ -79,7 +79,7 @@ export async function CtaRow({
   );
 }
 
-/** A simple comparison table styled with the brand's hard borders. */
+/** A simple comparison table styled with the shared Craft hairline system. */
 export function CompareTable({
   rows,
   competitor,
@@ -105,7 +105,7 @@ export function CompareTable({
     borderBottom: '1px solid var(--paper-3)',
   };
   return (
-    <div style={{ marginTop: 16, overflowX: 'auto', border: '2px solid var(--ink)', borderRadius: 12 }}>
+    <div className="content-craft-table" style={{ marginTop: 16, overflowX: 'auto', border: '2px solid var(--ink)', borderRadius: 12 }}>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr>

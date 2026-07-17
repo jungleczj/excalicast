@@ -102,7 +102,7 @@ export function CameraBubble({ stream, size = 160, shape = 'circle', position, o
   return (
     <div
       onMouseDown={handleMouseDown}
-      className="fade-in fixed z-40 select-none overflow-hidden"
+      className="camera-craft-bubble fade-in fixed z-40 select-none overflow-hidden"
       style={{
         left: position.x,
         top: position.y,
@@ -134,30 +134,13 @@ export function CameraBubble({ stream, size = 160, shape = 'circle', position, o
         <CameraIdlePlaceholder size={size} />
       )}
 
-      <div
-        className="pointer-events-none absolute right-2 top-2 grid h-[22px] w-[22px] place-items-center rounded-full text-white"
-        style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(6px)' }}
-      >
-        <I.Drag size={11} />
-      </div>
-
       {onSizeChange && (
         <div
           onMouseDown={handleResizeMouseDown}
           title="拖动缩放"
-          className="absolute bottom-1.5 right-1.5 grid h-[22px] w-[22px] place-items-center rounded-full"
-          style={{ background: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(6px)', cursor: 'nwse-resize' }}
-        >
-          {/* 右下角缩放抓手：CSS 双线，无需图标依赖 */}
-          <span
-            style={{
-              width: 9,
-              height: 9,
-              borderRight: '2px solid rgba(255,255,255,0.92)',
-              borderBottom: '2px solid rgba(255,255,255,0.92)',
-            }}
-          />
-        </div>
+          className="absolute bottom-0 right-0 h-8 w-8"
+          style={{ cursor: 'nwse-resize' }}
+        />
       )}
     </div>
   );
