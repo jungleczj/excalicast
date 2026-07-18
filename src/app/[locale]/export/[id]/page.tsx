@@ -7,6 +7,7 @@ import { ExportRatioPicker } from '@/components/ExportRatioPicker';
 import { ExportFormatPanel } from '@/components/ExportFormatPanel';
 import { ExportPreview } from '@/components/ExportPreview';
 import { ExportPanel, type ExportProgressState } from '@/components/ExportPanel';
+import { VideoBackgroundPanel } from '@/components/VideoBackgroundPanel';
 import { WorkspaceShellToggle } from '@/components/WorkspaceShellToggle';
 import { SubtitlePanel } from '@/components/SubtitlePanel';
 import { HandoutPanel } from '@/components/HandoutPanel';
@@ -45,7 +46,11 @@ function nearestPreset(w: number, h: number): AspectRatio {
 
 /** 录制前 Setup 配置 → 导出默认（沿用比例 / 裁切模式 / 含工作区 / 裁切框）。 */
 function exportDefaultsFromSetup(setup: RecordingSetupConfig): ExportConfig {
-  const base: ExportConfig = { ...DEFAULT_CONFIG, includeWorkspaceShell: setup.includeWorkspaceShell };
+  const base: ExportConfig = {
+    ...DEFAULT_CONFIG,
+    includeWorkspaceShell: setup.includeWorkspaceShell,
+    videoBackground: setup.videoBackground,
+  };
   if (setup.framing === 'default') {
     return { ...base, aspectRatio: '16:9', croppingMode: 'fit_all_content' };
   }
@@ -177,6 +182,7 @@ export default function EditorRecordingPage(): JSX.Element {
   const exportTab = (
     <div className="space-y-5">
       <WorkspaceShellToggle recordingId={id} config={config} onChange={handleConfigChange} />
+      <VideoBackgroundPanel config={config} onChange={handleConfigChange} />
       <ExportRatioPicker config={config} onChange={handleConfigChange} />
       <ExportFormatPanel config={config} onChange={setConfig} en={en} />
       <div style={{ height: 1.5, background: 'var(--ink)', opacity: 0.4 }} />

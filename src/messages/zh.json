@@ -484,6 +484,7 @@
   "workspace": {
     "paymentReceived": "支付完成 ✓ —— 可回到原标签页继续操作。",
     "cameraOpenFailed": "无法打开摄像头：{message}",
+    "displaySourceFailed": "无法打开显示源：{message}",
     "startFailed": "开始录制失败：{message}",
     "stopFailed": "停止录制失败：{message}",
     "discardConfirm": "丢弃当前录制？所有数据将被删除。",
@@ -543,6 +544,43 @@
     "title": "新建录制",
     "close": "关闭",
     "cropLocked": "已锁定裁切",
+    "source": {
+      "title": "录制来源",
+      "subtitle": "先确定要留下什么，再进入取景。",
+      "browserChooserHint": "浏览器仍会显示系统选择器；这里的选项会作为采集提示和后续裁切方式。",
+      "whiteboard": {
+        "title": "白板",
+        "desc": "只记录画板讲解"
+      },
+      "current_tab": {
+        "title": "本标签页",
+        "desc": "浏览器控制授权"
+      },
+      "window": {
+        "title": "窗口",
+        "desc": "记录一个应用窗口"
+      },
+      "desktop": {
+        "title": "整个桌面",
+        "desc": "记录完整屏幕"
+      },
+      "selected_area": {
+        "title": "选定区域",
+        "desc": "授权后再框选区域"
+      }
+    },
+    "background": {
+      "title": "视频背景",
+      "subtitle": "用于最终视频画幅，也可在导出页继续调整。",
+      "none": "无背景",
+      "tones": {
+        "all": "全部",
+        "fresh": "鲜艳",
+        "soft": "柔和",
+        "dark": "深色",
+        "natural": "自然"
+      }
+    },
     "aspect": {
       "title": "画幅比例",
       "subtitle": "在画布上锁定裁切框 —— 导出无黑边。",
@@ -647,6 +685,18 @@
     "available": "录制时已捕获 {count} 张工作区快照",
     "notAvailable": "该录制未捕获工作区界面（属于旧版本录制）",
     "lockedNote": "已锁定原始工作区比例（{w}×{h}）"
+  },
+  "videoBackgroundPanel": {
+    "title": "视频背景",
+    "subtitle": "背景会铺满最终画幅，比例变化时自动 cover，不拉伸。",
+    "none": "无背景",
+    "tones": {
+      "all": "全部",
+      "fresh": "鲜艳",
+      "soft": "柔和",
+      "dark": "深色",
+      "natural": "自然"
+    }
   },
   "exportPreview": {
     "watermarkBadge": "👁️ 含水印预览",

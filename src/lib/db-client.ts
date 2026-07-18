@@ -8,6 +8,7 @@ import type {
   CameraPositionEvent,
   LaserEvent,
   RecordingMetadata,
+  ScreenChunk,
   ShellCanvasRect,
   ShellSize,
   TimeSegment,
@@ -28,6 +29,10 @@ interface CameraChunkRow extends CameraChunk {
   id?: number;
 }
 
+interface ScreenChunkRow extends ScreenChunk {
+  id?: number;
+}
+
 interface CameraPositionRow extends CameraPositionEvent {
   id?: number;
 }
@@ -45,6 +50,7 @@ class ExcalicastDB extends Dexie {
   snapshots!: Table<SnapshotRow, number>;
   audioChunks!: Table<AudioChunkRow, number>;
   cameraChunks!: Table<CameraChunkRow, number>;
+  screenChunks!: Table<ScreenChunkRow, number>;
   cameraPositions!: Table<CameraPositionRow, number>;
   binaryFiles!: Table<BinaryFileRow, number>;
   workspaceShells!: Table<WorkspaceShellRow, number>;
@@ -160,6 +166,19 @@ class ExcalicastDB extends Dexie {
       libraryItems: 'id, status, created',
       laserEvents: '++id, recordingId, timestamp, [recordingId+timestamp]',
     });
+    // v10: screenChunks 表（本标签页/窗口/桌面/选区显示源录制）。
+    this.version(10).stores({
+      recordings: 'id, startedAt, status, ownerKey',
+      snapshots: '++id, recordingId, timestamp',
+      audioChunks: '++id, recordingId, index',
+      cameraChunks: '++id, recordingId, index',
+      screenChunks: '++id, recordingId, index',
+      binaryFiles: '++id, recordingId, fileId',
+      workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
+      cameraPositions: '++id, recordingId, timestamp, [recordingId+timestamp]',
+      libraryItems: 'id, status, created',
+      laserEvents: '++id, recordingId, timestamp, [recordingId+timestamp]',
+    });
   }
 }
 
@@ -245,12 +264,13 @@ export async function deleteRecording(recordingId: string, ownerKey?: string): P
   if (ownerKey && !(await ownsRecording(recordingId, ownerKey))) return;
   await db.transaction(
     'rw',
-    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.cameraPositions, db.binaryFiles, db.workspaceShells, db.laserEvents],
+    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.screenChunks, db.cameraPositions, db.binaryFiles, db.workspaceShells, db.laserEvents],
     async () => {
       await db.recordings.delete(recordingId);
       await db.snapshots.where('recordingId').equals(recordingId).delete();
       await db.audioChunks.where('recordingId').equals(recordingId).delete();
       await db.cameraChunks.where('recordingId').equals(recordingId).delete();
+      await db.screenChunks.where('recordingId').equals(recordingId).delete();
       await db.cameraPositions.where('recordingId').equals(recordingId).delete();
       await db.binaryFiles.where('recordingId').equals(recordingId).delete();
       await db.workspaceShells.where('recordingId').equals(recordingId).delete();
@@ -287,6 +307,7 @@ export async function loadFullRecording(recordingId: string, ownerKey?: string):
   snapshots: WhiteboardSnapshot[];
   audioBlob: Blob | null;
   cameraBlob: Blob | null;
+  screenBlob: Blob | null;
   cameraEvents: CameraPositionEvent[];
   laserEvents: LaserEvent[];
   binaryFiles: BinaryFileEntry[];
@@ -317,6 +338,13 @@ export async function loadFullRecording(recordingId: string, ownerKey?: string):
     ? new Blob(camRows.map((c) => c.blob), { type: camRows[0].blob.type || 'video/webm' })
     : null;
 
+  const screenRows = await db.screenChunks
+    .where('recordingId').equals(recordingId)
+    .sortBy('index');
+  const screenBlob = screenRows.length > 0
+    ? new Blob(screenRows.map((c) => c.blob), { type: screenRows[0].blob.type || 'video/webm' })
+    : null;
+
   const camPosRows = await db.cameraPositions
     .where('recordingId').equals(recordingId)
     .sortBy('timestamp');
@@ -342,7 +370,7 @@ export async function loadFullRecording(recordingId: string, ownerKey?: string):
 
   const binaryFiles = await db.binaryFiles.where('recordingId').equals(recordingId).toArray();
 
-  return { metadata, snapshots, audioBlob, cameraBlob, cameraEvents, laserEvents, binaryFiles };
+  return { metadata, snapshots, audioBlob, cameraBlob, screenBlob, cameraEvents, laserEvents, binaryFiles };
 }
 
 export async function listLaserEvents(recordingId: string): Promise<LaserEvent[]> {

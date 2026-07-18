@@ -9,14 +9,17 @@ import { RecordingSetup } from '@/components/RecordingSetup';
 import { CameraBubble } from '@/components/CameraBubble';
 import { Teleprompter } from '@/components/Teleprompter';
 import { AspectCropOverlay } from '@/components/AspectCropOverlay';
+import { DisplaySourceCropOverlay } from '@/components/DisplaySourceCropOverlay';
+import { DisplaySourcePreview } from '@/components/DisplaySourcePreview';
 import { I } from '@/components/icons';
 import { useSubscription } from '@/hooks/useSubscription';
 import { startRecording, type SessionHandle, type CameraFrameRect } from '@/services/recordingSession';
 import { acquireMicStream } from '@/services/audioRecorder';
 import { acquireCameraStream } from '@/services/cameraRecorder';
+import { acquireDisplayStream } from '@/services/displayCaptureRecorder';
 import { trackEvent } from '@/lib/analytics/track';
 import type { WhiteboardChangeFn } from '@/components/Whiteboard';
-import type { CameraCorner, CameraShape, CropWindow, RecordingSetupConfig } from '@/types/recording';
+import type { CameraCorner, CameraShape, CropWindow, RecordingSetupConfig, SourceCropWindow } from '@/types/recording';
 import { useRouter } from '@/i18n/navigation';
 
 const DEFAULT_SETUP: RecordingSetupConfig = {
@@ -24,6 +27,8 @@ const DEFAULT_SETUP: RecordingSetupConfig = {
   croppingMode: 'follow_viewport',
   includeWorkspaceShell: false,
   camera: { enabled: false, sizePx: 160, shape: 'circle', position: 'bottom-right', backgroundRemoval: false },
+  videoBackground: { kind: 'none' },
+  source: { kind: 'whiteboard' },
 };
 
 /** 摄像头气泡角落预设 → 视口像素坐标（与 CameraBubble 的 fixed 定位一致）。 */
@@ -83,6 +88,12 @@ export default function HomePage(): JSX.Element {
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   micStreamRef.current = micStream;
+  // 取景阶段预采集的显示源流（开录时复用，避免倒计时后才申请权限）
+  const [displayStream, setDisplayStream] = useState<MediaStream | null>(null);
+  const displayStreamRef = useRef<MediaStream | null>(null);
+  displayStreamRef.current = displayStream;
+  const [displayAspect, setDisplayAspect] = useState<number | null>(null);
+  const [sourceCropWindow, setSourceCropWindow] = useState<SourceCropWindow | null>(null);
   // 裁切框（画布区比例）+ Custom 输出尺寸；录制中由 overlay 编辑
   const [cropWindow, setCropWindow] = useState<CropWindow | null>(null);
   const [customOutput, setCustomOutput] = useState<{ width: number; height: number } | undefined>(undefined);
@@ -405,6 +416,14 @@ export default function HomePage(): JSX.Element {
     setSetupOpen(true);
   }, [cameraEnabled, cameraSize, cameraShape]);
 
+  const clearDisplayStream = useCallback(() => {
+    displayStreamRef.current?.getTracks().forEach((tk) => tk.stop());
+    displayStreamRef.current = null;
+    setDisplayStream(null);
+    setDisplayAspect(null);
+    setSourceCropWindow(null);
+  }, []);
+
   // 真正开录（取景确认 + 倒计时结束后调用）—— 复用取景已采集的麦克风/摄像头流，瞬时开录
   const beginRecording = useCallback(async (config: RecordingSetupConfig, startPos: { x: number; y: number }, startSize: number) => {
     try {
@@ -414,9 +433,12 @@ export default function HomePage(): JSX.Element {
         setup: config,
         audioStream: micStreamRef.current,
         cameraStream,
+        displayStream: displayStreamRef.current,
       });
       // 流所有权移交 session（stop 时由其停轨）；清掉页面侧引用，避免重复管理
       setMicStream(null);
+      displayStreamRef.current = null;
+      setDisplayStream(null);
       sessionRef.current = session;
       changeRef.current = session.onWhiteboardChange;
       laserPointRef.current = session.recordLaserPoint;
@@ -424,7 +446,12 @@ export default function HomePage(): JSX.Element {
       setHasCamera(session.hasCamera);
       setCameraStream(session.cameraStream);
       setState('recording');
-      trackEvent('recording_start', { framing: config.framing, withCamera: config.camera.enabled, withAudio: session.hasAudio });
+      trackEvent('recording_start', {
+        framing: config.framing,
+        withCamera: config.camera.enabled,
+        withAudio: session.hasAudio,
+        source: config.source?.kind ?? 'whiteboard',
+      });
       // 录制开始种一颗 t=0 事件，定位当前气泡位置
       if (session.hasCamera) {
         session.recordCameraMove(startPos.x, startPos.y, startSize);
@@ -441,6 +468,7 @@ export default function HomePage(): JSX.Element {
     // 裁切框重置 → overlay 按所选比例居中初始化（default 不显框）
     setCropWindow(null);
     setCustomOutput(undefined);
+    clearDisplayStream();
     setCameraEnabled(config.camera.enabled);
     setCameraSize(config.camera.sizePx);
     setCameraShape(config.camera.shape);
@@ -455,11 +483,24 @@ export default function HomePage(): JSX.Element {
       cameraStream?.getTracks().forEach((tk) => tk.stop());
       setCameraStream(null);
     }
+    // 显示源预采集：浏览器仍会展示自己的选择器；选择成功后在取景态显示私有预览。
+    const source = config.source ?? { kind: 'whiteboard' as const };
+    if (source.kind !== 'whiteboard') {
+      try {
+        const stream = await acquireDisplayStream(source);
+        displayStreamRef.current = stream;
+        setDisplayStream(stream);
+      } catch (err) {
+        setSetupOpen(true);
+        alert(t('displaySourceFailed', { message: err instanceof Error ? err.message : 'unknown' }));
+        return;
+      }
+    }
     // 预采集麦克风（在倒计时之前申请权限并就绪，供电平表 + 开录复用）
     micStreamRef.current?.getTracks().forEach((tk) => tk.stop());
     setMicStream(await acquireMicStream());
     setState('framing');
-  }, [cameraStream]);
+  }, [cameraStream, clearDisplayStream, t]);
 
   // 取景确认：校验摄像头在裁切框内 → 用当前相机位置/尺寸构建待开录参数 → 启动 3 秒倒计时
   const handleConfirmFraming = useCallback(() => {
@@ -486,9 +527,15 @@ export default function HomePage(): JSX.Element {
       }
     }
     setFramingWarn(false);
-    pendingStartRef.current = { config: setupConfig, pos: cameraPos, size: cameraSize };
+    const finalConfig: RecordingSetupConfig = {
+      ...setupConfig,
+      source: setupConfig.source?.kind === 'selected_area'
+        ? { ...setupConfig.source, sourceCropWindow: sourceCropWindow ?? { rx: 0.1, ry: 0.1, rw: 0.8, rh: 0.8 } }
+        : setupConfig.source,
+    };
+    pendingStartRef.current = { config: finalConfig, pos: cameraPos, size: cameraSize };
     setCountdown(3);
-  }, [setupConfig, cameraPos, cameraSize, cameraEnabled]);
+  }, [setupConfig, cameraPos, cameraSize, cameraEnabled, sourceCropWindow]);
 
   // 取景取消：停掉摄像头/麦克风预览、清裁切框、回 idle
   const handleCancelFraming = useCallback(() => {
@@ -496,10 +543,11 @@ export default function HomePage(): JSX.Element {
     setCameraStream(null);
     micStreamRef.current?.getTracks().forEach((tk) => tk.stop());
     setMicStream(null);
+    clearDisplayStream();
     setCropWindow(null);
     setFramingWarn(false);
     setState('idle');
-  }, [cameraStream]);
+  }, [cameraStream, clearDisplayStream]);
 
   // 倒计时：3→2→1→0 后真正开录
   useEffect(() => {
@@ -600,6 +648,7 @@ export default function HomePage(): JSX.Element {
       changeRef.current = null;
       laserPointRef.current = null;
       setCameraStream(null);
+      clearDisplayStream();
       setHasCamera(false);
       setHasAudio(false);
       setAudioMuted(false);
@@ -610,11 +659,12 @@ export default function HomePage(): JSX.Element {
       sessionRef.current = null;
       changeRef.current = null;
       laserPointRef.current = null;
+      clearDisplayStream();
       setState('idle');
     } finally {
       stoppingRef.current = false;
     }
-  }, [router, t, setupConfig, customOutput]);
+  }, [router, t, setupConfig, customOutput, clearDisplayStream]);
 
   const handleDiscard = useCallback(async () => {
     const s = sessionRef.current;
@@ -630,10 +680,11 @@ export default function HomePage(): JSX.Element {
     changeRef.current = null;
     laserPointRef.current = null;
     setCameraStream(null);
+    clearDisplayStream();
     setHasCamera(false);
     setHasAudio(false);
     setState('idle');
-  }, [t]);
+  }, [t, clearDisplayStream]);
 
   const isRecording = state === 'recording' || state === 'paused';
 
@@ -648,8 +699,23 @@ export default function HomePage(): JSX.Element {
           laserPointRef={laserPointRef}
         />
 
+        {displayStream && (state === 'framing' || isRecording) && (
+          <div className="rb-no-record absolute inset-0 z-10">
+            <DisplaySourcePreview stream={displayStream} onAspectChange={setDisplayAspect} />
+          </div>
+        )}
+
+        {displayStream && state === 'framing' && setupConfig.source?.kind === 'selected_area' && (
+          <DisplaySourceCropOverlay
+            value={sourceCropWindow}
+            mediaAspect={displayAspect}
+            onChange={setSourceCropWindow}
+            label={en ? 'Selected area' : '选定区域'}
+          />
+        )}
+
         {/* 裁切框 viewfinder：取景态 + 录制中显示（'default' 整画板不画） */}
-        {(state === 'framing' || isRecording) && setupConfig.framing !== 'default' && (
+        {(state === 'framing' || isRecording) && setupConfig.framing !== 'default' && setupConfig.source?.kind !== 'selected_area' && (
           <AspectCropOverlay
             framing={setupConfig.framing}
             value={cropWindow}

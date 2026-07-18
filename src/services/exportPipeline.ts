@@ -17,7 +17,9 @@ import {
   type ExportConfig,
   type ExportFormat,
   type ExportQuality,
+  type RecordingSourceKind,
   type SceneRect,
+  type SourceCropWindow,
   type WhiteboardSnapshot,
   type WorkspaceShellRow,
 } from '@/types/recording';
@@ -26,6 +28,8 @@ import { normalizeSegments, keptDuration, isTrimmed, outputToSource } from '@/ut
 import { cueAt } from '@/utils/srtParser';
 import { createCameraFrameSource, type CameraFrameSource } from './webmCameraFrames';
 import { drawLaserOverlay } from '@/utils/laserRender';
+import { paintVideoBackground } from '@/services/videoBackgroundRenderer';
+import { createDisplayFrameSource, type DisplayFrameSource } from '@/services/displayFrameSource';
 
 export interface ExportOptions extends ExportConfig {
   recordingId: string;
@@ -184,6 +188,33 @@ function drawCameraBubble(
   ctx.restore();
 }
 
+function drawDisplayFrame(
+  ctx: CanvasRenderingContext2D,
+  video: HTMLVideoElement,
+  sourceKind: RecordingSourceKind,
+  sourceCrop: SourceCropWindow | undefined,
+  targetW: number,
+  targetH: number,
+): void {
+  const vw = video.videoWidth || targetW;
+  const vh = video.videoHeight || targetH;
+  const effectiveCrop = sourceKind === 'selected_area' ? undefined : sourceCrop;
+  const crop = effectiveCrop
+    ? {
+        sx: effectiveCrop.rx * vw,
+        sy: effectiveCrop.ry * vh,
+        sw: effectiveCrop.rw * vw,
+        sh: effectiveCrop.rh * vh,
+      }
+    : { sx: 0, sy: 0, sw: vw, sh: vh };
+  const scale = Math.min(targetW / crop.sw, targetH / crop.sh);
+  const dw = crop.sw * scale;
+  const dh = crop.sh * scale;
+  const dx = (targetW - dw) / 2;
+  const dy = (targetH - dh) / 2;
+  ctx.drawImage(video, crop.sx, crop.sy, crop.sw, crop.sh, dx, dy, dw, dh);
+}
+
 function shellAt(shells: WorkspaceShellRow[], t: number): WorkspaceShellRow | null {
   if (shells.length === 0) return null;
   let lo = 0, hi = shells.length - 1, ans = -1;
@@ -287,7 +318,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   opts.onProgress?.(0.01);
   const { exportToCanvas } = await import('@excalidraw/excalidraw');
   opts.onProgress?.(0.05);
-  const { metadata, snapshots, audioBlob, cameraBlob, cameraEvents, laserEvents, binaryFiles } = await loadFullRecording(opts.recordingId);
+  const { metadata, snapshots, audioBlob, cameraBlob, screenBlob, cameraEvents, laserEvents, binaryFiles } = await loadFullRecording(opts.recordingId);
   opts.onProgress?.(0.08);
   // ffmpeg 仅在兜底路径才加载（WebCodecs 快路径不需要）。
 
@@ -350,7 +381,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 相同帧去重：静止段（场景/外壳/字幕都没变）直接复用上一帧 PNG，跳过最贵的
   // exportToCanvas + 合成 + toBlob。有激光轨迹时逐帧不同，保守关闭去重以保正确。
   // 注：ffmpeg 兜底里若摄像头改走画布内合成（裁剪场景），逐帧含视频会再关掉去重。
-  let dedupEnabled = laserEvents.length === 0;
+  let dedupEnabled = laserEvents.length === 0 && !screenBlob;
   let lastSig: string | null = null;
   let lastBuf: Uint8Array | null = null;
   // 基帧缓存：场景+外壳+水印只随 snapshot/shell 变化（与字幕无关）
@@ -360,6 +391,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 摄像头画布内合成（仅 WebCodecs 路径启用；ffmpeg 路径仍用 overlay 滤镜）
   let compositeCamera = false;
   let cameraSource: CameraFrameSource | null = null;
+  let displaySource: DisplayFrameSource | null = screenBlob ? createDisplayFrameSource(screenBlob) : null;
   // 摄像头气泡有效边界（shell-aware，与 ffmpeg 路径同一套换算）
   const camBounds: CameraBounds = (() => {
     if (useShell && decodedShells.length > 0) {
@@ -406,8 +438,47 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     target.width = outputW;
     target.height = outputH;
     const targetCtx = target.getContext('2d')!;
-    targetCtx.fillStyle = '#ffffff';
-    targetCtx.fillRect(0, 0, target.width, target.height);
+    await paintVideoBackground(targetCtx, target.width, target.height, opts.videoBackground);
+
+    if (displaySource) {
+      await displaySource.seek(t);
+      drawDisplayFrame(
+        targetCtx,
+        displaySource.video,
+        metadata.source?.kind ?? 'desktop',
+        metadata.source?.sourceCropWindow,
+        target.width,
+        target.height,
+      );
+
+      if (opts.withWatermark) {
+        drawFrostedWatermark(targetCtx, target.width, target.height, watermarkPos);
+      }
+      if (cues.length > 0) {
+        drawSubtitle(targetCtx, target.width, target.height, cues, t, {
+          reservedRightFraction: cameraBlob ? 0.3 : 0,
+        });
+      }
+      if (compositeCamera && cameraSource) {
+        const frame = await cameraSource.getFrameAt(t);
+        if (frame) {
+          const pos = cameraPositionAt(cameraEvents, t);
+          if (!pos) {
+            const size = Math.max(16, Math.round(camBounds.h * 0.22));
+            const x = Math.round(camBounds.offX + camBounds.w - size - camBounds.w * 0.025);
+            const y = Math.round(camBounds.offY + camBounds.h - size - camBounds.h * 0.04);
+            drawCameraBubble(targetCtx, frame, x, y, size);
+          } else if (!pos.hidden) {
+            const shortSide = Math.min(camBounds.w, camBounds.h);
+            const size = Math.max(16, Math.min(Math.round(pos.rs * shortSide), Math.round(shortSide)));
+            const x = Math.round(camBounds.offX + Math.max(0, Math.min(pos.rx * camBounds.w, camBounds.w - size)));
+            const y = Math.round(camBounds.offY + Math.max(0, Math.min(pos.ry * camBounds.h, camBounds.h - size)));
+            drawCameraBubble(targetCtx, frame, x, y, size);
+          }
+        }
+      }
+      return target;
+    }
 
     // 基帧缓存：旁白讲解时画面静止、仅字幕在变 → 复用上次合成好的基帧（含水印），只重画字幕。
     const baseSig = `${snap?.timestamp ?? -1}|${shellAtTframe?.timestamp ?? -1}`;
@@ -462,8 +533,8 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
           appState: {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             ...(snap.appState as any),
-            exportBackground: true,
-            viewBackgroundColor: '#ffffff',
+            exportBackground: false,
+            viewBackgroundColor: 'transparent',
             exportWithDarkMode: false,
             exportPadding: 0,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -576,12 +647,16 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         onProgress: (p) => opts.onProgress?.(0.08 + p * 0.9),
       });
       cameraSource?.close();
+      displaySource?.close();
+      displaySource = null;
       opts.onPhase?.('done');
       opts.onProgress?.(1);
       return blob;
     } catch (err) {
       // 回退前清理摄像头解码资源 + 复位标志（ffmpeg 路径用 overlay 自己处理摄像头）
       try { cameraSource?.close(); } catch { /* */ }
+      try { displaySource?.close(); } catch { /* */ }
+      displaySource = screenBlob ? createDisplayFrameSource(screenBlob) : null;
       cameraSource = null;
       compositeCamera = false;
       // 基帧缓存可能已含半帧状态，复位以免污染 ffmpeg 路径
@@ -791,6 +866,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   if (audioFile) { try { await ffmpeg.deleteFile(audioFile); } catch { /* ignore */ } }
   if (cameraFile) { try { await ffmpeg.deleteFile(cameraFile); } catch { /* ignore */ } }
   try { cameraSource?.close(); } catch { /* */ } // 裁剪时画布内合成用过的摄像头解码器
+  try { displaySource?.close(); } catch { /* */ }
   disposeShells(decodedShells);
 
   opts.onProgress?.(1);
@@ -812,7 +888,7 @@ export async function renderPreviewFrame(
   target: HTMLCanvasElement,
 ): Promise<void> {
   const { exportToCanvas } = await import('@excalidraw/excalidraw');
-  const { metadata, snapshots, binaryFiles, cameraBlob, laserEvents } = await loadFullRecording(recordingId);
+  const { metadata, snapshots, binaryFiles, cameraBlob, screenBlob, laserEvents } = await loadFullRecording(recordingId);
   const preset = ASPECT_PRESETS[config.aspectRatio];
 
   // 预览也要走 shell-aware 路径
@@ -828,13 +904,39 @@ export async function renderPreviewFrame(
   target.width = outputW;
   target.height = outputH;
   const ctx = target.getContext('2d')!;
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, target.width, target.height);
+  await paintVideoBackground(ctx, target.width, target.height, config.videoBackground);
 
   const hasCamera = !!cameraBlob;
   const cues = ((config.burnSubtitles ?? true) && metadata.subtitleSrt)
     ? compileSubtitles(metadata.subtitleSrt)
     : [];
+
+  if (screenBlob) {
+    const display = createDisplayFrameSource(screenBlob);
+    try {
+      await display.seek(timeMs);
+      drawDisplayFrame(
+        ctx,
+        display.video,
+        metadata.source?.kind ?? 'desktop',
+        metadata.source?.sourceCropWindow,
+        target.width,
+        target.height,
+      );
+    } finally {
+      display.close();
+      disposeShells(decodedShells);
+    }
+    if (config.withWatermark) {
+      drawFrostedWatermark(ctx, target.width, target.height, hasCamera ? 'bottom-left' : 'bottom-right');
+    }
+    if (cues.length > 0) {
+      drawSubtitle(ctx, target.width, target.height, cues, timeMs, {
+        reservedRightFraction: hasCamera ? 0.3 : 0,
+      });
+    }
+    return;
+  }
 
   // shell 先铺底（contain / letterbox：整张 shell 完整落在 target 内）
   let shellAtT: DecodedShell | null = null;
@@ -910,8 +1012,8 @@ export async function renderPreviewFrame(
     appState: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...(snap.appState as any),
-      exportBackground: true,
-      viewBackgroundColor: '#ffffff',
+      exportBackground: false,
+      viewBackgroundColor: 'transparent',
       exportWithDarkMode: false,
       exportPadding: 0,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

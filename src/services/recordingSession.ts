@@ -5,6 +5,7 @@ import { bulkAddLaserEvents, getClientDb } from '@/lib/db-client';
 import { getCurrentOwnerKey } from '@/lib/ownerKey';
 import { startAudioRecorder, type AudioRecorderHandle } from '@/services/audioRecorder';
 import { startCameraRecorder, type CameraHandle } from '@/services/cameraRecorder';
+import { startDisplayCaptureRecorder, type DisplayCaptureHandle } from '@/services/displayCaptureRecorder';
 import { ShellCapturer } from '@/services/workspaceShellCapture';
 import type { LaserEvent, RecordingMetadata, RecordingSetupConfig } from '@/types/recording';
 
@@ -78,6 +79,8 @@ export interface StartOptions {
   audioStream?: MediaStream | null;
   /** 取景阶段已采集的摄像头流；复用以避免倒计时后才唤醒设备。 */
   cameraStream?: MediaStream | null;
+  /** 取景阶段已采集的显示源流；复用以避免倒计时后才申请权限。 */
+  displayStream?: MediaStream | null;
 }
 
 const SNAPSHOT_THROTTLE_MS = 50;
@@ -97,6 +100,7 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
     hasCamera: false,
     status: 'recording',
     ownerKey,
+    source: opts.setup?.source ?? { kind: 'whiteboard' },
     ...(opts.setup ? { setup: opts.setup } : {}),
   });
 
@@ -110,6 +114,13 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
     try { camera = await startCameraRecorder(recordingId, opts.cameraStream); } catch { camera = null; }
   }
   if (camera) await db.recordings.update(recordingId, { hasCamera: true });
+
+  const source = opts.setup?.source ?? { kind: 'whiteboard' };
+  let display: DisplayCaptureHandle | null = null;
+  if (source.kind !== 'whiteboard' && opts.displayStream) {
+    display = await startDisplayCaptureRecorder(recordingId, source, opts.displayStream);
+    await db.recordings.update(recordingId, { source });
+  }
 
   const writtenFileIds = new Set<string>();
   let lastSnapshotAt = -Infinity;
@@ -331,6 +342,7 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
       pauseStartedAt = Date.now();
       audio?.pause();
       camera?.pause();
+      display?.pause();
     },
     resume() {
       if (!paused) return;
@@ -338,6 +350,7 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
       paused = false;
       audio?.resume();
       camera?.resume();
+      display?.resume();
     },
     async stop() {
       if (paused) {
@@ -366,6 +379,7 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
       shellCapturer?.stop();
       if (audio) { try { await audio.stop(); } catch { /* ignore */ } }
       if (camera) { try { await camera.stop(); } catch { /* ignore */ } }
+      if (display) { try { await display.stop(); } catch { /* ignore */ } }
       const durationMs = Date.now() - startedAt - pausedTotal;
       await db.recordings.update(recordingId, {
         durationMs,

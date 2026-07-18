@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, type JSX, type ReactNode } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
+import { DEFAULT_VIDEO_BACKGROUND, VIDEO_BACKGROUND_PRESETS, type VideoBackgroundPreset } from '@/config/videoBackgrounds';
 import {
   ASPECT_PRESETS,
   type AspectRatio,
@@ -10,6 +11,10 @@ import {
   type CameraShape,
   type CameraCorner,
   type RecordingSetupConfig,
+  type RecordingSourceConfig,
+  type RecordingSourceKind,
+  type VideoBackgroundConfig,
+  type VideoBackgroundTone,
 } from '@/types/recording';
 
 interface Props {
@@ -27,6 +32,14 @@ type Tab = AspectGroup | 'custom' | 'default';
 
 const RATIOS = Object.entries(ASPECT_PRESETS) as [AspectRatio, (typeof ASPECT_PRESETS)[AspectRatio]][];
 const POSITIONS: CameraCorner[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+const SOURCE_OPTIONS: RecordingSourceConfig[] = [
+  { kind: 'whiteboard' },
+  { kind: 'current_tab', displaySurface: 'browser', captureSystemAudio: true },
+  { kind: 'window', displaySurface: 'window' },
+  { kind: 'desktop', displaySurface: 'monitor' },
+  { kind: 'selected_area', displaySurface: 'monitor' },
+];
+const BACKGROUND_TONES: VideoBackgroundTone[] = ['all', 'fresh', 'soft', 'dark', 'natural'];
 
 function tabForFraming(framing: RecordingSetupConfig['framing']): Tab {
   if (framing === 'default') return 'default';
@@ -36,9 +49,14 @@ function tabForFraming(framing: RecordingSetupConfig['framing']): Tab {
 
 export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, onCancel, onStart }: Props): JSX.Element | null {
   const t = useTranslations('recordingSetup');
+  const locale = useLocale();
+  const en = locale === 'en';
   const [tab, setTab] = useState<Tab>(() => tabForFraming(initial.framing));
   const [framing, setFraming] = useState<RecordingSetupConfig['framing']>(initial.framing);
   const [includeShell, setIncludeShell] = useState(initial.includeWorkspaceShell);
+  const [source, setSource] = useState<RecordingSourceConfig>(initial.source ?? { kind: 'whiteboard' });
+  const [videoBackground, setVideoBackground] = useState<VideoBackgroundConfig>(initial.videoBackground ?? DEFAULT_VIDEO_BACKGROUND);
+  const [backgroundTone, setBackgroundTone] = useState<VideoBackgroundTone>('all');
   const [camEnabled, setCamEnabled] = useState(initial.camera.enabled);
   const [size, setSize] = useState(initial.camera.sizePx);
   const [shape, setShape] = useState<CameraShape>(initial.camera.shape);
@@ -78,6 +96,8 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
       croppingMode: framing === 'default' ? 'fit_all_content' : 'follow_viewport',
       includeWorkspaceShell: includeShell,
       camera: { enabled: camEnabled, sizePx: size, shape, position: pos, backgroundRemoval: bgRemove },
+      source,
+      videoBackground,
     };
     onStart(config);
   };
@@ -121,6 +141,29 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
         </div>
 
         <div style={{ padding: 28 }}>
+          {/* Recording source */}
+          <SetupSection title={t('source.title')} subtitle={t('source.subtitle')}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8 }}>
+              {SOURCE_OPTIONS.map((option) => (
+                <SourceCard
+                  key={option.kind}
+                  option={option}
+                  selected={source.kind === option.kind}
+                  title={t(`source.${option.kind}.title`)}
+                  desc={t(`source.${option.kind}.desc`)}
+                  onSelect={setSource}
+                />
+              ))}
+            </div>
+            {source.kind !== 'whiteboard' && (
+              <div style={{ marginTop: 10, fontSize: 11.5, color: 'var(--ink-3)', lineHeight: 1.45 }}>
+                {t('source.browserChooserHint')}
+              </div>
+            )}
+          </SetupSection>
+
+          <SectionDivider />
+
           {/* Aspect ratio */}
           <SetupSection title={t('aspect.title')} subtitle={t('aspect.subtitle')} right={<div className="label-mono">{dimsLabel}</div>}>
             {/* Tabs */}
@@ -245,6 +288,40 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
 
           <SectionDivider />
 
+          {/* Video background */}
+          <SetupSection title={t('background.title')} subtitle={t('background.subtitle')}>
+            <div className="flex flex-wrap" style={{ gap: 8, marginBottom: 12 }}>
+              {BACKGROUND_TONES.map((tone) => (
+                <button
+                  key={tone}
+                  type="button"
+                  onClick={() => setBackgroundTone(tone)}
+                  style={{
+                    padding: '6px 11px',
+                    borderRadius: 999,
+                    border: '1.2px solid rgba(31,34,37,.16)',
+                    background: backgroundTone === tone ? 'var(--ink)' : 'var(--paper-2)',
+                    color: backgroundTone === tone ? 'var(--paper)' : 'var(--ink-2)',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {t(`background.tones.${tone}`)}
+                </button>
+              ))}
+            </div>
+            <BackgroundSwatches
+              en={en}
+              tone={backgroundTone}
+              value={videoBackground}
+              noneLabel={t('background.none')}
+              onChange={setVideoBackground}
+            />
+          </SetupSection>
+
+          <SectionDivider />
+
           {/* Camera */}
           <SetupSection title={t('camera.title')} subtitle={t('camera.subtitle')} right={<Toggle on={camEnabled} onChange={setCamEnabled} />}>
             {camEnabled && (
@@ -352,6 +429,126 @@ function SetupSection({ title, subtitle, right, children }: { title: string; sub
 
 function SectionDivider(): JSX.Element {
   return <div style={{ height: 1.5, background: 'var(--ink)', margin: '22px 0', opacity: 0.7 }} />;
+}
+
+function sourceIcon(kind: RecordingSourceKind): (p: { size?: number }) => JSX.Element {
+  if (kind === 'whiteboard') return I.Grid;
+  if (kind === 'selected_area') return I.Crop;
+  return I.Monitor;
+}
+
+function SourceCard({
+  option,
+  selected,
+  title,
+  desc,
+  onSelect,
+}: {
+  option: RecordingSourceConfig;
+  selected: boolean;
+  title: string;
+  desc: string;
+  onSelect: (next: RecordingSourceConfig) => void;
+}): JSX.Element {
+  const Icon = sourceIcon(option.kind);
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(option)}
+      className="press"
+      aria-pressed={selected}
+      style={{
+        minHeight: 112,
+        padding: 12,
+        borderRadius: 18,
+        border: selected ? '1.4px solid var(--ink)' : '1px solid rgba(31,34,37,.14)',
+        background: selected ? 'var(--ink)' : 'var(--paper-2)',
+        color: selected ? 'var(--paper)' : 'var(--ink)',
+        boxShadow: selected ? '0 10px 26px rgba(24,25,26,.16)' : '0 8px 20px rgba(48,38,26,.05)',
+        cursor: 'pointer',
+        textAlign: 'left',
+      }}
+    >
+      <div
+        className="grid place-items-center"
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 999,
+          background: selected ? 'rgba(255,255,255,.12)' : '#fffdf8',
+          border: selected ? '1px solid rgba(255,255,255,.20)' : '1px solid rgba(31,34,37,.10)',
+          marginBottom: 10,
+        }}
+      >
+        <Icon size={16} />
+      </div>
+      <div style={{ fontSize: 12.5, fontWeight: 750, lineHeight: 1.2 }}>{title}</div>
+      <div style={{ marginTop: 5, fontSize: 10.5, lineHeight: 1.35, color: selected ? 'rgba(255,253,248,.68)' : 'var(--ink-3)' }}>
+        {desc}
+      </div>
+    </button>
+  );
+}
+
+function BackgroundSwatches({
+  en,
+  tone,
+  value,
+  noneLabel,
+  onChange,
+}: {
+  en: boolean;
+  tone: VideoBackgroundTone;
+  value: VideoBackgroundConfig;
+  noneLabel: string;
+  onChange: (next: VideoBackgroundConfig) => void;
+}): JSX.Element {
+  const filtered = VIDEO_BACKGROUND_PRESETS.filter((preset) => tone === 'all' || preset.tone === tone);
+  const swatches: Array<VideoBackgroundPreset | null> = [null, ...filtered];
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
+      {swatches.map((preset) => {
+        const selected = preset ? value.kind === 'preset' && value.presetId === preset.id : value.kind === 'none';
+        return (
+          <button
+            key={preset?.id ?? 'none'}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onChange(preset ? { kind: 'preset', presetId: preset.id, tone: preset.tone } : DEFAULT_VIDEO_BACKGROUND)}
+            className="press"
+            style={{
+              padding: 7,
+              borderRadius: 18,
+              border: selected ? '1.5px solid var(--ink)' : '1px solid rgba(31,34,37,.13)',
+              background: selected ? '#fffdf8' : 'var(--paper-2)',
+              boxShadow: selected ? '0 10px 24px rgba(24,25,26,.12)' : '0 8px 20px rgba(48,38,26,.05)',
+              cursor: 'pointer',
+              color: 'var(--ink)',
+              textAlign: 'left',
+            }}
+          >
+            <div
+              style={{
+                height: 64,
+                borderRadius: 13,
+                border: '1px solid rgba(31,34,37,.10)',
+                background: preset
+                  ? `url(${preset.preview}) center / cover no-repeat`
+                  : 'linear-gradient(135deg, #fffdf8, #f4efe8)',
+                marginBottom: 7,
+              }}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+              <span style={{ fontSize: 11.5, fontWeight: 750 }}>
+                {preset ? (en ? preset.labelEn : preset.labelZh) : noneLabel}
+              </span>
+              {selected && <I.Check size={13} />}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function SetupRow({ label, children }: { label: string; children: ReactNode }): JSX.Element {

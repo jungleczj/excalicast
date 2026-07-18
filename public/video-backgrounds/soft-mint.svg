@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1920" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EAF7EC"/>
+      <stop offset=".48" stop-color="#F8FFF9"/>
+      <stop offset="1" stop-color="#EAF3FF"/>
+    </linearGradient>
+    <filter id="grain" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency=".76" numOctaves="3" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer><feFuncA type="table" tableValues="0 .095"/></feComponentTransfer>
+    </filter>
+    <pattern id="dots" width="16" height="16" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.4" fill="#478A62" opacity=".13"/>
+    </pattern>
+    <clipPath id="cloud"><path d="M105 235C150 166 227 140 294 177C333 116 421 109 475 162C526 138 593 158 623 212C685 203 747 242 770 304C576 310 284 303 105 235Z"/></clipPath>
+    <clipPath id="paper"><path d="M-15 555C113 518 256 533 394 497C520 464 636 497 766 471C921 439 1067 455 1204 491C1378 537 1559 484 1930 506V1080H-15V555Z"/></clipPath>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <rect width="1920" height="1080" filter="url(#grain)" opacity=".75"/>
+  <g clip-path="url(#cloud)"><rect x="80" y="108" width="730" height="235" fill="url(#dots)"/></g>
+  <path d="M1196 214C1258 151 1354 154 1408 211C1457 183 1537 193 1578 254C1648 244 1717 294 1740 362C1559 351 1364 351 1196 318V214Z" fill="url(#dots)" opacity=".95"/>
+  <path d="M-39 438C166 401 351 414 562 442C767 470 933 420 1119 426C1309 432 1495 476 1708 429C1809 407 1882 415 1955 433V613C1739 628 1587 594 1402 613C1194 634 976 624 776 609C534 590 302 641 -45 619L-39 438Z" fill="#FFFDF8" opacity=".92"/>
+  <g clip-path="url(#paper)">
+    <rect y="455" width="1920" height="625" fill="#DDF3E6"/>
+    <rect y="455" width="1920" height="625" filter="url(#grain)" opacity=".5"/>
+  </g>
+  <path d="M1240 744C1322 685 1396 713 1497 669C1588 629 1702 602 1930 662V1080H1240V744Z" fill="#FFF0D7" opacity=".84"/>
+  <path d="M-20 838C134 793 257 840 402 812C550 784 652 741 774 768C919 799 1014 844 1162 800V1080H-20V838Z" fill="#F2EDFF" opacity=".68"/>
+  <path d="M0 1002C234 959 422 988 617 950C851 904 1030 968 1212 930C1406 889 1628 941 1920 884V1080H0V1002Z" fill="#FFFDF8"/>
+</svg>

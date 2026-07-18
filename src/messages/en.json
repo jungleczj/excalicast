@@ -484,6 +484,7 @@
   "workspace": {
     "paymentReceived": "Payment received ✓ — you can return to your previous tab to continue.",
     "cameraOpenFailed": "Could not open camera: {message}",
+    "displaySourceFailed": "Could not open display source: {message}",
     "startFailed": "Could not start recording: {message}",
     "stopFailed": "Could not stop recording: {message}",
     "discardConfirm": "Discard this recording? All data will be deleted.",
@@ -543,6 +544,43 @@
     "title": "New recording",
     "close": "Close",
     "cropLocked": "CROP LOCKED",
+    "source": {
+      "title": "Recording source",
+      "subtitle": "Choose what should be kept before framing.",
+      "browserChooserHint": "The browser still shows its own picker. This choice controls the capture hint and later cropping behavior.",
+      "whiteboard": {
+        "title": "Whiteboard",
+        "desc": "Record board explanations"
+      },
+      "current_tab": {
+        "title": "This tab",
+        "desc": "Browser-controlled capture"
+      },
+      "window": {
+        "title": "Window",
+        "desc": "Record one app window"
+      },
+      "desktop": {
+        "title": "Desktop",
+        "desc": "Record an entire screen"
+      },
+      "selected_area": {
+        "title": "Selected area",
+        "desc": "Crop after permission"
+      }
+    },
+    "background": {
+      "title": "Video background",
+      "subtitle": "Used in the final video frame. You can adjust it again on export.",
+      "none": "No background",
+      "tones": {
+        "all": "All",
+        "fresh": "Fresh",
+        "soft": "Soft",
+        "dark": "Dark",
+        "natural": "Natural"
+      }
+    },
     "aspect": {
       "title": "Aspect ratio",
       "subtitle": "Locks the crop frame on canvas — no black bars on export.",
@@ -647,6 +685,18 @@
     "available": "{count} workspace snapshots were captured during recording",
     "notAvailable": "This recording has no workspace snapshots (older recording)",
     "lockedNote": "Locked to original workspace aspect ({w}×{h})"
+  },
+  "videoBackgroundPanel": {
+    "title": "Video background",
+    "subtitle": "The background fills the final frame with cover-fit and never stretches.",
+    "none": "No background",
+    "tones": {
+      "all": "All",
+      "fresh": "Fresh",
+      "soft": "Soft",
+      "dark": "Dark",
+      "natural": "Natural"
+    }
   },
   "exportPreview": {
     "watermarkBadge": "👁️ Watermarked preview",

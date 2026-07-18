@@ -40,6 +40,8 @@ export interface RecordingMetadata {
   ownerKey?: string;
   /** 录制前 Setup 面板锁定的画幅/摄像头/工作区配置；导出默认沿用。旧录制无此字段。 */
   setup?: RecordingSetupConfig;
+  /** 录制来源。旧录制缺省为白板。 */
+  source?: RecordingSourceConfig;
   /** 用户给录制打的类别标签（录制库卡片展示 + 可编辑）。 */
   tags?: string[];
   /** 时间轴保留段（ms，相对录制开始）。缺省=整段 [0,durationMs]。导出按段裁剪输出。 */
@@ -59,6 +61,12 @@ export interface AudioChunk {
 }
 
 export interface CameraChunk {
+  recordingId: string;
+  index: number;
+  blob: Blob;
+}
+
+export interface ScreenChunk {
   recordingId: string;
   index: number;
   blob: Blob;
@@ -132,6 +140,20 @@ export const ASPECT_PRESETS: Record<
 
 export type CroppingMode = 'follow_viewport' | 'fit_all_content';
 
+export type VideoBackgroundKind = 'none' | 'preset';
+
+export type VideoBackgroundTone = 'all' | 'fresh' | 'soft' | 'dark' | 'natural';
+
+export interface VideoBackgroundConfig {
+  kind: VideoBackgroundKind;
+  presetId?: string;
+  tone?: VideoBackgroundTone;
+  /** 背景模糊像素。 */
+  blurPx?: number;
+  /** 0..1 柔化/压暗强度，用于降低高饱和背景干扰。 */
+  dim?: number;
+}
+
 export type ExportResolution = 'sd' | 'hd' | 'fhd' | 'qhd' | 'uhd';
 export type ExportFormat = 'mp4' | 'webm' | 'gif';
 export type ExportQuality = 'auto' | 'high' | 'medium' | 'low';
@@ -166,6 +188,8 @@ export interface ExportConfig {
   customOutput?: { width: number; height: number };
   /** 时间轴裁剪保留段（ms）；缺省=整段。导出只输出这些段、按序拼接。 */
   segments?: TimeSegment[];
+  /** 视频背景。旧录制缺省为 none。 */
+  videoBackground?: VideoBackgroundConfig;
 }
 
 export interface ShellCanvasRect {
@@ -228,6 +252,30 @@ export interface CropWindow {
   rh: number;  // 高占画布区高的比例
 }
 
+export type RecordingSourceKind =
+  | 'whiteboard'
+  | 'current_tab'
+  | 'window'
+  | 'desktop'
+  | 'selected_area';
+
+export interface SourceCropWindow {
+  rx: number;
+  ry: number;
+  rw: number;
+  rh: number;
+}
+
+export interface RecordingSourceConfig {
+  kind: RecordingSourceKind;
+  /** Browser display surface hint; not a guarantee. */
+  displaySurface?: 'browser' | 'window' | 'monitor';
+  /** selected_area 模式：浏览器授权后的源画面内部裁切区域。 */
+  sourceCropWindow?: SourceCropWindow;
+  /** Tab/system audio is only available when the browser grants it. */
+  captureSystemAudio?: boolean;
+}
+
 /**
  * 录制前 Setup 面板选定并锁定的配置，随录制存进 RecordingMetadata.setup，
  * 录制中据此画裁切框，导出页据此设默认 ExportConfig。
@@ -245,4 +293,8 @@ export interface RecordingSetupConfig {
   /** framing='custom' 的输出像素尺寸（由框选区域换算或用户手输；预设比例用 ASPECT_PRESETS）。 */
   customOutput?: { width: number; height: number };
   camera: CameraSetupConfig;
+  /** 视频背景，进入导出默认配置并参与最终视频绘制。 */
+  videoBackground?: VideoBackgroundConfig;
+  /** 录制来源。缺省 whiteboard。 */
+  source?: RecordingSourceConfig;
 }
