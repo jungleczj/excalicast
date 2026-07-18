@@ -1,6 +1,7 @@
 'use client';
 
-import type { CSSProperties, ReactNode } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 interface Props {
   open: boolean;
@@ -31,11 +32,18 @@ export function Modal({
   style,
   children,
 }: Props): JSX.Element | null {
-  if (!open) return null;
-  return (
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!open || !mounted) return null;
+
+  return createPortal(
     <div
       className="app-craft-modal-overlay fade-in fixed inset-0 z-50 grid place-items-center"
-      style={{ background: 'var(--overlay)' }}
+      style={{ background: 'var(--overlay)', zIndex: 9999 }}
       onClick={dismissable ? onClose : undefined}
     >
       <div
@@ -72,6 +80,7 @@ export function Modal({
         )}
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
