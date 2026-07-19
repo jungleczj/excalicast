@@ -102,6 +102,7 @@ export default function EditorRecordingPage(): JSX.Element {
   // 时间轴裁剪：保留段（源 ms）+ 播放头源时间
   const [segments, setSegments] = useState<TimeSegment[]>([]);
   const [autoZooms, setAutoZooms] = useState<AutoZoomSegment[]>([]);
+  const [selectedAutoZoomId, setSelectedAutoZoomId] = useState<string | null>(null);
   const [playheadMs, setPlayheadMs] = useState(0);
 
   useEffect(() => {
@@ -125,6 +126,7 @@ export default function EditorRecordingPage(): JSX.Element {
           setTitle(m.title?.trim() || (en ? `Recording ${id.slice(0, 8)}` : `录制 ${id.slice(0, 8)}`));
           const savedAutoZooms = m.autoZooms ?? [];
           setAutoZooms(savedAutoZooms);
+          setSelectedAutoZoomId(savedAutoZooms[0]?.id ?? null);
           if (m.setup) setConfig({ ...exportDefaultsFromSetup(m.setup), autoZooms: savedAutoZooms.length ? savedAutoZooms : undefined });
           else if (savedAutoZooms.length) setConfig((c) => ({ ...c, autoZooms: savedAutoZooms }));
           setSegments(normalizeSegments(m.segments, m.durationMs));
@@ -277,9 +279,9 @@ export default function EditorRecordingPage(): JSX.Element {
         {/* Left: player + timeline */}
         <div className="editor-craft-main flex flex-1 flex-col overflow-auto p-6" style={{ borderRight: '1.5px solid var(--ink)', background: 'var(--paper-2)' }}>
           {/* 预览 + 时间轴 + 删除 共用全宽列：填满左列、两者等宽对齐 */}
-          <div className="flex min-h-0 w-full flex-1 flex-col">
-          <div className="flex min-h-0 flex-1 items-center justify-center">
-            <div className="editor-craft-card editor-craft-preview-shell flex h-full min-h-0 w-full items-center justify-center" style={{ ...CARD, padding: 0 }}>
+          <div className="w-full">
+          <div className="flex w-full justify-center">
+            <div className="editor-craft-card editor-craft-preview-shell flex w-full justify-center" style={{ ...CARD, padding: 0 }}>
               <ExportPreview
                 recordingId={id}
                 metadata={meta}
@@ -293,7 +295,7 @@ export default function EditorRecordingPage(): JSX.Element {
           </div>
 
           {/* Timeline — 主流剪辑交互：播放头 scrub + Split + 选段删除 + 边缘 Trim */}
-          <div className="mt-5">
+          <div className="mt-5" data-testid="editor-timeline">
             <Timeline
               durationMs={meta.durationMs}
               clips={segments}
@@ -303,6 +305,10 @@ export default function EditorRecordingPage(): JSX.Element {
               onReset={() => setSegments(normalizeSegments(undefined, meta.durationMs))}
               hasAudio={meta.hasAudio}
               hasCaptions={!!meta.subtitleSrt}
+              autoZooms={autoZooms}
+              onAutoZoomChange={setAutoZooms}
+              selectedAutoZoomId={selectedAutoZoomId}
+              onAutoZoomSelect={setSelectedAutoZoomId}
               labels={{
                 edit: en ? 'Edit' : '剪辑',
                 reset: en ? 'Reset' : '复原',
@@ -314,12 +320,16 @@ export default function EditorRecordingPage(): JSX.Element {
                 hint: en
                   ? 'Drag playhead/edges to scrub · Split (S) then Delete to cut any part'
                   : '拖播放头/边缘实时预览 · 切一刀(S)后删片段即可剪掉任意段',
+                autoZoom: 'Autozoom',
+                autoZoomHint: en
+                  ? 'Drag onto the purple zoom lane, or click to add at the playhead'
+                  : '拖入紫色放大轨道，或点击在播放头处添加',
               }}
             />
             <AutoZoomPanel
               durationMs={meta.durationMs}
-              playheadMs={playheadMs}
               autoZooms={autoZooms}
+              selectedId={selectedAutoZoomId}
               onChange={setAutoZooms}
               en={en}
             />

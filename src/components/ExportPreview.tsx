@@ -27,9 +27,22 @@ interface Props {
 // 这里把它限到 ~5fps，足以让用户感知白板进度，又不会卡 UI。
 const CANVAS_REDRAW_INTERVAL_MS = 200;
 
-// 预览盒子优先按父容器真实宽高 contain-fit。
-// 父容器拿不到高度时才回退到 viewport 比例，避免盖到底部时间轴/编辑工具栏。
-const PREVIEW_FALLBACK_VH_PCT = 0.68;
+const PREVIEW_MIN_WIDTH = 300;
+const PREVIEW_PREFERRED_WIDTH = 860;
+const resizeButtonStyle: React.CSSProperties = {
+  display: 'grid',
+  width: 24,
+  height: 24,
+  placeItems: 'center',
+  border: 'none',
+  borderRadius: 999,
+  background: 'transparent',
+  color: 'var(--ink)',
+  fontFamily: 'var(--font-mono)',
+  fontSize: 16,
+  lineHeight: 1,
+  cursor: 'pointer',
+};
 
 export function ExportPreview({ recordingId, metadata, config, progress, segments, playheadMs, onPlayheadChange }: Props): JSX.Element {
   const t = useTranslations('exportPreview');
@@ -49,21 +62,11 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
   const [cameraEvents, setCameraEvents] = useState<CameraPositionEvent[]>([]);
   const [firstShell, setFirstShell] = useState<{ shellSize: ShellSize; canvasRect: ShellCanvasRect } | null>(null);
   const [playing, setPlaying] = useState(false);
-  // 视口高度 —— 用来 JS 算盒子高度上限
-  const [viewportH, setViewportH] = useState<number>(() =>
-    typeof window === 'undefined' ? 800 : window.innerHeight,
-  );
-  // 真实父容器宽高 —— 由 ResizeObserver 实时测量，预览只能在时间轴上方区域内放大
+  // 预览外框尺寸独立于画面渲染倍率：拖拽/按钮只改变承载视频的盒子，画面始终 contain-fit。
+  // 这个容器处于普通文档流中，变高时 Timeline 会自然向下移动。
   const parentRef = useRef<HTMLDivElement>(null);
-  const [parentBox, setParentBox] = useState({ w: 0, h: 0 });
-  const [previewScale, setPreviewScale] = useState(1);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const onResize = () => setViewportH(window.innerHeight);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
+  const [parentWidth, setParentWidth] = useState(0);
+  const [requestedWidth, setRequestedWidth] = useState<number | null>(null);
 
   // useLayoutEffect：挂载/重渲染后、浏览器 paint 前同步读宽度，避免首帧 0 宽闪烁
   // 把 config.aspectRatio 放进依赖：每次切换比例都强制重新测量一次父宽（兜底
@@ -72,15 +75,14 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
     const el = parentRef.current;
     if (!el) return;
     const measure = () => {
-      setParentBox({ w: el.clientWidth, h: el.clientHeight });
+      setParentWidth(el.clientWidth);
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver((entries) => {
       const box = entries[0]?.contentRect;
       const w = box?.width ?? el.clientWidth;
-      const h = box?.height ?? el.clientHeight;
-      if (w > 0 || h > 0) setParentBox({ w, h });
+      if (w > 0) setParentWidth(w);
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -302,23 +304,39 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
   const preset = ASPECT_PRESETS[config.aspectRatio];
   const aspect = preset.width / preset.height;
 
-  // contain-fit 计算盒子像素尺寸 —— maxW 来自 useLayoutEffect 实测的父容器宽度。
-  // parentW 还没拿到时用一个保守的 viewport fallback，避免首帧返回 0×0 让后续的
-  // 高度 transition 卡住（9:16 高 ≈ viewportH*0.52 一旦先被定为 0，某些浏览器后续
-  // 不再触发 ResizeObserver 通知）。
+  // 容器可拉伸，但不会超过编辑栏可用宽度；高度永远由当前视频比例推导。
   const previewBox = useMemo(() => {
-    const maxW = parentBox.w > 0 ? parentBox.w : Math.min(960, viewportH * 1.2);
-    const maxH = parentBox.h > 0 ? parentBox.h : viewportH * PREVIEW_FALLBACK_VH_PCT;
-    const safeW = Math.max(120, Math.floor(maxW));
-    const safeH = Math.max(90, Math.floor(maxH));
-    const fit = safeW / aspect <= safeH
-      ? { w: safeW, h: Math.floor(safeW / aspect) }
-      : { w: Math.floor(safeH * aspect), h: safeH };
+    const maxW = Math.max(PREVIEW_MIN_WIDTH, Math.floor((parentWidth || PREVIEW_PREFERRED_WIDTH) - 16));
+    // 默认留出一档可放大的空间；如果编辑列很窄则自然退化为满宽。
+    const preferred = Math.min(maxW, Math.max(PREVIEW_MIN_WIDTH, Math.min(PREVIEW_PREFERRED_WIDTH, maxW * 0.78)));
+    const w = Math.round(Math.max(PREVIEW_MIN_WIDTH, Math.min(maxW, requestedWidth ?? preferred)));
     return {
-      w: Math.floor(fit.w * previewScale),
-      h: Math.floor(fit.h * previewScale),
+      w,
+      h: Math.round(w / aspect),
     };
-  }, [aspect, viewportH, parentBox, previewScale]);
+  }, [aspect, parentWidth, requestedWidth]);
+
+  const resizePreview = useCallback((nextWidth: number) => {
+    const maxW = Math.max(PREVIEW_MIN_WIDTH, Math.floor((parentWidth || PREVIEW_PREFERRED_WIDTH) - 16));
+    setRequestedWidth(Math.max(PREVIEW_MIN_WIDTH, Math.min(maxW, Math.round(nextWidth))));
+  }, [parentWidth]);
+
+  const startResize = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const startX = event.clientX;
+    const startWidth = previewBox.w;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const move = (moveEvent: PointerEvent) => resizePreview(startWidth + moveEvent.clientX - startX);
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }, [previewBox.w, resizePreview]);
+
+  const controlScale = Math.max(0.78, Math.min(1.35, previewBox.w / 720));
 
   const exporting = progress != null;
   const pct = exporting ? Math.round((progress?.ratio ?? 0) * 100) : 0;
@@ -335,18 +353,15 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
   // 摄像头气泡位置/尺寸由 cameraOverlayStyle 计算（events → 动态；无事件 → 右下角 18% 宽度）
 
   return (
-    <div className="export-preview-craft-wrap flex h-full min-h-0 w-full items-center justify-center">
-      {/* 外层 wrapper 用 ref + ResizeObserver 实时拿父容器宽度，picker 切换时 previewBox 才会跟着变 */}
-      <div ref={parentRef} className="flex h-full min-h-0 w-full items-center justify-center overflow-auto p-2">
+    <div className="export-preview-craft-wrap w-full">
+      {/* 外层 wrapper 用 ref + ResizeObserver 实时拿可用宽度；不再受预览区高度限制。 */}
+      <div ref={parentRef} className="flex w-full justify-center p-2">
       <div
+        data-testid="export-preview-stage"
         className="export-preview-craft-stage relative mx-auto overflow-hidden"
         style={{
-          // 直接用 JS 算出来的像素尺寸，绕开 CSS aspect-ratio + max-* 三件套
-          // 在某些浏览器下不能同步收 width 的坑 —— 进度条、canvas、摄像头叠加层
-          // 都跟这个盒子尺寸走。maxWidth: 100% 是硬保险：祖先永远不会被撑爆。
           width: previewBox.w,
           height: previewBox.h,
-          maxWidth: previewScale === 1 ? '100%' : undefined,
           flex: '0 0 auto',
           background: 'var(--paper)',
           border: '1.5px solid var(--ink)',
@@ -459,7 +474,7 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
             style={{
               background: 'var(--ink)',
               color: 'var(--paper)',
-              padding: '6px 10px 6px 6px',
+              padding: `${6 * controlScale}px ${10 * controlScale}px ${6 * controlScale}px ${6 * controlScale}px`,
               borderRadius: 3,
               border: '1.3px solid var(--ink)',
               // 自身 overflow-hidden 防 input 极窄时 second-order 溢出把右 span 推出
@@ -472,8 +487,8 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
               disabled={metadata.durationMs === 0}
               className="grid place-items-center"
               style={{
-                width: 26,
-                height: 26,
+                width: 26 * controlScale,
+                height: 26 * controlScale,
                 background: 'var(--hi)',
                 color: 'var(--ink)',
                 border: '1.2px solid var(--paper)',
@@ -489,7 +504,7 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
             <span
               style={{
                 fontFamily: 'var(--font-mono)',
-                fontSize: 11,
+                fontSize: 11 * controlScale,
                 opacity: 0.85,
                 fontVariantNumeric: 'tabular-nums',
                 flexShrink: 0,
@@ -502,16 +517,16 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
               ref={barRef}
               onMouseDown={startBarScrub}
               className="flex flex-1 items-center"
-              style={{ minWidth: 0, height: 16, cursor: keptDur > 0 ? 'ew-resize' : 'default' }}
+              style={{ minWidth: 0, height: 16 * controlScale, cursor: keptDur > 0 ? 'ew-resize' : 'default' }}
             >
-              <div className="h-1 w-full" style={{ background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden', pointerEvents: 'none' }}>
+              <div className="w-full" style={{ height: 4 * controlScale, background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden', pointerEvents: 'none' }}>
                 <div style={{ height: '100%', width: `${keptDur > 0 ? Math.min(100, (sourceToOutput(kept, timeMs) / keptDur) * 100) : 0}%`, background: 'var(--hi)' }} />
               </div>
             </div>
             <span
               style={{
                 fontFamily: 'var(--font-mono)',
-                fontSize: 11,
+                fontSize: 11 * controlScale,
                 opacity: 0.85,
                 fontVariantNumeric: 'tabular-nums',
                 flexShrink: 0,
@@ -524,31 +539,26 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
 
         {!exporting && (
           <div
-            className="absolute left-1/2 top-3 z-40 flex -translate-x-1/2 items-center gap-1"
-            style={{ background: 'rgba(255,253,248,.86)', border: '1px solid rgba(31,34,37,.12)', borderRadius: 999, padding: 3, backdropFilter: 'blur(10px)' }}
+            className="absolute right-3 top-3 z-40 flex items-center gap-1"
+            style={{ background: 'rgba(255,253,248,.9)', border: '1px solid rgba(31,34,37,.12)', borderRadius: 999, padding: 3, backdropFilter: 'blur(10px)' }}
           >
-            {[1, 1.25, 1.5, 2].map((scale) => (
-              <button
-                key={scale}
-                type="button"
-                onClick={() => setPreviewScale(scale)}
-                aria-pressed={previewScale === scale}
-                style={{
-                  border: 'none',
-                  borderRadius: 999,
-                  padding: '4px 8px',
-                  background: previewScale === scale ? 'var(--ink)' : 'transparent',
-                  color: previewScale === scale ? 'var(--paper)' : 'var(--ink-2)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                {scale === 1 ? 'Fit' : `${Math.round(scale * 100)}%`}
-              </button>
-            ))}
+            <button type="button" aria-label="Shrink preview" onClick={() => resizePreview(previewBox.w - 120)} style={resizeButtonStyle}>−</button>
+            <span style={{ padding: '0 5px', color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', fontSize: 10 }}>{Math.round(previewBox.w)}px</span>
+            <button data-testid="preview-enlarge" type="button" aria-label="Enlarge preview" onClick={() => resizePreview(previewBox.w + 120)} style={resizeButtonStyle}>+</button>
           </div>
+        )}
+
+        {!exporting && (
+          <button
+            data-testid="preview-resize-handle"
+            type="button"
+            aria-label="Resize preview window"
+            onPointerDown={startResize}
+            className="absolute bottom-2 right-2 z-40 grid place-items-center"
+            style={{ width: 24, height: 24, border: 'none', borderRadius: 999, background: 'rgba(255,253,248,.84)', color: 'var(--ink-2)', cursor: 'nwse-resize', boxShadow: '0 4px 10px rgba(24,25,26,.1)' }}
+          >
+            <span aria-hidden style={{ fontSize: 14, lineHeight: 1, transform: 'rotate(-45deg)' }}>↔</span>
+          </button>
         )}
 
         {exporting && (

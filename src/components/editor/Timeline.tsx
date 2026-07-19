@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { I } from '@/components/icons';
-import type { TimeSegment } from '@/types/recording';
+import type { AutoZoomSegment, TimeSegment } from '@/types/recording';
 import { keptDuration, splitSegments, removeSegmentAt, trimSegmentEdge } from '@/utils/segments';
 
 interface Props {
@@ -17,11 +17,17 @@ interface Props {
   onChange: (clips: TimeSegment[]) => void;
   /** 复原为整段。 */
   onReset: () => void;
+  /** Screen Studio 风格的独立 zoom 轨道。 */
+  autoZooms?: AutoZoomSegment[];
+  onAutoZoomChange?: (next: AutoZoomSegment[]) => void;
+  selectedAutoZoomId?: string | null;
+  onAutoZoomSelect?: (id: string | null) => void;
   hasAudio: boolean;
   hasCaptions: boolean;
   labels: {
     edit: string; reset: string; kept: string; mic: string; captions: string;
     split: string; deleteClip: string; hint: string;
+    autoZoom: string; autoZoomHint: string;
   };
 }
 
@@ -38,7 +44,9 @@ function fmt(ms: number): string {
  * 数据＝保留片段 `clips`（gap＝被删）；导出按保留段拼接输出（见 exportPipeline）。
  */
 export function Timeline({
-  durationMs, clips, playheadMs, onScrub, onChange, onReset, hasAudio, hasCaptions, labels,
+  durationMs, clips, playheadMs, onScrub, onChange, onReset,
+  autoZooms = [], onAutoZoomChange, selectedAutoZoomId, onAutoZoomSelect,
+  hasAudio, hasCaptions, labels,
 }: Props): JSX.Element {
   const laneRef = useRef<HTMLDivElement>(null);
   const dur = Math.max(1, durationMs);
@@ -101,6 +109,52 @@ export function Timeline({
     setSelectedIdx(null);
   };
 
+  const replaceZoom = (id: string, patch: Partial<AutoZoomSegment>) => {
+    if (!onAutoZoomChange) return;
+    onAutoZoomChange(autoZooms.map((zoom) => {
+      if (zoom.id !== id) return zoom;
+      const start = Math.max(0, Math.min(durationMs - 100, Math.round(patch.start ?? zoom.start)));
+      const end = Math.max(start + 100, Math.min(durationMs, Math.round(patch.end ?? zoom.end)));
+      return { ...zoom, ...patch, start, end };
+    }).sort((a, b) => a.start - b.start));
+  };
+
+  const addZoomAt = (timeMs: number) => {
+    if (!onAutoZoomChange) return;
+    const start = Math.max(0, Math.min(Math.max(0, durationMs - 800), Math.round(timeMs)));
+    const id = `az-${Date.now().toString(36)}`;
+    onAutoZoomChange([
+      ...autoZooms,
+      { id, start, end: Math.min(durationMs, start + 2200), scale: 1.6, cx: 0.5, cy: 0.5 },
+    ].sort((a, b) => a.start - b.start));
+    onAutoZoomSelect?.(id);
+  };
+
+  const startZoomDrag = (id: string, mode: 'move' | 'start' | 'end') => (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const base = autoZooms.find((zoom) => zoom.id === id);
+    if (!base) return;
+    onAutoZoomSelect?.(id);
+    const dragOrigin = srcAtClientX(event.clientX);
+    const move = (moveEvent: MouseEvent) => {
+      const delta = srcAtClientX(moveEvent.clientX) - dragOrigin;
+      if (mode === 'start') {
+        replaceZoom(id, { start: Math.max(0, Math.min(base.end - 100, base.start + delta)) });
+      } else if (mode === 'end') {
+        replaceZoom(id, { end: Math.max(base.start + 100, Math.min(durationMs, base.end + delta)) });
+      } else {
+        const length = base.end - base.start;
+        const start = Math.max(0, Math.min(durationMs - length, base.start + delta));
+        replaceZoom(id, { start, end: start + length });
+      }
+      onScrub(Math.max(0, Math.min(durationMs, base.start + delta)));
+    };
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+
   // 快捷键：S=Split、Delete/Backspace=删选中段（输入框聚焦时不拦截）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -129,6 +183,24 @@ export function Timeline({
           <button type="button" onClick={doDelete} disabled={!canDelete} className="timeline-craft-action timeline-craft-danger btn-sketch" style={{ padding: '3px 9px' }} title={`${labels.deleteClip} (Del)`}>
             <I.Trash size={11} /> {labels.deleteClip}
           </button>
+          {onAutoZoomChange && (
+            <button
+              data-testid="autozoom-drag-source"
+              type="button"
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = 'copy';
+                event.dataTransfer.setData('application/x-excalicast-autozoom', 'new');
+                event.dataTransfer.setData('text/plain', 'autozoom');
+              }}
+              onClick={() => addZoomAt(playheadMs)}
+              className="timeline-craft-action btn-sketch"
+              style={{ padding: '3px 9px' }}
+              title={labels.autoZoomHint}
+            >
+              <I.Search size={11} /> {labels.autoZoom}
+            </button>
+          )}
           {trimmed && (
             <button type="button" onClick={() => { onReset(); setSelectedIdx(null); }} className="timeline-craft-action btn-sketch" style={{ padding: '3px 8px' }}>
               {labels.reset}
@@ -170,6 +242,50 @@ export function Timeline({
         {/* 麦克风 / 字幕 视觉镜像条（跟随 clips，非交互） */}
         {hasAudio && <MirrorBar clips={clips} pct={pct} fill="var(--hi-soft)" icon={<I.Mic size={10} />} label={labels.mic} />}
         {hasCaptions && <MirrorBar clips={clips} pct={pct} fill="var(--pro)" icon={<I.Subtitles size={10} />} label={labels.captions} />}
+
+        {onAutoZoomChange && (
+          <div
+            data-testid="autozoom-track"
+            className="timeline-craft-autozoom-track"
+            onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
+            onDrop={(event) => {
+              event.preventDefault();
+              // Chrome / Playwright 对自定义 drag MIME 的保留方式不同；这个轨道是唯一 drop target，
+              // 因而在此处直接创建，保证鼠标和触控板拖入都可靠。
+              addZoomAt(srcAtClientX(event.clientX));
+            }}
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) onScrub(srcAtClientX(event.clientX));
+            }}
+            style={{ position: 'relative', height: 34, marginTop: 6, cursor: 'copy' }}
+            aria-label={labels.autoZoom}
+          >
+            <span className="timeline-craft-autozoom-label">{labels.autoZoom}</span>
+            {autoZooms.map((zoom) => {
+              const selected = selectedAutoZoomId === zoom.id;
+              return (
+                <div
+                  key={zoom.id}
+                  data-testid="autozoom-segment"
+                  data-zoom-range={`${zoom.start}-${zoom.end}`}
+                  className={`timeline-craft-autozoom-segment${selected ? ' is-selected' : ''}`}
+                  onMouseDown={startZoomDrag(zoom.id, 'move')}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    onAutoZoomChange(autoZooms.filter((item) => item.id !== zoom.id));
+                    if (selected) onAutoZoomSelect?.(null);
+                  }}
+                  style={{ position: 'absolute', top: 5, bottom: 5, left: `${pct(zoom.start)}%`, width: `${Math.max(1.2, pct(zoom.end - zoom.start))}%` }}
+                  title={`${labels.autoZoom} · ${fmt(zoom.start)}–${fmt(zoom.end)}`}
+                >
+                  <i className="timeline-craft-autozoom-edge" onMouseDown={startZoomDrag(zoom.id, 'start')} />
+                  <span>×{zoom.scale.toFixed(1)}</span>
+                  <i className="timeline-craft-autozoom-edge" onMouseDown={startZoomDrag(zoom.id, 'end')} />
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* 播放头：竖线贯穿 + 标尺上的三角手柄 */}
         <div className="timeline-craft-playhead" style={{ position: 'absolute', top: 0, bottom: 0, left: `calc(${pct(playheadMs)}% - 1px)`, pointerEvents: 'none', zIndex: 5 }} />

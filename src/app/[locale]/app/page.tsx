@@ -11,6 +11,7 @@ import { Teleprompter } from '@/components/Teleprompter';
 import { AspectCropOverlay } from '@/components/AspectCropOverlay';
 import { DisplaySourceCropOverlay } from '@/components/DisplaySourceCropOverlay';
 import { DisplaySourcePreview } from '@/components/DisplaySourcePreview';
+import { DesktopRecordingControls, requestDesktopRecordingControlsWindow } from '@/components/DesktopRecordingControls';
 import { I } from '@/components/icons';
 import { useSubscription } from '@/hooks/useSubscription';
 import { startRecording, type SessionHandle, type CameraFrameRect } from '@/services/recordingSession';
@@ -119,6 +120,7 @@ export default function HomePage(): JSX.Element {
 
   // 录制条位置：默认放在 Excalidraw toolbar 之下、右上角，避开顶部菜单
   const [barPos, setBarPos] = useState<{ x: number; y: number } | null>(null);
+  const [desktopControlHost, setDesktopControlHost] = useState<Window | null>(null);
   const dragStartRef = useRef<{ mouseX: number; mouseY: number; barX: number; barY: number } | null>(null);
   const [draggingBar, setDraggingBar] = useState(false);
 
@@ -440,6 +442,29 @@ export default function HomePage(): JSX.Element {
     setSourceCropWindow(null);
   }, []);
 
+  const closeDesktopControls = useCallback(() => {
+    setDesktopControlHost((host) => {
+      if (host && host !== window && !host.closed) host.close();
+      return null;
+    });
+  }, []);
+
+  const openDesktopControls = useCallback(async () => {
+    if (desktopControlHost) return;
+    try {
+      const host = await requestDesktopRecordingControlsWindow();
+      if (!host) return;
+      if (host !== window) {
+        host.addEventListener('pagehide', () => setDesktopControlHost(null), { once: true });
+      }
+      setDesktopControlHost(host);
+    } catch {
+      // 浏览器不支持/用户关闭 Picture-in-Picture 时，继续使用页面内控制条。
+    }
+  }, [desktopControlHost]);
+
+  useEffect(() => () => closeDesktopControls(), [closeDesktopControls]);
+
   // 真正开录（取景确认 + 倒计时结束后调用）—— 复用取景已采集的麦克风/摄像头流，瞬时开录
   const beginRecording = useCallback(async (config: RecordingSetupConfig, startPos: { x: number; y: number }, startSize: number) => {
     try {
@@ -451,13 +476,23 @@ export default function HomePage(): JSX.Element {
         cameraStream,
         displayStream: displayStreamRef.current,
       });
-      // 流所有权移交 session（stop 时由其停轨）；清掉页面侧引用，避免重复管理
+      // 流所有权移交 session（stop 时由其停轨）；保留 React state 供录制期间的实况预览与选区边框使用。
+      // ref 清空避免页面侧重复 stop，state 只负责显示，停止/丢弃时统一由 clearDisplayStream 清掉。
       setMicStream(null);
       displayStreamRef.current = null;
-      setDisplayStream(null);
       sessionRef.current = session;
       changeRef.current = session.onWhiteboardChange;
       laserPointRef.current = session.recordLaserPoint;
+      // Excalidraw 不会因为「开始录制」自动触发 onChange。若画板在开录前已有内容，
+      // 必须立即写入 t=0 快照，否则回放/导出只能拿到背景而没有实际白板画面。
+      if (config.source?.kind === 'whiteboard') {
+        const api = excalidrawApiRef.current;
+        const elements = api?.getSceneElements?.();
+        const appState = api?.getAppState?.();
+        if (elements && appState) {
+          session.onWhiteboardChange(elements, appState, api?.getFiles?.() ?? {});
+        }
+      }
       setHasAudio(session.hasAudio);
       setHasCamera(session.hasCamera);
       setCameraStream(session.cameraStream);
@@ -567,9 +602,13 @@ export default function HomePage(): JSX.Element {
       ...setupConfig,
       source: selectedSource,
     };
+    if (selectedSource?.kind === 'window' || selectedSource?.kind === 'desktop') {
+      // 在用户点击「开始录制」这一手势内请求 Document PiP，确保浏览器允许把控制条放到桌面上。
+      void openDesktopControls();
+    }
     pendingStartRef.current = { config: finalConfig, pos: cameraPos, size: cameraSize };
     setCountdown(3);
-  }, [setupConfig, cameraPos, cameraSize, cameraEnabled, sourceCropWindow]);
+  }, [setupConfig, cameraPos, cameraSize, cameraEnabled, sourceCropWindow, openDesktopControls]);
 
   // 取景取消：停掉摄像头/麦克风预览、清裁切框、回 idle
   const handleCancelFraming = useCallback(() => {
@@ -578,10 +617,11 @@ export default function HomePage(): JSX.Element {
     micStreamRef.current?.getTracks().forEach((tk) => tk.stop());
     setMicStream(null);
     clearDisplayStream();
+    closeDesktopControls();
     setCropWindow(null);
     setFramingWarn(false);
     setState('idle');
-  }, [cameraStream, clearDisplayStream]);
+  }, [cameraStream, clearDisplayStream, closeDesktopControls]);
 
   // 倒计时：3→2→1→0 后真正开录
   useEffect(() => {
@@ -661,6 +701,7 @@ export default function HomePage(): JSX.Element {
     if (!s || stoppingRef.current) return;
     stoppingRef.current = true;
     setState('processing');
+    closeDesktopControls();
     try {
       const meta = await s.stop();
       trackEvent('recording_complete', { durationMs: meta.durationMs, framing: setupConfig.framing, hasCamera: meta.hasCamera, hasAudio: meta.hasAudio });
@@ -698,7 +739,7 @@ export default function HomePage(): JSX.Element {
     } finally {
       stoppingRef.current = false;
     }
-  }, [router, t, setupConfig, customOutput, clearDisplayStream]);
+  }, [router, t, setupConfig, customOutput, clearDisplayStream, closeDesktopControls]);
 
   const handleDiscard = useCallback(async () => {
     const s = sessionRef.current;
@@ -715,10 +756,11 @@ export default function HomePage(): JSX.Element {
     laserPointRef.current = null;
     setCameraStream(null);
     clearDisplayStream();
+    closeDesktopControls();
     setHasCamera(false);
     setHasAudio(false);
     setState('idle');
-  }, [t, clearDisplayStream]);
+  }, [t, clearDisplayStream, closeDesktopControls]);
 
   const isRecording = state === 'recording' || state === 'paused';
 
@@ -739,12 +781,13 @@ export default function HomePage(): JSX.Element {
           </div>
         )}
 
-        {displayStream && state === 'framing' && setupConfig.source?.kind === 'selected_area' && (
+        {displayStream && (state === 'framing' || isRecording) && setupConfig.source?.kind === 'selected_area' && (
           <DisplaySourceCropOverlay
             value={sourceCropWindow}
             mediaAspect={displayAspect}
             onChange={setSourceCropWindow}
-            label={en ? 'Selected area' : '选定区域'}
+            label={isRecording ? (en ? 'Recording selected area' : '正在录制选定区域') : (en ? 'Selected area' : '选定区域')}
+            interactive={state === 'framing'}
           />
         )}
 
@@ -776,7 +819,7 @@ export default function HomePage(): JSX.Element {
 
         {/* 取景控制条：取景态显示，用户框选/摆相机后点「开始录制」才进入倒计时 */}
         {state === 'framing' && (
-          <div className="rb-no-record fixed left-1/2 bottom-7 z-40 -translate-x-1/2">
+          <div className="rb-no-record fixed left-1/2 bottom-7 z-[70] -translate-x-1/2">
             <FramingBar
               hint={t('framingHint')}
               startLabel={t('framingStart')}
@@ -828,6 +871,15 @@ export default function HomePage(): JSX.Element {
             />
           </div>
         )}
+
+        <DesktopRecordingControls
+          host={desktopControlHost}
+          state={state === 'framing' || countdown !== null ? 'starting' : state === 'paused' ? 'paused' : state === 'processing' ? 'processing' : 'recording'}
+          elapsedMs={elapsed}
+          onPause={handlePause}
+          onResume={handleResume}
+          onStop={handleStop}
+        />
 
         {/* 提词器浮层（私有，不进录制）；open=false 时返回 null */}
         <Teleprompter open={teleprompterOpen} onClose={() => setTeleprompterOpen(false)} en={en} autoFollow={isRecording && hasAudio && !audioMuted} micStream={micStream} />

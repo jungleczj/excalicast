@@ -57,6 +57,39 @@ function sourcePixelSize(stream: MediaStream): { width: number; height: number }
   };
 }
 
+/**
+ * 某些浏览器/虚拟显示流会在 `play()` 成功后延迟（甚至不触发）metadata 事件。
+ * 选区录制不应因此永远停在倒计时结束：已有 track settings 时，它们就是可靠的
+ * 像素后备值；等首帧到来后 canvas 会自然开始绘制。
+ */
+async function waitForVideoDimensions(
+  video: HTMLVideoElement,
+  fallback: { width: number; height: number },
+): Promise<{ width: number; height: number }> {
+  // 虚拟捕获源可能永远不 resolve play()；绝不能让倒计时结束后卡在这里。
+  await Promise.race([
+    video.play().catch(() => {}),
+    new Promise<void>((resolve) => window.setTimeout(resolve, 800)),
+  ]);
+  if (video.videoWidth > 0 && video.videoHeight > 0) {
+    return { width: video.videoWidth, height: video.videoHeight };
+  }
+  await new Promise<void>((resolve) => {
+    const done = () => {
+      video.removeEventListener('loadedmetadata', done);
+      video.removeEventListener('loadeddata', done);
+      resolve();
+    };
+    video.addEventListener('loadedmetadata', done, { once: true });
+    video.addEventListener('loadeddata', done, { once: true });
+    window.setTimeout(done, 800);
+  });
+  return {
+    width: video.videoWidth || fallback.width,
+    height: video.videoHeight || fallback.height,
+  };
+}
+
 function bitrateFor(stream: MediaStream, kind: RecordingSourceKind): number {
   const { width, height } = sourcePixelSize(stream);
   const fps = sourceFrameRate(stream);
@@ -152,15 +185,12 @@ async function createSelectedAreaStream(
   video.muted = true;
   video.playsInline = true;
   video.srcObject = sourceStream;
-  await video.play();
-  await new Promise<void>((resolve) => {
-    if (video.videoWidth > 0 && video.videoHeight > 0) resolve();
-    else video.onloadedmetadata = () => resolve();
-  });
+  const fallbackSize = sourcePixelSize(sourceStream);
+  const dimensions = await waitForVideoDimensions(video, fallbackSize);
 
   const crop = source.sourceCropWindow;
-  const sourceW = even(video.videoWidth || sourcePixelSize(sourceStream).width);
-  const sourceH = even(video.videoHeight || sourcePixelSize(sourceStream).height);
+  const sourceW = even(dimensions.width);
+  const sourceH = even(dimensions.height);
   const rect = cropRect(crop, sourceW, sourceH);
   const canvas = document.createElement('canvas');
   canvas.width = rect.sw;
