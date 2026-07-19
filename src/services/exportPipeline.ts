@@ -14,6 +14,7 @@ import {
   ASPECT_PRESETS,
   RESOLUTION_SCALE,
   type CameraPositionEvent,
+  type AutoZoomSegment,
   type ExportConfig,
   type ExportFormat,
   type ExportQuality,
@@ -39,6 +40,7 @@ export interface ExportOptions extends ExportConfig {
 }
 
 let _ffmpeg: FFmpeg | null = null;
+const previewDisplayCache = new Map<string, { source: DisplayFrameSource; lastTimeMs: number }>();
 
 async function getFfmpeg(onLog?: (m: string) => void): Promise<FFmpeg> {
   if (_ffmpeg) return _ffmpeg;
@@ -47,6 +49,21 @@ async function getFfmpeg(onLog?: (m: string) => void): Promise<FFmpeg> {
   await ffmpeg.load();
   _ffmpeg = ffmpeg;
   return ffmpeg;
+}
+
+async function getPreviewDisplaySource(recordingId: string, screenBlob: Blob, timeMs: number): Promise<DisplayFrameSource> {
+  const cached = previewDisplayCache.get(recordingId);
+  if (cached && timeMs >= cached.lastTimeMs - 80) {
+    cached.lastTimeMs = Math.max(cached.lastTimeMs, timeMs);
+    return cached.source;
+  }
+  if (cached) {
+    try { cached.source.close(); } catch { /* ignore */ }
+    previewDisplayCache.delete(recordingId);
+  }
+  const source = await createDisplayFrameSource(screenBlob);
+  previewDisplayCache.set(recordingId, { source, lastTimeMs: timeMs });
+  return source;
 }
 
 function snapshotAt(snapshots: WhiteboardSnapshot[], t: number): WhiteboardSnapshot | null {
@@ -190,14 +207,21 @@ function drawCameraBubble(
 
 function drawDisplayFrame(
   ctx: CanvasRenderingContext2D,
-  video: HTMLVideoElement,
+  frame: CanvasImageSource & {
+    videoWidth?: number;
+    videoHeight?: number;
+    displayWidth?: number;
+    displayHeight?: number;
+    codedWidth?: number;
+    codedHeight?: number;
+  },
   sourceKind: RecordingSourceKind,
   sourceCrop: SourceCropWindow | undefined,
   targetW: number,
   targetH: number,
 ): void {
-  const vw = video.videoWidth || targetW;
-  const vh = video.videoHeight || targetH;
+  const vw = frame.videoWidth ?? frame.displayWidth ?? frame.codedWidth ?? targetW;
+  const vh = frame.videoHeight ?? frame.displayHeight ?? frame.codedHeight ?? targetH;
   const effectiveCrop = sourceKind === 'selected_area' ? undefined : sourceCrop;
   const crop = effectiveCrop
     ? {
@@ -212,7 +236,36 @@ function drawDisplayFrame(
   const dh = crop.sh * scale;
   const dx = (targetW - dw) / 2;
   const dy = (targetH - dh) / 2;
-  ctx.drawImage(video, crop.sx, crop.sy, crop.sw, crop.sh, dx, dy, dw, dh);
+  ctx.drawImage(frame, crop.sx, crop.sy, crop.sw, crop.sh, dx, dy, dw, dh);
+}
+
+function activeAutoZoom(segments: AutoZoomSegment[] | undefined, t: number): AutoZoomSegment | null {
+  if (!segments || segments.length === 0) return null;
+  return segments.find((z) => t >= z.start && t <= z.end && z.scale > 1) ?? null;
+}
+
+function applyAutoZoom(
+  canvas: HTMLCanvasElement,
+  segment: AutoZoomSegment | null,
+): void {
+  if (!segment) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const source = document.createElement('canvas');
+  source.width = canvas.width;
+  source.height = canvas.height;
+  source.getContext('2d')!.drawImage(canvas, 0, 0);
+  const scale = Math.max(1.05, Math.min(4, segment.scale));
+  const cropW = canvas.width / scale;
+  const cropH = canvas.height / scale;
+  const cx = Math.max(0, Math.min(1, segment.cx ?? 0.5)) * canvas.width;
+  const cy = Math.max(0, Math.min(1, segment.cy ?? 0.5)) * canvas.height;
+  const sx = Math.max(0, Math.min(canvas.width - cropW, cx - cropW / 2));
+  const sy = Math.max(0, Math.min(canvas.height - cropH, cy - cropH / 2));
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(source, sx, sy, cropW, cropH, 0, 0, canvas.width, canvas.height);
 }
 
 function shellAt(shells: WorkspaceShellRow[], t: number): WorkspaceShellRow | null {
@@ -391,7 +444,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 摄像头画布内合成（仅 WebCodecs 路径启用；ffmpeg 路径仍用 overlay 滤镜）
   let compositeCamera = false;
   let cameraSource: CameraFrameSource | null = null;
-  let displaySource: DisplayFrameSource | null = screenBlob ? createDisplayFrameSource(screenBlob) : null;
+  let displaySource: DisplayFrameSource | null = screenBlob ? await createDisplayFrameSource(screenBlob) : null;
   // 摄像头气泡有效边界（shell-aware，与 ffmpeg 路径同一套换算）
   const camBounds: CameraBounds = (() => {
     if (useShell && decodedShells.length > 0) {
@@ -441,15 +494,17 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     await paintVideoBackground(targetCtx, target.width, target.height, opts.videoBackground);
 
     if (displaySource) {
-      await displaySource.seek(t);
+      const displayFrame = await displaySource.getFrameAt(t);
+      if (!displayFrame) return target;
       drawDisplayFrame(
         targetCtx,
-        displaySource.video,
+        displayFrame,
         metadata.source?.kind ?? 'desktop',
         metadata.source?.sourceCropWindow,
         target.width,
         target.height,
       );
+      applyAutoZoom(target, activeAutoZoom(opts.autoZooms, t));
 
       if (opts.withWatermark) {
         drawFrostedWatermark(targetCtx, target.width, target.height, watermarkPos);
@@ -580,9 +635,6 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         });
       }
 
-      if (opts.withWatermark) {
-        drawFrostedWatermark(targetCtx, target.width, target.height, watermarkPos);
-      }
       if (dedupEnabled) {
         if (!baseCanvas) baseCanvas = document.createElement('canvas');
         baseCanvas.width = target.width;
@@ -593,6 +645,12 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     } // end else（基帧渲染）
 
     // 字幕硬嵌入（每帧都画，不入基帧缓存）
+    applyAutoZoom(target, activeAutoZoom(opts.autoZooms, t));
+
+    if (opts.withWatermark) {
+      drawFrostedWatermark(targetCtx, target.width, target.height, watermarkPos);
+    }
+
     if (cues.length > 0) {
       drawSubtitle(targetCtx, target.width, target.height, cues, t, {
         reservedRightFraction: cameraBlob ? 0.3 : 0,
@@ -656,7 +714,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       // 回退前清理摄像头解码资源 + 复位标志（ffmpeg 路径用 overlay 自己处理摄像头）
       try { cameraSource?.close(); } catch { /* */ }
       try { displaySource?.close(); } catch { /* */ }
-      displaySource = screenBlob ? createDisplayFrameSource(screenBlob) : null;
+      displaySource = screenBlob ? await createDisplayFrameSource(screenBlob) : null;
       cameraSource = null;
       compositeCamera = false;
       // 基帧缓存可能已含半帧状态，复位以免污染 ffmpeg 路径
@@ -912,19 +970,20 @@ export async function renderPreviewFrame(
     : [];
 
   if (screenBlob) {
-    const display = createDisplayFrameSource(screenBlob);
+    const display = await getPreviewDisplaySource(recordingId, screenBlob, timeMs);
     try {
-      await display.seek(timeMs);
+      const displayFrame = await display.getFrameAt(timeMs);
+      if (!displayFrame) return;
       drawDisplayFrame(
         ctx,
-        display.video,
+        displayFrame,
         metadata.source?.kind ?? 'desktop',
         metadata.source?.sourceCropWindow,
         target.width,
         target.height,
       );
+      applyAutoZoom(target, activeAutoZoom(config.autoZooms, timeMs));
     } finally {
-      display.close();
       disposeShells(decodedShells);
     }
     if (config.withWatermark) {
@@ -1059,6 +1118,8 @@ export async function renderPreviewFrame(
   }
 
   disposeShells(decodedShells);
+
+  applyAutoZoom(target, activeAutoZoom(config.autoZooms, timeMs));
 
   if (config.withWatermark) {
     drawFrostedWatermark(ctx, target.width, target.height, hasCamera ? 'bottom-left' : 'bottom-right');

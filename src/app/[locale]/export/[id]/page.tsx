@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, type JSX } from 'react';
+import { useEffect, useState, useCallback, type CSSProperties, type JSX, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import { useLocale } from 'next-intl';
 import { ExportRatioPicker } from '@/components/ExportRatioPicker';
@@ -13,13 +13,14 @@ import { SubtitlePanel } from '@/components/SubtitlePanel';
 import { HandoutPanel } from '@/components/HandoutPanel';
 import { ProUpgradeModal } from '@/components/ProUpgradeModal';
 import { Timeline } from '@/components/editor/Timeline';
+import { AutoZoomPanel } from '@/components/editor/AutoZoomPanel';
 import { I, LogoMark } from '@/components/icons';
 import { TierBadge } from '@/components/TierBadge';
 import { ShareButton } from '@/components/ShareButton';
 import { useSubscription } from '@/hooks/useSubscription';
-import { getRecording, deleteRecording, updateRecordingTitle, updateRecordingSegments } from '@/lib/db-client';
+import { getRecording, deleteRecording, updateRecordingTitle, updateRecordingSegments, updateRecordingAutoZooms } from '@/lib/db-client';
 import { getCurrentOwnerKey } from '@/lib/ownerKey';
-import type { AspectRatio, ExportConfig, RecordingMetadata, RecordingSetupConfig, TimeSegment } from '@/types/recording';
+import type { AspectRatio, AutoZoomSegment, ExportConfig, RecordingMetadata, RecordingSetupConfig, TimeSegment } from '@/types/recording';
 import { ASPECT_PRESETS } from '@/types/recording';
 import { normalizeSegments, isTrimmed } from '@/utils/segments';
 import { Link, useRouter } from '@/i18n/navigation';
@@ -51,6 +52,17 @@ function exportDefaultsFromSetup(setup: RecordingSetupConfig): ExportConfig {
     includeWorkspaceShell: setup.includeWorkspaceShell,
     videoBackground: setup.videoBackground,
   };
+  const sourceSize = setup.source?.kind && setup.source.kind !== 'whiteboard'
+    ? setup.source.sourceSize
+    : undefined;
+  if (sourceSize?.width && sourceSize.height) {
+    return {
+      ...base,
+      aspectRatio: nearestPreset(sourceSize.width, sourceSize.height),
+      croppingMode: 'follow_viewport',
+      customOutput: { width: sourceSize.width, height: sourceSize.height },
+    };
+  }
   if (setup.framing === 'default') {
     return { ...base, aspectRatio: '16:9', croppingMode: 'fit_all_content' };
   }
@@ -89,6 +101,7 @@ export default function EditorRecordingPage(): JSX.Element {
   const [upgradeOpen, setUpgradeOpen] = useState<false | 'pro' | 'max'>(false);
   // 时间轴裁剪：保留段（源 ms）+ 播放头源时间
   const [segments, setSegments] = useState<TimeSegment[]>([]);
+  const [autoZooms, setAutoZooms] = useState<AutoZoomSegment[]>([]);
   const [playheadMs, setPlayheadMs] = useState(0);
 
   useEffect(() => {
@@ -110,7 +123,10 @@ export default function EditorRecordingPage(): JSX.Element {
         else {
           setMeta(m);
           setTitle(m.title?.trim() || (en ? `Recording ${id.slice(0, 8)}` : `录制 ${id.slice(0, 8)}`));
-          if (m.setup) setConfig(exportDefaultsFromSetup(m.setup));
+          const savedAutoZooms = m.autoZooms ?? [];
+          setAutoZooms(savedAutoZooms);
+          if (m.setup) setConfig({ ...exportDefaultsFromSetup(m.setup), autoZooms: savedAutoZooms.length ? savedAutoZooms : undefined });
+          else if (savedAutoZooms.length) setConfig((c) => ({ ...c, autoZooms: savedAutoZooms }));
           setSegments(normalizeSegments(m.segments, m.durationMs));
           setPlayheadMs(0);
         }
@@ -145,6 +161,15 @@ export default function EditorRecordingPage(): JSX.Element {
     const tid = setTimeout(() => { void updateRecordingSegments(id, trimmed ? segments : []); }, 500);
     return () => clearTimeout(tid);
   }, [segments, meta, id]);
+
+  // Autozoom 段 → 同步进 config.autoZooms（预览/导出用）+ 去抖持久化。
+  useEffect(() => {
+    if (!meta) return;
+    const next = autoZooms.length > 0 ? autoZooms : undefined;
+    setConfig((c) => (JSON.stringify(c.autoZooms) === JSON.stringify(next) ? c : { ...c, autoZooms: next }));
+    const tid = setTimeout(() => { void updateRecordingAutoZooms(id, autoZooms); }, 500);
+    return () => clearTimeout(tid);
+  }, [autoZooms, meta, id]);
 
   const handleDelete = useCallback(async () => {
     if (!id) return;
@@ -291,6 +316,13 @@ export default function EditorRecordingPage(): JSX.Element {
                   : '拖播放头/边缘实时预览 · 切一刀(S)后删片段即可剪掉任意段',
               }}
             />
+            <AutoZoomPanel
+              durationMs={meta.durationMs}
+              playheadMs={playheadMs}
+              autoZooms={autoZooms}
+              onChange={setAutoZooms}
+              en={en}
+            />
           </div>
 
           <div className="mt-4 flex justify-end">
@@ -343,10 +375,10 @@ export default function EditorRecordingPage(): JSX.Element {
   );
 }
 
-const CARD: React.CSSProperties = {
+const CARD: CSSProperties = {
   background: '#fffdf8', border: '1px solid rgba(24,25,26,0.08)', borderRadius: 28, boxShadow: '0 14px 36px rgba(48,38,26,0.09), inset 0 1px 0 rgba(255,255,255,0.74)',
 };
 
-function Shell({ children }: { children: React.ReactNode }): JSX.Element {
+function Shell({ children }: { children: ReactNode }): JSX.Element {
   return <div className="app-craft-screen editor-craft-shell flex h-full flex-col" style={{ background: 'var(--paper-2)' }}>{children}</div>;
 }

@@ -34,6 +34,7 @@ const PREVIEW_FALLBACK_VH_PCT = 0.68;
 export function ExportPreview({ recordingId, metadata, config, progress, segments, playheadMs, onPlayheadChange }: Props): JSX.Element {
   const t = useTranslations('exportPreview');
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const renderCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const cameraRef = useRef<HTMLVideoElement>(null);
   // 受控播放头（源时间）。播放/读数走「成片」输出时间（跳过被删段）。
@@ -55,6 +56,7 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
   // 真实父容器宽高 —— 由 ResizeObserver 实时测量，预览只能在时间轴上方区域内放大
   const parentRef = useRef<HTMLDivElement>(null);
   const [parentBox, setParentBox] = useState({ w: 0, h: 0 });
+  const [previewScale, setPreviewScale] = useState(1);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -168,7 +170,8 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
 
   // 帧渲染：节流到 CANVAS_REDRAW_INTERVAL_MS。静态 scrub 时立即重绘。
   const drawFrame = useCallback((t: number, force: boolean) => {
-    if (!canvasRef.current) return;
+    const visible = canvasRef.current;
+    if (!visible) return;
     const now = performance.now();
     if (!force && now - lastDrawAtRef.current < CANVAS_REDRAW_INTERVAL_MS) return;
     if (!force && Math.abs(t - lastDrawTimeMsRef.current) < CANVAS_REDRAW_INTERVAL_MS / 2) return;
@@ -177,7 +180,15 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
     const my = ++renderToken.current;
     setRendering(true);
     setError(null);
-    renderPreviewFrame(recordingId, t, config, canvasRef.current)
+    const renderCanvas = renderCanvasRef.current ?? document.createElement('canvas');
+    renderCanvasRef.current = renderCanvas;
+    renderPreviewFrame(recordingId, t, config, renderCanvas)
+      .then(() => {
+        if (renderToken.current !== my) return;
+        visible.width = renderCanvas.width;
+        visible.height = renderCanvas.height;
+        visible.getContext('2d')?.drawImage(renderCanvas, 0, 0);
+      })
       .catch((err) => { if (renderToken.current === my) setError(err instanceof Error ? err.message : 'render_failed'); })
       .finally(() => { if (renderToken.current === my) setRendering(false); });
   }, [recordingId, config]);
@@ -300,9 +311,14 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
     const maxH = parentBox.h > 0 ? parentBox.h : viewportH * PREVIEW_FALLBACK_VH_PCT;
     const safeW = Math.max(120, Math.floor(maxW));
     const safeH = Math.max(90, Math.floor(maxH));
-    if (safeW / aspect <= safeH) return { w: safeW, h: Math.floor(safeW / aspect) };
-    return { w: Math.floor(safeH * aspect), h: safeH };
-  }, [aspect, viewportH, parentBox]);
+    const fit = safeW / aspect <= safeH
+      ? { w: safeW, h: Math.floor(safeW / aspect) }
+      : { w: Math.floor(safeH * aspect), h: safeH };
+    return {
+      w: Math.floor(fit.w * previewScale),
+      h: Math.floor(fit.h * previewScale),
+    };
+  }, [aspect, viewportH, parentBox, previewScale]);
 
   const exporting = progress != null;
   const pct = exporting ? Math.round((progress?.ratio ?? 0) * 100) : 0;
@@ -321,7 +337,7 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
   return (
     <div className="export-preview-craft-wrap flex h-full min-h-0 w-full items-center justify-center">
       {/* 外层 wrapper 用 ref + ResizeObserver 实时拿父容器宽度，picker 切换时 previewBox 才会跟着变 */}
-      <div ref={parentRef} className="flex h-full min-h-0 w-full items-center justify-center">
+      <div ref={parentRef} className="flex h-full min-h-0 w-full items-center justify-center overflow-auto p-2">
       <div
         className="export-preview-craft-stage relative mx-auto overflow-hidden"
         style={{
@@ -330,7 +346,8 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
           // 都跟这个盒子尺寸走。maxWidth: 100% 是硬保险：祖先永远不会被撑爆。
           width: previewBox.w,
           height: previewBox.h,
-          maxWidth: '100%',
+          maxWidth: previewScale === 1 ? '100%' : undefined,
+          flex: '0 0 auto',
           background: 'var(--paper)',
           border: '1.5px solid var(--ink)',
           borderRadius: 3,
@@ -502,6 +519,35 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
             >
               {(keptDur / 1000).toFixed(1)}s
             </span>
+          </div>
+        )}
+
+        {!exporting && (
+          <div
+            className="absolute left-1/2 top-3 z-40 flex -translate-x-1/2 items-center gap-1"
+            style={{ background: 'rgba(255,253,248,.86)', border: '1px solid rgba(31,34,37,.12)', borderRadius: 999, padding: 3, backdropFilter: 'blur(10px)' }}
+          >
+            {[1, 1.25, 1.5, 2].map((scale) => (
+              <button
+                key={scale}
+                type="button"
+                onClick={() => setPreviewScale(scale)}
+                aria-pressed={previewScale === scale}
+                style={{
+                  border: 'none',
+                  borderRadius: 999,
+                  padding: '4px 8px',
+                  background: previewScale === scale ? 'var(--ink)' : 'transparent',
+                  color: previewScale === scale ? 'var(--paper)' : 'var(--ink-2)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {scale === 1 ? 'Fit' : `${Math.round(scale * 100)}%`}
+              </button>
+            ))}
           </div>
         )}
 

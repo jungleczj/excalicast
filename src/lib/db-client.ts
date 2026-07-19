@@ -3,6 +3,7 @@
 import Dexie, { type Table } from 'dexie';
 import type {
   AudioChunk,
+  AutoZoomSegment,
   BinaryFileEntry,
   CameraChunk,
   CameraPositionEvent,
@@ -248,6 +249,21 @@ export async function updateRecordingSegments(recordingId: string, segments: Tim
     .filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start)
     .sort((a, b) => a.start - b.start);
   await getClientDb().recordings.update(recordingId, { segments: clean.length > 0 ? clean : undefined });
+}
+
+export async function updateRecordingAutoZooms(recordingId: string, autoZooms: AutoZoomSegment[]): Promise<void> {
+  const clean = autoZooms
+    .filter((z) => Number.isFinite(z.start) && Number.isFinite(z.end) && z.end > z.start && Number.isFinite(z.scale) && z.scale > 1)
+    .map((z) => ({
+      id: z.id,
+      start: Math.max(0, Math.round(z.start)),
+      end: Math.max(0, Math.round(z.end)),
+      scale: Math.max(1.05, Math.min(4, Number(z.scale))),
+      cx: Number.isFinite(z.cx) ? Math.max(0, Math.min(1, Number(z.cx))) : 0.5,
+      cy: Number.isFinite(z.cy) ? Math.max(0, Math.min(1, Number(z.cy))) : 0.5,
+    }))
+    .sort((a, b) => a.start - b.start);
+  await getClientDb().recordings.update(recordingId, { autoZooms: clean.length > 0 ? clean : undefined });
 }
 
 export async function saveSubtitleSrt(recordingId: string, srt: string): Promise<void> {

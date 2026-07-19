@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" fill="none">
+  <defs>
+    <linearGradient id="sky" x1="90" y1="20" x2="1810" y2="1050" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B1B35"/>
+      <stop offset=".42" stop-color="#184164"/>
+      <stop offset=".72" stop-color="#B9D4E9"/>
+      <stop offset="1" stop-color="#F6D4BD"/>
+    </linearGradient>
+    <linearGradient id="aurora" x1="650" y1="-10" x2="1375" y2="672" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B9FFF7" stop-opacity=".95"/>
+      <stop offset=".28" stop-color="#B790FF" stop-opacity=".72"/>
+      <stop offset=".55" stop-color="#69FFB2" stop-opacity=".48"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="32"/></filter>
+    <filter id="grain" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency=".78" numOctaves="4" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer><feFuncA type="table" tableValues="0 .11"/></feComponentTransfer>
+    </filter>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#sky)"/>
+  <path d="M514 0C624 155 780 230 950 310C1164 410 1303 548 1460 765C1265 650 1082 625 898 531C711 436 586 280 514 0Z" fill="url(#aurora)" filter="url(#soft)"/>
+  <path d="M-34 882C149 736 277 666 455 692C612 715 707 844 854 811C1006 776 1044 617 1214 595C1401 570 1539 738 1688 716C1792 701 1849 631 1952 586V1080H-34V882Z" fill="#F7FBFF"/>
+  <path d="M0 1010C177 934 312 974 484 939C672 901 795 818 970 847C1158 879 1253 986 1451 953C1628 923 1769 830 1920 794V1080H0V1010Z" fill="#DCEBFA" opacity=".58"/>
+  <rect width="1920" height="1080" filter="url(#grain)" opacity=".76"/>
+</svg>

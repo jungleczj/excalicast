@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" fill="none">
+  <defs>
+    <linearGradient id="base" x1="154" y1="120" x2="1774" y2="1004" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F48A00"/>
+      <stop offset=".25" stop-color="#C8FF42"/>
+      <stop offset=".5" stop-color="#45F7D2"/>
+      <stop offset=".76" stop-color="#FFE7D6"/>
+      <stop offset="1" stop-color="#FF7AAA"/>
+    </linearGradient>
+    <radialGradient id="cyan" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1090 498) rotate(-23) scale(1050 430)">
+      <stop stop-color="#00F7CF"/>
+      <stop offset=".52" stop-color="#00A9C8" stop-opacity=".64"/>
+      <stop offset="1" stop-color="#00A9C8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="rose" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(320 900) rotate(28) scale(650 430)">
+      <stop stop-color="#FF7A6B"/>
+      <stop offset=".7" stop-color="#FF7A6B" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="blur" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="38"/>
+    </filter>
+    <filter id="grain" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency=".78" numOctaves="4" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer><feFuncA type="table" tableValues="0 .105"/></feComponentTransfer>
+    </filter>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#base)"/>
+  <rect width="1920" height="1080" fill="url(#cyan)" filter="url(#blur)"/>
+  <rect width="1920" height="1080" fill="url(#rose)" filter="url(#blur)"/>
+  <path d="M-95 900C89 686 257 578 461 533C657 490 783 326 957 210C1119 102 1307 116 1501 202C1273 301 1167 489 1014 625C833 786 642 841 438 876C258 907 120 973 -95 900Z" fill="#FFFFFF" opacity=".27"/>
+  <path d="M154 1060C312 821 459 696 673 643C901 587 1003 422 1190 314C1367 211 1547 232 1738 334C1518 418 1409 596 1237 741C1047 901 821 957 612 988C438 1014 301 1084 154 1060Z" fill="#FFFDF8" opacity=".23"/>
+  <rect width="1920" height="1080" filter="url(#grain)" opacity=".82"/>
+</svg>

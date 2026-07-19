@@ -37,7 +37,7 @@ const SOURCE_OPTIONS: RecordingSourceConfig[] = [
   { kind: 'current_tab', displaySurface: 'browser', captureSystemAudio: true },
   { kind: 'window', displaySurface: 'window' },
   { kind: 'desktop', displaySurface: 'monitor' },
-  { kind: 'selected_area', displaySurface: 'monitor' },
+  { kind: 'selected_area' },
 ];
 const BACKGROUND_TONES: VideoBackgroundTone[] = ['all', 'fresh', 'soft', 'dark', 'natural'];
 
@@ -517,11 +517,11 @@ function BackgroundSwatches({
             onClick={() => onChange(preset ? { kind: 'preset', presetId: preset.id, tone: preset.tone } : DEFAULT_VIDEO_BACKGROUND)}
             className="press"
             style={{
-              padding: 7,
-              borderRadius: 18,
-              border: selected ? '1.5px solid var(--ink)' : '1px solid rgba(31,34,37,.13)',
-              background: selected ? '#fffdf8' : 'var(--paper-2)',
-              boxShadow: selected ? '0 10px 24px rgba(24,25,26,.12)' : '0 8px 20px rgba(48,38,26,.05)',
+              padding: 0,
+              borderRadius: 0,
+              border: 'none',
+              background: 'transparent',
+              boxShadow: 'none',
               cursor: 'pointer',
               color: 'var(--ink)',
               textAlign: 'left',
@@ -529,9 +529,11 @@ function BackgroundSwatches({
           >
             <div
               style={{
-                height: 64,
+                aspectRatio: '16 / 9',
+                width: '100%',
                 borderRadius: 13,
-                border: '1px solid rgba(31,34,37,.10)',
+                border: selected ? '2px solid var(--ink)' : '1px solid rgba(31,34,37,.10)',
+                boxShadow: selected ? '0 0 0 3px rgba(255,253,248,.9), 0 10px 24px rgba(48,38,26,.12)' : '0 8px 18px rgba(48,38,26,.05)',
                 background: preset
                   ? `url(${preset.preview}) center / cover no-repeat`
                   : 'linear-gradient(135deg, #fffdf8, #f4efe8)',

@@ -46,12 +46,24 @@ export interface RecordingMetadata {
   tags?: string[];
   /** 时间轴保留段（ms，相对录制开始）。缺省=整段 [0,durationMs]。导出按段裁剪输出。 */
   segments?: TimeSegment[];
+  /** 自动放大段（ms，相对录制开始）。 */
+  autoZooms?: AutoZoomSegment[];
 }
 
 /** 保留段：导出时只输出 [start,end]（ms）内的内容，多段按序拼接。 */
 export interface TimeSegment {
   start: number;
   end: number;
+}
+
+/** Auto zoom 段：在指定源时间窗口内把画面按中心点放大。 */
+export interface AutoZoomSegment {
+  id: string;
+  start: number;
+  end: number;
+  scale: number;
+  cx?: number;
+  cy?: number;
 }
 
 export interface AudioChunk {
@@ -140,7 +152,7 @@ export const ASPECT_PRESETS: Record<
 
 export type CroppingMode = 'follow_viewport' | 'fit_all_content';
 
-export type VideoBackgroundKind = 'none' | 'preset';
+export type VideoBackgroundKind = 'none' | 'preset' | 'color';
 
 export type VideoBackgroundTone = 'all' | 'fresh' | 'soft' | 'dark' | 'natural';
 
@@ -148,6 +160,8 @@ export interface VideoBackgroundConfig {
   kind: VideoBackgroundKind;
   presetId?: string;
   tone?: VideoBackgroundTone;
+  /** 自定义纯色背景。kind='color' 时使用。 */
+  color?: string;
   /** 背景模糊像素。 */
   blurPx?: number;
   /** 0..1 柔化/压暗强度，用于降低高饱和背景干扰。 */
@@ -188,6 +202,8 @@ export interface ExportConfig {
   customOutput?: { width: number; height: number };
   /** 时间轴裁剪保留段（ms）；缺省=整段。导出只输出这些段、按序拼接。 */
   segments?: TimeSegment[];
+  /** 指定时间窗口内自动放大画面。 */
+  autoZooms?: AutoZoomSegment[];
   /** 视频背景。旧录制缺省为 none。 */
   videoBackground?: VideoBackgroundConfig;
 }
@@ -270,6 +286,8 @@ export interface RecordingSourceConfig {
   kind: RecordingSourceKind;
   /** Browser display surface hint; not a guarantee. */
   displaySurface?: 'browser' | 'window' | 'monitor';
+  /** 授权后拿到的源画面原始像素尺寸，用于像素级默认导出。 */
+  sourceSize?: { width: number; height: number; frameRate?: number };
   /** selected_area 模式：浏览器授权后的源画面内部裁切区域。 */
   sourceCropWindow?: SourceCropWindow;
   /** Tab/system audio is only available when the browser grants it. */

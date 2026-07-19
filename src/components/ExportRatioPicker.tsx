@@ -61,7 +61,7 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
                   padding: '10px 6px',
                   background: preview ? 'var(--hi)' : sel ? 'var(--hi-soft)' : 'var(--paper)',
                   border: '1.5px solid var(--ink)',
-                  borderRadius: 3,
+                  borderRadius: 1,
                   boxShadow: preview ? '2px 2px 0 var(--ink)' : 'none',
                   color: 'var(--ink)',
                 }}
@@ -73,7 +73,7 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
                   aria-label={r}
                   onClick={(e) => { e.stopPropagation(); if (sel) removeRatio(r); else previewAndSelect(r); }}
                   className="editor-craft-ratio-check absolute left-1 top-1 grid h-4 w-4 place-items-center"
-                  style={{ background: sel ? 'var(--ink)' : 'var(--paper)', color: 'var(--paper)', border: '1.2px solid var(--ink)', borderRadius: 2, fontSize: 9, lineHeight: 1, cursor: 'pointer' }}
+                  style={{ background: sel ? 'var(--ink)' : 'var(--paper)', color: 'var(--paper)', border: '1.2px solid var(--ink)', borderRadius: 999, fontSize: 9, lineHeight: 1, cursor: 'pointer' }}
                 >{sel ? '✓' : ''}</span>
                 <div
                   className="editor-craft-ratio-shape"

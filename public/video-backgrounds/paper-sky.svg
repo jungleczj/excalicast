@@ -1,43 +1,40 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" fill="none">
   <defs>
-    <linearGradient id="sky" x1="0" y1="0" x2="1920" y2="1080" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#EAF3FF"/>
-      <stop offset=".58" stop-color="#F8FBFF"/>
-      <stop offset="1" stop-color="#FFF0D7"/>
+    <linearGradient id="base" x1="122" y1="78" x2="1758" y2="1012" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#48B9FF"/>
+      <stop offset=".34" stop-color="#75F0DC"/>
+      <stop offset=".63" stop-color="#F4F8B4"/>
+      <stop offset="1" stop-color="#FFF2D8"/>
     </linearGradient>
-    <filter id="grain" x="-10%" y="-10%" width="120%" height="120%">
-      <feTurbulence type="fractalNoise" baseFrequency=".82" numOctaves="3" stitchTiles="stitch"/>
-      <feColorMatrix type="saturate" values="0"/>
-      <feComponentTransfer>
-        <feFuncA type="table" tableValues="0 .10"/>
-      </feComponentTransfer>
+    <radialGradient id="glowA" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(220 230) rotate(42) scale(720 520)">
+      <stop stop-color="#FF9A00"/>
+      <stop offset=".45" stop-color="#FF5D4D" stop-opacity=".72"/>
+      <stop offset="1" stop-color="#FF5D4D" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(840 330) rotate(20) scale(860 420)">
+      <stop stop-color="#B8FF48"/>
+      <stop offset=".52" stop-color="#20F0C7" stop-opacity=".72"/>
+      <stop offset="1" stop-color="#20F0C7" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowC" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1560 850) rotate(-35) scale(740 480)">
+      <stop stop-color="#FF7AA8"/>
+      <stop offset=".5" stop-color="#A978FF" stop-opacity=".62"/>
+      <stop offset="1" stop-color="#A978FF" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="blur" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="42"/>
     </filter>
-    <pattern id="dots" width="18" height="18" patternUnits="userSpaceOnUse">
-      <circle cx="2" cy="2" r="1.7" fill="#2B75AD" opacity=".13"/>
-    </pattern>
-    <pattern id="lines" width="42" height="42" patternUnits="userSpaceOnUse">
-      <path d="M0 21H42" stroke="#D2B76D" stroke-width="2" opacity=".22"/>
-    </pattern>
-    <clipPath id="leftPaper"><path d="M0 822C117 795 188 804 267 764C361 717 421 698 520 713C629 729 708 688 821 704C913 718 1000 701 1092 684C1183 667 1281 675 1375 690C1485 708 1569 674 1658 644C1761 610 1833 623 1920 590V1080H0V822Z"/></clipPath>
-    <clipPath id="note"><path d="M-10 805C87 782 168 784 265 766C344 752 420 722 506 731C620 743 733 720 826 699L901 1080H0L-10 805Z"/></clipPath>
-    <clipPath id="cloudA"><path d="M14 213C55 141 116 108 177 123C205 66 281 47 338 91C378 63 442 69 476 111C529 94 591 129 605 185C657 186 699 223 718 273C594 278 440 273 301 264C193 257 88 250 14 213Z"/></clipPath>
-    <clipPath id="cloudB"><path d="M1284 287C1324 214 1389 178 1459 195C1485 134 1575 111 1637 159C1689 123 1764 139 1797 193C1851 186 1901 222 1928 278V343C1755 337 1490 332 1284 287Z"/></clipPath>
+    <filter id="grain" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency=".72" numOctaves="4" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer><feFuncA type="table" tableValues="0 .11"/></feComponentTransfer>
+    </filter>
   </defs>
-  <rect width="1920" height="1080" rx="0" fill="url(#sky)"/>
-  <rect width="1920" height="1080" filter="url(#grain)" opacity=".72"/>
-  <g clip-path="url(#cloudA)"><rect width="760" height="300" fill="url(#dots)"/></g>
-  <g clip-path="url(#cloudB)"><rect x="1260" y="90" width="700" height="310" fill="url(#dots)"/></g>
-  <path d="M-55 439C155 393 333 387 531 420C734 455 889 457 1087 423C1287 389 1490 394 1718 436C1807 452 1873 453 1957 431V661C1692 684 1538 634 1326 665C1086 699 877 692 655 666C407 636 200 683 -56 647L-55 439Z" fill="#FFFDF8" opacity=".92"/>
-  <path d="M-16 546C105 530 203 545 307 528C430 508 500 480 622 505C753 532 870 504 997 497C1130 490 1241 520 1365 530C1515 541 1653 490 1930 509V1080H-16V546Z" fill="#F8FDFF" opacity=".72"/>
-  <g clip-path="url(#leftPaper)">
-    <rect y="588" width="1920" height="492" fill="#FFF0D7"/>
-    <rect y="588" width="1920" height="492" filter="url(#grain)" opacity=".52"/>
-  </g>
-  <g clip-path="url(#note)">
-    <rect y="690" width="910" height="390" fill="#FFE08C"/>
-    <rect y="690" width="910" height="390" fill="url(#lines)"/>
-  </g>
-  <path d="M1380 748C1450 702 1536 716 1608 688C1685 658 1755 620 1932 633V1080H1380V748Z" fill="#EAF7EC" opacity=".84"/>
-  <path d="M1608 814C1668 764 1737 742 1821 755C1867 761 1900 744 1932 719V1080H1608V814Z" fill="#302E29" opacity=".45"/>
-  <path d="M0 1004C207 954 365 995 541 952C724 907 902 950 1052 934C1201 918 1334 854 1478 861C1638 868 1767 933 1920 887V1080H0V1004Z" fill="#FFFDF8"/>
+  <rect width="1920" height="1080" rx="0" fill="url(#base)"/>
+  <rect width="1920" height="1080" fill="url(#glowA)" filter="url(#blur)"/>
+  <rect width="1920" height="1080" fill="url(#glowB)" filter="url(#blur)"/>
+  <rect width="1920" height="1080" fill="url(#glowC)" filter="url(#blur)"/>
+  <path d="M-70 875C96 742 227 707 384 713C560 720 652 560 808 500C1011 421 1188 533 1324 448C1512 331 1675 286 1994 350V1112H-70V875Z" fill="#FFFFFF" opacity=".34"/>
+  <path d="M-44 232C108 145 269 108 398 160C538 217 596 330 756 333C961 336 1032 159 1236 148C1438 138 1588 261 1970 174" stroke="#FFFFFF" stroke-width="88" stroke-linecap="round" opacity=".22"/>
+  <rect width="1920" height="1080" filter="url(#grain)" opacity=".9"/>
 </svg>

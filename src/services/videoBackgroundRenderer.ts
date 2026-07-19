@@ -46,6 +46,12 @@ export async function paintVideoBackground(
     return;
   }
 
+  if (bg.kind === 'color') {
+    ctx.fillStyle = bg.color ?? '#fffdf8';
+    ctx.fillRect(0, 0, width, height);
+    return;
+  }
+
   const preset = getVideoBackgroundPreset(bg.presetId);
   if (!preset) {
     ctx.fillStyle = '#ffffff';

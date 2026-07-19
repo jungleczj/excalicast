@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { DEFAULT_VIDEO_BACKGROUND, VIDEO_BACKGROUND_PRESETS, type VideoBackgroundPreset } from '@/config/videoBackgrounds';
 import { I } from '@/components/icons';
@@ -16,7 +17,7 @@ export function VideoBackgroundPanel({ config, onChange }: Props): JSX.Element {
   const t = useTranslations('videoBackgroundPanel');
   const en = useLocale() === 'en';
   const value = config.videoBackground ?? DEFAULT_VIDEO_BACKGROUND;
-  const tone = value.tone ?? 'all';
+  const [tone, setTone] = useState<VideoBackgroundTone>(() => value.tone ?? 'all');
   const filtered = VIDEO_BACKGROUND_PRESETS.filter((preset) => tone === 'all' || preset.tone === tone);
 
   const setValue = (next: VideoBackgroundConfig) => {
@@ -46,9 +47,7 @@ export function VideoBackgroundPanel({ config, onChange }: Props): JSX.Element {
           <button
             key={item}
             type="button"
-            onClick={() => {
-              if (value.kind === 'preset') setValue({ ...value, tone: item });
-            }}
+            onClick={() => setTone(item)}
             style={{
               padding: '5px 10px',
               borderRadius: 999,
@@ -103,20 +102,22 @@ function BackgroundOption({
       onClick={onClick}
       className="press"
       style={{
-        padding: 7,
-        borderRadius: 18,
-        border: selected ? '1.4px solid var(--ink)' : '1px solid rgba(31,34,37,.12)',
-        background: '#fffdf8',
-        boxShadow: selected ? '0 10px 22px rgba(24,25,26,.12)' : 'none',
+        padding: 0,
+        borderRadius: 0,
+        border: 'none',
+        background: 'transparent',
+        boxShadow: 'none',
         cursor: 'pointer',
         color: 'var(--ink)',
       }}
     >
       <div
         style={{
-          height: 58,
+          aspectRatio: '16 / 9',
+          width: '100%',
           borderRadius: 13,
-          border: '1px solid rgba(31,34,37,.09)',
+          border: selected ? '2px solid var(--ink)' : '1px solid rgba(31,34,37,.09)',
+          boxShadow: selected ? '0 0 0 3px rgba(255,253,248,.92), 0 10px 24px rgba(48,38,26,.12)' : '0 8px 18px rgba(48,38,26,.05)',
           background: preset ? `url(${preset.preview}) center / cover no-repeat` : 'linear-gradient(135deg, #fffdf8, #f4efe8)',
         }}
       />

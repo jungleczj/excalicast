@@ -1,31 +1,37 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" fill="none">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1920" y2="1080" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#EEF2F6"/>
-      <stop offset=".46" stop-color="#FFFDF8"/>
-      <stop offset="1" stop-color="#F2EDFF"/>
+    <linearGradient id="night" x1="0" y1="0" x2="1920" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#071A2A"/>
+      <stop offset=".42" stop-color="#12324B"/>
+      <stop offset=".72" stop-color="#183F52"/>
+      <stop offset="1" stop-color="#F6E2C0"/>
     </linearGradient>
-    <filter id="grain" x="-10%" y="-10%" width="120%" height="120%">
-      <feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="3" stitchTiles="stitch"/>
-      <feColorMatrix type="saturate" values="0"/>
-      <feComponentTransfer><feFuncA type="table" tableValues="0 .11"/></feComponentTransfer>
+    <linearGradient id="aurora" x1="660" y1="20" x2="1370" y2="812" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B4FFFE" stop-opacity=".86"/>
+      <stop offset=".28" stop-color="#8B7CFF" stop-opacity=".66"/>
+      <stop offset=".56" stop-color="#50FF9B" stop-opacity=".48"/>
+      <stop offset="1" stop-color="#FF8A50" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="ridge" x1="208" y1="700" x2="1638" y2="1132" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7FBFF"/>
+      <stop offset=".36" stop-color="#B6D2E8"/>
+      <stop offset=".72" stop-color="#7895B4"/>
+      <stop offset="1" stop-color="#F2C98C"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="28"/>
     </filter>
-    <pattern id="dots" width="18" height="18" patternUnits="userSpaceOnUse">
-      <circle cx="2" cy="2" r="1.5" fill="#46515C" opacity=".13"/>
-    </pattern>
-    <clipPath id="paper"><path d="M-15 596C108 555 237 587 370 553C520 515 633 539 774 512C925 483 1085 503 1228 536C1418 579 1584 533 1930 555V1080H-15V596Z"/></clipPath>
-    <clipPath id="cloud"><path d="M126 265C185 187 279 181 339 236C387 192 476 203 519 269C587 261 647 302 671 366C487 363 279 342 126 290V265Z"/></clipPath>
+    <filter id="grain" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency=".76" numOctaves="4" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer><feFuncA type="table" tableValues="0 .12"/></feComponentTransfer>
+    </filter>
   </defs>
-  <rect width="1920" height="1080" fill="url(#bg)"/>
-  <rect width="1920" height="1080" filter="url(#grain)" opacity=".72"/>
-  <g clip-path="url(#cloud)"><rect x="92" y="155" width="620" height="240" fill="url(#dots)"/></g>
-  <path d="M1200 235C1266 165 1350 164 1413 218C1465 179 1548 195 1589 258C1659 248 1728 296 1754 365C1574 363 1372 343 1200 296V235Z" fill="url(#dots)"/>
-  <path d="M-44 425C142 375 320 408 520 393C719 378 868 331 1058 386C1259 444 1439 410 1609 369C1749 335 1843 363 1956 383V604C1739 634 1538 591 1336 622C1098 658 907 616 704 606C448 593 211 639 -45 614L-44 425Z" fill="#FFFDF8" opacity=".9"/>
-  <g clip-path="url(#paper)">
-    <rect y="500" width="1920" height="580" fill="#DDE4EC"/>
-    <rect y="500" width="1920" height="580" filter="url(#grain)" opacity=".5"/>
-  </g>
-  <path d="M1278 732C1358 672 1436 700 1523 656C1617 609 1734 622 1930 598V1080H1278V732Z" fill="#2F3438" opacity=".56"/>
-  <path d="M-20 812C151 765 276 813 438 775C604 736 733 790 892 755C1043 721 1168 781 1290 798V1080H-20V812Z" fill="#EAF3FF" opacity=".64"/>
-  <path d="M0 1001C237 957 420 987 625 946C849 901 1052 966 1258 928C1448 893 1621 943 1920 881V1080H0V1001Z" fill="#FFFDF8"/>
+  <rect width="1920" height="1080" fill="url(#night)"/>
+  <path d="M475 28C606 194 760 279 921 353C1114 442 1284 555 1445 785C1244 652 1048 620 880 531C682 426 561 268 475 28Z" fill="url(#aurora)" filter="url(#soft)"/>
+  <path d="M1220 0C1289 156 1394 242 1538 310C1690 381 1798 504 1916 732C1760 638 1626 607 1484 525C1324 432 1257 286 1220 0Z" fill="#7DFFF0" opacity=".26" filter="url(#soft)"/>
+  <path d="M-12 842C146 707 238 622 416 650C561 673 659 812 802 781C950 749 984 583 1142 566C1325 546 1459 727 1597 720C1722 714 1817 619 1932 572V1080H-12V842Z" fill="url(#ridge)"/>
+  <path d="M-20 905C142 834 265 840 420 858C602 879 740 1004 920 958C1101 912 1138 762 1326 760C1496 758 1638 879 1938 826V1080H-20V905Z" fill="#F8FBFF" opacity=".64"/>
+  <path d="M0 1002C206 944 362 1015 547 958C704 910 814 840 969 873C1154 913 1302 1012 1514 953C1668 910 1784 839 1920 810V1080H0V1002Z" fill="#F4D6A4" opacity=".28"/>
+  <rect width="1920" height="1080" filter="url(#grain)" opacity=".75"/>
 </svg>

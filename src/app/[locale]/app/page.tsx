@@ -16,7 +16,7 @@ import { useSubscription } from '@/hooks/useSubscription';
 import { startRecording, type SessionHandle, type CameraFrameRect } from '@/services/recordingSession';
 import { acquireMicStream } from '@/services/audioRecorder';
 import { acquireCameraStream } from '@/services/cameraRecorder';
-import { acquireDisplayStream } from '@/services/displayCaptureRecorder';
+import { acquireDisplayStream, getDisplayStreamPixelSize } from '@/services/displayCaptureRecorder';
 import { trackEvent } from '@/lib/analytics/track';
 import type { WhiteboardChangeFn } from '@/components/Whiteboard';
 import type { CameraCorner, CameraShape, CropWindow, RecordingSetupConfig, SourceCropWindow } from '@/types/recording';
@@ -30,6 +30,22 @@ const DEFAULT_SETUP: RecordingSetupConfig = {
   videoBackground: { kind: 'none' },
   source: { kind: 'whiteboard' },
 };
+
+function evenPixel(n: number): number {
+  return Math.max(2, Math.round(n / 2) * 2);
+}
+
+function sourceSizeForCrop(
+  size: { width: number; height: number; frameRate?: number } | undefined,
+  crop: SourceCropWindow,
+): { width: number; height: number; frameRate?: number } | undefined {
+  if (!size?.width || !size.height) return undefined;
+  return {
+    width: evenPixel(size.width * crop.rw),
+    height: evenPixel(size.height * crop.rh),
+    frameRate: size.frameRate,
+  };
+}
 
 /** 摄像头气泡角落预设 → 视口像素坐标（与 CameraBubble 的 fixed 定位一致）。 */
 function cornerToXY(corner: CameraCorner, sizePx: number): { x: number; y: number } {
@@ -463,7 +479,8 @@ export default function HomePage(): JSX.Element {
 
   // Setup 面板确认：应用配置 → 进入取景态（在画布上框选裁切框/摆相机），暂不倒计时
   const handleSetupConfirm = useCallback(async (config: RecordingSetupConfig) => {
-    setSetupConfig(config);
+    let nextConfig = config;
+    setSetupConfig(nextConfig);
     setSetupOpen(false);
     // 裁切框重置 → overlay 按所选比例居中初始化（default 不显框）
     setCropWindow(null);
@@ -488,6 +505,15 @@ export default function HomePage(): JSX.Element {
     if (source.kind !== 'whiteboard') {
       try {
         const stream = await acquireDisplayStream(source);
+        const sourceSize = await getDisplayStreamPixelSize(stream);
+        nextConfig = {
+          ...nextConfig,
+          source: {
+            ...source,
+            sourceSize,
+          },
+        };
+        setSetupConfig(nextConfig);
         displayStreamRef.current = stream;
         setDisplayStream(stream);
       } catch (err) {
@@ -527,11 +553,19 @@ export default function HomePage(): JSX.Element {
       }
     }
     setFramingWarn(false);
+    const selectedSource = setupConfig.source?.kind === 'selected_area'
+      ? (() => {
+          const crop = sourceCropWindow ?? { rx: 0.1, ry: 0.1, rw: 0.8, rh: 0.8 };
+          return {
+            ...setupConfig.source,
+            sourceCropWindow: crop,
+            sourceSize: sourceSizeForCrop(setupConfig.source.sourceSize, crop) ?? setupConfig.source.sourceSize,
+          };
+        })()
+      : setupConfig.source;
     const finalConfig: RecordingSetupConfig = {
       ...setupConfig,
-      source: setupConfig.source?.kind === 'selected_area'
-        ? { ...setupConfig.source, sourceCropWindow: sourceCropWindow ?? { rx: 0.1, ry: 0.1, rw: 0.8, rh: 0.8 } }
-        : setupConfig.source,
+      source: selectedSource,
     };
     pendingStartRef.current = { config: finalConfig, pos: cameraPos, size: cameraSize };
     setCountdown(3);
