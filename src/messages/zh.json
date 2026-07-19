@@ -573,6 +573,7 @@
       "title": "视频背景",
       "subtitle": "用于最终视频画幅，也可在导出页继续调整。",
       "none": "无背景",
+      "customColor": "自定义颜色",
       "tones": {
         "all": "全部",
         "fresh": "鲜艳",
@@ -690,6 +691,7 @@
     "title": "视频背景",
     "subtitle": "背景会铺满最终画幅，比例变化时自动 cover，不拉伸。",
     "none": "无背景",
+    "customColor": "自定义颜色",
     "tones": {
       "all": "全部",
       "fresh": "鲜艳",

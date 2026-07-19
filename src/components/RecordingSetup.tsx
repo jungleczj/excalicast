@@ -316,6 +316,7 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
               tone={backgroundTone}
               value={videoBackground}
               noneLabel={t('background.none')}
+              customColorLabel={t('background.customColor')}
               onChange={setVideoBackground}
             />
           </SetupSection>
@@ -495,18 +496,63 @@ function BackgroundSwatches({
   tone,
   value,
   noneLabel,
+  customColorLabel,
   onChange,
 }: {
   en: boolean;
   tone: VideoBackgroundTone;
   value: VideoBackgroundConfig;
   noneLabel: string;
+  customColorLabel: string;
   onChange: (next: VideoBackgroundConfig) => void;
 }): JSX.Element {
   const filtered = VIDEO_BACKGROUND_PRESETS.filter((preset) => tone === 'all' || preset.tone === tone);
   const swatches: Array<VideoBackgroundPreset | null> = [null, ...filtered];
+  const customColor = value.kind === 'color' ? (value.color ?? '#fffdf8') : '#fffdf8';
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
+      <div>
+        <button
+          type="button"
+          aria-label={customColorLabel}
+          aria-pressed={value.kind === 'color'}
+          onClick={() => onChange({ kind: 'color', color: customColor })}
+          className="press"
+          style={{
+            padding: 0,
+            borderRadius: 0,
+            border: 'none',
+            background: 'transparent',
+            boxShadow: 'none',
+            cursor: 'pointer',
+            color: 'var(--ink)',
+            textAlign: 'left',
+            width: '100%',
+          }}
+        >
+          <div
+            style={{
+              aspectRatio: '16 / 9',
+              width: '100%',
+              borderRadius: 13,
+              border: value.kind === 'color' ? '2px solid var(--ink)' : '1px solid rgba(31,34,37,.10)',
+              boxShadow: value.kind === 'color' ? '0 0 0 3px rgba(255,253,248,.9), 0 10px 24px rgba(48,38,26,.12)' : '0 8px 18px rgba(48,38,26,.05)',
+              background: customColor,
+              marginBottom: 7,
+            }}
+          />
+        </button>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+          <span style={{ fontSize: 11.5, fontWeight: 750 }}>{customColorLabel}</span>
+          <input
+            type="color"
+            aria-label={customColorLabel}
+            value={customColor}
+            onChange={(e) => onChange({ kind: 'color', color: e.target.value })}
+            style={{ width: 28, height: 20, border: '1px solid rgba(31,34,37,.16)', borderRadius: 999, background: 'transparent', padding: 0, cursor: 'pointer' }}
+          />
+        </div>
+      </div>
       {swatches.map((preset) => {
         const selected = preset ? value.kind === 'preset' && value.presetId === preset.id : value.kind === 'none';
         return (

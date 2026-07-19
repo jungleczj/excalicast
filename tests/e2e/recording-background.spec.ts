@@ -37,6 +37,8 @@ test('recording setup can select a video background', async ({ page }) => {
   for (const label of ['纸感蓝', '柔和绿', '暖黄纸', '淡紫便笺', '深色纸面', '糖果流光', '柔粉花园', '粉彩薄雾', '极光雪原', '晨色山脊', '叶影纸面', '霓虹暮色']) {
     await expect(page.getByRole('button', { name: new RegExp(label) })).toBeVisible();
   }
+  await page.getByRole('button', { name: /自定义颜色/ }).click();
+  await expect(page.getByRole('button', { name: /自定义颜色/ })).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: /纸感蓝/ }).click();
   await expect(page.getByRole('button', { name: /纸感蓝/ })).toHaveAttribute('aria-pressed', 'true');
 });

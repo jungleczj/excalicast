@@ -65,6 +65,12 @@ export function VideoBackgroundPanel({ config, onChange }: Props): JSX.Element {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 9 }}>
+        <ColorBackgroundOption
+          label={t('customColor')}
+          color={value.kind === 'color' ? (value.color ?? '#fffdf8') : '#fffdf8'}
+          selected={value.kind === 'color'}
+          onSelect={(color) => setValue({ kind: 'color', color })}
+        />
         <BackgroundOption
           label={t('none')}
           selected={value.kind === 'none'}
@@ -81,6 +87,61 @@ export function VideoBackgroundPanel({ config, onChange }: Props): JSX.Element {
         ))}
       </div>
     </section>
+  );
+}
+
+function ColorBackgroundOption({
+  label,
+  color,
+  selected,
+  onSelect,
+}: {
+  label: string;
+  color: string;
+  selected: boolean;
+  onSelect: (color: string) => void;
+}): JSX.Element {
+  return (
+    <div>
+      <button
+        type="button"
+        aria-label={label}
+        aria-pressed={selected}
+        onClick={() => onSelect(color)}
+        className="press"
+        style={{
+          padding: 0,
+          borderRadius: 0,
+          border: 'none',
+          background: 'transparent',
+          boxShadow: 'none',
+          cursor: 'pointer',
+          color: 'var(--ink)',
+          width: '100%',
+        }}
+      >
+        <div
+          style={{
+            aspectRatio: '16 / 9',
+            width: '100%',
+            borderRadius: 13,
+            border: selected ? '2px solid var(--ink)' : '1px solid rgba(31,34,37,.09)',
+            boxShadow: selected ? '0 0 0 3px rgba(255,253,248,.92), 0 10px 24px rgba(48,38,26,.12)' : '0 8px 18px rgba(48,38,26,.05)',
+            background: color,
+          }}
+        />
+      </button>
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        <span style={{ fontSize: 11, fontWeight: 750 }}>{label}</span>
+        <input
+          type="color"
+          aria-label={label}
+          value={color}
+          onChange={(e) => onSelect(e.target.value)}
+          style={{ width: 28, height: 20, border: '1px solid rgba(31,34,37,.16)', borderRadius: 999, background: 'transparent', padding: 0, cursor: 'pointer' }}
+        />
+      </div>
+    </div>
   );
 }
 

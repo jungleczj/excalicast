@@ -573,6 +573,7 @@
       "title": "Video background",
       "subtitle": "Used in the final video frame. You can adjust it again on export.",
       "none": "No background",
+      "customColor": "Custom color",
       "tones": {
         "all": "All",
         "fresh": "Fresh",
@@ -690,6 +691,7 @@
     "title": "Video background",
     "subtitle": "The background fills the final frame with cover-fit and never stretches.",
     "none": "No background",
+    "customColor": "Custom color",
     "tones": {
       "all": "All",
       "fresh": "Fresh",
