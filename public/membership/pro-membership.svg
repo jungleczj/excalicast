@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" fill="none" role="img" aria-label="Excalicast Pro membership product illustration">
+  <defs>
+    <style>
+      .serif{font-family:Georgia,'Noto Serif SC','Songti SC',serif}
+      .sans{font-family:Inter,Geist,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+      .ink{fill:#1F2225}.muted{fill:#5F5A52}.faint{fill:#867F74}
+    </style>
+    <pattern id="proGrain" width="138" height="138" patternUnits="userSpaceOnUse">
+      <circle cx="14" cy="18" r="1.15" fill="#7898C6" opacity=".16"/>
+      <circle cx="86" cy="42" r=".95" fill="#8EB6D0" opacity=".14"/>
+      <circle cx="48" cy="106" r="1" fill="#BFAF79" opacity=".10"/>
+    </pattern>
+    <filter id="proShadow" x="-14%" y="-18%" width="130%" height="142%">
+      <feDropShadow dx="0" dy="26" stdDeviation="36" flood-color="#4B607C" flood-opacity=".17"/>
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#1F2225" flood-opacity=".10"/>
+    </filter>
+    <filter id="paperLift" x="-8%" y="-8%" width="116%" height="116%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#5E4E3C" flood-opacity=".08"/>
+    </filter>
+    <symbol id="logoMark" viewBox="0 0 32 32">
+      <rect x="3.6" y="3.4" width="24.8" height="25" rx="6.2" fill="#FFFCF5"/>
+      <path d="M9.2 22.6 L14.3 16.7 c1.1 -1.3 2.5 -1.2 3.5 0.1 l2.1 2.7 l2.9 -3.5 c0.9 -1.1 2.1 -1 3 0.2 l2.1 2.9 v4.4 c0 1.9 -1 2.9 -3 2.9 H7.2 c-1.7 0 -2.7 -0.8 -2.9 -2.2 c1.5 -0.4 3.1 -0.9 4.9 -1.6 z" fill="#BFE0F5"/>
+      <path d="M16.8 26.4 L21.8 18.2 c0.8 -1.3 2.2 -1.3 3 0 l3.1 5 v0.6 c0 1.7 -0.9 2.6 -2.6 2.6 z" fill="#F9D05A"/>
+      <circle cx="10.1" cy="9.1" r="2.6" fill="#F0443E"/>
+      <rect x="3.6" y="3.4" width="24.8" height="25" rx="6.2" fill="none" stroke="#1F2225" stroke-width="2.35"/>
+    </symbol>
+  </defs>
+
+  <rect width="1920" height="1080" rx="72" fill="#F8FAF7"/>
+  <rect width="1920" height="1080" fill="url(#proGrain)"/>
+  <path d="M0 0H1920V132C1750 82 1600 78 1430 146C1246 220 1118 252 930 220C760 191 650 103 482 107C308 112 198 186 0 158Z" fill="#D7EFFB"/>
+  <path d="M0 112C156 80 326 100 520 176C706 249 910 256 1130 154C1394 31 1642 42 1920 152V0H0Z" fill="#BFE0F5" opacity=".58"/>
+  <path d="M132 594L544 530L602 926L168 968Z" fill="#E4F1DB" opacity=".70" filter="url(#paperLift)"/>
+  <path d="M1460 250L1802 298L1735 664L1394 620Z" fill="#FFF0BE" opacity=".76" filter="url(#paperLift)"/>
+  <path d="M0 846C164 772 322 752 506 812C742 889 944 892 1190 778C1468 649 1692 700 1920 804V1080H0Z" fill="#DAD2F1" opacity=".55"/>
+  <path d="M0 934C128 866 274 830 434 840C620 852 736 902 910 934C1108 970 1268 938 1456 854C1642 770 1770 792 1920 860V1080H0Z" fill="#EEF2F6" opacity=".72"/>
+
+  <g transform="translate(154 122)">
+    <use href="#logoMark" width="70" height="70"/>
+    <text x="92" y="43" class="sans ink" font-size="32" font-weight="720" letter-spacing="-.02em">Excalicast</text>
+  </g>
+
+  <g transform="translate(154 254)">
+    <text x="0" y="0" class="serif ink" font-size="78" letter-spacing="-2.9">Pro prepares</text>
+    <text x="0" y="86" class="serif ink" font-size="78" letter-spacing="-2.9">the final cut.</text>
+    <text x="0" y="158" class="sans muted" font-size="27">Captions, presets, and</text>
+    <text x="0" y="196" class="sans muted" font-size="27">clean high-definition exports.</text>
+    <g transform="translate(0 232)">
+      <rect width="248" height="70" rx="35" fill="#0B0B0B"/>
+      <circle cx="42" cy="35" r="9" fill="#F0443E"/>
+      <text x="70" y="44" class="sans" font-size="25" font-weight="800" fill="#FFFDF8">Upgrade Pro</text>
+    </g>
+    <g transform="translate(278 232)">
+      <rect width="254" height="70" rx="35" fill="#FFFDF8" stroke="#E3DED4" stroke-width="3"/>
+      <text x="44" y="44" class="sans ink" font-size="25" font-weight="800">Subtitles</text>
+      <text x="154" y="44" class="sans faint" font-size="22">included</text>
+    </g>
+  </g>
+
+  <g transform="translate(836 226)" filter="url(#proShadow)">
+    <rect width="948" height="692" rx="46" fill="#FFFDF8" stroke="#E3DDD2" stroke-width="3"/>
+    <g transform="translate(48 42)">
+      <use href="#logoMark" width="42" height="42"/>
+      <text x="58" y="29" class="sans ink" font-size="22" font-weight="800">Caption studio</text>
+      <rect x="608" y="-6" width="248" height="48" rx="24" fill="#F9D05A"/>
+      <text x="654" y="25" class="sans ink" font-size="19" font-weight="820">PRO · Active</text>
+    </g>
+
+    <g transform="translate(58 122)">
+      <rect width="520" height="344" rx="32" fill="#F6F3ED" stroke="#E7E0D5" stroke-width="3"/>
+      <rect x="54" y="52" width="412" height="208" rx="24" fill="#FFFDF8" stroke="#EAE3D7" stroke-width="2"/>
+      <path d="M104 116H410M104 158H356M104 200H434" stroke="#B8B1A5" stroke-width="10" stroke-linecap="round"/>
+      <path d="M104 276H424" stroke="#1F2225" stroke-width="7" stroke-linecap="round"/>
+      <circle cx="302" cy="276" r="18" fill="#F0443E"/>
+      <rect x="156" y="294" width="252" height="40" rx="14" fill="#BFE0F5"/>
+      <text x="188" y="320" class="sans ink" font-size="18" font-weight="760">Auto captions</text>
+    </g>
+
+    <g transform="translate(594 122)">
+      <rect width="308" height="344" rx="32" fill="#F9F7FF" stroke="#E7E0D5" stroke-width="3"/>
+      <text x="36" y="62" class="sans ink" font-size="24" font-weight="820">Transcript</text>
+      <rect x="36" y="92" width="238" height="48" rx="16" fill="#E9E2FF"/>
+      <rect x="36" y="156" width="238" height="48" rx="16" fill="#BFE0F5"/>
+      <rect x="36" y="220" width="198" height="48" rx="16" fill="#E4F1DB"/>
+      <path d="M60 116H222M60 180H218M60 244H190" stroke="#1F2225" stroke-opacity=".54" stroke-width="6" stroke-linecap="round"/>
+    </g>
+
+    <g transform="translate(58 514)">
+      <rect width="830" height="96" rx="28" fill="#F7F2EA"/>
+      <rect x="54" y="20" width="240" height="60" rx="16" fill="#BFE0F5" opacity=".70"/>
+      <rect x="322" y="20" width="260" height="60" rx="16" fill="#DAD2F1" opacity=".72"/>
+      <rect x="612" y="20" width="224" height="60" rx="16" fill="#E4F1DB" opacity=".76"/>
+      <path d="M52 50C88 20 124 78 160 48S232 21 268 50 340 80 376 50 448 22 484 50 556 79 592 50 664 22 700 50 752 72 792 50" stroke="#5EC08B" stroke-width="8" stroke-linecap="round"/>
+      <path d="M480 12V84" stroke="#1F2225" stroke-width="4"/>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" fill="none" role="img" aria-label="Excalicast one-time export product illustration">
+  <defs>
+    <style>
+      .serif{font-family:Georgia,'Noto Serif SC','Songti SC',serif}
+      .sans{font-family:Inter,Geist,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+      .ink{fill:#1F2225}.muted{fill:#615C54}.faint{fill:#8B8478}
+    </style>
+    <pattern id="grain" width="140" height="140" patternUnits="userSpaceOnUse">
+      <circle cx="18" cy="18" r="1.2" fill="#D8B55A" opacity=".18"/>
+      <circle cx="92" cy="44" r=".9" fill="#A57E34" opacity=".12"/>
+      <circle cx="48" cy="102" r="1" fill="#44606F" opacity=".08"/>
+    </pattern>
+    <pattern id="ruled" width="1" height="36" patternUnits="userSpaceOnUse">
+      <path d="M0 35.5H1920" stroke="#E3C467" stroke-width="1.4" opacity=".42"/>
+    </pattern>
+    <filter id="softShadow" x="-14%" y="-18%" width="130%" height="142%">
+      <feDropShadow dx="0" dy="24" stdDeviation="34" flood-color="#56422A" flood-opacity=".16"/>
+      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#1F2225" flood-opacity=".10"/>
+    </filter>
+    <filter id="paperLift" x="-8%" y="-8%" width="116%" height="116%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#5E4E3C" flood-opacity=".08"/>
+    </filter>
+    <clipPath id="yellowClip">
+      <path d="M0 753C88 731 170 704 260 692C370 678 450 705 548 748C666 800 758 806 870 756C1015 690 1126 690 1268 748C1414 807 1520 820 1658 760C1766 713 1846 706 1920 732V1080H0Z"/>
+    </clipPath>
+    <symbol id="logoMark" viewBox="0 0 32 32">
+      <rect x="3.6" y="3.4" width="24.8" height="25" rx="6.2" fill="#FFFCF5"/>
+      <path d="M9.2 22.6 L14.3 16.7 c1.1 -1.3 2.5 -1.2 3.5 0.1 l2.1 2.7 l2.9 -3.5 c0.9 -1.1 2.1 -1 3 0.2 l2.1 2.9 v4.4 c0 1.9 -1 2.9 -3 2.9 H7.2 c-1.7 0 -2.7 -0.8 -2.9 -2.2 c1.5 -0.4 3.1 -0.9 4.9 -1.6 z" fill="#BFE0F5"/>
+      <path d="M16.8 26.4 L21.8 18.2 c0.8 -1.3 2.2 -1.3 3 0 l3.1 5 v0.6 c0 1.7 -0.9 2.6 -2.6 2.6 z" fill="#F9D05A"/>
+      <circle cx="10.1" cy="9.1" r="2.6" fill="#F0443E"/>
+      <rect x="3.6" y="3.4" width="24.8" height="25" rx="6.2" fill="none" stroke="#1F2225" stroke-width="2.35"/>
+    </symbol>
+  </defs>
+
+  <rect width="1920" height="1080" rx="72" fill="#FCF8F0"/>
+  <rect width="1920" height="1080" fill="url(#grain)"/>
+
+  <path d="M0 0H1920V145C1790 105 1647 94 1508 136C1338 187 1236 246 1064 220C892 194 778 93 600 103C438 113 328 204 168 179C92 167 42 138 0 128Z" fill="#DCEFF8" opacity=".82"/>
+  <path d="M0 168C95 196 202 206 318 169C478 118 602 130 750 198C896 265 1045 280 1224 210C1446 123 1632 116 1920 208V0H0Z" fill="#BFE0F5" opacity=".52"/>
+  <path d="M94 296L462 251L514 603L132 646Z" fill="#DAD2F1" opacity=".54" filter="url(#paperLift)"/>
+  <path d="M1338 202L1770 158L1842 510L1404 566Z" fill="#F7E4AF" opacity=".68" filter="url(#paperLift)"/>
+  <path d="M1338 202L1770 158L1842 510L1404 566Z" fill="url(#ruled)" opacity=".72"/>
+  <path d="M0 753C88 731 170 704 260 692C370 678 450 705 548 748C666 800 758 806 870 756C1015 690 1126 690 1268 748C1414 807 1520 820 1658 760C1766 713 1846 706 1920 732V1080H0Z" fill="#F9D05A" opacity=".48"/>
+  <g clip-path="url(#yellowClip)" opacity=".36"><rect width="1920" height="1080" fill="url(#ruled)"/></g>
+  <path d="M0 903C112 834 238 787 392 784C558 780 670 831 820 880C1016 943 1180 934 1372 852C1592 758 1745 782 1920 858V1080H0Z" fill="#FFF7DB" opacity=".78"/>
+
+  <g transform="translate(154 122)">
+    <use href="#logoMark" width="70" height="70"/>
+    <text x="92" y="43" class="sans ink" font-size="32" font-weight="720" letter-spacing="-.02em">Excalicast</text>
+  </g>
+
+  <g transform="translate(154 254)">
+    <text x="0" y="0" class="serif ink" font-size="78" letter-spacing="-2.9">One export.</text>
+    <text x="0" y="86" class="serif ink" font-size="78" letter-spacing="-2.9">No watermark.</text>
+    <text x="0" y="158" class="sans muted" font-size="27">A single polished MP4,</text>
+    <text x="0" y="196" class="sans muted" font-size="27">rendered locally and ready to send.</text>
+    <g transform="translate(0 232)">
+      <rect width="290" height="70" rx="35" fill="#0B0B0B"/>
+      <circle cx="42" cy="35" r="9" fill="#F0443E"/>
+      <text x="68" y="44" class="sans" font-size="25" font-weight="760" fill="#FFFDF8">Unlock export</text>
+    </g>
+    <g transform="translate(320 232)">
+      <rect width="212" height="70" rx="35" fill="#FFFDF8" stroke="#E3DED4" stroke-width="3"/>
+      <text x="48" y="44" class="sans ink" font-size="25" font-weight="760">$4.99</text>
+      <text x="130" y="44" class="sans faint" font-size="22">once</text>
+    </g>
+  </g>
+
+  <g transform="translate(836 232)" filter="url(#softShadow)">
+    <rect width="930" height="680" rx="46" fill="#FFFDF8" stroke="#E2DBCF" stroke-width="3"/>
+    <g transform="translate(48 42)">
+      <use href="#logoMark" width="42" height="42"/>
+      <text x="58" y="29" class="sans ink" font-size="22" font-weight="780">Export review</text>
+      <rect x="618" y="-6" width="186" height="48" rx="24" fill="#0B0B0B"/>
+      <text x="678" y="25" class="sans" font-size="19" font-weight="760" fill="#FFFDF8">Render</text>
+    </g>
+
+    <g transform="translate(58 122)">
+      <rect width="528" height="332" rx="32" fill="#F8F3EA" stroke="#E5DED2" stroke-width="3"/>
+      <rect x="58" y="64" width="384" height="194" rx="24" fill="#FFFDF8" stroke="#ECE5DA" stroke-width="2"/>
+      <path d="M100 122H386M100 160H330M100 198H372" stroke="#B9B2A7" stroke-width="10" stroke-linecap="round"/>
+      <path d="M82 274H462" stroke="#1F2225" stroke-width="7" stroke-linecap="round"/>
+      <circle cx="342" cy="274" r="18" fill="#F0443E"/>
+      <rect x="390" y="222" width="62" height="62" rx="31" fill="#111111"/>
+      <text x="408" y="263" class="sans" font-size="26" font-weight="900" fill="#FFFDF8">✓</text>
+    </g>
+
+    <g transform="translate(620 122)">
+      <rect width="252" height="332" rx="32" fill="#FFF8E8" stroke="#E5DED2" stroke-width="3"/>
+      <text x="34" y="62" class="sans ink" font-size="24" font-weight="820">Settings</text>
+      <rect x="34" y="92" width="184" height="56" rx="18" fill="#F9D05A"/>
+      <text x="61" y="128" class="sans ink" font-size="21" font-weight="760">No watermark</text>
+      <rect x="34" y="170" width="184" height="54" rx="18" fill="#FFFDF8" stroke="#E4DED4" stroke-width="3"/>
+      <text x="62" y="204" class="sans ink" font-size="21">MP4 · 1080p</text>
+      <rect x="34" y="252" width="184" height="52" rx="26" fill="#0B0B0B"/>
+      <text x="75" y="286" class="sans" font-size="20" font-weight="800" fill="#FFFDF8">Download</text>
+    </g>
+
+    <g transform="translate(58 506)">
+      <rect width="814" height="94" rx="28" fill="#F6F1E8"/>
+      <path d="M48 47H748" stroke="#D8D0C4" stroke-width="8" stroke-linecap="round"/>
+      <path d="M48 47H436" stroke="#F0443E" stroke-width="8" stroke-linecap="round"/>
+      <circle cx="436" cy="47" r="17" fill="#F0443E"/>
+    </g>
+  </g>
+</svg>
