@@ -14,6 +14,7 @@ import {
   ASPECT_PRESETS,
   RESOLUTION_SCALE,
   type CameraPositionEvent,
+  type CameraShape,
   type AutoZoomSegment,
   type ExportConfig,
   type ExportFormat,
@@ -21,6 +22,7 @@ import {
   type RecordingSourceKind,
   type SceneRect,
   type SourceCropWindow,
+  type VideoBackgroundConfig,
   type WhiteboardSnapshot,
   type WorkspaceShellRow,
 } from '@/types/recording';
@@ -182,11 +184,11 @@ export function buildCameraSegments(
   return aggressive.slice(0, maxSegments);
 }
 
-/** 在画布上把摄像头帧画成镜像圆形气泡（与 ffmpeg overlay 观感一致）。 */
+/** 在画布上把摄像头帧画成镜像气泡（与设置页、ffmpeg overlay 观感一致）。 */
 function drawCameraBubble(
   ctx: CanvasRenderingContext2D,
   frame: { displayWidth?: number; displayHeight?: number; codedWidth?: number; codedHeight?: number },
-  x: number, y: number, size: number,
+  x: number, y: number, size: number, shape: CameraShape,
 ): void {
   const fw = frame.displayWidth ?? frame.codedWidth ?? size;
   const fh = frame.displayHeight ?? frame.codedHeight ?? size;
@@ -194,9 +196,13 @@ function drawCameraBubble(
   const sx = (fw - s) / 2;
   const sy = (fh - s) / 2;
   ctx.save();
-  ctx.beginPath();
-  ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
-  ctx.closePath();
+  if (shape === 'rounded') {
+    roundedRectPath(ctx, { x, y, width: size, height: size }, Math.max(12, Math.round(size * 0.14)));
+  } else {
+    ctx.beginPath();
+    ctx.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
+    ctx.closePath();
+  }
   ctx.clip();
   ctx.translate(x + size, y);            // 水平镜像（hflip）
   ctx.scale(-1, 1);
@@ -239,33 +245,223 @@ function drawDisplayFrame(
   ctx.drawImage(frame, crop.sx, crop.sy, crop.sw, crop.sh, dx, dy, dw, dh);
 }
 
-function activeAutoZoom(segments: AutoZoomSegment[] | undefined, t: number): AutoZoomSegment | null {
+/** Auto Zoom 在片段边缘使用对称缓动，避免倍率从 1 直接跳到目标值。 */
+export function autoZoomAt(segments: AutoZoomSegment[] | undefined, t: number): AutoZoomSegment | null {
   if (!segments || segments.length === 0) return null;
-  return segments.find((z) => t >= z.start && t <= z.end && z.scale > 1) ?? null;
+  const segment = segments.find((z) => t >= z.start && t <= z.end && z.scale > 1);
+  if (!segment) return null;
+
+  const duration = Math.max(1, segment.end - segment.start);
+  // 默认 2.2 秒的片段会以约 620ms 缓入/缓出；短片段按自身时长收缩，
+  // 仍保持中间有可感知的停留区，而不是突然闪一下。
+  const rampMs = Math.min(650, Math.max(180, duration * 0.28));
+  const progress = Math.min(
+    1,
+    Math.max(0, Math.min((t - segment.start) / rampMs, (segment.end - t) / rampMs)),
+  );
+  // easeInOutCubic：开始和结束速度都接近 0，放大与恢复同样柔和。
+  const eased = progress < 0.5
+    ? 4 * progress * progress * progress
+    : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+  return {
+    ...segment,
+    scale: 1 + (Math.max(1, Math.min(4, segment.scale)) - 1) * eased,
+  };
+}
+
+interface CanvasRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 有视频背景时，录制画面作为一个固定的前景窗口置于背景上方。AutoZoom 只在这个
+ * 窗口内部移动镜头；窗口本身、背景以及窗口之外的留白都不参与缩放。
+ */
+export interface RecordingWindowRect extends CanvasRect {
+  radius: number;
+  scale: number;
+}
+
+export function getRecordingWindowRect(
+  width: number,
+  height: number,
+  background?: VideoBackgroundConfig,
+): RecordingWindowRect | null {
+  if (!background || background.kind === 'none') return null;
+  // 保留足够的背景呼吸空间。统一缩放可确保前景画幅不被拉伸。
+  const scale = 0.84;
+  const windowWidth = Math.round(width * scale);
+  const windowHeight = Math.round(height * scale);
+  return {
+    x: Math.round((width - windowWidth) / 2),
+    y: Math.round((height - windowHeight) / 2),
+    width: windowWidth,
+    height: windowHeight,
+    radius: Math.max(16, Math.round(Math.min(windowWidth, windowHeight) * 0.025)),
+    scale,
+  };
+}
+
+function roundedRectPath(ctx: CanvasRenderingContext2D, rect: CanvasRect, radius: number): void {
+  const r = Math.min(radius, rect.width / 2, rect.height / 2);
+  ctx.beginPath();
+  ctx.moveTo(rect.x + r, rect.y);
+  ctx.arcTo(rect.x + rect.width, rect.y, rect.x + rect.width, rect.y + rect.height, r);
+  ctx.arcTo(rect.x + rect.width, rect.y + rect.height, rect.x, rect.y + rect.height, r);
+  ctx.arcTo(rect.x, rect.y + rect.height, rect.x, rect.y, r);
+  ctx.arcTo(rect.x, rect.y, rect.x + rect.width, rect.y, r);
+  ctx.closePath();
+}
+
+function drawRecordingWindow(
+  target: CanvasRenderingContext2D,
+  foreground: HTMLCanvasElement,
+  background?: VideoBackgroundConfig,
+): void {
+  const frame = getRecordingWindowRect(target.canvas.width, target.canvas.height, background);
+  if (!frame) {
+    target.drawImage(foreground, 0, 0);
+    return;
+  }
+
+  // 阴影和卡片外轮廓在背景之上，但不属于会被镜头缩放的前景内容。
+  // 两层阴影分别给出柔和环境投影和近距离接触阴影，让录制窗口明确浮在壁纸上。
+  target.save();
+  target.shadowColor = 'rgba(22, 27, 32, 0.25)';
+  target.shadowBlur = Math.max(28, Math.round(frame.width * 0.027));
+  target.shadowOffsetY = Math.max(14, Math.round(frame.height * 0.025));
+  target.fillStyle = '#fffdf9';
+  roundedRectPath(target, frame, frame.radius);
+  target.fill();
+  target.shadowColor = 'rgba(22, 27, 32, 0.13)';
+  target.shadowBlur = Math.max(8, Math.round(frame.width * 0.008));
+  target.shadowOffsetY = Math.max(3, Math.round(frame.height * 0.005));
+  roundedRectPath(target, frame, frame.radius);
+  target.fill();
+  target.restore();
+
+  target.save();
+  roundedRectPath(target, frame, frame.radius);
+  target.clip();
+  // 透明白板也应有稳定的窗口底色，避免缩放时把背景从内容下方露出来。
+  target.fillStyle = '#fffdf9';
+  target.fillRect(frame.x, frame.y, frame.width, frame.height);
+  target.imageSmoothingEnabled = true;
+  target.imageSmoothingQuality = 'high';
+  target.drawImage(foreground, 0, 0, foreground.width, foreground.height, frame.x, frame.y, frame.width, frame.height);
+  target.restore();
+
+  target.save();
+  target.strokeStyle = 'rgba(31, 34, 37, 0.12)';
+  target.lineWidth = Math.max(1, Math.round(Math.min(target.canvas.width, target.canvas.height) / 1200));
+  roundedRectPath(target, frame, frame.radius);
+  target.stroke();
+  target.restore();
+}
+
+function projectBoundsIntoRecordingWindow(
+  bounds: CameraBounds,
+  outputWidth: number,
+  outputHeight: number,
+  background?: VideoBackgroundConfig,
+): CameraBounds {
+  const frame = getRecordingWindowRect(outputWidth, outputHeight, background);
+  if (!frame) return bounds;
+  return {
+    offX: frame.x + bounds.offX * frame.scale,
+    offY: frame.y + bounds.offY * frame.scale,
+    w: bounds.w * frame.scale,
+    h: bounds.h * frame.scale,
+  };
 }
 
 function applyAutoZoom(
   canvas: HTMLCanvasElement,
   segment: AutoZoomSegment | null,
+  bounds: CanvasRect = { x: 0, y: 0, width: canvas.width, height: canvas.height },
 ): void {
   if (!segment) return;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
+  const scale = Math.max(1, Math.min(4, segment.scale));
+  // 缓动刚开始/结束时 scale 精确为 1，必须保持原帧，不能因原先的 1.05 下限跳帧。
+  if (scale <= 1.0001) return;
   const source = document.createElement('canvas');
   source.width = canvas.width;
   source.height = canvas.height;
   source.getContext('2d')!.drawImage(canvas, 0, 0);
-  const scale = Math.max(1.05, Math.min(4, segment.scale));
-  const cropW = canvas.width / scale;
-  const cropH = canvas.height / scale;
-  const cx = Math.max(0, Math.min(1, segment.cx ?? 0.5)) * canvas.width;
-  const cy = Math.max(0, Math.min(1, segment.cy ?? 0.5)) * canvas.height;
-  const sx = Math.max(0, Math.min(canvas.width - cropW, cx - cropW / 2));
-  const sy = Math.max(0, Math.min(canvas.height - cropH, cy - cropH / 2));
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const safeBounds: CanvasRect = {
+    x: Math.max(0, Math.min(canvas.width, bounds.x)),
+    y: Math.max(0, Math.min(canvas.height, bounds.y)),
+    width: Math.max(1, Math.min(canvas.width - Math.max(0, bounds.x), bounds.width)),
+    height: Math.max(1, Math.min(canvas.height - Math.max(0, bounds.y), bounds.height)),
+  };
+  const cropW = safeBounds.width / scale;
+  const cropH = safeBounds.height / scale;
+  const cx = safeBounds.x + Math.max(0, Math.min(1, segment.cx ?? 0.5)) * safeBounds.width;
+  const cy = safeBounds.y + Math.max(0, Math.min(1, segment.cy ?? 0.5)) * safeBounds.height;
+  const sx = Math.max(safeBounds.x, Math.min(safeBounds.x + safeBounds.width - cropW, cx - cropW / 2));
+  const sy = Math.max(safeBounds.y, Math.min(safeBounds.y + safeBounds.height - cropH, cy - cropH / 2));
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(safeBounds.x, safeBounds.y, safeBounds.width, safeBounds.height);
+  ctx.clip();
+  ctx.clearRect(safeBounds.x, safeBounds.y, safeBounds.width, safeBounds.height);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(source, sx, sy, cropW, cropH, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(source, sx, sy, cropW, cropH, safeBounds.x, safeBounds.y, safeBounds.width, safeBounds.height);
+  ctx.restore();
+}
+
+/**
+ * 背景与录制内容分层合成：AutoZoom 只能作用于透明的内容层，避免把用户选择的
+ * 视频背景也一起裁切、放大。白板、工作区壳、屏幕录制和激光笔都属于内容层。
+ */
+function createContentLayer(width: number, height: number): HTMLCanvasElement {
+  const layer = document.createElement('canvas');
+  layer.width = width;
+  layer.height = height;
+  return layer;
+}
+
+function drawZoomedContentLayer(
+  target: CanvasRenderingContext2D,
+  content: HTMLCanvasElement,
+  zoom: AutoZoomSegment | null,
+  bounds?: CanvasRect,
+): void {
+  applyAutoZoom(content, zoom, bounds);
+  target.drawImage(content, 0, 0);
+}
+
+interface ShellLayout {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+  canvasRect: CanvasRect;
+}
+
+function shellLayout(shell: WorkspaceShellRow, targetWidth: number, targetHeight: number): ShellLayout {
+  const scale = Math.min(targetWidth / shell.shellSize.width, targetHeight / shell.shellSize.height);
+  const width = shell.shellSize.width * scale;
+  const height = shell.shellSize.height * scale;
+  const offsetX = (targetWidth - width) / 2;
+  const offsetY = (targetHeight - height) / 2;
+  return {
+    scale,
+    offsetX,
+    offsetY,
+    canvasRect: {
+      x: offsetX + shell.canvasRect.x * scale,
+      y: offsetY + shell.canvasRect.y * scale,
+      width: shell.canvasRect.width * scale,
+      height: shell.canvasRect.height * scale,
+    },
+  };
 }
 
 function shellAt(shells: WorkspaceShellRow[], t: number): WorkspaceShellRow | null {
@@ -440,6 +636,15 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 基帧缓存：场景+外壳+水印只随 snapshot/shell 变化（与字幕无关）
   let lastBaseSig: string | null = null;
   let baseCanvas: HTMLCanvasElement | null = null;
+  // WebCodecs 的编码器需要每一帧，但静态白板的像素结果不需要每一帧都重新合成。
+  // 仅在没有视频源、激光轨迹和自动推镜时复用最终 canvas；每一个输出时间戳
+  // 仍会创建独立 VideoFrame，因此分辨率、帧率和用户选择的画质都完全不变。
+  const canReuseFinalFrame = laserEvents.length === 0
+    && !screenBlob
+    && !cameraBlob
+    && !(opts.autoZooms?.length);
+  let lastFinalSig: string | null = null;
+  let lastFinalCanvas: HTMLCanvasElement | null = null;
 
   // 摄像头画布内合成（仅 WebCodecs 路径启用；ffmpeg 路径仍用 overlay 滤镜）
   let compositeCamera = false;
@@ -486,31 +691,29 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
 
   // 合成一帧到独立 canvas（场景+外壳+水印+字幕），含基帧缓存。ffmpeg / WebCodecs 两路径共用。
   const composeFrame = async (inp: ReturnType<typeof frameInputs>): Promise<HTMLCanvasElement> => {
+    if (canReuseFinalFrame && inp.sig === lastFinalSig && lastFinalCanvas) {
+      return lastFinalCanvas;
+    }
     const { t, snap, shellAtTframe } = inp;
     const target = document.createElement('canvas');
     target.width = outputW;
     target.height = outputH;
     const targetCtx = target.getContext('2d')!;
     await paintVideoBackground(targetCtx, target.width, target.height, opts.videoBackground);
+    const content = createContentLayer(target.width, target.height);
+    const contentCtx = content.getContext('2d')!;
+    // foreground 是固定的“录制窗口”内容；背景与窗口外框始终不参与 AutoZoom。
+    const foreground = createContentLayer(target.width, target.height);
+    const foregroundCtx = foreground.getContext('2d')!;
 
-    if (displaySource) {
-      const displayFrame = await displaySource.getFrameAt(t);
-      if (!displayFrame) return target;
-      drawDisplayFrame(
-        targetCtx,
-        displayFrame,
-        metadata.source?.kind ?? 'desktop',
-        metadata.source?.sourceCropWindow,
-        target.width,
-        target.height,
-      );
-      applyAutoZoom(target, activeAutoZoom(opts.autoZooms, t));
+    const finalizeForeground = async (zoomBounds: CanvasRect) => {
+      drawZoomedContentLayer(foregroundCtx, content, autoZoomAt(opts.autoZooms, t), zoomBounds);
 
       if (opts.withWatermark) {
-        drawFrostedWatermark(targetCtx, target.width, target.height, watermarkPos);
+        drawFrostedWatermark(foregroundCtx, foreground.width, foreground.height, watermarkPos);
       }
       if (cues.length > 0) {
-        drawSubtitle(targetCtx, target.width, target.height, cues, t, {
+        drawSubtitle(foregroundCtx, foreground.width, foreground.height, cues, t, {
           reservedRightFraction: cameraBlob ? 0.3 : 0,
         });
       }
@@ -522,50 +725,60 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
             const size = Math.max(16, Math.round(camBounds.h * 0.22));
             const x = Math.round(camBounds.offX + camBounds.w - size - camBounds.w * 0.025);
             const y = Math.round(camBounds.offY + camBounds.h - size - camBounds.h * 0.04);
-            drawCameraBubble(targetCtx, frame, x, y, size);
+            drawCameraBubble(foregroundCtx, frame, x, y, size, metadata.setup?.camera.shape ?? 'circle');
           } else if (!pos.hidden) {
             const shortSide = Math.min(camBounds.w, camBounds.h);
             const size = Math.max(16, Math.min(Math.round(pos.rs * shortSide), Math.round(shortSide)));
             const x = Math.round(camBounds.offX + Math.max(0, Math.min(pos.rx * camBounds.w, camBounds.w - size)));
             const y = Math.round(camBounds.offY + Math.max(0, Math.min(pos.ry * camBounds.h, camBounds.h - size)));
-            drawCameraBubble(targetCtx, frame, x, y, size);
+            drawCameraBubble(foregroundCtx, frame, x, y, size, metadata.setup?.camera.shape ?? 'circle');
           }
         }
       }
+
+      drawRecordingWindow(targetCtx, foreground, opts.videoBackground);
+    };
+
+    if (displaySource) {
+      const displayFrame = await displaySource.getFrameAt(t);
+      if (!displayFrame) return target;
+      drawDisplayFrame(
+        contentCtx,
+        displayFrame,
+        metadata.source?.kind ?? 'desktop',
+        metadata.source?.sourceCropWindow,
+        target.width,
+        target.height,
+      );
+      await finalizeForeground({ x: 0, y: 0, width: content.width, height: content.height });
       return target;
     }
 
-    // 基帧缓存：旁白讲解时画面静止、仅字幕在变 → 复用上次合成好的基帧（含水印），只重画字幕。
+    // 基帧缓存：旁白讲解时画面静止、仅字幕在变 → 复用未缩放的内容层，只重画字幕。
     const baseSig = `${snap?.timestamp ?? -1}|${shellAtTframe?.timestamp ?? -1}`;
     const reuseBase = dedupEnabled && baseSig === lastBaseSig && baseCanvas !== null;
+    const frameShellLayout = useShell && shellAtTframe
+      ? shellLayout(shellAtTframe, target.width, target.height)
+      : null;
+    // 只推近白板/屏幕内容。shell 的边框与背景上的前景窗口都保持固定。
+    const zoomBounds = frameShellLayout?.canvasRect ?? { x: 0, y: 0, width: content.width, height: content.height };
     if (reuseBase) {
-      targetCtx.drawImage(baseCanvas as HTMLCanvasElement, 0, 0);
+      contentCtx.drawImage(baseCanvas as HTMLCanvasElement, 0, 0);
     } else {
-      // shell 模式：先按 contain 把工作区外壳画到 target，再把 scene 画进映射后的 canvasRect。
+      // shell 模式：先按 contain 把工作区外壳画到内容层，再把 scene 画进映射后的 canvasRect。
       let shellAtT: DecodedShell | null = shellAtTframe;
-      let shellRenderScale = 1;
-      let shellOffsetX = 0;
-      let shellOffsetY = 0;
       if (useShell && shellAtT) {
-        const shellW = shellAtT.shellSize.width;
-        const shellH = shellAtT.shellSize.height;
-        shellRenderScale = Math.min(target.width / shellW, target.height / shellH);
-        const scaledW = shellW * shellRenderScale;
-        const scaledH = shellH * shellRenderScale;
-        shellOffsetX = (target.width - scaledW) / 2;
-        shellOffsetY = (target.height - scaledH) / 2;
-        targetCtx.drawImage(shellAtT.bitmap, shellOffsetX, shellOffsetY, scaledW, scaledH);
+        contentCtx.drawImage(
+          shellAtT.bitmap,
+          frameShellLayout!.offsetX,
+          frameShellLayout!.offsetY,
+          shellAtT.shellSize.width * frameShellLayout!.scale,
+          shellAtT.shellSize.height * frameShellLayout!.scale,
+        );
       }
 
       const dest = (() => {
-        if (useShell && shellAtT) {
-          return {
-            x: shellOffsetX + shellAtT.canvasRect.x * shellRenderScale,
-            y: shellOffsetY + shellAtT.canvasRect.y * shellRenderScale,
-            width: shellAtT.canvasRect.width * shellRenderScale,
-            height: shellAtT.canvasRect.height * shellRenderScale,
-          };
-        }
+        if (useShell && shellAtT && frameShellLayout) return frameShellLayout.canvasRect;
         return { x: 0, y: 0, width: target.width, height: target.height };
       })();
 
@@ -612,7 +825,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         const sh2 = sceneSourceRect.height * scaleY;
 
         try {
-          targetCtx.drawImage(
+          contentCtx.drawImage(
             sceneCanvas,
             Math.max(0, sx),
             Math.max(0, sy2),
@@ -621,13 +834,13 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
             dest.x, dest.y, dest.width, dest.height,
           );
         } catch {
-          targetCtx.drawImage(sceneCanvas, dest.x, dest.y, dest.width, dest.height);
+          contentCtx.drawImage(sceneCanvas, dest.x, dest.y, dest.width, dest.height);
         }
       }
 
       if (laserEvents.length > 0) {
         const ssr = sceneSourceRect;
-        drawLaserOverlay(targetCtx, laserEvents, t, {
+        drawLaserOverlay(contentCtx, laserEvents, t, {
           sceneToScreen: (sx: number, sy: number) => ({
             x: dest.x + ((sx - ssr.x) / ssr.width) * dest.width,
             y: dest.y + ((sy - ssr.y) / ssr.height) * dest.height,
@@ -639,43 +852,16 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         if (!baseCanvas) baseCanvas = document.createElement('canvas');
         baseCanvas.width = target.width;
         baseCanvas.height = target.height;
-        baseCanvas.getContext('2d')!.drawImage(target, 0, 0);
+        baseCanvas.getContext('2d')!.drawImage(content, 0, 0);
         lastBaseSig = baseSig;
       }
     } // end else（基帧渲染）
 
-    // 字幕硬嵌入（每帧都画，不入基帧缓存）
-    applyAutoZoom(target, activeAutoZoom(opts.autoZooms, t));
-
-    if (opts.withWatermark) {
-      drawFrostedWatermark(targetCtx, target.width, target.height, watermarkPos);
-    }
-
-    if (cues.length > 0) {
-      drawSubtitle(targetCtx, target.width, target.height, cues, t, {
-        reservedRightFraction: cameraBlob ? 0.3 : 0,
-      });
-    }
-
-    // 摄像头气泡（仅 WebCodecs 路径在画布内合成；位置/镜像/隐藏与 ffmpeg overlay 对齐）
-    if (compositeCamera && cameraSource) {
-      const frame = await cameraSource.getFrameAt(t);
-      if (frame) {
-        const pos = cameraPositionAt(cameraEvents, t);
-        if (!pos) {
-          const size = Math.max(16, Math.round(camBounds.h * 0.22));
-          const x = Math.round(camBounds.offX + camBounds.w - size - camBounds.w * 0.025);
-          const y = Math.round(camBounds.offY + camBounds.h - size - camBounds.h * 0.04);
-          drawCameraBubble(targetCtx, frame, x, y, size);
-        } else if (!pos.hidden) {
-          // 尺寸按较短边归一；位置钳进边界（与 buildCameraSegments 同口径）。
-          const shortSide = Math.min(camBounds.w, camBounds.h);
-          const size = Math.max(16, Math.min(Math.round(pos.rs * shortSide), Math.round(shortSide)));
-          const x = Math.round(camBounds.offX + Math.max(0, Math.min(pos.rx * camBounds.w, camBounds.w - size)));
-          const y = Math.round(camBounds.offY + Math.max(0, Math.min(pos.ry * camBounds.h, camBounds.h - size)));
-          drawCameraBubble(targetCtx, frame, x, y, size);
-        }
-      }
+    // 推镜、字幕、水印与人像都在固定录制窗口内完成；背景与窗口外轮廓不被缩放。
+    await finalizeForeground(zoomBounds);
+    if (canReuseFinalFrame) {
+      lastFinalSig = inp.sig;
+      lastFinalCanvas = target;
     }
     return target;
   };
@@ -685,7 +871,10 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 裁剪也走此路径：音频在解码后按保留段拼接 AudioBuffer（audioSegments），摄像头画布内
   // getFrameAt(源时间) 合成 —— 多段输出映射到的源时间单调不减，与前进式解码器吻合。
   // GIF 无视频编码器路径 → 强制走 ffmpeg（palettegen/paletteuse）。
-  if (format !== 'gif' && 'VideoEncoder' in globalThis && 'AudioEncoder' in globalThis) {
+  // `in globalThis` is not sufficient here: test environments and partially implemented
+  // browsers can expose the keys with an undefined value. Treat those as unsupported so
+  // the proven ffmpeg fallback is selected rather than failing after export has started.
+  if (format !== 'gif' && typeof VideoEncoder !== 'undefined' && typeof AudioEncoder !== 'undefined') {
     try {
       if (cameraBlob) {
         cameraSource = await createCameraFrameSource(cameraBlob); // 失败抛错 → 回退 ffmpeg
@@ -722,6 +911,8 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       baseCanvas = null;
       lastSig = null;
       lastBuf = null;
+      lastFinalSig = null;
+      lastFinalCanvas = null;
       // eslint-disable-next-line no-console
       console.warn('[export] WebCodecs path failed, falling back to ffmpeg:', err);
     }
@@ -795,8 +986,12 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // filter 链：视频侧 camera overlay（仅不裁时）+ 音频侧裁剪拼接（atrim/concat）。
   const filterParts: string[] = [];
   let curLabel = '[0:v]';
-  // 圆形 alpha mask 的 geq 表达式 —— 多段也复用同一段
-  const geqMask = `format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(pow(X-W/2,2)+pow(Y-H/2,2),pow(W/2-1,2)),0,255)'`;
+  // 与画布路径一致的 alpha mask。圆角方形按 SDF 计算，保证 ffmpeg 回退路径
+  // 也会保留录制设置中的 rounded 形状，而不是静默退回圆形。
+  const cameraShape = metadata.setup?.camera.shape ?? 'circle';
+  const geqMask = cameraShape === 'rounded'
+    ? `format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(lte(pow(max(abs(X-W/2)-(W/2-W*0.14),0),2)+pow(max(abs(Y-H/2)-(H/2-H*0.14),0),2),pow(W*0.14,2)),255,0)'`
+    : `format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(gt(pow(X-W/2,2)+pow(Y-H/2,2),pow(W/2-1,2)),0,255)'`;
 
   if (cameraIdx !== null) {
     // （未裁剪）摄像头气泡的有效边界：shell on 时跟随 letterboxed shell（用首张 shell 做基准）。
@@ -813,6 +1008,9 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         h: sh,
       };
     }
+    // ffmpeg 的 camera overlay 发生在已绘制出固定录制窗口的 JPEG 上，
+    // 因此需要把相对原始内容的边界投影到前景窗口，而不是落在背景上。
+    camBounds = projectBoundsIntoRecordingWindow(camBounds, outputW, outputH, opts.videoBackground);
     const segments = buildCameraSegments(cameraEvents, durationMs, camBounds);
 
     if (segments.length === 0) {
@@ -963,11 +1161,28 @@ export async function renderPreviewFrame(
   target.height = outputH;
   const ctx = target.getContext('2d')!;
   await paintVideoBackground(ctx, target.width, target.height, config.videoBackground);
+  const content = createContentLayer(target.width, target.height);
+  const contentCtx = content.getContext('2d')!;
+  const foreground = createContentLayer(target.width, target.height);
+  const foregroundCtx = foreground.getContext('2d')!;
 
   const hasCamera = !!cameraBlob;
   const cues = ((config.burnSubtitles ?? true) && metadata.subtitleSrt)
     ? compileSubtitles(metadata.subtitleSrt)
     : [];
+
+  const finalizePreviewForeground = (zoomBounds: CanvasRect) => {
+    drawZoomedContentLayer(foregroundCtx, content, autoZoomAt(config.autoZooms, timeMs), zoomBounds);
+    if (config.withWatermark) {
+      drawFrostedWatermark(foregroundCtx, foreground.width, foreground.height, hasCamera ? 'bottom-left' : 'bottom-right');
+    }
+    if (cues.length > 0) {
+      drawSubtitle(foregroundCtx, foreground.width, foreground.height, cues, timeMs, {
+        reservedRightFraction: hasCamera ? 0.3 : 0,
+      });
+    }
+    drawRecordingWindow(ctx, foreground, config.videoBackground);
+  };
 
   if (screenBlob) {
     const display = await getPreviewDisplaySource(recordingId, screenBlob, timeMs);
@@ -975,57 +1190,40 @@ export async function renderPreviewFrame(
       const displayFrame = await display.getFrameAt(timeMs);
       if (!displayFrame) return;
       drawDisplayFrame(
-        ctx,
+        contentCtx,
         displayFrame,
         metadata.source?.kind ?? 'desktop',
         metadata.source?.sourceCropWindow,
         target.width,
         target.height,
       );
-      applyAutoZoom(target, activeAutoZoom(config.autoZooms, timeMs));
+      finalizePreviewForeground({ x: 0, y: 0, width: content.width, height: content.height });
     } finally {
       disposeShells(decodedShells);
-    }
-    if (config.withWatermark) {
-      drawFrostedWatermark(ctx, target.width, target.height, hasCamera ? 'bottom-left' : 'bottom-right');
-    }
-    if (cues.length > 0) {
-      drawSubtitle(ctx, target.width, target.height, cues, timeMs, {
-        reservedRightFraction: hasCamera ? 0.3 : 0,
-      });
     }
     return;
   }
 
   // shell 先铺底（contain / letterbox：整张 shell 完整落在 target 内）
   let shellAtT: DecodedShell | null = null;
-  let shellRenderScale = 1;
-  let shellOffsetX = 0;
-  let shellOffsetY = 0;
+  let frameShellLayout: ShellLayout | null = null;
   if (useShell) {
     shellAtT = shellAt(decodedShells, timeMs) as DecodedShell | null;
     if (shellAtT) {
-      const shellW = shellAtT.shellSize.width;
-      const shellH = shellAtT.shellSize.height;
-      shellRenderScale = Math.min(target.width / shellW, target.height / shellH);
-      const scaledW = shellW * shellRenderScale;
-      const scaledH = shellH * shellRenderScale;
-      shellOffsetX = (target.width - scaledW) / 2;
-      shellOffsetY = (target.height - scaledH) / 2;
-      ctx.drawImage(shellAtT.bitmap, shellOffsetX, shellOffsetY, scaledW, scaledH);
+      frameShellLayout = shellLayout(shellAtT, target.width, target.height);
+      contentCtx.drawImage(
+        shellAtT.bitmap,
+        frameShellLayout.offsetX,
+        frameShellLayout.offsetY,
+        shellAtT.shellSize.width * frameShellLayout.scale,
+        shellAtT.shellSize.height * frameShellLayout.scale,
+      );
     }
   }
 
   const snap = snapshotAt(snapshots, timeMs);
   if (!snap || (snap.elements as unknown[]).length === 0) {
-    if (config.withWatermark) {
-      drawFrostedWatermark(ctx, target.width, target.height, hasCamera ? 'bottom-left' : 'bottom-right');
-    }
-    if (cues.length > 0) {
-      drawSubtitle(ctx, target.width, target.height, cues, timeMs, {
-        reservedRightFraction: hasCamera ? 0.3 : 0,
-      });
-    }
+    finalizePreviewForeground(frameShellLayout?.canvasRect ?? { x: 0, y: 0, width: content.width, height: content.height });
     disposeShells(decodedShells);
     return;
   }
@@ -1052,13 +1250,8 @@ export async function renderPreviewFrame(
     });
   })();
 
-  const dest = (useShell && shellAtT)
-    ? {
-        x: shellOffsetX + shellAtT.canvasRect.x * shellRenderScale,
-        y: shellOffsetY + shellAtT.canvasRect.y * shellRenderScale,
-        width: shellAtT.canvasRect.width * shellRenderScale,
-        height: shellAtT.canvasRect.height * shellRenderScale,
-      }
+  const dest = (useShell && shellAtT && frameShellLayout)
+    ? frameShellLayout.canvasRect
     : { x: 0, y: 0, width: target.width, height: target.height };
 
   const ghost = buildGhostRect(sceneSourceRect);
@@ -1095,7 +1288,7 @@ export async function renderPreviewFrame(
   const sh = sceneSourceRect.height * scaleY;
 
   try {
-    ctx.drawImage(
+    contentCtx.drawImage(
       sceneCanvas,
       Math.max(0, sx),
       Math.max(0, sy),
@@ -1104,12 +1297,12 @@ export async function renderPreviewFrame(
       dest.x, dest.y, dest.width, dest.height,
     );
   } catch {
-    ctx.drawImage(sceneCanvas, dest.x, dest.y, dest.width, dest.height);
+    contentCtx.drawImage(sceneCanvas, dest.x, dest.y, dest.width, dest.height);
   }
 
   // 激光笔轨迹叠加（预览也需要）
   if (laserEvents.length > 0) {
-    drawLaserOverlay(ctx, laserEvents, timeMs, {
+    drawLaserOverlay(contentCtx, laserEvents, timeMs, {
       sceneToScreen: (vx: number, vy: number) => ({
         x: dest.x + ((vx - sceneSourceRect.x) / sceneSourceRect.width) * dest.width,
         y: dest.y + ((vy - sceneSourceRect.y) / sceneSourceRect.height) * dest.height,
@@ -1119,16 +1312,7 @@ export async function renderPreviewFrame(
 
   disposeShells(decodedShells);
 
-  applyAutoZoom(target, activeAutoZoom(config.autoZooms, timeMs));
-
-  if (config.withWatermark) {
-    drawFrostedWatermark(ctx, target.width, target.height, hasCamera ? 'bottom-left' : 'bottom-right');
-  }
-  if (cues.length > 0) {
-    drawSubtitle(ctx, target.width, target.height, cues, timeMs, {
-      reservedRightFraction: hasCamera ? 0.3 : 0,
-    });
-  }
+  finalizePreviewForeground(dest);
 }
 
 export function downloadBlob(blob: Blob, filename: string): void {

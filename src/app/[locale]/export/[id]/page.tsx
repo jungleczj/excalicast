@@ -173,6 +173,12 @@ export default function EditorRecordingPage(): JSX.Element {
     return () => clearTimeout(tid);
   }, [autoZooms, meta, id]);
 
+  // 预览框选直接更新时间轴同一段的中心点/倍率；随后现有去抖持久化会把这组
+  // 参数写入 recording，因此最终导出与预览使用完全相同的目标区域。
+  const handleAutoZoomRegionChange = useCallback((zoomId: string, patch: Partial<Pick<AutoZoomSegment, 'scale' | 'cx' | 'cy'>>) => {
+    setAutoZooms((current) => current.map((zoom) => zoom.id === zoomId ? { ...zoom, ...patch } : zoom));
+  }, []);
+
   const handleDelete = useCallback(async () => {
     if (!id) return;
     if (!confirm(en ? 'Delete this recording? Cannot be undone.' : '删除这条录制？此操作不可恢复。')) return;
@@ -290,6 +296,8 @@ export default function EditorRecordingPage(): JSX.Element {
                 segments={segments}
                 playheadMs={playheadMs}
                 onPlayheadChange={setPlayheadMs}
+                selectedAutoZoomId={selectedAutoZoomId}
+                onAutoZoomRegionChange={handleAutoZoomRegionChange}
               />
             </div>
           </div>

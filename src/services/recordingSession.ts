@@ -29,6 +29,13 @@ export interface SessionHandle {
     files: Record<string, unknown>,
   ) => void;
   /**
+   * 等待当前已经收到的白板快照全部写入本地库。
+   *
+   * 开始录制时用它确认 t=0 白板已持久化；停止录制时再调用一次，避免导出页
+   * 在 IndexedDB 写入尚未结束时读取到空快照、只显示视频背景。
+   */
+  flushWhiteboardSnapshots: () => Promise<void>;
+  /**
    * 记录摄像头气泡的位置变化（viewport 像素），节流后存到 cameraPositions 表。
    *  - xPx/yPx：气泡左上角（viewport）。sizePx：气泡边长。
    *  - frame：裁切框 viewport 矩形（固定比例时传入）→ 位置/尺寸相对裁切框存
@@ -126,6 +133,9 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
   let lastSnapshotAt = -Infinity;
   let pendingTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingSnapshot: { elements: unknown[]; appState: Record<string, unknown>; t: number } | null = null;
+  // onChange 是同步回调，但 IndexedDB 写入是异步的。所有快照写入走同一条队列，
+  // 防止快速开始/停止时 stop() 错过正在进行中的首帧写入。
+  let snapshotFlushChain: Promise<void> = Promise.resolve();
   let paused = false;
   let pauseStartedAt = 0;
   let pausedTotal = 0;
@@ -155,6 +165,22 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
       elements: snap.elements,
       appState: snap.appState,
     });
+  };
+
+  const enqueueSnapshotFlush = (): Promise<void> => {
+    const next = snapshotFlushChain.catch(() => undefined).then(flushSnapshot);
+    snapshotFlushChain = next;
+    return next;
+  };
+
+  const drainWhiteboardSnapshots = async (): Promise<void> => {
+    if (pendingTimer !== null) {
+      clearTimeout(pendingTimer);
+      pendingTimer = null;
+    }
+    // 即使 pendingSnapshot 已被前一次 flushSnapshot 取走，也要等待它真正写入完成。
+    await snapshotFlushChain;
+    if (pendingSnapshot) await enqueueSnapshotFlush();
   };
 
   // 摄像头气泡位置事件：节流写入 cameraPositions 表
@@ -236,12 +262,13 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
 
       if (t - lastSnapshotAt < SNAPSHOT_THROTTLE_MS) {
         if (pendingTimer === null) {
-          pendingTimer = setTimeout(() => { void flushSnapshot(); }, SNAPSHOT_THROTTLE_MS);
+          pendingTimer = setTimeout(() => { void enqueueSnapshotFlush().catch(() => {}); }, SNAPSHOT_THROTTLE_MS);
         }
         return;
       }
-      void flushSnapshot();
+      void enqueueSnapshotFlush().catch(() => {});
     },
+    flushWhiteboardSnapshots: drainWhiteboardSnapshots,
     recordCameraMove(xPx, yPx, sizePx, frame) {
       if (paused) return;
       pendingCameraMove = { x: xPx, y: yPx, s: sizePx, frame: frame ?? null };
@@ -357,10 +384,7 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
         pausedTotal += Date.now() - pauseStartedAt;
         paused = false;
       }
-      if (pendingTimer !== null) {
-        clearTimeout(pendingTimer);
-        await flushSnapshot();
-      }
+      await drainWhiteboardSnapshots();
       if (cameraMoveTimer !== null) {
         clearTimeout(cameraMoveTimer);
         cameraMoveTimer = null;
@@ -377,9 +401,13 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
         await flushLaserEvents();
       }
       shellCapturer?.stop();
-      if (audio) { try { await audio.stop(); } catch { /* ignore */ } }
-      if (camera) { try { await camera.stop(); } catch { /* ignore */ } }
-      if (display) { try { await display.stop(); } catch { /* ignore */ } }
+      // MediaRecorder 最后一帧/最后一个音频分片的收尾可能分别等待编码器回调。
+      // 三路互不依赖，串行等待会把停止到导出页的延迟累加；并行收尾只需等待最慢一路。
+      await Promise.all([
+        audio?.stop().catch(() => undefined),
+        camera?.stop().catch(() => undefined),
+        display?.stop().catch(() => undefined),
+      ]);
       const durationMs = Date.now() - startedAt - pausedTotal;
       await db.recordings.update(recordingId, {
         durationMs,

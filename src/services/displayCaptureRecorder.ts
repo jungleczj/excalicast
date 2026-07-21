@@ -110,12 +110,16 @@ export async function acquireDisplayStream(source: RecordingSourceConfig): Promi
     logicalSurface: true,
     ...(source.displaySurface ? { displaySurface: source.displaySurface } : {}),
   };
+  // 桌面 / 窗口录制不需要捕获本页；让浏览器从系统选择器开始就排除当前 tab，
+  // 且不允许录制中切换回当前 tab，避免用户无意中形成递归的“屏幕录屏幕”。
+  // 当前标签页是唯一有意录制本页的模式，保留该模式原本的行为。
+  const mayCaptureCurrentTab = source.kind === 'current_tab';
   const options: DisplayMediaOptions = {
     video,
     audio: source.captureSystemAudio ? true : false,
-    ...(source.kind === 'current_tab' ? { preferCurrentTab: true } : {}),
-    selfBrowserSurface: 'include',
-    surfaceSwitching: 'include',
+    ...(mayCaptureCurrentTab ? { preferCurrentTab: true } : {}),
+    selfBrowserSurface: mayCaptureCurrentTab ? 'include' : 'exclude',
+    surfaceSwitching: mayCaptureCurrentTab ? 'include' : 'exclude',
     systemAudio: source.captureSystemAudio ? 'include' : 'exclude',
     windowAudio: source.captureSystemAudio ? 'system' : 'exclude',
   };

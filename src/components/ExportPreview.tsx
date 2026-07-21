@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { cameraPositionAt, renderPreviewFrame } from '@/services/exportPipeline';
+import { autoZoomAt, cameraPositionAt, getRecordingWindowRect, renderPreviewFrame } from '@/services/exportPipeline';
 import { getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
-import type { CameraPositionEvent, ExportConfig, RecordingMetadata, ShellCanvasRect, ShellSize, TimeSegment } from '@/types/recording';
+import type { AutoZoomSegment, CameraPositionEvent, ExportConfig, RecordingMetadata, ShellCanvasRect, ShellSize, TimeSegment } from '@/types/recording';
 import { ASPECT_PRESETS } from '@/types/recording';
 import { keptDuration, normalizeSegments, outputToSource, sourceToOutput } from '@/utils/segments';
 import { I } from '@/components/icons';
@@ -20,6 +20,9 @@ interface Props {
   /** 受控播放头（源 ms）。 */
   playheadMs: number;
   onPlayheadChange: (srcMs: number) => void;
+  /** 时间轴当前选中的 Auto Zoom；在预览中以可拖动框呈现最终放大区域。 */
+  selectedAutoZoomId?: string | null;
+  onAutoZoomRegionChange?: (id: string, patch: Partial<Pick<AutoZoomSegment, 'scale' | 'cx' | 'cy'>>) => void;
 }
 
 // 预览播放时，主帧画面的最小重渲染间隔（ms）。
@@ -29,6 +32,11 @@ const CANVAS_REDRAW_INTERVAL_MS = 200;
 
 const PREVIEW_MIN_WIDTH = 300;
 const PREVIEW_PREFERRED_WIDTH = 860;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 const resizeButtonStyle: React.CSSProperties = {
   display: 'grid',
   width: 24,
@@ -44,7 +52,10 @@ const resizeButtonStyle: React.CSSProperties = {
   cursor: 'pointer',
 };
 
-export function ExportPreview({ recordingId, metadata, config, progress, segments, playheadMs, onPlayheadChange }: Props): JSX.Element {
+export function ExportPreview({
+  recordingId, metadata, config, progress, segments, playheadMs, onPlayheadChange,
+  selectedAutoZoomId = null, onAutoZoomRegionChange,
+}: Props): JSX.Element {
   const t = useTranslations('exportPreview');
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const renderCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -143,6 +154,17 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
       };
     }
 
+    // 视频背景启用时，摄像头仍属于固定的前景录制窗口，不能漂在背景上。
+    const recordingWindow = getRecordingWindowRect(preset.width, preset.height, config.videoBackground);
+    if (recordingWindow) {
+      bounds = {
+        offFracX: (recordingWindow.x + bounds.offFracX * preset.width * recordingWindow.scale) / preset.width,
+        offFracY: (recordingWindow.y + bounds.offFracY * preset.height * recordingWindow.scale) / preset.height,
+        fracW: bounds.fracW * recordingWindow.scale,
+        fracH: bounds.fracH * recordingWindow.scale,
+      };
+    }
+
     // 尺寸按 camBounds「较短边」归一（与导出 pipeline 同口径，跨比例协调）。
     // 气泡为正方形：width 是占框宽的比例；按较短边换算成占宽比例 = rs × min(fracW, fracH/aspect)。
     const aspect = preset.width / preset.height; // = boxW/boxH
@@ -168,7 +190,7 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
       top: `${(bounds.offFracY + bounds.fracH - hFrac - bounds.fracH * 0.04) * 100}%`,
       width: `${wFrac * 100}%`,
     };
-  }, [cameraEvents, timeMs, firstShell, config.aspectRatio, config.includeWorkspaceShell]);
+  }, [cameraEvents, timeMs, firstShell, config.aspectRatio, config.includeWorkspaceShell, config.videoBackground]);
 
   // 帧渲染：节流到 CANVAS_REDRAW_INTERVAL_MS。静态 scrub 时立即重绘。
   const drawFrame = useCallback((t: number, force: boolean) => {
@@ -351,6 +373,108 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
   }, [exporting, phaseKey, t]);
 
   // 摄像头气泡位置/尺寸由 cameraOverlayStyle 计算（events → 动态；无事件 → 右下角 18% 宽度）
+  const cameraShape = metadata.setup?.camera.shape ?? 'circle';
+  const previewAutoZoomScale = autoZoomAt(config.autoZooms, timeMs)?.scale ?? 1;
+  const selectedAutoZoom = useMemo(
+    () => config.autoZooms?.find((zoom) => zoom.id === selectedAutoZoomId) ?? null,
+    [config.autoZooms, selectedAutoZoomId],
+  );
+
+  // 与 exportPipeline 的 zoomBounds / drawRecordingWindow 一致：框选目标永远位于实际
+  // 会被放大的内容区域中；workspace shell 与视频背景的边框、留白都不会被框进去。
+  const zoomContentBounds = useMemo(() => {
+    const preset = ASPECT_PRESETS[config.aspectRatio];
+    let bounds = { x: 0, y: 0, width: 1, height: 1 };
+    const useShell = !!firstShell && (config.includeWorkspaceShell ?? true);
+    if (useShell && firstShell) {
+      const scale = Math.min(preset.width / firstShell.shellSize.width, preset.height / firstShell.shellSize.height);
+      const shellW = firstShell.shellSize.width * scale;
+      const shellH = firstShell.shellSize.height * scale;
+      bounds = {
+        x: ((preset.width - shellW) / 2 + firstShell.canvasRect.x * scale) / preset.width,
+        y: ((preset.height - shellH) / 2 + firstShell.canvasRect.y * scale) / preset.height,
+        width: firstShell.canvasRect.width * scale / preset.width,
+        height: firstShell.canvasRect.height * scale / preset.height,
+      };
+    }
+    const recordingWindow = getRecordingWindowRect(preset.width, preset.height, config.videoBackground);
+    if (!recordingWindow) return bounds;
+    return {
+      x: (recordingWindow.x + bounds.x * preset.width * recordingWindow.scale) / preset.width,
+      y: (recordingWindow.y + bounds.y * preset.height * recordingWindow.scale) / preset.height,
+      width: bounds.width * recordingWindow.scale,
+      height: bounds.height * recordingWindow.scale,
+    };
+  }, [config.aspectRatio, config.includeWorkspaceShell, config.videoBackground, firstShell]);
+
+  const zoomRegionStyle = useMemo<React.CSSProperties | null>(() => {
+    if (!selectedAutoZoom) return null;
+    const scale = clamp(selectedAutoZoom.scale, 1.05, 4);
+    const width = zoomContentBounds.width / scale;
+    const height = zoomContentBounds.height / scale;
+    const cx = zoomContentBounds.x + clamp(selectedAutoZoom.cx ?? 0.5, 0, 1) * zoomContentBounds.width;
+    const cy = zoomContentBounds.y + clamp(selectedAutoZoom.cy ?? 0.5, 0, 1) * zoomContentBounds.height;
+    return {
+      left: `${clamp(cx - width / 2, zoomContentBounds.x, zoomContentBounds.x + zoomContentBounds.width - width) * 100}%`,
+      top: `${clamp(cy - height / 2, zoomContentBounds.y, zoomContentBounds.y + zoomContentBounds.height - height) * 100}%`,
+      width: `${width * 100}%`,
+      height: `${height * 100}%`,
+    };
+  }, [selectedAutoZoom, zoomContentBounds]);
+
+  const startZoomRegionDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!selectedAutoZoom || !onAutoZoomRegionChange || !zoomRegionStyle) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const stage = event.currentTarget.closest('[data-testid="export-preview-stage"]');
+    if (!stage) return;
+    const stageRect = stage.getBoundingClientRect();
+    const content = {
+      x: zoomContentBounds.x * stageRect.width,
+      y: zoomContentBounds.y * stageRect.height,
+      width: zoomContentBounds.width * stageRect.width,
+      height: zoomContentBounds.height * stageRect.height,
+    };
+    const initialScale = clamp(selectedAutoZoom.scale, 1.05, 4);
+    const initialWidth = content.width / initialScale;
+    const initialHeight = content.height / initialScale;
+    const initialCx = content.x + clamp(selectedAutoZoom.cx ?? 0.5, 0, 1) * content.width;
+    const initialCy = content.y + clamp(selectedAutoZoom.cy ?? 0.5, 0, 1) * content.height;
+    const initialLeft = clamp(initialCx - initialWidth / 2, content.x, content.x + content.width - initialWidth);
+    const initialTop = clamp(initialCy - initialHeight / 2, content.y, content.y + content.height - initialHeight);
+    const resizing = (event.target as HTMLElement).closest('[data-autozoom-region-resize]') !== null;
+    const onMove = (move: PointerEvent) => {
+      const localX = move.clientX - stageRect.left;
+      const localY = move.clientY - stageRect.top;
+      if (resizing) {
+        // 保持输出画幅的宽高比：选择框即最终导出要放大的 source crop。
+        const width = clamp(localX - initialLeft, content.width / 4, content.width / 1.05);
+        const scale = clamp(content.width / width, 1.05, 4);
+        const finalWidth = content.width / scale;
+        const finalHeight = content.height / scale;
+        const left = clamp(initialLeft, content.x, content.x + content.width - finalWidth);
+        const top = clamp(initialTop, content.y, content.y + content.height - finalHeight);
+        onAutoZoomRegionChange(selectedAutoZoom.id, {
+          scale,
+          cx: clamp((left + finalWidth / 2 - content.x) / content.width, 0, 1),
+          cy: clamp((top + finalHeight / 2 - content.y) / content.height, 0, 1),
+        });
+        return;
+      }
+      const cx = clamp(localX, content.x + initialWidth / 2, content.x + content.width - initialWidth / 2);
+      const cy = clamp(localY, content.y + initialHeight / 2, content.y + content.height - initialHeight / 2);
+      onAutoZoomRegionChange(selectedAutoZoom.id, {
+        cx: (cx - content.x) / content.width,
+        cy: (cy - content.y) / content.height,
+      });
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp, { once: true });
+  }, [onAutoZoomRegionChange, selectedAutoZoom, zoomContentBounds, zoomRegionStyle]);
 
   return (
     <div className="export-preview-craft-wrap w-full">
@@ -358,6 +482,8 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
       <div ref={parentRef} className="flex w-full justify-center p-2">
       <div
         data-testid="export-preview-stage"
+        data-autozoom-scale={previewAutoZoomScale.toFixed(3)}
+        data-autozoom-region={selectedAutoZoom ? `${(selectedAutoZoom.cx ?? 0.5).toFixed(3)},${(selectedAutoZoom.cy ?? 0.5).toFixed(3)},${selectedAutoZoom.scale.toFixed(3)}` : undefined}
         className="export-preview-craft-stage relative mx-auto overflow-hidden"
         style={{
           width: previewBox.w,
@@ -373,14 +499,53 @@ export function ExportPreview({ recordingId, metadata, config, progress, segment
           className="h-full w-full object-contain"
         />
 
+        {zoomRegionStyle && selectedAutoZoom && (
+          <div
+            data-testid="autozoom-region"
+            aria-label="Autozoom target region"
+            title="Drag to move the Auto Zoom target; drag the corner to resize"
+            onPointerDown={startZoomRegionDrag}
+            style={{
+              ...zoomRegionStyle,
+              position: 'absolute',
+              zIndex: 25,
+              border: '2px solid rgba(116, 78, 184, .95)',
+              borderRadius: 8,
+              background: 'rgba(158, 125, 235, .10)',
+              boxShadow: '0 0 0 999px rgba(17, 20, 23, .12), 0 0 0 1px rgba(255,255,255,.76) inset',
+              cursor: 'move',
+              touchAction: 'none',
+            }}
+          >
+            <span
+              data-autozoom-region-resize
+              aria-hidden="true"
+              style={{
+                position: 'absolute',
+                right: -7,
+                bottom: -7,
+                width: 13,
+                height: 13,
+                borderRadius: 999,
+                border: '2px solid #fffdf8',
+                background: 'rgb(116, 78, 184)',
+                boxShadow: '0 2px 7px rgba(49,31,83,.35)',
+                cursor: 'nwse-resize',
+              }}
+            />
+          </div>
+        )}
+
         {/* 摄像头气泡：位置/尺寸跟随 cameraEvents（无事件时回退右下角） */}
         {cameraUrl && (
           <div
+            data-testid="export-preview-camera"
+            data-camera-shape={cameraShape}
             className="pointer-events-none absolute z-30 overflow-hidden transition-[left,top,width] duration-100"
             style={{
               ...cameraOverlayStyle,
               aspectRatio: '1 / 1',
-              borderRadius: '50%',
+              borderRadius: cameraShape === 'circle' ? '50%' : '14%',
               background: '#1f2937',
               boxShadow: '0 4px 14px rgba(0,0,0,0.25), 0 0 0 2px rgba(255,255,255,0.9)',
             }}

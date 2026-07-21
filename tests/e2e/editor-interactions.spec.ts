@@ -21,7 +21,7 @@ test.beforeEach(async ({ context, page }) => {
       ['libraryItems', 'id'], ['laserEvents', 'id'],
     ] as const;
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open('excalicast', 10);
+      const request = indexedDB.open('excalicast');
       request.onupgradeneeded = () => {
         const next = request.result;
         for (const [name, keyPath] of stores) {

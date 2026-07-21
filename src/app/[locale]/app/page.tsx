@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useTranslations, useLocale } from 'next-intl';
 import { AppHeader } from '@/components/AppHeader';
-import { RecordingBar } from '@/components/RecordingBar';
+import { RecordingBar, type RecordingBarProps } from '@/components/RecordingBar';
 import { RecordingSetup } from '@/components/RecordingSetup';
 import { CameraBubble } from '@/components/CameraBubble';
 import { Teleprompter } from '@/components/Teleprompter';
@@ -34,6 +34,13 @@ const DEFAULT_SETUP: RecordingSetupConfig = {
 
 function evenPixel(n: number): number {
   return Math.max(2, Math.round(n / 2) * 2);
+}
+
+function formatRecordingElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 function sourceSizeForCrop(
@@ -123,6 +130,7 @@ export default function HomePage(): JSX.Element {
   const [desktopControlHost, setDesktopControlHost] = useState<Window | null>(null);
   const dragStartRef = useRef<{ mouseX: number; mouseY: number; barX: number; barY: number } | null>(null);
   const [draggingBar, setDraggingBar] = useState(false);
+  const [recordingBarDocked, setRecordingBarDocked] = useState(false);
 
   const sessionRef = useRef<SessionHandle | null>(null);
   const stoppingRef = useRef(false);
@@ -285,17 +293,19 @@ export default function HomePage(): JSX.Element {
     }, 250);
   }, [cameraPos.x, cameraPos.y, getCropFrameRect]);
 
-  // 演示缩放：双击画布某点放大 ~2× 并居中、再双击还原；rAF 平滑过渡。
+  // 演示缩放：双击画布某点放大 ~2× 并居中、再双击还原；缓入缓出避免镜头突跳。
   const zoomToPoint = useCallback((clientX: number, clientY: number) => {
     const api = excalidrawApiRef.current;
     if (!api?.getAppState || !api?.updateScene) return;
     type VP = { zoom: number; scrollX: number; scrollY: number };
-    const animate = (from: VP, to: VP, ms = 180) => {
+    const animate = (from: VP, to: VP, ms = 520) => {
       if (zoomAnimRef.current) cancelAnimationFrame(zoomAnimRef.current);
       const start = performance.now();
       const tick = (now: number) => {
         const k = Math.min(1, (now - start) / ms);
-        const e = 1 - Math.pow(1 - k, 3); // easeOutCubic
+        const e = k < 0.5
+          ? 4 * k * k * k
+          : 1 - Math.pow(-2 * k + 2, 3) / 2; // easeInOutCubic
         api.updateScene({ appState: {
           zoom: { value: from.zoom + (to.zoom - from.zoom) * e },
           scrollX: from.scrollX + (to.scrollX - from.scrollX) * e,
@@ -602,7 +612,7 @@ export default function HomePage(): JSX.Element {
       ...setupConfig,
       source: selectedSource,
     };
-    if (selectedSource?.kind === 'window' || selectedSource?.kind === 'desktop') {
+    if (selectedSource?.kind && selectedSource.kind !== 'whiteboard') {
       // 在用户点击「开始录制」这一手势内请求 Document PiP，确保浏览器允许把控制条放到桌面上。
       void openDesktopControls();
     }
@@ -701,7 +711,6 @@ export default function HomePage(): JSX.Element {
     if (!s || stoppingRef.current) return;
     stoppingRef.current = true;
     setState('processing');
-    closeDesktopControls();
     try {
       const meta = await s.stop();
       trackEvent('recording_complete', { durationMs: meta.durationMs, framing: setupConfig.framing, hasCamera: meta.hasCamera, hasAudio: meta.hasAudio });
@@ -729,6 +738,9 @@ export default function HomePage(): JSX.Element {
       setAudioMuted(false);
       setCameraMuted(false);
       router.push(`/export/${meta.id}` as never);
+      // Stop 可以从 Document PiP 的独立窗口触发。先把媒体收尾并发起主页面导航，
+      // 再在下一轮事件循环释放控制窗口，避免销毁点击上下文导致导出页无法打开。
+      window.setTimeout(closeDesktopControls, 0);
     } catch (err) {
       alert(t('stopFailed', { message: err instanceof Error ? err.message : 'unknown' }));
       sessionRef.current = null;
@@ -763,6 +775,59 @@ export default function HomePage(): JSX.Element {
   }, [t, clearDisplayStream, closeDesktopControls]);
 
   const isRecording = state === 'recording' || state === 'paused';
+  // 显示源录制会直接采集浏览器画面。录制真正开始前，页内控制条必须撤出，
+  // 只在 Document PiP 的独立文档中保留同一套完整控制条，避免录入最终素材。
+  const usesExternalRecordingControls = state !== 'idle' && setupConfig.source?.kind !== 'whiteboard';
+  const canDockRecordingBar = isRecording && !usesExternalRecordingControls;
+
+  // 录制开始后将页内工具带收在画布右侧，避免长时间遮住白板；触碰窄标签即可
+  // 在同一侧展开完整带。显示源录制走独立 Document PiP，因此不参与该行为。
+  useEffect(() => {
+    if (!canDockRecordingBar) {
+      setRecordingBarDocked(false);
+      return;
+    }
+    const id = window.setTimeout(() => setRecordingBarDocked(true), 1200);
+    return () => window.clearTimeout(id);
+  }, [canDockRecordingBar]);
+
+  const revealRecordingBar = useCallback(() => setRecordingBarDocked(false), []);
+  const dockRecordingBar = useCallback(() => {
+    if (canDockRecordingBar && !draggingBar) setRecordingBarDocked(true);
+  }, [canDockRecordingBar, draggingBar]);
+
+  const recordingBarProps: RecordingBarProps = {
+    state: state === 'framing' ? 'idle' : state,
+    elapsedMs: elapsed,
+    hasAudio,
+    hasCamera: hasCamera || cameraEnabled,
+    cameraEnabled,
+    audioMuted,
+    cameraMuted,
+    laserActive,
+    zoomActive: zoomMode,
+    teleprompterActive: teleprompterOpen,
+    aspect: isRecording ? setupConfig.framing : undefined,
+    onToggleCamera: handleToggleCamera,
+    onToggleAudioMute: handleToggleAudioMute,
+    onToggleCameraMute: handleToggleCameraMute,
+    onToggleLaser: handleToggleLaser,
+    onToggleZoom: () => setZoomMode((value) => !value),
+    onToggleTeleprompter: () => setTeleprompterOpen((value) => !value),
+    onOpenTemplates: () => setLibraryOpen(true),
+    onStart: handleStart,
+    onStop: handleStop,
+    onDiscard: handleDiscard,
+    onPause: handlePause,
+    onResume: handleResume,
+  };
+  // 只有“选定区域”需要在页面内显示源画面供用户拖拽裁切。
+  // 桌面、窗口和标签页取景一律不挂回显层：即使用户误选本页面，也不会形成
+  // 叠加的递归镜像；真正录制仍直接使用原始 display stream。
+  const showLiveDisplayPreview = displayStream
+    && setupConfig.source?.kind === 'selected_area'
+    && state === 'framing'
+    && countdown === null;
 
   return (
     <div className="app-craft-screen workspace-craft-shell flex h-full flex-col" ref={workspaceRootRef}>
@@ -775,8 +840,8 @@ export default function HomePage(): JSX.Element {
           laserPointRef={laserPointRef}
         />
 
-        {displayStream && (state === 'framing' || isRecording) && (
-          <div className="rb-no-record absolute inset-0 z-10">
+        {showLiveDisplayPreview && (
+          <div data-testid="display-source-live-preview" className="rb-no-record absolute inset-0 z-10">
             <DisplaySourcePreview stream={displayStream} onAspectChange={setDisplayAspect} />
           </div>
         )}
@@ -787,7 +852,7 @@ export default function HomePage(): JSX.Element {
             mediaAspect={displayAspect}
             onChange={setSourceCropWindow}
             label={isRecording ? (en ? 'Recording selected area' : '正在录制选定区域') : (en ? 'Selected area' : '选定区域')}
-            interactive={state === 'framing'}
+            interactive={state === 'framing' && countdown === null}
           />
         )}
 
@@ -818,7 +883,7 @@ export default function HomePage(): JSX.Element {
         )}
 
         {/* 取景控制条：取景态显示，用户框选/摆相机后点「开始录制」才进入倒计时 */}
-        {state === 'framing' && (
+        {state === 'framing' && countdown === null && (
           <div className="rb-no-record fixed left-1/2 bottom-7 z-[70] -translate-x-1/2">
             <FramingBar
               hint={t('framingHint')}
@@ -833,52 +898,65 @@ export default function HomePage(): JSX.Element {
         )}
 
         {/* 浮动录制条：position: fixed + 可拖拽，wrapper 不阻挡 Excalidraw 工具区点击 */}
-        {barPos && state !== 'framing' && (
+        {barPos && state !== 'framing' && !usesExternalRecordingControls && (
           <div
+            data-testid="in-page-recording-bar"
+            data-docked={canDockRecordingBar && recordingBarDocked ? 'true' : 'false'}
             className="rb-no-record fixed z-30"
-            style={{
-              left: barPos.x,
-              top: barPos.y,
-              cursor: draggingBar ? 'grabbing' : 'grab',
-            }}
-            onMouseDown={handleBarMouseDown}
-            title={t('dragToMove')}
+            style={canDockRecordingBar
+              ? {
+                  right: 0,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  cursor: recordingBarDocked ? 'pointer' : 'default',
+                  transition: 'opacity 160ms ease, transform 180ms ease',
+                }
+              : {
+                  left: barPos.x,
+                  top: barPos.y,
+                  cursor: draggingBar ? 'grabbing' : 'grab',
+                }}
+            onPointerEnter={canDockRecordingBar ? revealRecordingBar : undefined}
+            onPointerLeave={canDockRecordingBar ? dockRecordingBar : undefined}
+            onMouseDown={canDockRecordingBar ? undefined : handleBarMouseDown}
+            title={canDockRecordingBar ? undefined : t('dragToMove')}
           >
-            <RecordingBar
-              state={state}
-              elapsedMs={elapsed}
-              hasAudio={hasAudio}
-              hasCamera={hasCamera || cameraEnabled}
-              cameraEnabled={cameraEnabled}
-              audioMuted={audioMuted}
-              cameraMuted={cameraMuted}
-              laserActive={laserActive}
-              zoomActive={zoomMode}
-              teleprompterActive={teleprompterOpen}
-              aspect={isRecording ? setupConfig.framing : undefined}
-              onToggleCamera={handleToggleCamera}
-              onToggleAudioMute={handleToggleAudioMute}
-              onToggleCameraMute={handleToggleCameraMute}
-              onToggleLaser={handleToggleLaser}
-              onToggleZoom={() => setZoomMode((v) => !v)}
-              onToggleTeleprompter={() => setTeleprompterOpen((v) => !v)}
-              onOpenTemplates={() => setLibraryOpen(true)}
-              onStart={handleStart}
-              onStop={handleStop}
-              onDiscard={handleDiscard}
-              onPause={handlePause}
-              onResume={handleResume}
-            />
+            {canDockRecordingBar && recordingBarDocked ? (
+              <button
+                type="button"
+                data-testid="recording-bar-side-dock"
+                onClick={revealRecordingBar}
+                aria-label={en ? 'Show recording controls' : '展开录制工具条'}
+                title={en ? 'Show recording controls' : '展开录制工具条'}
+                style={{
+                  display: 'grid',
+                  placeItems: 'center',
+                  gap: 4,
+                  minWidth: 48,
+                  height: 72,
+                  padding: '7px 9px 7px 11px',
+                  border: '1px solid rgba(255,255,255,.12)',
+                  borderRight: 'none',
+                  borderRadius: '18px 0 0 18px',
+                  background: 'rgba(18,19,20,.94)',
+                  color: '#fffdf8',
+                  boxShadow: '-10px 12px 28px rgba(20,22,24,.16), inset 0 1px 0 rgba(255,255,255,.10)',
+                  backdropFilter: 'blur(16px) saturate(1.1)',
+                  WebkitBackdropFilter: 'blur(16px) saturate(1.1)',
+                  cursor: 'pointer',
+                }}
+              >
+                <span className={state === 'recording' ? 'recording-indicator' : ''} style={{ width: 8, height: 8, borderRadius: 999, background: state === 'recording' ? 'var(--rec)' : 'rgba(255,255,255,.52)' }} />
+                <span style={{ fontSize: 10, fontWeight: 750, letterSpacing: '.04em' }}>{state === 'recording' ? 'REC' : 'II'}</span>
+                <span style={{ fontSize: 10, fontVariantNumeric: 'tabular-nums', opacity: .86 }}>{formatRecordingElapsed(elapsed)}</span>
+              </button>
+            ) : <RecordingBar {...recordingBarProps} />}
           </div>
         )}
 
         <DesktopRecordingControls
           host={desktopControlHost}
-          state={state === 'framing' || countdown !== null ? 'starting' : state === 'paused' ? 'paused' : state === 'processing' ? 'processing' : 'recording'}
-          elapsedMs={elapsed}
-          onPause={handlePause}
-          onResume={handleResume}
-          onStop={handleStop}
+          bar={usesExternalRecordingControls && isRecording ? recordingBarProps : null}
         />
 
         {/* 提词器浮层（私有，不进录制）；open=false 时返回 null */}

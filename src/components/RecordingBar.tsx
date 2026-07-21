@@ -3,7 +3,7 @@
 import { useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
 
-interface Props {
+export interface RecordingBarProps {
   state: 'idle' | 'recording' | 'paused' | 'processing';
   elapsedMs: number;
   hasAudio: boolean;
@@ -58,18 +58,22 @@ function fmt(ms: number): string {
 const BAR_STYLE: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 6,
-  padding: '6px 12px',
-  background: 'linear-gradient(180deg, rgba(28,28,28,0.98), rgba(10,10,10,0.98))',
+  width: 'max-content',
+  gap: 0,
+  padding: '6px 10px',
+  // 保留一条完整圆角控制带，而不是把每个操作做成独立“小窗口”。
+  background: 'rgba(18, 19, 20, 0.93)',
   color: '#fffdf8',
-  border: '1px solid rgba(255,255,255,0.08)',
+  border: '1px solid rgba(255,255,255,0.09)',
   borderRadius: 999,
-  boxShadow: '0 24px 58px rgba(0,0,0,0.24), 0 6px 16px rgba(0,0,0,0.16), inset 0 1px 0 rgba(255,255,255,0.12)',
+  boxShadow: '0 14px 34px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.10)',
+  backdropFilter: 'blur(16px) saturate(1.1)',
+  WebkitBackdropFilter: 'blur(16px) saturate(1.1)',
   fontFamily: 'var(--font-sans)',
   fontSize: 11,
 };
 
-export function RecordingBar(props: Props): JSX.Element {
+export function RecordingBar(props: RecordingBarProps): JSX.Element {
   const t = useTranslations('recordingBar');
   const {
     state, elapsedMs, hasAudio, hasCamera, cameraEnabled,
@@ -80,16 +84,17 @@ export function RecordingBar(props: Props): JSX.Element {
 
   if (state === 'idle') {
     return (
-      <div className="fade-in" style={BAR_STYLE}>
+      <div data-testid="recording-bar" className="fade-in" style={BAR_STYLE}>
         <button
           type="button"
           onClick={onToggleCamera}
           className="grid h-7 w-7 place-items-center"
           style={{
-            background: cameraEnabled ? 'rgba(84,173,105,0.9)' : 'rgba(255,255,255,0.08)',
-            border: '1px solid rgba(255,255,255,0.12)',
+            background: cameraEnabled ? 'rgba(84,173,105,0.9)' : 'transparent',
+            border: 'none',
             borderRadius: 999,
             color: '#fffdf8',
+            boxShadow: 'none',
             cursor: 'pointer',
           }}
           title={cameraEnabled ? t('cameraOnTooltip') : t('cameraOffTooltip')}
@@ -102,10 +107,11 @@ export function RecordingBar(props: Props): JSX.Element {
             onClick={onToggleLaser}
             className="grid h-7 w-7 place-items-center"
             style={{
-              background: laserActive ? 'rgba(84,173,105,0.9)' : 'rgba(255,255,255,0.08)',
-              border: '1px solid rgba(255,255,255,0.12)',
+              background: laserActive ? 'rgba(84,173,105,0.9)' : 'transparent',
+              border: 'none',
               borderRadius: 999,
               color: '#fffdf8',
+              boxShadow: 'none',
               cursor: 'pointer',
             }}
             title={laserActive ? t('laserOn') : t('laserOff')}
@@ -119,10 +125,11 @@ export function RecordingBar(props: Props): JSX.Element {
             onClick={onToggleZoom}
             className="grid h-7 w-7 place-items-center"
             style={{
-              background: zoomActive ? 'rgba(84,173,105,0.9)' : 'rgba(255,255,255,0.08)',
-              border: '1px solid rgba(255,255,255,0.12)',
+              background: zoomActive ? 'rgba(84,173,105,0.9)' : 'transparent',
+              border: 'none',
               borderRadius: 999,
               color: '#fffdf8',
+              boxShadow: 'none',
               cursor: 'pointer',
             }}
             title={zoomActive ? t('zoomOn') : t('zoomOff')}
@@ -136,10 +143,11 @@ export function RecordingBar(props: Props): JSX.Element {
             onClick={onToggleTeleprompter}
             className="grid h-7 w-7 place-items-center"
             style={{
-              background: teleprompterActive ? 'rgba(84,173,105,0.9)' : 'rgba(255,255,255,0.08)',
-              border: '1px solid rgba(255,255,255,0.12)',
+              background: teleprompterActive ? 'rgba(84,173,105,0.9)' : 'transparent',
+              border: 'none',
               borderRadius: 999,
               color: '#fffdf8',
+              boxShadow: 'none',
               cursor: 'pointer',
             }}
             title={teleprompterActive ? t('teleprompterOn') : t('teleprompterOff')}
@@ -156,10 +164,11 @@ export function RecordingBar(props: Props): JSX.Element {
               width: 30,
               height: 30,
               padding: 0,
-              background: 'rgba(255,255,255,0.08)',
+              background: 'transparent',
               color: '#fffdf8',
-              border: '1px solid rgba(255,255,255,0.12)',
+              border: 'none',
               borderRadius: 999,
+              boxShadow: 'none',
               cursor: 'pointer',
             }}
             title={t('fromTemplate')}
@@ -195,9 +204,10 @@ export function RecordingBar(props: Props): JSX.Element {
   if (state === 'processing') {
     return (
       <div
+        data-testid="recording-bar"
         style={{
           ...BAR_STYLE,
-          padding: '12px 22px',
+          padding: '9px 16px',
           fontFamily: 'var(--font-sans)',
           fontSize: 11,
           fontWeight: 600,
@@ -211,16 +221,14 @@ export function RecordingBar(props: Props): JSX.Element {
 
   const isRec = state === 'recording';
   return (
-    <div style={BAR_STYLE}>
+    <div data-testid="recording-bar" style={BAR_STYLE}>
       {/* REC + timer */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 8,
-          background: 'rgba(255,255,255,0.08)',
-          padding: '8px 12px',
-          borderRadius: 999,
+          padding: '0 10px 0 2px',
         }}
       >
         <span
@@ -243,11 +251,11 @@ export function RecordingBar(props: Props): JSX.Element {
       <Divider />
 
       {isRec ? (
-        <CtrlBtn onClick={onPause} Icon={I.Pause} label={t('pause')} />
+        <CtrlBtn onClick={onPause} Icon={I.Pause} label={t('pause')} ariaLabel="Pause recording" />
       ) : (
-        <CtrlBtn onClick={onResume} Icon={I.Play} label={t('resume')} />
+        <CtrlBtn onClick={onResume} Icon={I.Play} label={t('resume')} ariaLabel="Resume recording" />
       )}
-      <CtrlBtn onClick={onStop} Icon={I.Stop} label={t('stop')} tone="rec" />
+      <CtrlBtn onClick={onStop} Icon={I.Stop} label={t('stop')} ariaLabel="Stop recording" tone="rec" />
 
       {onDiscard && (
         <button
@@ -255,12 +263,13 @@ export function RecordingBar(props: Props): JSX.Element {
           onClick={onDiscard}
           title={t('discardTooltip')}
           style={{
-            width: 34,
-            height: 34,
-            background: 'rgba(255,255,255,0.06)',
-            border: '1px solid rgba(255,255,255,0.12)',
+            width: 38,
+            height: 40,
+            background: 'transparent',
+            border: 'none',
             color: '#fffdf8',
-            borderRadius: 999,
+            borderRadius: 10,
+            boxShadow: 'none',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
@@ -276,9 +285,10 @@ export function RecordingBar(props: Props): JSX.Element {
       {aspect && (
         <div
           style={{
-            padding: '4px 8px',
-            background: 'rgba(255,255,255,0.08)',
-            borderRadius: 999,
+            padding: '0 8px',
+            background: 'transparent',
+            borderRadius: 8,
+            border: 'none',
             fontSize: 11,
             fontWeight: 600,
             letterSpacing: '0.02em',
@@ -293,6 +303,7 @@ export function RecordingBar(props: Props): JSX.Element {
         IconOff={I.MicOff}
         present={hasAudio}
         muted={!!audioMuted}
+        label={t('mic')}
         title={!hasAudio ? t('micTooltip') : audioMuted ? t('unmuteAudio') : t('muteAudio')}
         onClick={hasAudio ? onToggleAudioMute : undefined}
       />
@@ -302,6 +313,7 @@ export function RecordingBar(props: Props): JSX.Element {
         // 录制中 camera 按钮始终可点：未启用时点击触发懒激活；已启用时切 mute
         present={true}
         muted={!hasCamera || !!cameraMuted}
+        label={t('camera')}
         title={!hasCamera ? t('enableCameraNow') : cameraMuted ? t('unmuteCamera') : t('muteCamera')}
         onClick={onToggleCameraMute}
       />
@@ -311,6 +323,7 @@ export function RecordingBar(props: Props): JSX.Element {
           IconOff={I.Laser}
           present={true}
           muted={!laserActive}
+          label={t('laser')}
           title={laserActive ? t('laserOn') : t('laserOff')}
           onClick={onToggleLaser}
         />
@@ -321,6 +334,7 @@ export function RecordingBar(props: Props): JSX.Element {
           IconOff={I.Search}
           present={true}
           muted={!zoomActive}
+          label={t('zoom')}
           title={zoomActive ? t('zoomOn') : t('zoomOff')}
           onClick={onToggleZoom}
         />
@@ -331,6 +345,7 @@ export function RecordingBar(props: Props): JSX.Element {
           IconOff={I.Text}
           present={true}
           muted={!teleprompterActive}
+          label={t('teleprompter')}
           title={teleprompterActive ? t('teleprompterOn') : t('teleprompterOff')}
           onClick={onToggleTeleprompter}
         />
@@ -340,24 +355,27 @@ export function RecordingBar(props: Props): JSX.Element {
 }
 
 function Divider() {
-  return <div style={{ width: 1, height: 32, background: 'rgba(255,255,255,0.14)' }} />;
+  return <span aria-hidden="true" style={{ width: 1, height: 28, margin: '0 4px', flex: '0 0 1px', background: 'rgba(255,255,255,0.14)' }} />;
 }
 
 function CtrlBtn({
   onClick,
   Icon,
   label,
+  ariaLabel,
   tone,
 }: {
   onClick?: () => void;
   Icon: (p: { size?: number; sw?: number }) => JSX.Element;
   label: string;
+  ariaLabel?: string;
   tone?: 'rec';
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      aria-label={ariaLabel}
       className={tone === 'rec' ? 'press sketch-active' : 'press'}
       style={{
         display: 'flex',
@@ -365,13 +383,14 @@ function CtrlBtn({
         alignItems: 'center',
         justifyContent: 'center',
         gap: 2,
-        minWidth: 58,
-        minHeight: 44,
-        padding: '4px 9px',
-        background: tone === 'rec' ? 'var(--rec)' : 'transparent',
+        minWidth: 48,
+        minHeight: 42,
+        padding: '2px 7px',
+        background: 'transparent',
         color: '#fffdf8',
         border: 'none',
-        borderRadius: 999,
+        borderRadius: 10,
+        boxShadow: 'none',
         fontFamily: 'var(--font-sans)',
         fontSize: 10,
         fontWeight: 600,
@@ -379,7 +398,13 @@ function CtrlBtn({
         cursor: 'pointer',
       }}
     >
-      <Icon size={17} />
+      <span
+        style={tone === 'rec'
+          ? { width: 20, height: 20, borderRadius: 999, display: 'grid', placeItems: 'center', background: 'var(--rec)', color: '#fff' }
+          : { width: 20, height: 20, display: 'grid', placeItems: 'center' }}
+      >
+        <Icon size={tone === 'rec' ? 12 : 17} />
+      </span>
       {label}
     </button>
   );
@@ -396,6 +421,7 @@ function SrcToggle({
   IconOff,
   present,
   muted,
+  label,
   title,
   onClick,
 }: {
@@ -403,13 +429,13 @@ function SrcToggle({
   IconOff: (p: { size?: number; sw?: number }) => JSX.Element;
   present: boolean;
   muted: boolean;
+  label: string;
   title: string;
   onClick?: () => void;
 }) {
-  const greyBg = 'rgba(255,255,255,0.06)';
-  const bg = present && !muted ? 'rgba(84,173,105,0.92)' : greyBg;
   const Icon = present && muted ? IconOff : IconOn;
   const clickable = present && !!onClick;
+  const active = present && !muted;
   return (
     <button
       type="button"
@@ -417,20 +443,24 @@ function SrcToggle({
       disabled={!clickable}
       title={title}
       style={{
-        width: 34,
-        height: 34,
-        borderRadius: 999,
-        background: bg,
-        border: '1px solid rgba(255,255,255,0.12)',
+        minWidth: 46,
+        minHeight: 42,
+        borderRadius: 10,
+        background: 'transparent',
+        border: 'none',
+        boxShadow: 'none',
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        color: '#fffdf8',
+        gap: 2,
+        color: active ? '#9DE7AD' : 'rgba(255,253,248,0.72)',
         cursor: clickable ? 'pointer' : 'default',
         padding: 0,
       }}
     >
       <Icon size={16} />
+      <span style={{ fontFamily: 'var(--font-sans)', fontSize: 9, fontWeight: 600, lineHeight: 1, letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>{label}</span>
     </button>
   );
 }
