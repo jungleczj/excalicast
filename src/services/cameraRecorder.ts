@@ -1,6 +1,9 @@
 'use client';
 
 import { getClientDb } from '@/lib/db-client';
+import { stopMediaRecorderSafely } from '@/services/mediaRecorderStop';
+
+const RECORDER_TIMESLICE_MS = 250;
 
 export interface CameraHandle {
   /**
@@ -64,7 +67,7 @@ export async function startCameraRecorder(
   let chunkIndex = 0;
   let currentStream: MediaStream | null = null;
   let currentRecorder: MediaRecorder | null = null;
-  let stoppedPromise: Promise<void> = Promise.resolve();
+  const pendingWrites: Promise<unknown>[] = [];
   // 首次 acquire 复用取景预览流；之后（mute→unmute）仍 fresh 获取
   let pendingInitial: MediaStream | null = existingStream ?? null;
 
@@ -72,15 +75,12 @@ export async function startCameraRecorder(
     const stream = pendingInitial ?? (await acquireCameraStream());
     pendingInitial = null;
     const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 300_000 });
-    recorder.ondataavailable = async (e) => {
+    recorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) {
-        await db.cameraChunks.add({ recordingId, index: chunkIndex++, blob: e.data });
+        pendingWrites.push(db.cameraChunks.add({ recordingId, index: chunkIndex++, blob: e.data }).catch(() => undefined));
       }
     };
-    stoppedPromise = new Promise<void>((resolve) => {
-      recorder.onstop = () => resolve();
-    });
-    recorder.start(1000);
+    recorder.start(RECORDER_TIMESLICE_MS);
     currentStream = stream;
     currentRecorder = recorder;
   };
@@ -91,9 +91,9 @@ export async function startCameraRecorder(
     currentRecorder = null;
     currentStream = null;
     if (recorder && recorder.state !== 'inactive') {
-      try { recorder.stop(); } catch { /* ignore */ }
-      try { await stoppedPromise; } catch { /* ignore */ }
+      await stopMediaRecorderSafely(recorder);
     }
+    await Promise.allSettled(pendingWrites);
     if (stream) {
       stream.getTracks().forEach((t) => { try { t.stop(); } catch { /* ignore */ } });
     }

@@ -401,6 +401,11 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
         await flushLaserEvents();
       }
       shellCapturer?.stop();
+      const durationMs = Date.now() - startedAt - pausedTotal;
+      await db.recordings.update(recordingId, {
+        durationMs,
+        status: 'done',
+      });
       // MediaRecorder 最后一帧/最后一个音频分片的收尾可能分别等待编码器回调。
       // 三路互不依赖，串行等待会把停止到导出页的延迟累加；并行收尾只需等待最慢一路。
       await Promise.all([
@@ -408,11 +413,6 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
         camera?.stop().catch(() => undefined),
         display?.stop().catch(() => undefined),
       ]);
-      const durationMs = Date.now() - startedAt - pausedTotal;
-      await db.recordings.update(recordingId, {
-        durationMs,
-        status: 'done',
-      });
       const meta = await db.recordings.get(recordingId);
       if (!meta) throw new Error('recording_lost_after_stop');
       return meta;

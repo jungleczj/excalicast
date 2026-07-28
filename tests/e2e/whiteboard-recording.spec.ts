@@ -34,9 +34,11 @@ test('starting a whiteboard recording immediately stores the existing drawing', 
   await page.mouse.move(520, 390, { steps: 8 });
   await page.mouse.up();
 
-  await page.getByRole('button', { name: /开始录制/ }).first().click();
-  await page.getByRole('button', { name: /开始（3 秒倒计时）/ }).click();
-  await page.getByRole('button', { name: /^开始录制$/ }).click();
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
+  // 选择视频背景后，仍必须导出实际白板，而不是只显示这张背景图。
+  await page.getByTestId('recording-background-swatch-coral-silk').click();
+  await page.getByRole('button', { name: /下一步：取景/ }).click();
+  await page.getByRole('button', { name: /^开始倒计时$/ }).click();
 
   await expect(page.getByText('暂停', { exact: true })).toBeVisible({ timeout: 9_000 });
   const elementCount = await page.evaluate(async () => {
@@ -64,8 +66,19 @@ test('starting a whiteboard recording immediately stores the existing drawing', 
 
   // 真实停止并进入编辑器：断言导出预览 canvas 里存在黑色画笔像素，
   // 证明已有白板元素不只是写入 IndexedDB，而是确实被渲染出来。
-  // 浮动录制条会持续有轻微的 Craft 入场动效，按钮本身始终可点。
-  await page.getByRole('button', { name: '停止', exact: true }).click({ force: true });
+  // 白板录制条会自动收纳至右侧，悬停后在同一位置展开完整工具带。
+  const recordingBar = page.getByTestId('in-page-recording-bar');
+  await expect(recordingBar).toHaveAttribute('data-docked', 'true', { timeout: 4_000 });
+  const dockBox = await page.getByTestId('recording-bar-side-dock').boundingBox();
+  const viewport = page.viewportSize();
+  if (!dockBox || !viewport) throw new Error('recording bar dock has no box');
+  expect(Math.round(dockBox.x + dockBox.width)).toBeGreaterThanOrEqual(viewport.width - 2);
+  expect(dockBox.y + dockBox.height).toBeGreaterThanOrEqual(viewport.height - 120);
+  await recordingBar.hover();
+  await expect(recordingBar).toHaveAttribute('data-docked', 'false');
+  // 可见文案会随 locale 变化，但控件的可访问名称还包含英文 title。
+  const stopButton = page.getByRole('button', { name: /停止|Stop recording/ });
+  await stopButton.evaluate((button: HTMLButtonElement) => button.click());
   await page.waitForURL(/\/zh\/export\//, { timeout: 12_000 });
   const previewCanvas = page.getByTestId('export-preview-stage').locator('canvas');
   await expect(previewCanvas).toBeVisible();

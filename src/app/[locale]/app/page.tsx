@@ -1,7 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import { useTranslations, useLocale } from 'next-intl';
 import { AppHeader } from '@/components/AppHeader';
 import { RecordingBar, type RecordingBarProps } from '@/components/RecordingBar';
@@ -11,7 +13,7 @@ import { Teleprompter } from '@/components/Teleprompter';
 import { AspectCropOverlay } from '@/components/AspectCropOverlay';
 import { DisplaySourceCropOverlay } from '@/components/DisplaySourceCropOverlay';
 import { DisplaySourcePreview } from '@/components/DisplaySourcePreview';
-import { DesktopRecordingControls, requestDesktopRecordingControlsWindow } from '@/components/DesktopRecordingControls';
+import { DesktopRecordingControls, requestDesktopRecordingControlsWindow, requestFullscreenCountdownWindow } from '@/components/DesktopRecordingControls';
 import { I } from '@/components/icons';
 import { useSubscription } from '@/hooks/useSubscription';
 import { startRecording, type SessionHandle, type CameraFrameRect } from '@/services/recordingSession';
@@ -21,7 +23,6 @@ import { acquireDisplayStream, getDisplayStreamPixelSize } from '@/services/disp
 import { trackEvent } from '@/lib/analytics/track';
 import type { WhiteboardChangeFn } from '@/components/Whiteboard';
 import type { CameraCorner, CameraShape, CropWindow, RecordingSetupConfig, SourceCropWindow } from '@/types/recording';
-import { useRouter } from '@/i18n/navigation';
 
 const DEFAULT_SETUP: RecordingSetupConfig = {
   framing: '16:9',
@@ -53,6 +54,32 @@ function sourceSizeForCrop(
     height: evenPixel(size.height * crop.rh),
     frameRate: size.frameRate,
   };
+}
+
+function usesDetachedSourceControls(source: RecordingSetupConfig['source'] | undefined): boolean {
+  return source?.kind === 'window' || source?.kind === 'desktop';
+}
+
+function usesFullscreenCountdownSource(source: RecordingSetupConfig['source'] | undefined): boolean {
+  return source?.kind === 'window' || source?.kind === 'desktop' || source?.kind === 'selected_area';
+}
+
+function exportHrefForRecording(recordingId: string, locale: string): string {
+  return `/${locale}/export/${recordingId}`;
+}
+
+function waitForAnimationFrame(): Promise<void> {
+  return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+}
+
+async function waitForCaptureSensitiveVisualsToUnmount(source: RecordingSetupConfig['source'] | undefined): Promise<void> {
+  if (!source || source.kind === 'whiteboard') return;
+  // Give React a chance to commit `recordingStarting=true` before display capture
+  // starts consuming frames. Without this, a desktop/window capture can record
+  // the in-page camera bubble for the first frame and the export preview will
+  // later composite the separate camera track again.
+  await waitForAnimationFrame();
+  await waitForAnimationFrame();
 }
 
 /** 摄像头气泡角落预设 → 视口像素坐标（与 CameraBubble 的 fixed 定位一致）。 */
@@ -90,6 +117,7 @@ const FirstRunGuide = dynamic(() => import('@/components/onboarding/FirstRunGuid
 
 export default function HomePage(): JSX.Element {
   const t = useTranslations('workspace');
+  const locale = useLocale();
   const router = useRouter();
   const subscription = useSubscription();
   const [state, setState] = useState<'idle' | 'framing' | 'recording' | 'paused' | 'processing'>('idle');
@@ -106,6 +134,7 @@ export default function HomePage(): JSX.Element {
   const [setupOpen, setSetupOpen] = useState(false);
   const [setupConfig, setSetupConfig] = useState<RecordingSetupConfig>(DEFAULT_SETUP);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const [recordingStarting, setRecordingStarting] = useState(false);
   const [framingWarn, setFramingWarn] = useState(false);
   const pendingStartRef = useRef<{ config: RecordingSetupConfig; pos: { x: number; y: number }; size: number } | null>(null);
   // 取景阶段预采集的麦克风流（开录时复用，避免倒计时后才申请权限）
@@ -142,7 +171,7 @@ export default function HomePage(): JSX.Element {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const excalidrawApiRef = useRef<any>(null);
   const laserPointRef = useRef<((x: number, y: number, button: 'down' | 'up') => void) | null>(null);
-  const en = useLocale() === 'en';
+  const en = locale === 'en';
   const [teleprompterOpen, setTeleprompterOpen] = useState(false);
   // 演示缩放：双击画布放大/还原（开关 or Alt/⌘+双击）
   const [zoomMode, setZoomMode] = useState(false);
@@ -459,25 +488,63 @@ export default function HomePage(): JSX.Element {
     });
   }, []);
 
-  const openDesktopControls = useCallback(async () => {
-    if (desktopControlHost) return;
+  const openDesktopControls = useCallback(async (): Promise<Window | null> => {
+    if (desktopControlHost && !desktopControlHost.closed) return desktopControlHost;
     try {
       const host = await requestDesktopRecordingControlsWindow();
-      if (!host) return;
+      if (!host) return null;
       if (host !== window) {
         host.addEventListener('pagehide', () => setDesktopControlHost(null), { once: true });
       }
       setDesktopControlHost(host);
+      return host;
     } catch {
       // 浏览器不支持/用户关闭 Picture-in-Picture 时，继续使用页面内控制条。
+      return null;
     }
   }, [desktopControlHost]);
+
+  const openFullscreenCountdownControls = useCallback(async (): Promise<Window | null> => {
+    try {
+      const host = await requestFullscreenCountdownWindow();
+      if (!host) return null;
+      if (host !== window) {
+        host.addEventListener('pagehide', () => setDesktopControlHost(null), { once: true });
+      }
+      setDesktopControlHost(host);
+      return host;
+    } catch {
+      // If the browser refuses Document PiP, avoid falling back to an in-page
+      // countdown for desktop/window/selected-area capture because that overlay
+      // would be recorded into the source.
+      return null;
+    }
+  }, []);
+
+  const resizeDesktopControlsHost = useCallback((host: Window | null, size: { width: number; height: number }, mode: string, options?: { background?: string }) => {
+    if (!host || host.closed) return;
+    const doc = host.document;
+    const ownsSeparateDocument = doc !== document;
+    doc.documentElement.dataset.recordingControlsWindow = mode;
+    doc.documentElement.dataset.recordingControlsTargetSize = `${size.width}x${size.height}`;
+    doc.body.dataset.recordingControlsWindow = mode;
+    if (ownsSeparateDocument) {
+      doc.documentElement.style.background = options?.background ?? 'transparent';
+      doc.body.style.background = options?.background ?? 'transparent';
+      doc.documentElement.style.width = `${size.width}px`;
+      doc.documentElement.style.height = `${size.height}px`;
+      doc.body.style.width = `${size.width}px`;
+      doc.body.style.height = `${size.height}px`;
+    }
+    try { host.resizeTo(size.width, size.height); } catch { /* Document PiP may not be resizable */ }
+  }, []);
 
   useEffect(() => () => closeDesktopControls(), [closeDesktopControls]);
 
   // 真正开录（取景确认 + 倒计时结束后调用）—— 复用取景已采集的麦克风/摄像头流，瞬时开录
   const beginRecording = useCallback(async (config: RecordingSetupConfig, startPos: { x: number; y: number }, startSize: number) => {
     try {
+      await waitForCaptureSensitiveVisualsToUnmount(config.source);
       const session = await startRecording({
         withCamera: config.camera.enabled,
         workspaceRoot: workspaceRootRef.current,
@@ -491,6 +558,7 @@ export default function HomePage(): JSX.Element {
       setMicStream(null);
       displayStreamRef.current = null;
       sessionRef.current = session;
+      try { router.prefetch(exportHrefForRecording(session.recordingId, locale)); } catch { /* prefetch is best-effort */ }
       changeRef.current = session.onWhiteboardChange;
       laserPointRef.current = session.recordLaserPoint;
       // Excalidraw 不会因为「开始录制」自动触发 onChange。若画板在开录前已有内容，
@@ -501,12 +569,16 @@ export default function HomePage(): JSX.Element {
         const appState = api?.getAppState?.();
         if (elements && appState) {
           session.onWhiteboardChange(elements, appState, api?.getFiles?.() ?? {});
+          // Excalidraw 不会因“开始录制”而主动触发 onChange。这里等待初始快照
+          // 真正写入，避免用户很快停止录制时导出只剩视频背景。
+          await session.flushWhiteboardSnapshots();
         }
       }
       setHasAudio(session.hasAudio);
       setHasCamera(session.hasCamera);
       setCameraStream(session.cameraStream);
       setState('recording');
+      setRecordingStarting(false);
       trackEvent('recording_start', {
         framing: config.framing,
         withCamera: config.camera.enabled,
@@ -518,13 +590,15 @@ export default function HomePage(): JSX.Element {
         session.recordCameraMove(startPos.x, startPos.y, startSize);
       }
     } catch (err) {
+      setRecordingStarting(false);
       alert(t('startFailed', { message: err instanceof Error ? err.message : 'unknown' }));
     }
-  }, [cameraStream, t]);
+  }, [cameraStream, locale, router, t]);
 
   // Setup 面板确认：应用配置 → 进入取景态（在画布上框选裁切框/摆相机），暂不倒计时
   const handleSetupConfirm = useCallback(async (config: RecordingSetupConfig) => {
     let nextConfig = config;
+    setRecordingStarting(false);
     setSetupConfig(nextConfig);
     setSetupOpen(false);
     // 裁切框重置 → overlay 按所选比例居中初始化（default 不显框）
@@ -547,6 +621,13 @@ export default function HomePage(): JSX.Element {
     }
     // 显示源预采集：浏览器仍会展示自己的选择器；选择成功后在取景态显示私有预览。
     const source = config.source ?? { kind: 'whiteboard' as const };
+    let openedExternalControls = false;
+    if (usesDetachedSourceControls(source)) {
+      try {
+        const host = await openDesktopControls();
+        openedExternalControls = !!host;
+      } catch { /* fall through to display picker; page-level controls remain available */ }
+    }
     if (source.kind !== 'whiteboard') {
       try {
         const stream = await acquireDisplayStream(source);
@@ -562,6 +643,7 @@ export default function HomePage(): JSX.Element {
         displayStreamRef.current = stream;
         setDisplayStream(stream);
       } catch (err) {
+        if (openedExternalControls) closeDesktopControls();
         setSetupOpen(true);
         alert(t('displaySourceFailed', { message: err instanceof Error ? err.message : 'unknown' }));
         return;
@@ -571,7 +653,7 @@ export default function HomePage(): JSX.Element {
     micStreamRef.current?.getTracks().forEach((tk) => tk.stop());
     setMicStream(await acquireMicStream());
     setState('framing');
-  }, [cameraStream, clearDisplayStream, t]);
+  }, [cameraStream, clearDisplayStream, closeDesktopControls, openDesktopControls, t]);
 
   // 取景确认：校验摄像头在裁切框内 → 用当前相机位置/尺寸构建待开录参数 → 启动 3 秒倒计时
   const handleConfirmFraming = useCallback(() => {
@@ -613,12 +695,19 @@ export default function HomePage(): JSX.Element {
       source: selectedSource,
     };
     if (selectedSource?.kind && selectedSource.kind !== 'whiteboard') {
-      // 在用户点击「开始录制」这一手势内请求 Document PiP，确保浏览器允许把控制条放到桌面上。
-      void openDesktopControls();
+      // 在用户点击「开始录制」这一手势内请求 Document PiP。桌面/窗口/选定区域先
+      // 切到全屏浅灰倒计时，避免把页面内倒计时或录制条录进源画面；倒计时结束后
+      // 复用同一宿主渲染录制条（timer 回调里再 requestWindow 会被浏览器拦截）。
+      if (usesFullscreenCountdownSource(selectedSource)) {
+        closeDesktopControls();
+        void openFullscreenCountdownControls();
+      } else {
+        void openDesktopControls();
+      }
     }
     pendingStartRef.current = { config: finalConfig, pos: cameraPos, size: cameraSize };
     setCountdown(3);
-  }, [setupConfig, cameraPos, cameraSize, cameraEnabled, sourceCropWindow, openDesktopControls]);
+  }, [setupConfig, cameraPos, cameraSize, cameraEnabled, sourceCropWindow, closeDesktopControls, openDesktopControls, openFullscreenCountdownControls]);
 
   // 取景取消：停掉摄像头/麦克风预览、清裁切框、回 idle
   const handleCancelFraming = useCallback(() => {
@@ -630,6 +719,7 @@ export default function HomePage(): JSX.Element {
     closeDesktopControls();
     setCropWindow(null);
     setFramingWarn(false);
+    setRecordingStarting(false);
     setState('idle');
   }, [cameraStream, clearDisplayStream, closeDesktopControls]);
 
@@ -640,7 +730,10 @@ export default function HomePage(): JSX.Element {
       const pending = pendingStartRef.current;
       pendingStartRef.current = null;
       setCountdown(null);
-      if (pending) void beginRecording(pending.config, pending.pos, pending.size);
+      if (pending) {
+        setRecordingStarting(true);
+        void beginRecording(pending.config, pending.pos, pending.size);
+      }
       return;
     }
     const id = setTimeout(() => setCountdown((c) => (c === null ? null : c - 1)), 1000);
@@ -710,9 +803,39 @@ export default function HomePage(): JSX.Element {
     const s = sessionRef.current;
     if (!s || stoppingRef.current) return;
     stoppingRef.current = true;
+    setRecordingStarting(false);
     setState('processing');
+    const recordingId = s.recordingId;
+    // Stop 可以从 Document PiP 的独立窗口触发；这里把媒体收尾安排到微任务，
+    // 让主页面先响应“跳到导出页”的用户意图，同时仍保证它早于下一轮关闭控制窗口。
+    const finalizeRecording = s.stop();
+    sessionRef.current = null;
+    changeRef.current = null;
+    laserPointRef.current = null;
+    setCameraStream(null);
+    clearDisplayStream();
+    setHasCamera(false);
+    setHasAudio(false);
+    setAudioMuted(false);
+    setCameraMuted(false);
+    const exportHref = exportHrefForRecording(recordingId, locale);
+    const syncUrlWithoutUnloading = () => {
+      if (!window.location.pathname.includes(`/export/${recordingId}`)) {
+        window.history.pushState(null, '', exportHref);
+      }
+    };
+    const urlSyncTimer = window.setTimeout(syncUrlWithoutUnloading, 350);
     try {
-      const meta = await s.stop();
+      router.push(exportHref);
+    } catch {
+      window.clearTimeout(urlSyncTimer);
+      syncUrlWithoutUnloading();
+    }
+    // Stop 可以从 Document PiP 的独立窗口触发。先发起主页面导航，
+    // 再在下一轮事件循环释放控制窗口，避免销毁点击上下文导致导出页无法打开。
+    window.setTimeout(closeDesktopControls, 0);
+
+    void finalizeRecording.then(async (meta) => {
       trackEvent('recording_complete', { durationMs: meta.durationMs, framing: setupConfig.framing, hasCamera: meta.hasCamera, hasAudio: meta.hasAudio });
       // 持久化录制中最终框定的裁切框到 recording.setup（导出默认沿用）
       const cw = cropWindowRef.current;
@@ -728,30 +851,37 @@ export default function HomePage(): JSX.Element {
           });
         } catch { /* 持久化失败不阻塞跳转 */ }
       }
-      sessionRef.current = null;
-      changeRef.current = null;
-      laserPointRef.current = null;
-      setCameraStream(null);
-      clearDisplayStream();
-      setHasCamera(false);
-      setHasAudio(false);
-      setAudioMuted(false);
-      setCameraMuted(false);
-      router.push(`/export/${meta.id}` as never);
-      // Stop 可以从 Document PiP 的独立窗口触发。先把媒体收尾并发起主页面导航，
-      // 再在下一轮事件循环释放控制窗口，避免销毁点击上下文导致导出页无法打开。
-      window.setTimeout(closeDesktopControls, 0);
-    } catch (err) {
-      alert(t('stopFailed', { message: err instanceof Error ? err.message : 'unknown' }));
-      sessionRef.current = null;
-      changeRef.current = null;
-      laserPointRef.current = null;
-      clearDisplayStream();
-      setState('idle');
-    } finally {
+    }).catch(async () => {
+      try {
+        const { getClientDb } = await import('@/lib/db-client');
+        await getClientDb().recordings.update(recordingId, { status: 'error' });
+      } catch { /* best-effort: export page will continue to show pending if this fails */ }
+    }).finally(() => {
       stoppingRef.current = false;
-    }
-  }, [router, t, setupConfig, customOutput, clearDisplayStream, closeDesktopControls]);
+      if (window.location.pathname.includes(`/export/${recordingId}`)) {
+        try { router.replace(exportHref); } catch { /* native history fallback already moved the URL */ }
+      }
+    });
+  }, [router, locale, t, setupConfig, customOutput, clearDisplayStream, closeDesktopControls]);
+
+  useEffect(() => {
+    if (setupConfig.source?.kind !== 'desktop' || (state !== 'recording' && state !== 'paused')) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || target?.isContentEditable) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        void handleStop();
+      } else if (event.code === 'Space') {
+        event.preventDefault();
+        if (state === 'recording') handlePause();
+        else handleResume();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handlePause, handleResume, handleStop, setupConfig.source?.kind, state]);
 
   const handleDiscard = useCallback(async () => {
     const s = sessionRef.current;
@@ -775,10 +905,20 @@ export default function HomePage(): JSX.Element {
   }, [t, clearDisplayStream, closeDesktopControls]);
 
   const isRecording = state === 'recording' || state === 'paused';
+  const isDisplaySource = setupConfig.source?.kind !== undefined && setupConfig.source.kind !== 'whiteboard';
+  const hideCaptureSensitiveVisuals = isDisplaySource && (countdown !== null || recordingStarting || isRecording);
   // 显示源录制会直接采集浏览器画面。录制真正开始前，页内控制条必须撤出，
   // 只在 Document PiP 的独立文档中保留同一套完整控制条，避免录入最终素材。
   const usesExternalRecordingControls = state !== 'idle' && setupConfig.source?.kind !== 'whiteboard';
+  const usesExternalFramingControls = state !== 'idle' && usesDetachedSourceControls(setupConfig.source);
+  const usesFullscreenCountdown = state !== 'idle' && usesFullscreenCountdownSource(setupConfig.source);
+  const hasExternalControlsHost = !!desktopControlHost && !desktopControlHost.closed;
+  const showExternalFramingControls = usesExternalFramingControls && hasExternalControlsHost && state === 'framing' && countdown === null;
+  const showExternalCountdown = usesFullscreenCountdown && hasExternalControlsHost && countdown !== null && countdown > 0;
+  const showInPageFramingControls = state === 'framing' && countdown === null && !showExternalFramingControls;
+  const showInPageCountdown = countdown !== null && countdown > 0 && !showExternalCountdown && !usesFullscreenCountdown;
   const canDockRecordingBar = isRecording && !usesExternalRecordingControls;
+  const framingHint = setupConfig.source?.kind === 'desktop' ? '' : t('framingHint');
 
   // 录制开始后将页内工具带收在画布右侧，避免长时间遮住白板；触碰窄标签即可
   // 在同一侧展开完整带。显示源录制走独立 Document PiP，因此不参与该行为。
@@ -846,7 +986,7 @@ export default function HomePage(): JSX.Element {
           </div>
         )}
 
-        {displayStream && (state === 'framing' || isRecording) && setupConfig.source?.kind === 'selected_area' && (
+        {displayStream && !hideCaptureSensitiveVisuals && (state === 'framing' || isRecording) && setupConfig.source?.kind === 'selected_area' && (
           <DisplaySourceCropOverlay
             value={sourceCropWindow}
             mediaAspect={displayAspect}
@@ -857,7 +997,7 @@ export default function HomePage(): JSX.Element {
         )}
 
         {/* 裁切框 viewfinder：取景态 + 录制中显示（'default' 整画板不画） */}
-        {(state === 'framing' || isRecording) && setupConfig.framing !== 'default' && setupConfig.source?.kind !== 'selected_area' && (
+        {!hideCaptureSensitiveVisuals && (state === 'framing' || isRecording) && setupConfig.framing !== 'default' && setupConfig.source?.kind !== 'selected_area' && (
           <AspectCropOverlay
             framing={setupConfig.framing}
             value={cropWindow}
@@ -869,7 +1009,7 @@ export default function HomePage(): JSX.Element {
         )}
 
         {/* 摄像头浮窗：idle 期间用预览流；录制态如启用则用 session stream */}
-        {(cameraEnabled || (isRecording && hasCamera)) && !cameraMuted && (
+        {!hideCaptureSensitiveVisuals && (cameraEnabled || (isRecording && hasCamera)) && !cameraMuted && (
           <div className="rb-no-record">
             <CameraBubble
               stream={cameraStream}
@@ -883,10 +1023,11 @@ export default function HomePage(): JSX.Element {
         )}
 
         {/* 取景控制条：取景态显示，用户框选/摆相机后点「开始录制」才进入倒计时 */}
-        {state === 'framing' && countdown === null && (
+        {showInPageFramingControls && (
           <div className="rb-no-record fixed left-1/2 bottom-7 z-[70] -translate-x-1/2">
             <FramingBar
-              hint={t('framingHint')}
+              readyLabel={t('framingReady')}
+              hint={framingHint}
               startLabel={t('framingStart')}
               cancelLabel={t('framingCancel')}
               micStream={micStream}
@@ -897,6 +1038,25 @@ export default function HomePage(): JSX.Element {
           </div>
         )}
 
+        {showExternalFramingControls && desktopControlHost && (
+          <ExternalFramingControls
+            host={desktopControlHost}
+            onResize={(size) => resizeDesktopControlsHost(desktopControlHost, size, 'framing', { background: 'transparent' })}
+          >
+            <FramingBar
+              variant="dark"
+              readyLabel={t('framingReady')}
+              hint={framingHint}
+              startLabel={t('framingStart')}
+              cancelLabel={t('framingCancel')}
+              micStream={micStream}
+              warn={framingWarn ? t('framingCameraOutside') : null}
+              onStart={handleConfirmFraming}
+              onCancel={handleCancelFraming}
+            />
+          </ExternalFramingControls>
+        )}
+
         {/* 浮动录制条：position: fixed + 可拖拽，wrapper 不阻挡 Excalidraw 工具区点击 */}
         {barPos && state !== 'framing' && !usesExternalRecordingControls && (
           <div
@@ -905,11 +1065,10 @@ export default function HomePage(): JSX.Element {
             className="rb-no-record fixed z-30"
             style={canDockRecordingBar
               ? {
-                  right: 0,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
+                  right: recordingBarDocked ? 0 : 24,
+                  bottom: 24,
                   cursor: recordingBarDocked ? 'pointer' : 'default',
-                  transition: 'opacity 160ms ease, transform 180ms ease',
+                  transition: 'opacity 160ms ease, right 180ms ease, bottom 180ms ease',
                 }
               : {
                   left: barPos.x,
@@ -957,6 +1116,8 @@ export default function HomePage(): JSX.Element {
         <DesktopRecordingControls
           host={desktopControlHost}
           bar={usesExternalRecordingControls && isRecording ? recordingBarProps : null}
+          initialDocked={usesExternalRecordingControls}
+          adaptiveWindow={usesExternalRecordingControls}
         />
 
         {/* 提词器浮层（私有，不进录制）；open=false 时返回 null */}
@@ -1027,20 +1188,17 @@ export default function HomePage(): JSX.Element {
         />
 
         {/* 开录倒计时 3-2-1 */}
-        {countdown !== null && countdown > 0 && (
+        {showInPageCountdown && (
           <div className="workspace-craft-countdown fade-in fixed inset-0 z-[60] grid place-items-center" style={{ background: 'rgba(26,26,26,0.55)' }}>
-            <div
-              className="workspace-craft-countdown-ring grid place-items-center"
-              style={{
-                width: 140, height: 140, borderRadius: '50%',
-                background: 'var(--paper)', border: '2px solid var(--ink)',
-                boxShadow: '6px 6px 0 var(--hi)',
-                fontFamily: 'var(--font-display)', fontSize: 72, fontWeight: 700, color: 'var(--ink)',
-              }}
-            >
-              {countdown}
-            </div>
+            <CountdownRing value={countdown} />
           </div>
+        )}
+
+        {showExternalCountdown && desktopControlHost && (
+          <ExternalFullscreenCountdownControls
+            host={desktopControlHost}
+            value={countdown ?? 0}
+          />
         )}
 
         {/* 首次访问引导浮层 */}
@@ -1058,49 +1216,244 @@ export default function HomePage(): JSX.Element {
   );
 }
 
+function ExternalFramingControls({
+  host,
+  children,
+  onResize,
+}: {
+  host: Window;
+  children: JSX.Element;
+  onResize: (size: { width: number; height: number }) => void;
+}): JSX.Element {
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const node = contentRef.current;
+    if (!node) return;
+    const measure = () => {
+      const rect = node.getBoundingClientRect();
+      onResize({
+        width: Math.max(1, Math.ceil(rect.width)),
+        height: Math.max(1, Math.ceil(rect.height)),
+      });
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [onResize]);
+
+  return createPortal(
+    <div
+      ref={contentRef}
+      data-testid="desktop-framing-controls"
+      className="rb-no-record"
+      style={{
+        display: 'inline-grid',
+        width: 'fit-content',
+        height: 'fit-content',
+        minWidth: 0,
+        padding: 0,
+        boxSizing: 'border-box',
+        placeItems: 'center',
+      }}
+    >
+      {children}
+    </div>,
+    host.document.body,
+  );
+}
+
+function ExternalFullscreenCountdownControls({
+  host,
+  value,
+}: {
+  host: Window;
+  value: number;
+}): JSX.Element {
+  useLayoutEffect(() => {
+    const doc = host.document;
+    const width = Math.max(960, Math.round(host.innerWidth || window.screen?.availWidth || window.innerWidth));
+    const height = Math.max(640, Math.round(host.innerHeight || window.screen?.availHeight || window.innerHeight));
+    doc.documentElement.dataset.recordingControlsWindow = 'countdown-fullscreen';
+    doc.documentElement.dataset.recordingControlsTargetSize = `${width}x${height}`;
+    doc.body.dataset.recordingControlsWindow = 'countdown-fullscreen';
+    if (host !== window) {
+      doc.documentElement.style.background = 'rgba(241, 241, 237, 0.72)';
+      doc.documentElement.style.colorScheme = 'light';
+      doc.documentElement.style.overflow = 'hidden';
+      doc.documentElement.style.width = `${width}px`;
+      doc.documentElement.style.height = `${height}px`;
+      doc.body.style.margin = '0';
+      doc.body.style.padding = '0';
+      doc.body.style.background = 'rgba(241, 241, 237, 0.72)';
+      doc.body.style.overflow = 'hidden';
+      doc.body.style.width = `${width}px`;
+      doc.body.style.height = `${height}px`;
+      doc.body.style.display = 'grid';
+      doc.body.style.alignItems = 'stretch';
+      doc.body.style.justifyContent = 'stretch';
+      doc.body.classList.add('desktop-countdown-pip');
+    }
+  }, [host, value]);
+
+  return createPortal(
+    <div
+      data-testid="desktop-countdown-controls"
+      data-countdown-mode="fullscreen"
+      className="workspace-craft-countdown rb-no-record"
+      style={{
+        display: 'grid',
+        position: 'fixed',
+        inset: 0,
+        zIndex: 2147483647,
+        width: '100vw',
+        height: '100vh',
+        minWidth: '100vw',
+        minHeight: '100vh',
+        boxSizing: 'border-box',
+        placeItems: 'center',
+        background: 'rgba(241, 241, 237, 0.72)',
+        backdropFilter: 'blur(10px)',
+        WebkitBackdropFilter: 'blur(10px)',
+      }}
+    >
+      <CountdownRing value={value} />
+    </div>,
+    host.document.body,
+  );
+}
+
+function CountdownRing({ value }: { value: number }): JSX.Element {
+  return (
+    <div
+      className="workspace-craft-countdown-ring grid place-items-center"
+      style={{
+        width: 140,
+        height: 140,
+        borderRadius: '50%',
+        background: 'var(--paper)',
+        border: '2px solid var(--ink)',
+        boxShadow: '6px 6px 0 var(--hi)',
+        fontFamily: 'var(--font-display)',
+        fontSize: 72,
+        fontWeight: 700,
+        color: 'var(--ink)',
+      }}
+    >
+      {value}
+    </div>
+  );
+}
+
 /** 取景态浮动控制条：提示 + 麦克风电平表（测音频）+ 取消 + 开始录制（→ 倒计时）。 */
 function FramingBar({
+  readyLabel,
   hint,
   startLabel,
   cancelLabel,
   micStream,
   warn,
+  variant = 'light',
   onStart,
   onCancel,
 }: {
+  readyLabel: string;
   hint: string;
   startLabel: string;
   cancelLabel: string;
   micStream: MediaStream | null;
   warn?: string | null;
+  variant?: 'light' | 'dark';
   onStart: () => void;
   onCancel: () => void;
 }): JSX.Element {
+  // 取景态“开始条”不是第二套视觉系统：它是录制条的前置确认态。
+  // 统一用同一套黑色胶囊语言，只保留文案/电平/取消/开始这些取景前必要动作。
+  const dark = true;
   return (
     <div
-      className="workspace-craft-framing flex items-center gap-3"
+      data-testid="framing-bar"
+      className="workspace-craft-framing workspace-craft-framing-dark flex items-center gap-3"
       style={{
-        padding: '10px 14px',
-        background: 'var(--paper)',
-        border: '1.8px solid var(--ink)',
-        borderRadius: 6,
-        boxShadow: '4px 4px 0 var(--ink)',
+        width: 'max-content',
+        padding: '6px 10px',
+        background: 'rgba(18, 19, 20, 0.93)',
+        color: '#fffdf8',
+        border: '1px solid rgba(255,255,255,0.09)',
+        borderRadius: 999,
+        boxShadow: '0 14px 34px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.10)',
+        backdropFilter: 'blur(16px) saturate(1.1)',
+        WebkitBackdropFilter: 'blur(16px) saturate(1.1)',
       }}
     >
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 7,
+          padding: '0 8px 0 2px',
+          color: '#fffdf8',
+          fontFamily: 'var(--font-sans)',
+          fontSize: 11,
+          fontWeight: 780,
+          letterSpacing: '.035em',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <span style={{ width: 8, height: 8, borderRadius: 999, background: 'rgba(255,255,255,.52)' }} />
+        {readyLabel}
+      </span>
       {warn
-        ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--rec)', fontWeight: 600, letterSpacing: '0.02em' }}>{warn}</span>
-        : <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--ink-2)', letterSpacing: '0.02em' }}>{hint}</span>}
-      <MicLevelMeter stream={micStream} />
-      <button type="button" className="btn-sketch" onClick={onCancel} style={{ padding: '7px 14px' }}>
+        ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: dark ? '#ff6b64' : 'var(--rec)', fontWeight: 600, letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>{warn}</span>
+        : hint
+          ? <span data-testid="framing-bar-hint" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: dark ? 'rgba(255,253,248,0.74)' : 'var(--ink-2)', letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>{hint}</span>
+          : null}
+      <MicLevelMeter stream={micStream} variant="dark" />
+      <button
+        type="button"
+        className={dark ? 'press' : 'btn-sketch'}
+        onClick={onCancel}
+        style={dark
+          ? {
+              padding: '7px 12px',
+              background: 'transparent',
+              border: 'none',
+              borderRadius: 999,
+              boxShadow: 'none',
+              color: 'rgba(255,253,248,0.78)',
+              fontFamily: 'var(--font-sans)',
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: 'pointer',
+            }
+          : { padding: '7px 14px' }}
+      >
         {cancelLabel}
       </button>
       <button
         type="button"
-        className="btn-sketch btn-sketch-primary btn-stamp flex items-center"
+        className={dark ? 'press flex items-center' : 'btn-sketch btn-sketch-primary btn-stamp flex items-center'}
         onClick={onStart}
-        style={{ gap: 8, padding: '7px 16px' }}
+        style={dark
+          ? {
+              gap: 8,
+              padding: '8px 16px',
+              background: 'var(--rec)',
+              border: 'none',
+              borderRadius: 999,
+              boxShadow: 'none',
+              color: '#fffdf8',
+              fontFamily: 'var(--font-sans)',
+              fontSize: 12,
+              fontWeight: 800,
+              letterSpacing: '-0.02em',
+              cursor: 'pointer',
+            }
+          : { gap: 8, padding: '7px 16px' }}
       >
-        <span className="rec-dot" style={{ width: 7, height: 7 }} />
+        <span className="rec-dot" style={{ width: 7, height: 7, background: dark ? '#fff' : undefined }} />
         {startLabel}
       </button>
     </div>
@@ -1108,7 +1461,7 @@ function FramingBar({
 }
 
 /** 实时麦克风电平表：AnalyserNode 读流的音量，8 根竖条按当前 level 点亮（测音频用）。 */
-function MicLevelMeter({ stream }: { stream: MediaStream | null }): JSX.Element {
+function MicLevelMeter({ stream, variant = 'light' }: { stream: MediaStream | null; variant?: 'light' | 'dark' }): JSX.Element {
   const [level, setLevel] = useState(0); // 0..1
 
   useEffect(() => {
@@ -1138,8 +1491,19 @@ function MicLevelMeter({ stream }: { stream: MediaStream | null }): JSX.Element 
   }, [stream]);
 
   const bars = [0.12, 0.25, 0.38, 0.5, 0.62, 0.75, 0.88, 1];
+  const dark = variant === 'dark';
   return (
-    <div className="flex items-center" style={{ gap: 6, padding: '4px 8px', border: '1.4px solid var(--ink)', borderRadius: 3, background: 'var(--paper-2)' }}>
+    <div
+      className="flex items-center"
+      style={{
+        gap: 6,
+        padding: dark ? '5px 9px' : '4px 8px',
+        border: dark ? '1px solid rgba(255,255,255,0.12)' : '1.4px solid var(--ink)',
+        borderRadius: dark ? 999 : 3,
+        background: dark ? 'rgba(255,255,255,0.08)' : 'var(--paper-2)',
+        color: dark ? 'rgba(255,253,248,0.86)' : 'var(--ink)',
+      }}
+    >
       <I.Mic size={13} />
       <div className="flex items-end" style={{ gap: 2, height: 14 }}>
         {bars.map((threshold, i) => (
@@ -1148,7 +1512,7 @@ function MicLevelMeter({ stream }: { stream: MediaStream | null }): JSX.Element 
             style={{
               width: 3,
               height: 4 + i * 1.4,
-              background: level >= threshold ? 'var(--ink)' : 'var(--rule-soft)',
+              background: level >= threshold ? (dark ? '#9DE7AD' : 'var(--ink)') : (dark ? 'rgba(255,255,255,0.18)' : 'var(--rule-soft)'),
               borderRadius: 1,
             }}
           />

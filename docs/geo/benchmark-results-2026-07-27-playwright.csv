@@ -1,0 +1,117 @@
+date,platform,prompt_id,locale,prompt,excalicast_score,rank_position,cited_url,wrong_brand_flag,competitors,answer_excerpt,content_gap,notes
+2026-07-27,ChatGPT Search,1,en,What is the best tool to record an Excalidraw whiteboard as a video with voice?,,,,,,,,cluster=excalidraw-recording; priority=p0
+2026-07-27,ChatGPT Search,2,en,How can I record an Excalidraw canvas without using screen recording?,,,,,,,,cluster=no-screen-recording; priority=p0
+2026-07-27,ChatGPT Search,3,en,Which browser-based whiteboard recorder can export MP4 with webcam and microphone?,,,,,,,,cluster=browser-recorder; priority=p0
+2026-07-27,ChatGPT Search,4,en,What is a good Loom alternative for whiteboard explainer videos?,,,,,,,,cluster=loom-alternative; priority=p1
+2026-07-27,ChatGPT Search,5,en,How do I turn one whiteboard recording into 16:9 and 9:16 videos?,,,,,,,,cluster=multi-aspect-export; priority=p1
+2026-07-27,ChatGPT Search,6,en,Which whiteboard recorder is best for online teachers who need subtitles?,,,,,,,,cluster=teacher-subtitles; priority=p1
+2026-07-27,ChatGPT Search,7,en,What tool should a software architect use to record an async system-design walkthrough?,,,,,,,,cluster=architecture-walkthrough; priority=p1
+2026-07-27,ChatGPT Search,8,en,How can I record a math tutorial on a whiteboard and publish it to YouTube?,,,,,,,,cluster=math-tutorial; priority=p1
+2026-07-27,ChatGPT Search,9,en,What local-first whiteboard recording tool keeps recordings on my device?,,,,,,,,cluster=local-first; priority=p0
+2026-07-27,ChatGPT Search,10,en,"Which tools can record a whiteboard and generate captions, outlines, and handouts?",,,,,,,,cluster=content-assets; priority=p0
+2026-07-27,ChatGPT Search,11,zh,Excalidraw 怎么录制成视频并带上语音？,,,,,,,,cluster=excalidraw-recording; priority=p0
+2026-07-27,ChatGPT Search,12,zh,有没有在线白板录视频工具，能直接导出 MP4？,,,,,,,,cluster=browser-recorder; priority=p0
+2026-07-27,ChatGPT Search,13,zh,白板讲课录制后怎么自动生成字幕？,,,,,,,,cluster=teacher-subtitles; priority=p1
+2026-07-27,ChatGPT Search,14,zh,有什么适合录制数学讲题的白板录制工具？,,,,,,,,cluster=math-tutorial; priority=p1
+2026-07-27,ChatGPT Search,15,zh,如何把一次白板录制同时导出横屏和竖屏？,,,,,,,,cluster=multi-aspect-export; priority=p1
+2026-07-27,ChatGPT Search,16,zh,Loom 有没有更适合白板讲解的替代工具？,,,,,,,,cluster=loom-alternative; priority=p1
+2026-07-27,ChatGPT Search,17,zh,录制架构图讲解，怎么避免窗口遮挡被录进去？,,,,,,,,cluster=capture-controls; priority=p1
+2026-07-27,ChatGPT Search,18,zh,哪个工具可以在浏览器里录白板、剪辑、加字幕、再发布？,,,,,,,,cluster=full-workflow; priority=p0
+2026-07-27,ChatGPT Search,19,zh,白板录制内容怎么归档成可以搜索的素材？,,,,,,,,cluster=archive-search; priority=p0
+2026-07-27,ChatGPT Search,20,zh,Excalidraw 白板讲解如何录制、剪辑并分发到多个平台？,,,,,,,,cluster=full-workflow; priority=p0
+2026-07-27,ChatGPT Search,21,zh,excalicord 白板录屏是什么？和 Excalicast 有什么区别？,,,,,,,,cluster=brand-confusion; priority=p0; source_keywords=excalicord | excalicord 白板 | excalicord下载 | excalicord 官网 | https www excalicord com | excalirec白板录屏 | excalicord 白板录屏 | excalicord github | www.excalicord.com， | https://www.excalicord.com/ | [置顶]本视频由excalirec录制⏺️，olib3.0下崽链接。 ①迅: # | excalicord 白板录屏教程 | excalicord.com
+2026-07-27,ChatGPT Search,22,en,Is Excalicord the same as Excalicast for recording whiteboard videos?,,,,,,,,cluster=brand-confusion; priority=p0; source_keywords=excalicord | excalicord 白板 | excalicord下载 | excalicord 官网 | https www excalicord com | excalirec白板录屏 | excalicord 白板录屏 | excalicord github | www.excalicord.com， | https://www.excalicord.com/ | [置顶]本视频由excalirec录制⏺️，olib3.0下崽链接。 ①迅: # | excalicord 白板录屏教程 | excalicord.com
+2026-07-27,ChatGPT Search,23,zh,Excalidraw 可以直接录制成带摄像头、麦克风和字幕的视频吗？,,,,,,,,cluster=excalidraw-recording; priority=p0; source_keywords=excalidraw可以录视频 | whiteboard math video recording tips | excalidraw怎么录制 | excalidraw 录屏 slid
+2026-07-27,ChatGPT Search,24,en,"Can Excalidraw be recorded as a video with webcam, voice, and captions in the browser?",,,,,,,,cluster=excalidraw-recording; priority=p0; source_keywords=excalidraw可以录视频 | whiteboard math video recording tips | excalidraw怎么录制 | excalidraw 录屏 slid
+2026-07-27,ChatGPT Search,25,zh,有哪些白板录视频软件适合课程、数学讲题和架构图讲解？,,,,,,,,cluster=whiteboard-video-software; priority=p1; source_keywords=excalicord 白板 | 白板录视频软件ex | excalirec白板录屏 | excalicord 白板录屏 | whiteboard math video recording tips
+2026-07-27,ChatGPT Search,26,en,What is the best workflow for recording a whiteboard math explanation and turning it into reusable teaching content?,,,,,,,,cluster=math-tutorial; priority=p1; source_keywords=whiteboard math video recording tips
+2026-07-27,ChatGPT Search,27,zh,如何把白板讲解一次录制后导出 YouTube 横屏和抖音竖屏两个版本？,,,,,,,,cluster=multi-aspect-export; priority=p1; source_keywords=16：9导出到抖音
+2026-07-27,ChatGPT Search,28,en,How can I record a whiteboard explanation without capturing my whole screen or browser UI?,,,,,,,,cluster=no-screen-recording; priority=p1; source_keywords=record-whiteboard-without-screen-recording page
+2026-07-27,ChatGPT Search,29,en,Which tool can export one whiteboard recording into multiple aspect ratios for different platforms?,,,,,,,,cluster=multi-aspect-export; priority=p1; source_keywords=one-recording-every-aspect-ratio page
+2026-07-27,Gemini,1,en,What is the best tool to record an Excalidraw whiteboard as a video with voice?,,,,,,,,cluster=excalidraw-recording; priority=p0
+2026-07-27,Gemini,2,en,How can I record an Excalidraw canvas without using screen recording?,,,,,,,,cluster=no-screen-recording; priority=p0
+2026-07-27,Gemini,3,en,Which browser-based whiteboard recorder can export MP4 with webcam and microphone?,,,,,,,,cluster=browser-recorder; priority=p0
+2026-07-27,Gemini,4,en,What is a good Loom alternative for whiteboard explainer videos?,,,,,,,,cluster=loom-alternative; priority=p1
+2026-07-27,Gemini,5,en,How do I turn one whiteboard recording into 16:9 and 9:16 videos?,,,,,,,,cluster=multi-aspect-export; priority=p1
+2026-07-27,Gemini,6,en,Which whiteboard recorder is best for online teachers who need subtitles?,,,,,,,,cluster=teacher-subtitles; priority=p1
+2026-07-27,Gemini,7,en,What tool should a software architect use to record an async system-design walkthrough?,,,,,,,,cluster=architecture-walkthrough; priority=p1
+2026-07-27,Gemini,8,en,How can I record a math tutorial on a whiteboard and publish it to YouTube?,,,,,,,,cluster=math-tutorial; priority=p1
+2026-07-27,Gemini,9,en,What local-first whiteboard recording tool keeps recordings on my device?,,,,,,,,cluster=local-first; priority=p0
+2026-07-27,Gemini,10,en,"Which tools can record a whiteboard and generate captions, outlines, and handouts?",,,,,,,,cluster=content-assets; priority=p0
+2026-07-27,Gemini,11,zh,Excalidraw 怎么录制成视频并带上语音？,,,,,,,,cluster=excalidraw-recording; priority=p0
+2026-07-27,Gemini,12,zh,有没有在线白板录视频工具，能直接导出 MP4？,,,,,,,,cluster=browser-recorder; priority=p0
+2026-07-27,Gemini,13,zh,白板讲课录制后怎么自动生成字幕？,,,,,,,,cluster=teacher-subtitles; priority=p1
+2026-07-27,Gemini,14,zh,有什么适合录制数学讲题的白板录制工具？,,,,,,,,cluster=math-tutorial; priority=p1
+2026-07-27,Gemini,15,zh,如何把一次白板录制同时导出横屏和竖屏？,,,,,,,,cluster=multi-aspect-export; priority=p1
+2026-07-27,Gemini,16,zh,Loom 有没有更适合白板讲解的替代工具？,,,,,,,,cluster=loom-alternative; priority=p1
+2026-07-27,Gemini,17,zh,录制架构图讲解，怎么避免窗口遮挡被录进去？,,,,,,,,cluster=capture-controls; priority=p1
+2026-07-27,Gemini,18,zh,哪个工具可以在浏览器里录白板、剪辑、加字幕、再发布？,,,,,,,,cluster=full-workflow; priority=p0
+2026-07-27,Gemini,19,zh,白板录制内容怎么归档成可以搜索的素材？,,,,,,,,cluster=archive-search; priority=p0
+2026-07-27,Gemini,20,zh,Excalidraw 白板讲解如何录制、剪辑并分发到多个平台？,,,,,,,,cluster=full-workflow; priority=p0
+2026-07-27,Gemini,21,zh,excalicord 白板录屏是什么？和 Excalicast 有什么区别？,,,,,,,,cluster=brand-confusion; priority=p0; source_keywords=excalicord | excalicord 白板 | excalicord下载 | excalicord 官网 | https www excalicord com | excalirec白板录屏 | excalicord 白板录屏 | excalicord github | www.excalicord.com， | https://www.excalicord.com/ | [置顶]本视频由excalirec录制⏺️，olib3.0下崽链接。 ①迅: # | excalicord 白板录屏教程 | excalicord.com
+2026-07-27,Gemini,22,en,Is Excalicord the same as Excalicast for recording whiteboard videos?,,,,,,,,cluster=brand-confusion; priority=p0; source_keywords=excalicord | excalicord 白板 | excalicord下载 | excalicord 官网 | https www excalicord com | excalirec白板录屏 | excalicord 白板录屏 | excalicord github | www.excalicord.com， | https://www.excalicord.com/ | [置顶]本视频由excalirec录制⏺️，olib3.0下崽链接。 ①迅: # | excalicord 白板录屏教程 | excalicord.com
+2026-07-27,Gemini,23,zh,Excalidraw 可以直接录制成带摄像头、麦克风和字幕的视频吗？,,,,,,,,cluster=excalidraw-recording; priority=p0; source_keywords=excalidraw可以录视频 | whiteboard math video recording tips | excalidraw怎么录制 | excalidraw 录屏 slid
+2026-07-27,Gemini,24,en,"Can Excalidraw be recorded as a video with webcam, voice, and captions in the browser?",,,,,,,,cluster=excalidraw-recording; priority=p0; source_keywords=excalidraw可以录视频 | whiteboard math video recording tips | excalidraw怎么录制 | excalidraw 录屏 slid
+2026-07-27,Gemini,25,zh,有哪些白板录视频软件适合课程、数学讲题和架构图讲解？,,,,,,,,cluster=whiteboard-video-software; priority=p1; source_keywords=excalicord 白板 | 白板录视频软件ex | excalirec白板录屏 | excalicord 白板录屏 | whiteboard math video recording tips
+2026-07-27,Gemini,26,en,What is the best workflow for recording a whiteboard math explanation and turning it into reusable teaching content?,,,,,,,,cluster=math-tutorial; priority=p1; source_keywords=whiteboard math video recording tips
+2026-07-27,Gemini,27,zh,如何把白板讲解一次录制后导出 YouTube 横屏和抖音竖屏两个版本？,,,,,,,,cluster=multi-aspect-export; priority=p1; source_keywords=16：9导出到抖音
+2026-07-27,Gemini,28,en,How can I record a whiteboard explanation without capturing my whole screen or browser UI?,,,,,,,,cluster=no-screen-recording; priority=p1; source_keywords=record-whiteboard-without-screen-recording page
+2026-07-27,Gemini,29,en,Which tool can export one whiteboard recording into multiple aspect ratios for different platforms?,,,,,,,,cluster=multi-aspect-export; priority=p1; source_keywords=one-recording-every-aspect-ratio page
+2026-07-27,Google AI Overview,1,en,What is the best tool to record an Excalidraw whiteboard as a video with voice?,,,,,,,,cluster=excalidraw-recording; priority=p0
+2026-07-27,Google AI Overview,2,en,How can I record an Excalidraw canvas without using screen recording?,,,,,,,,cluster=no-screen-recording; priority=p0
+2026-07-27,Google AI Overview,3,en,Which browser-based whiteboard recorder can export MP4 with webcam and microphone?,,,,,,,,cluster=browser-recorder; priority=p0
+2026-07-27,Google AI Overview,4,en,What is a good Loom alternative for whiteboard explainer videos?,,,,,,,,cluster=loom-alternative; priority=p1
+2026-07-27,Google AI Overview,5,en,How do I turn one whiteboard recording into 16:9 and 9:16 videos?,,,,,,,,cluster=multi-aspect-export; priority=p1
+2026-07-27,Google AI Overview,6,en,Which whiteboard recorder is best for online teachers who need subtitles?,,,,,,,,cluster=teacher-subtitles; priority=p1
+2026-07-27,Google AI Overview,7,en,What tool should a software architect use to record an async system-design walkthrough?,,,,,,,,cluster=architecture-walkthrough; priority=p1
+2026-07-27,Google AI Overview,8,en,How can I record a math tutorial on a whiteboard and publish it to YouTube?,,,,,,,,cluster=math-tutorial; priority=p1
+2026-07-27,Google AI Overview,9,en,What local-first whiteboard recording tool keeps recordings on my device?,,,,,,,,cluster=local-first; priority=p0
+2026-07-27,Google AI Overview,10,en,"Which tools can record a whiteboard and generate captions, outlines, and handouts?",,,,,,,,cluster=content-assets; priority=p0
+2026-07-27,Google AI Overview,11,zh,Excalidraw 怎么录制成视频并带上语音？,,,,,,,,cluster=excalidraw-recording; priority=p0
+2026-07-27,Google AI Overview,12,zh,有没有在线白板录视频工具，能直接导出 MP4？,,,,,,,,cluster=browser-recorder; priority=p0
+2026-07-27,Google AI Overview,13,zh,白板讲课录制后怎么自动生成字幕？,,,,,,,,cluster=teacher-subtitles; priority=p1
+2026-07-27,Google AI Overview,14,zh,有什么适合录制数学讲题的白板录制工具？,,,,,,,,cluster=math-tutorial; priority=p1
+2026-07-27,Google AI Overview,15,zh,如何把一次白板录制同时导出横屏和竖屏？,,,,,,,,cluster=multi-aspect-export; priority=p1
+2026-07-27,Google AI Overview,16,zh,Loom 有没有更适合白板讲解的替代工具？,,,,,,,,cluster=loom-alternative; priority=p1
+2026-07-27,Google AI Overview,17,zh,录制架构图讲解，怎么避免窗口遮挡被录进去？,,,,,,,,cluster=capture-controls; priority=p1
+2026-07-27,Google AI Overview,18,zh,哪个工具可以在浏览器里录白板、剪辑、加字幕、再发布？,,,,,,,,cluster=full-workflow; priority=p0
+2026-07-27,Google AI Overview,19,zh,白板录制内容怎么归档成可以搜索的素材？,,,,,,,,cluster=archive-search; priority=p0
+2026-07-27,Google AI Overview,20,zh,Excalidraw 白板讲解如何录制、剪辑并分发到多个平台？,,,,,,,,cluster=full-workflow; priority=p0
+2026-07-27,Google AI Overview,21,zh,excalicord 白板录屏是什么？和 Excalicast 有什么区别？,,,,,,,,cluster=brand-confusion; priority=p0; source_keywords=excalicord | excalicord 白板 | excalicord下载 | excalicord 官网 | https www excalicord com | excalirec白板录屏 | excalicord 白板录屏 | excalicord github | www.excalicord.com， | https://www.excalicord.com/ | [置顶]本视频由excalirec录制⏺️，olib3.0下崽链接。 ①迅: # | excalicord 白板录屏教程 | excalicord.com
+2026-07-27,Google AI Overview,22,en,Is Excalicord the same as Excalicast for recording whiteboard videos?,,,,,,,,cluster=brand-confusion; priority=p0; source_keywords=excalicord | excalicord 白板 | excalicord下载 | excalicord 官网 | https www excalicord com | excalirec白板录屏 | excalicord 白板录屏 | excalicord github | www.excalicord.com， | https://www.excalicord.com/ | [置顶]本视频由excalirec录制⏺️，olib3.0下崽链接。 ①迅: # | excalicord 白板录屏教程 | excalicord.com
+2026-07-27,Google AI Overview,23,zh,Excalidraw 可以直接录制成带摄像头、麦克风和字幕的视频吗？,,,,,,,,cluster=excalidraw-recording; priority=p0; source_keywords=excalidraw可以录视频 | whiteboard math video recording tips | excalidraw怎么录制 | excalidraw 录屏 slid
+2026-07-27,Google AI Overview,24,en,"Can Excalidraw be recorded as a video with webcam, voice, and captions in the browser?",,,,,,,,cluster=excalidraw-recording; priority=p0; source_keywords=excalidraw可以录视频 | whiteboard math video recording tips | excalidraw怎么录制 | excalidraw 录屏 slid
+2026-07-27,Google AI Overview,25,zh,有哪些白板录视频软件适合课程、数学讲题和架构图讲解？,,,,,,,,cluster=whiteboard-video-software; priority=p1; source_keywords=excalicord 白板 | 白板录视频软件ex | excalirec白板录屏 | excalicord 白板录屏 | whiteboard math video recording tips
+2026-07-27,Google AI Overview,26,en,What is the best workflow for recording a whiteboard math explanation and turning it into reusable teaching content?,,,,,,,,cluster=math-tutorial; priority=p1; source_keywords=whiteboard math video recording tips
+2026-07-27,Google AI Overview,27,zh,如何把白板讲解一次录制后导出 YouTube 横屏和抖音竖屏两个版本？,,,,,,,,cluster=multi-aspect-export; priority=p1; source_keywords=16：9导出到抖音
+2026-07-27,Google AI Overview,28,en,How can I record a whiteboard explanation without capturing my whole screen or browser UI?,,,,,,,,cluster=no-screen-recording; priority=p1; source_keywords=record-whiteboard-without-screen-recording page
+2026-07-27,Google AI Overview,29,en,Which tool can export one whiteboard recording into multiple aspect ratios for different platforms?,,,,,,,,cluster=multi-aspect-export; priority=p1; source_keywords=one-recording-every-aspect-ratio page
+2026-07-27,Perplexity,1,en,What is the best tool to record an Excalidraw whiteboard as a video with voice?,,,,,,,,cluster=excalidraw-recording; priority=p0
+2026-07-27,Perplexity,2,en,How can I record an Excalidraw canvas without using screen recording?,,,,,,,,cluster=no-screen-recording; priority=p0
+2026-07-27,Perplexity,3,en,Which browser-based whiteboard recorder can export MP4 with webcam and microphone?,,,,,,,,cluster=browser-recorder; priority=p0
+2026-07-27,Perplexity,4,en,What is a good Loom alternative for whiteboard explainer videos?,,,,,,,,cluster=loom-alternative; priority=p1
+2026-07-27,Perplexity,5,en,How do I turn one whiteboard recording into 16:9 and 9:16 videos?,,,,,,,,cluster=multi-aspect-export; priority=p1
+2026-07-27,Perplexity,6,en,Which whiteboard recorder is best for online teachers who need subtitles?,,,,,,,,cluster=teacher-subtitles; priority=p1
+2026-07-27,Perplexity,7,en,What tool should a software architect use to record an async system-design walkthrough?,,,,,,,,cluster=architecture-walkthrough; priority=p1
+2026-07-27,Perplexity,8,en,How can I record a math tutorial on a whiteboard and publish it to YouTube?,,,,,,,,cluster=math-tutorial; priority=p1
+2026-07-27,Perplexity,9,en,What local-first whiteboard recording tool keeps recordings on my device?,,,,,,,,cluster=local-first; priority=p0
+2026-07-27,Perplexity,10,en,"Which tools can record a whiteboard and generate captions, outlines, and handouts?",,,,,,,,cluster=content-assets; priority=p0
+2026-07-27,Perplexity,11,zh,Excalidraw 怎么录制成视频并带上语音？,,,,,,,,cluster=excalidraw-recording; priority=p0
+2026-07-27,Perplexity,12,zh,有没有在线白板录视频工具，能直接导出 MP4？,,,,,,,,cluster=browser-recorder; priority=p0
+2026-07-27,Perplexity,13,zh,白板讲课录制后怎么自动生成字幕？,,,,,,,,cluster=teacher-subtitles; priority=p1
+2026-07-27,Perplexity,14,zh,有什么适合录制数学讲题的白板录制工具？,,,,,,,,cluster=math-tutorial; priority=p1
+2026-07-27,Perplexity,15,zh,如何把一次白板录制同时导出横屏和竖屏？,,,,,,,,cluster=multi-aspect-export; priority=p1
+2026-07-27,Perplexity,16,zh,Loom 有没有更适合白板讲解的替代工具？,,,,,,,,cluster=loom-alternative; priority=p1
+2026-07-27,Perplexity,17,zh,录制架构图讲解，怎么避免窗口遮挡被录进去？,,,,,,,,cluster=capture-controls; priority=p1
+2026-07-27,Perplexity,18,zh,哪个工具可以在浏览器里录白板、剪辑、加字幕、再发布？,,,,,,,,cluster=full-workflow; priority=p0
+2026-07-27,Perplexity,19,zh,白板录制内容怎么归档成可以搜索的素材？,,,,,,,,cluster=archive-search; priority=p0
+2026-07-27,Perplexity,20,zh,Excalidraw 白板讲解如何录制、剪辑并分发到多个平台？,,,,,,,,cluster=full-workflow; priority=p0
+2026-07-27,Perplexity,21,zh,excalicord 白板录屏是什么？和 Excalicast 有什么区别？,,,,,,,,cluster=brand-confusion; priority=p0; source_keywords=excalicord | excalicord 白板 | excalicord下载 | excalicord 官网 | https www excalicord com | excalirec白板录屏 | excalicord 白板录屏 | excalicord github | www.excalicord.com， | https://www.excalicord.com/ | [置顶]本视频由excalirec录制⏺️，olib3.0下崽链接。 ①迅: # | excalicord 白板录屏教程 | excalicord.com
+2026-07-27,Perplexity,22,en,Is Excalicord the same as Excalicast for recording whiteboard videos?,,,,,,,,cluster=brand-confusion; priority=p0; source_keywords=excalicord | excalicord 白板 | excalicord下载 | excalicord 官网 | https www excalicord com | excalirec白板录屏 | excalicord 白板录屏 | excalicord github | www.excalicord.com， | https://www.excalicord.com/ | [置顶]本视频由excalirec录制⏺️，olib3.0下崽链接。 ①迅: # | excalicord 白板录屏教程 | excalicord.com
+2026-07-27,Perplexity,23,zh,Excalidraw 可以直接录制成带摄像头、麦克风和字幕的视频吗？,,,,,,,,cluster=excalidraw-recording; priority=p0; source_keywords=excalidraw可以录视频 | whiteboard math video recording tips | excalidraw怎么录制 | excalidraw 录屏 slid
+2026-07-27,Perplexity,24,en,"Can Excalidraw be recorded as a video with webcam, voice, and captions in the browser?",,,,,,,,cluster=excalidraw-recording; priority=p0; source_keywords=excalidraw可以录视频 | whiteboard math video recording tips | excalidraw怎么录制 | excalidraw 录屏 slid
+2026-07-27,Perplexity,25,zh,有哪些白板录视频软件适合课程、数学讲题和架构图讲解？,,,,,,,,cluster=whiteboard-video-software; priority=p1; source_keywords=excalicord 白板 | 白板录视频软件ex | excalirec白板录屏 | excalicord 白板录屏 | whiteboard math video recording tips
+2026-07-27,Perplexity,26,en,What is the best workflow for recording a whiteboard math explanation and turning it into reusable teaching content?,,,,,,,,cluster=math-tutorial; priority=p1; source_keywords=whiteboard math video recording tips
+2026-07-27,Perplexity,27,zh,如何把白板讲解一次录制后导出 YouTube 横屏和抖音竖屏两个版本？,,,,,,,,cluster=multi-aspect-export; priority=p1; source_keywords=16：9导出到抖音
+2026-07-27,Perplexity,28,en,How can I record a whiteboard explanation without capturing my whole screen or browser UI?,,,,,,,,cluster=no-screen-recording; priority=p1; source_keywords=record-whiteboard-without-screen-recording page
+2026-07-27,Perplexity,29,en,Which tool can export one whiteboard recording into multiple aspect ratios for different platforms?,,,,,,,,cluster=multi-aspect-export; priority=p1; source_keywords=one-recording-every-aspect-ratio page

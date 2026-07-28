@@ -174,6 +174,24 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
           />
         </div>
 
+        {config.localizedTrackId && config.muteOriginalAudio !== false && (
+          <div
+            data-testid="export-panel-localized-note"
+            className="mt-3 flex items-start gap-2 px-3 py-2.5"
+            style={{
+              background: 'var(--paper-2)',
+              border: '1px solid rgba(24,25,26,.10)',
+              borderRadius: 18,
+              color: 'var(--ink-2)',
+              fontSize: 12,
+              lineHeight: 1.45,
+            }}
+          >
+            <I.Sparkles size={14} />
+            <span>English dubbed audio will replace the original voice in preview and export.</span>
+          </div>
+        )}
+
         <button
           type="button"
           onClick={handleExport}

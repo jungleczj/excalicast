@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { autoZoomAt, cameraPositionAt, getRecordingWindowRect, renderPreviewFrame } from '@/services/exportPipeline';
-import { getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
-import type { AutoZoomSegment, CameraPositionEvent, ExportConfig, RecordingMetadata, ShellCanvasRect, ShellSize, TimeSegment } from '@/types/recording';
+import { getLocalizedTrack, getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
+import type { AutoZoomSegment, CameraPositionEvent, ExportConfig, LocalizedTrack, RecordingMetadata, ShellCanvasRect, ShellSize, TimeSegment } from '@/types/recording';
 import { ASPECT_PRESETS } from '@/types/recording';
 import { keptDuration, normalizeSegments, outputToSource, sourceToOutput } from '@/utils/segments';
 import { I } from '@/components/icons';
@@ -70,9 +70,13 @@ export function ExportPreview({
   const [error, setError] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [cameraUrl, setCameraUrl] = useState<string | null>(null);
+  const [localizedTrack, setLocalizedTrack] = useState<LocalizedTrack | null>(null);
+  const [localizedAudioUrl, setLocalizedAudioUrl] = useState<string | null>(null);
+  const [localizedCameraUrl, setLocalizedCameraUrl] = useState<string | null>(null);
   const [cameraEvents, setCameraEvents] = useState<CameraPositionEvent[]>([]);
   const [firstShell, setFirstShell] = useState<{ shellSize: ShellSize; canvasRect: ShellCanvasRect } | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [selectionOverlaysHidden, setSelectionOverlaysHidden] = useState(false);
   // 预览外框尺寸独立于画面渲染倍率：拖拽/按钮只改变承载视频的盒子，画面始终 contain-fit。
   // 这个容器处于普通文档流中，变高时 Timeline 会自然向下移动。
   const parentRef = useRef<HTMLDivElement>(null);
@@ -132,6 +136,45 @@ export function ExportPreview({
       if (createdCameraUrl) URL.revokeObjectURL(createdCameraUrl);
     };
   }, [recordingId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let createdAudioUrl: string | null = null;
+    let createdCameraUrl: string | null = null;
+    if (!config.localizedTrackId) {
+      setLocalizedTrack(null);
+      setLocalizedAudioUrl(null);
+      setLocalizedCameraUrl(null);
+      return;
+    }
+    getLocalizedTrack(config.localizedTrackId)
+      .then((track) => {
+        if (cancelled) return;
+        if (!track) {
+          setLocalizedTrack(null);
+          setLocalizedAudioUrl(null);
+          setLocalizedCameraUrl(null);
+          return;
+        }
+        createdAudioUrl = URL.createObjectURL(track.audioBlob);
+        createdCameraUrl = track.cameraBlob ? URL.createObjectURL(track.cameraBlob) : null;
+        setLocalizedTrack(track);
+        setLocalizedAudioUrl(createdAudioUrl);
+        setLocalizedCameraUrl(createdCameraUrl);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLocalizedTrack(null);
+          setLocalizedAudioUrl(null);
+          setLocalizedCameraUrl(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+      if (createdAudioUrl) URL.revokeObjectURL(createdAudioUrl);
+      if (createdCameraUrl) URL.revokeObjectURL(createdCameraUrl);
+    };
+  }, [config.localizedTrackId]);
 
   // 当前 timeMs 对应的摄像头位置（百分比）。
   // shell on 时，气泡定位用 letterboxed shell 区作为坐标系（跟导出 pipeline 一致）；
@@ -301,26 +344,53 @@ export function ExportPreview({
 
   // 预览进度条：可拖刮擦（成片输出时间 → 源时间），与底部时间轴等效
   const barRef = useRef<HTMLDivElement>(null);
-  const scrubBarToClientX = useCallback((clientX: number) => {
+  const scrubBarToClientX = useCallback((clientX: number): number | null => {
     const el = barRef.current;
-    if (!el || keptDur <= 0) return;
+    if (!el || keptDur <= 0) return null;
     const r = el.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
-    setTimeMs(outputToSource(kept, ratio * keptDur));
+    const src = outputToSource(kept, ratio * keptDur);
+    setTimeMs(src);
+    return src;
   }, [kept, keptDur, setTimeMs]);
   const startBarScrub = useCallback((e: React.MouseEvent) => {
     if (keptDur <= 0) return;
     e.preventDefault();
     e.stopPropagation();
-    setPlaying(false);
-    if (audioRef.current) audioRef.current.pause();
-    if (cameraRef.current) cameraRef.current.pause();
-    scrubBarToClientX(e.clientX);
-    const move = (ev: MouseEvent) => scrubBarToClientX(ev.clientX);
-    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    const wasPlaying = playing;
+    if (!wasPlaying) {
+      if (audioRef.current) audioRef.current.pause();
+      if (cameraRef.current) cameraRef.current.pause();
+    }
+    const syncMedia = (src: number) => {
+      const sec = src / 1000;
+      if (audioRef.current) {
+        try { audioRef.current.currentTime = sec; } catch { /* ignore */ }
+      }
+      if (cameraRef.current) {
+        try { cameraRef.current.currentTime = sec; } catch { /* ignore */ }
+      }
+      if (wasPlaying) {
+        clockRef.current = { perfStart: performance.now(), baseTime: sourceToOutput(kept, src) };
+      }
+    };
+    const initial = scrubBarToClientX(e.clientX);
+    if (initial !== null) syncMedia(initial);
+    const move = (ev: MouseEvent) => {
+      const src = scrubBarToClientX(ev.clientX);
+      if (src !== null) syncMedia(src);
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      if (wasPlaying) {
+        void audioRef.current?.play().catch(() => { /* ignore */ });
+        void cameraRef.current?.play().catch(() => { /* ignore */ });
+      }
+    };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
-  }, [keptDur, scrubBarToClientX]);
+  }, [kept, keptDur, playing, scrubBarToClientX]);
 
   // scrub 由时间轴驱动（onPlayheadChange → playheadMs）；预览不再自带进度条。
   const preset = ASPECT_PRESETS[config.aspectRatio];
@@ -375,6 +445,8 @@ export function ExportPreview({
   // 摄像头气泡位置/尺寸由 cameraOverlayStyle 计算（events → 动态；无事件 → 右下角 18% 宽度）
   const cameraShape = metadata.setup?.camera.shape ?? 'circle';
   const previewAutoZoomScale = autoZoomAt(config.autoZooms, timeMs)?.scale ?? 1;
+  const activeAudioUrl = localizedTrack && config.muteOriginalAudio !== false ? localizedAudioUrl : audioUrl;
+  const activeCameraUrl = localizedCameraUrl ?? cameraUrl;
   const selectedAutoZoom = useMemo(
     () => config.autoZooms?.find((zoom) => zoom.id === selectedAutoZoomId) ?? null,
     [config.autoZooms, selectedAutoZoomId],
@@ -483,7 +555,9 @@ export function ExportPreview({
       <div
         data-testid="export-preview-stage"
         data-autozoom-scale={previewAutoZoomScale.toFixed(3)}
+        data-localized-track={localizedTrack?.id}
         data-autozoom-region={selectedAutoZoom ? `${(selectedAutoZoom.cx ?? 0.5).toFixed(3)},${(selectedAutoZoom.cy ?? 0.5).toFixed(3)},${selectedAutoZoom.scale.toFixed(3)}` : undefined}
+        data-selection-overlays-hidden={selectionOverlaysHidden ? 'true' : 'false'}
         className="export-preview-craft-stage relative mx-auto overflow-hidden"
         style={{
           width: previewBox.w,
@@ -499,7 +573,37 @@ export function ExportPreview({
           className="h-full w-full object-contain"
         />
 
-        {zoomRegionStyle && selectedAutoZoom && (
+        {selectedAutoZoom && zoomRegionStyle && !exporting && (
+          <button
+            type="button"
+            data-testid="toggle-preview-selection-overlays"
+            aria-pressed={selectionOverlaysHidden}
+            onClick={() => setSelectionOverlaysHidden((value) => !value)}
+            style={{
+              position: 'absolute',
+              right: 10,
+              top: 46,
+              zIndex: 42,
+              height: 30,
+              padding: '0 11px',
+              border: '1px solid rgba(34,34,34,.18)',
+              borderRadius: 999,
+              background: 'rgba(255,253,248,.88)',
+              color: 'var(--ink)',
+              boxShadow: '0 8px 20px rgba(22,24,26,.12), inset 0 1px 0 rgba(255,255,255,.76)',
+              backdropFilter: 'blur(14px) saturate(1.04)',
+              WebkitBackdropFilter: 'blur(14px) saturate(1.04)',
+              fontFamily: 'var(--font-sans)',
+              fontSize: 12,
+              fontWeight: 650,
+              cursor: 'pointer',
+            }}
+          >
+            {selectionOverlaysHidden ? t('showSelectionOverlays') : t('hideSelectionOverlays')}
+          </button>
+        )}
+
+        {zoomRegionStyle && selectedAutoZoom && !selectionOverlaysHidden && (
           <div
             data-testid="autozoom-region"
             aria-label="Autozoom target region"
@@ -537,7 +641,7 @@ export function ExportPreview({
         )}
 
         {/* 摄像头气泡：位置/尺寸跟随 cameraEvents（无事件时回退右下角） */}
-        {cameraUrl && (
+        {activeCameraUrl && (
           <div
             data-testid="export-preview-camera"
             data-camera-shape={cameraShape}
@@ -552,7 +656,7 @@ export function ExportPreview({
           >
             <video
               ref={cameraRef}
-              src={cameraUrl}
+              src={activeCameraUrl}
               muted
               playsInline
               preload="auto"
@@ -573,10 +677,12 @@ export function ExportPreview({
         )}
 
         {/* 隐藏音频元素，仅用于预览播放 */}
-        {audioUrl && (
+        {activeAudioUrl && (
           <audio
+            data-testid="export-preview-audio"
+            data-localized-audio={localizedTrack && config.muteOriginalAudio !== false ? 'true' : 'false'}
             ref={audioRef}
-            src={audioUrl}
+            src={activeAudioUrl}
             preload="auto"
             hidden
           />
@@ -648,6 +754,7 @@ export function ExportPreview({
           >
             <button
               type="button"
+              data-testid="export-preview-play-toggle"
               onClick={togglePlay}
               disabled={metadata.durationMs === 0}
               className="grid place-items-center"
@@ -679,6 +786,7 @@ export function ExportPreview({
             </span>
             {/* 成片输出进度：可拖刮擦 —— 外层高 16px 做抓取热区、内层细条仅视觉；minWidth:0 保证 9:16 窄盒能缩 */}
             <div
+              data-testid="export-preview-progress-scrubber"
               ref={barRef}
               onMouseDown={startBarScrub}
               className="flex flex-1 items-center"

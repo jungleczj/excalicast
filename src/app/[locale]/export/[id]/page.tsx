@@ -11,16 +11,17 @@ import { VideoBackgroundPanel } from '@/components/VideoBackgroundPanel';
 import { WorkspaceShellToggle } from '@/components/WorkspaceShellToggle';
 import { SubtitlePanel } from '@/components/SubtitlePanel';
 import { HandoutPanel } from '@/components/HandoutPanel';
+import { DubbingPanel } from '@/components/DubbingPanel';
 import { ProUpgradeModal } from '@/components/ProUpgradeModal';
 import { Timeline } from '@/components/editor/Timeline';
-import { AutoZoomPanel } from '@/components/editor/AutoZoomPanel';
 import { I, LogoMark } from '@/components/icons';
+import { analyzeRecordingForAutoEdit, AutoEditError, type AutoEditMode, type AutoEditResult } from '@/services/autoEditAnalyzer';
 import { TierBadge } from '@/components/TierBadge';
 import { ShareButton } from '@/components/ShareButton';
 import { useSubscription } from '@/hooks/useSubscription';
 import { getRecording, deleteRecording, updateRecordingTitle, updateRecordingSegments, updateRecordingAutoZooms } from '@/lib/db-client';
 import { getCurrentOwnerKey } from '@/lib/ownerKey';
-import type { AspectRatio, AutoZoomSegment, ExportConfig, RecordingMetadata, RecordingSetupConfig, TimeSegment } from '@/types/recording';
+import type { AspectRatio, AutoZoomSegment, ExportConfig, LocalizedTrack, RecordingMetadata, RecordingSetupConfig, TimeSegment } from '@/types/recording';
 import { ASPECT_PRESETS } from '@/types/recording';
 import { normalizeSegments, isTrimmed } from '@/utils/segments';
 import { Link, useRouter } from '@/i18n/navigation';
@@ -79,7 +80,7 @@ function exportDefaultsFromSetup(setup: RecordingSetupConfig): ExportConfig {
   return { ...base, aspectRatio: setup.framing, croppingMode: 'follow_viewport', cropWindow: setup.cropWindow };
 }
 
-type Tab = 'export' | 'captions' | 'outline' | 'handout';
+type Tab = 'export' | 'captions' | 'dubbing' | 'outline' | 'handout';
 
 export default function EditorRecordingPage(): JSX.Element {
   const params = useParams<{ id: string }>();
@@ -93,6 +94,7 @@ export default function EditorRecordingPage(): JSX.Element {
 
   const [meta, setMeta] = useState<RecordingMetadata | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [finalizing, setFinalizing] = useState(false);
   const [config, setConfig] = useState<ExportConfig>(DEFAULT_CONFIG);
   const [exportProgress, setExportProgress] = useState<ExportProgressState | null>(null);
   const [paymentDone, setPaymentDone] = useState(false);
@@ -103,6 +105,10 @@ export default function EditorRecordingPage(): JSX.Element {
   const [segments, setSegments] = useState<TimeSegment[]>([]);
   const [autoZooms, setAutoZooms] = useState<AutoZoomSegment[]>([]);
   const [selectedAutoZoomId, setSelectedAutoZoomId] = useState<string | null>(null);
+  const [autoEditPhase, setAutoEditPhase] = useState<'idle' | 'analyzing' | 'applied' | 'failed'>('idle');
+  const [autoEditResult, setAutoEditResult] = useState<AutoEditResult | null>(null);
+  const [autoEditError, setAutoEditError] = useState<string | null>(null);
+  const [autoEditPreviousSegments, setAutoEditPreviousSegments] = useState<TimeSegment[] | null>(null);
   const [playheadMs, setPlayheadMs] = useState(0);
 
   useEffect(() => {
@@ -117,23 +123,68 @@ export default function EditorRecordingPage(): JSX.Element {
 
   useEffect(() => {
     if (!id) return;
-    getCurrentOwnerKey()
-      .then((ownerKey) => getRecording(id, ownerKey))
-      .then((m) => {
-        if (!m) setLoadError(en ? `Recording not found: ${id}` : `录制不存在：${id}`);
-        else {
-          setMeta(m);
-          setTitle(m.title?.trim() || (en ? `Recording ${id.slice(0, 8)}` : `录制 ${id.slice(0, 8)}`));
-          const savedAutoZooms = m.autoZooms ?? [];
-          setAutoZooms(savedAutoZooms);
-          setSelectedAutoZoomId(savedAutoZooms[0]?.id ?? null);
-          if (m.setup) setConfig({ ...exportDefaultsFromSetup(m.setup), autoZooms: savedAutoZooms.length ? savedAutoZooms : undefined });
-          else if (savedAutoZooms.length) setConfig((c) => ({ ...c, autoZooms: savedAutoZooms }));
-          setSegments(normalizeSegments(m.segments, m.durationMs));
-          setPlayheadMs(0);
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const applyRecording = (m: RecordingMetadata) => {
+      setMeta(m);
+      setFinalizing(false);
+      setTitle(m.title?.trim() || (en ? `Recording ${id.slice(0, 8)}` : `录制 ${id.slice(0, 8)}`));
+      const savedAutoZooms = m.autoZooms ?? [];
+      const localizedDefaults = m.localizedTrackId
+        ? { localizedTrackId: m.localizedTrackId, muteOriginalAudio: true }
+        : {};
+      setAutoZooms(savedAutoZooms);
+      setSelectedAutoZoomId(savedAutoZooms[0]?.id ?? null);
+      if (m.setup) {
+        setConfig({
+          ...exportDefaultsFromSetup(m.setup),
+          ...localizedDefaults,
+          autoZooms: savedAutoZooms.length ? savedAutoZooms : undefined,
+        });
+      } else if (savedAutoZooms.length || m.localizedTrackId) {
+        setConfig((c) => ({
+          ...c,
+          ...localizedDefaults,
+          autoZooms: savedAutoZooms.length ? savedAutoZooms : undefined,
+        }));
+      }
+      setSegments(normalizeSegments(m.segments, m.durationMs));
+      setPlayheadMs(0);
+    };
+
+    const load = async () => {
+      try {
+        const ownerKey = await getCurrentOwnerKey();
+        const m = await getRecording(id, ownerKey);
+        if (cancelled) return;
+        if (!m) {
+          setFinalizing(false);
+          setLoadError(en ? `Recording not found: ${id}` : `录制不存在：${id}`);
+          return;
         }
-      })
-      .catch((err) => setLoadError(err instanceof Error ? err.message : 'load_failed'));
+        if (m.status === 'error') {
+          setFinalizing(false);
+          setLoadError(en ? 'Recording failed while saving.' : '录制保存失败。');
+          return;
+        }
+        if (m.status !== 'done') {
+          setMeta(null);
+          setFinalizing(true);
+          retryTimer = setTimeout(load, 250);
+          return;
+        }
+        applyRecording(m);
+      } catch (err) {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : 'load_failed');
+      }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [id, en]);
 
   const handlePaidChange = useCallback((isPaidNow: boolean) => {
@@ -153,6 +204,49 @@ export default function EditorRecordingPage(): JSX.Element {
     if (!id) return;
     void updateRecordingTitle(id, title);
   }, [id, title]);
+
+  const clearAutoEditUndo = useCallback(() => {
+    setAutoEditPhase('idle');
+    setAutoEditResult(null);
+    setAutoEditError(null);
+    setAutoEditPreviousSegments(null);
+  }, []);
+
+  const handleAutoEdit = useCallback(async (preset: AutoEditMode) => {
+    if (!meta || !meta.hasAudio) return;
+    setAutoEditPhase('analyzing');
+    setAutoEditResult(null);
+    setAutoEditError(null);
+    try {
+      const result = await analyzeRecordingForAutoEdit({
+        recordingId: id,
+        durationMs: meta.durationMs,
+        currentSegments: segments,
+        subtitleSrt: meta.subtitleSrt,
+        preset,
+      });
+      setAutoEditPreviousSegments(segments);
+      setSegments(result.segments);
+      setAutoEditResult(result);
+      setAutoEditPhase('applied');
+    } catch (error) {
+      const code = error instanceof AutoEditError ? error.code : 'audio_decode_failed';
+      setAutoEditError(en
+        ? ({ no_audio: 'This recording has no audio to analyze.', audio_decode_failed: 'Could not read this local audio track.', browser_unsupported: 'This browser cannot analyze local audio.' }[code])
+        : ({ no_audio: '这条录制没有可分析的音频。', audio_decode_failed: '无法读取这条录制的本地音轨。', browser_unsupported: '当前浏览器无法分析本地音频。' }[code]));
+      setAutoEditPhase('failed');
+    }
+  }, [en, id, meta, segments]);
+
+  const handleUndoAutoEdit = useCallback(() => {
+    if (autoEditPreviousSegments) setSegments(autoEditPreviousSegments);
+    clearAutoEditUndo();
+  }, [autoEditPreviousSegments, clearAutoEditUndo]);
+
+  const handleTimelineSegmentsChange = useCallback((next: TimeSegment[]) => {
+    clearAutoEditUndo();
+    setSegments(next.length ? next : segments);
+  }, [clearAutoEditUndo, segments]);
 
   // 保留段 → 同步进 config.segments（导出用）+ 去抖持久化到 recording.segments
   useEffect(() => {
@@ -177,6 +271,20 @@ export default function EditorRecordingPage(): JSX.Element {
   // 参数写入 recording，因此最终导出与预览使用完全相同的目标区域。
   const handleAutoZoomRegionChange = useCallback((zoomId: string, patch: Partial<Pick<AutoZoomSegment, 'scale' | 'cx' | 'cy'>>) => {
     setAutoZooms((current) => current.map((zoom) => zoom.id === zoomId ? { ...zoom, ...patch } : zoom));
+  }, []);
+
+  const handleLocalizedTrackReady = useCallback((track: LocalizedTrack) => {
+    setMeta((current) => current ? { ...current, localizedTrackId: track.id } : current);
+    setConfig((current) => ({ ...current, localizedTrackId: track.id, muteOriginalAudio: true }));
+  }, []);
+
+  const handleLocalizedTrackSelect = useCallback((track: LocalizedTrack | null) => {
+    setMeta((current) => current ? { ...current, localizedTrackId: track?.id } : current);
+    setConfig((current) => {
+      if (track) return { ...current, localizedTrackId: track.id, muteOriginalAudio: true };
+      const { localizedTrackId: _localizedTrackId, muteOriginalAudio: _muteOriginalAudio, ...rest } = current;
+      return rest;
+    });
   }, []);
 
   const handleDelete = useCallback(async () => {
@@ -205,7 +313,7 @@ export default function EditorRecordingPage(): JSX.Element {
     return (
       <Shell>
         <div className="grid flex-1 place-items-center" style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-          {en ? 'Loading recording…' : '加载录制…'}
+          {finalizing ? (en ? 'Finishing recording…' : '正在完成录制…') : (en ? 'Loading recording…' : '加载录制…')}
         </div>
       </Shell>
     );
@@ -238,6 +346,16 @@ export default function EditorRecordingPage(): JSX.Element {
 
   const tabContent = (() => {
     if (tab === 'captions') return isPro ? <SubtitlePanel open recordingId={id} /> : lockBlock('pro', en ? 'Captions are a Pro feature' : '字幕是 Pro 功能', en ? 'Generate accurate subtitles from your audio.' : '从音频生成精准字幕。');
+    if (tab === 'dubbing') return isMax ? (
+      <DubbingPanel
+        recordingId={id}
+        metadata={meta}
+        activeTrackId={config.localizedTrackId ?? meta.localizedTrackId}
+        en={en}
+        onTrackReady={handleLocalizedTrackReady}
+        onTrackSelect={handleLocalizedTrackSelect}
+      />
+    ) : lockBlock('max', en ? 'Dubbing is a Max feature' : '翻译配音是 Max 功能', en ? 'Generate English voice, English subtitles, and optional lip-sync for the camera bubble.' : '生成英文语音、英文字幕，并可为人像气泡做口型同步。');
     if (tab === 'outline') return isMax ? <HandoutPanel view="outline" recordingId={id} config={config} onJumpToTime={setPlayheadMs} /> : lockBlock('max', en ? 'Outline is a Max feature' : '大纲是 Max 功能', en ? 'Auto chapters with jump-to-time.' : '自动识别章节、点击跳转预览。');
     if (tab === 'handout') return isMax ? <HandoutPanel view="handout" recordingId={id} config={config} /> : lockBlock('max', en ? 'Handout is a Max feature' : '讲义是 Max 功能', en ? 'Markdown handout — download / copy.' : '生成 Markdown 讲义，可下载 / 复制。');
     return exportTab;
@@ -246,6 +364,7 @@ export default function EditorRecordingPage(): JSX.Element {
   const tabs: { id: Tab; label: string }[] = [
     { id: 'export', label: en ? 'Export' : '导出' },
     { id: 'captions', label: en ? 'Captions' : '字幕' },
+    { id: 'dubbing', label: en ? 'Dubbing' : '配音' },
     { id: 'outline', label: en ? 'Outline' : '大纲' },
     { id: 'handout', label: en ? 'Handout' : '讲义' },
   ];
@@ -309,14 +428,45 @@ export default function EditorRecordingPage(): JSX.Element {
               clips={segments}
               playheadMs={playheadMs}
               onScrub={setPlayheadMs}
-              onChange={(next) => setSegments(next.length ? next : segments)}
-              onReset={() => setSegments(normalizeSegments(undefined, meta.durationMs))}
+              onChange={handleTimelineSegmentsChange}
+              onReset={() => {
+                clearAutoEditUndo();
+                setSegments(normalizeSegments(undefined, meta.durationMs));
+              }}
               hasAudio={meta.hasAudio}
               hasCaptions={!!meta.subtitleSrt}
               autoZooms={autoZooms}
               onAutoZoomChange={setAutoZooms}
               selectedAutoZoomId={selectedAutoZoomId}
               onAutoZoomSelect={setSelectedAutoZoomId}
+              autoEdit={{
+                phase: autoEditPhase,
+                result: autoEditResult,
+                error: autoEditError,
+                onRun: handleAutoEdit,
+                onUndo: handleUndoAutoEdit,
+                labels: {
+                  autoEdit: en ? 'Apply ChatCut' : '套用 ChatCut',
+                  chatCut: en ? 'ChatCut scenes' : 'ChatCut 场景',
+                  lecture: en ? 'Lecture · keep pauses' : '讲解 · 保留停顿',
+                  walkthrough: en ? 'Walkthrough · balanced' : '演示 · 均衡节奏',
+                  shorts: en ? 'Short-form · concise' : '短内容 · 紧凑成片',
+                  timing: en ? 'Timing only' : '仅按节奏',
+                  gentle: en ? 'Gentle' : '轻柔',
+                  standard: en ? 'Standard' : '标准',
+                  tight: en ? 'Tight' : '紧凑',
+                  analyzing: en ? 'Analyzing…' : '分析中…',
+                  noAudio: en ? 'Record audio to use auto edit' : '录制音频后可使用自动剪辑',
+                  removed: (cuts, seconds) => en
+                    ? `${cuts} quiet gap${cuts === 1 ? '' : 's'} removed · ${seconds}s`
+                    : `已移除 ${cuts} 段静音 · ${seconds} 秒`,
+                  noCuts: en ? 'No long silence found' : '未发现可安全移除的长静音',
+                  sceneAware: (transitions: number, alignedCuts: number) => en
+                    ? `PySceneDetect · ${transitions} transition${transitions === 1 ? '' : 's'} found · ${alignedCuts} edge${alignedCuts === 1 ? '' : 's'} aligned`
+                    : `PySceneDetect · 发现 ${transitions} 个转场 · 对齐 ${alignedCuts} 个剪辑边界`,
+                  undo: en ? 'Undo' : '撤销',
+                },
+              }}
               labels={{
                 edit: en ? 'Edit' : '剪辑',
                 reset: en ? 'Reset' : '复原',
@@ -332,14 +482,8 @@ export default function EditorRecordingPage(): JSX.Element {
                 autoZoomHint: en
                   ? 'Drag onto the purple zoom lane, or click to add at the playhead'
                   : '拖入紫色放大轨道，或点击在播放头处添加',
+                editAutoZoomScale: en ? 'Edit zoom scale' : '编辑放大倍率',
               }}
-            />
-            <AutoZoomPanel
-              durationMs={meta.durationMs}
-              autoZooms={autoZooms}
-              selectedId={selectedAutoZoomId}
-              onChange={setAutoZooms}
-              en={en}
             />
           </div>
 

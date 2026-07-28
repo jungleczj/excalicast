@@ -2,6 +2,11 @@ import { expect, test } from '@playwright/test';
 
 const baseOrigin = new URL(process.env.E2E_BASE_URL ?? 'http://localhost:3002').origin;
 
+function addChromeInset(size: string, inset: { width: number; height: number }): string {
+  const [width, height] = size.split('x').map((part) => Number(part));
+  return `${width + inset.width}x${height + inset.height}`;
+}
+
 test.use({
   locale: 'zh-CN',
   extraHTTPHeaders: {
@@ -32,7 +37,7 @@ test.beforeEach(async ({ context, page }) => {
 
 test('recording setup can choose display capture sources', async ({ page }) => {
   await page.goto('/app');
-  await page.getByRole('button', { name: /开始录制/ }).first().click();
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
   await expect(page.getByText('录制来源')).toBeVisible();
   await page.getByRole('button', { name: /窗口/ }).click();
   await expect(page.getByRole('button', { name: /窗口/ })).toHaveAttribute('aria-pressed', 'true');
@@ -63,10 +68,14 @@ test('display capture does not request fixed 1080p dimensions', async ({ page })
   });
 
   await page.goto('/app');
-  await page.getByRole('button', { name: /开始录制/ }).first().click();
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
   await page.getByRole('button', { name: /窗口/ }).click();
-  await page.getByRole('button', { name: /开始（3 秒倒计时）/ }).click();
+  await page.getByRole('button', { name: /下一步：取景/ }).click();
 
+  await expect.poll(() => page.evaluate(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (window as any).__lastDisplayOptions ?? null;
+  })).not.toBeNull();
   const options = await page.evaluate(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (window as any).__lastDisplayOptions as {
@@ -79,6 +88,39 @@ test('display capture does not request fixed 1080p dimensions', async ({ page })
   expect(options.video?.frameRate).toEqual({ ideal: 60, max: 60 });
   expect((options as { selfBrowserSurface?: string }).selfBrowserSurface).toBe('exclude');
   expect((options as { surfaceSwitching?: string }).surfaceSwitching).toBe('exclude');
+});
+
+test('non-whiteboard sources default to their native source frame without an aspect crop overlay', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getDisplayMedia: async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (window as any).__sourceFrameAcquired = true;
+          const canvas = document.createElement('canvas');
+          canvas.width = 1366;
+          canvas.height = 768;
+          const stream = canvas.captureStream(30);
+          const [track] = stream.getVideoTracks();
+          if (track) track.getSettings = () => ({ width: 1366, height: 768, frameRate: 30 });
+          return stream;
+        },
+        getUserMedia: async () => new MediaStream(),
+      },
+    });
+  });
+
+  await page.goto('/app');
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
+  await page.getByRole('button', { name: /窗口/ }).click();
+  await page.getByRole('button', { name: /下一步：取景/ }).click();
+
+  await expect.poll(() => page.evaluate(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (window as any).__sourceFrameAcquired === true;
+  })).toBe(true);
+  await expect(page.locator('.crop-craft-overlay')).toHaveCount(0);
 });
 
 test('window capture never mounts an in-page live preview that could recursively capture itself', async ({ page }) => {
@@ -98,14 +140,14 @@ test('window capture never mounts an in-page live preview that could recursively
   });
 
   await page.goto('/app');
-  await page.getByRole('button', { name: /开始录制/ }).first().click();
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
   await page.getByRole('button', { name: /窗口/ }).click();
-  await page.getByRole('button', { name: /开始（3 秒倒计时）/ }).click();
+  await page.getByRole('button', { name: /下一步：取景/ }).click();
 
   await expect(page.getByTestId('display-source-live-preview')).toHaveCount(0);
 });
 
-test('selected area stays adjustable before recording and remains framed while recording', async ({ page }) => {
+test('selected area stays adjustable before recording and removes capture overlays before countdown', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
@@ -125,9 +167,9 @@ test('selected area stays adjustable before recording and remains framed while r
   });
 
   await page.goto('/app');
-  await page.getByRole('button', { name: /开始录制/ }).first().click();
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
   await page.getByRole('button', { name: /选定区域/ }).click();
-  await page.getByRole('button', { name: /开始（3 秒倒计时）/ }).click();
+  await page.getByRole('button', { name: /下一步：取景/ }).click();
 
   const frame = page.getByTestId('display-source-crop-frame');
   const livePreview = page.getByTestId('display-source-live-preview');
@@ -142,10 +184,83 @@ test('selected area stays adjustable before recording and remains framed while r
   await page.mouse.up();
   await expect(frame).not.toHaveAttribute('data-crop', before ?? '');
 
-  await page.getByRole('button', { name: /^开始录制$/ }).click();
-  // 倒计时一开始隐藏 live preview，避免录当前 tab/window 时回灌为递归画面。
+  await page.getByRole('button', { name: /^开始倒计时$/ }).click();
+  // 倒计时一开始隐藏 live preview 和选区辅助框，避免 display stream 录进递归画面/蓝色框。
   await expect(livePreview).toBeHidden();
-  await expect(frame).toHaveAttribute('data-interactive', 'false', { timeout: 7_000 });
+  await expect(frame).toHaveCount(0, { timeout: 7_000 });
+});
+
+test('desktop capture hides the in-page camera bubble before recording starts', async ({ page }) => {
+  await page.addInitScript(() => {
+    class InspectingMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+      state: RecordingState = 'inactive';
+      ondataavailable: ((event: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+      constructor(readonly stream: MediaStream, readonly options?: MediaRecorderOptions) {
+        super();
+      }
+      start() {
+        this.state = 'recording';
+        const [track] = this.stream.getVideoTracks();
+        const settings = track?.getSettings?.() ?? {};
+        if (settings.width === 1280 && settings.height === 720) {
+          (window as any).__displayRecorderCameraBubbleCountAtStart = document.querySelectorAll('[data-testid="camera-bubble"]').length;
+        }
+        window.setTimeout(() => this.ondataavailable?.({ data: new Blob(['chunk'], { type: this.options?.mimeType ?? 'video/webm' }) }), 20);
+      }
+      stop() {
+        if (this.state === 'inactive') return;
+        this.state = 'inactive';
+        this.onstop?.();
+        this.dispatchEvent(new Event('stop'));
+      }
+      pause() { if (this.state === 'recording') this.state = 'paused'; }
+      resume() { if (this.state === 'paused') this.state = 'recording'; }
+      requestData() {
+        this.ondataavailable?.({ data: new Blob(['flush'], { type: this.options?.mimeType ?? 'video/webm' }) });
+      }
+    }
+    Object.defineProperty(window, 'MediaRecorder', {
+      configurable: true,
+      value: InspectingMediaRecorder,
+    });
+    Object.defineProperty(window, 'documentPictureInPicture', {
+      configurable: true,
+      value: { requestWindow: async () => window },
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getDisplayMedia: async () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 1280;
+          canvas.height = 720;
+          const stream = canvas.captureStream(30);
+          const [track] = stream.getVideoTracks();
+          if (track) track.getSettings = () => ({ width: 1280, height: 720, frameRate: 30 });
+          return stream;
+        },
+        getUserMedia: async () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 320;
+          canvas.height = 320;
+          return canvas.captureStream(24);
+        },
+      },
+    });
+  });
+
+  await page.goto('/app');
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
+  await page.getByRole('button', { name: /整个桌面/ }).click();
+  await page.getByRole('radio', { name: /打开摄像头/ }).click();
+  await page.getByRole('button', { name: /下一步：取景/ }).click();
+  await expect(page.getByTestId('camera-bubble')).toBeVisible();
+
+  await page.getByTestId('desktop-framing-controls').getByRole('button', { name: /^开始倒计时$/ }).click();
+  await expect(page.getByTestId('camera-bubble')).toHaveCount(0, { timeout: 7_000 });
+  await expect.poll(() => page.evaluate(() => (window as any).__displayRecorderCameraBubbleCountAtStart), { timeout: 9_000 }).toBe(0);
 });
 
 test('desktop capture requests a detached recording controller before countdown', async ({ page }) => {
@@ -184,10 +299,9 @@ test('desktop capture requests a detached recording controller before countdown'
   });
 
   await page.goto('/app');
-  await page.getByRole('button', { name: /开始录制/ }).first().click();
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
   await page.getByRole('button', { name: /整个桌面/ }).click();
-  await page.getByRole('button', { name: /开始（3 秒倒计时）/ }).click();
-  await page.getByRole('button', { name: /^开始录制$/ }).click();
+  await page.getByRole('button', { name: /下一步：取景/ }).click();
 
   await expect.poll(() => page.evaluate(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -202,18 +316,74 @@ test('desktop capture requests a detached recording controller before countdown'
     disallowReturnToOpener: true,
     preferInitialWindowPlacement: true,
   });
+  await expect(page.getByTestId('desktop-framing-controls')).toBeVisible();
+  await expect(page.getByTestId('framing-bar').getByText('取景中')).toBeVisible();
+  await expect(page.getByTestId('framing-bar-hint')).toHaveCount(0);
+
+  await page.getByRole('button', { name: /^开始倒计时$/ }).click();
+  await expect(page.getByTestId('desktop-countdown-controls')).toBeVisible();
+  await expect(page.getByTestId('desktop-countdown-controls')).toHaveAttribute('data-countdown-mode', 'fullscreen');
+  await expect.poll(() => page.evaluate(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (window as any).__desktopControlRequests;
+  })).toBe(2);
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.recordingControlsWindow)).toBe('countdown-fullscreen');
+  const countdownTarget = await page.evaluate(() => document.documentElement.dataset.recordingControlsTargetSize ?? '');
+  const [countdownWidth, countdownHeight] = countdownTarget.split('x').map((part) => Number(part));
+  expect(countdownWidth).toBeGreaterThanOrEqual(960);
+  expect(countdownHeight).toBeGreaterThanOrEqual(640);
 
   // 测试桩把 Document PiP host 指到当前 document，因此可直接验证脱离主录制条的控制动作。
+  const dock = page.getByTestId('desktop-recording-controls-dock');
+  await expect(dock).toBeVisible({ timeout: 9_000 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.recordingControlsWindow)).toBe('docked');
   const pause = page.getByRole('button', { name: 'Pause recording' });
-  await expect(pause).toBeEnabled({ timeout: 9_000 });
+  await expect(pause).toBeEnabled();
   await pause.click();
   const resume = page.getByRole('button', { name: 'Resume recording' });
   await expect(resume).toBeEnabled();
   await resume.click();
   await expect(pause).toBeEnabled();
+});
 
-  await page.getByRole('button', { name: 'Stop recording' }).click({ force: true });
-  await page.waitForURL(/\/zh\/export\//, { timeout: 12_000 });
+test('window capture also moves framing and recording controls outside the captured page', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'documentPictureInPicture', {
+      configurable: true,
+      value: { requestWindow: async () => window },
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getDisplayMedia: async () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 1280;
+          canvas.height = 720;
+          const stream = canvas.captureStream(30);
+          const [track] = stream.getVideoTracks();
+          if (track) track.getSettings = () => ({ width: 1280, height: 720, frameRate: 30 });
+          return stream;
+        },
+        getUserMedia: async () => new MediaStream(),
+      },
+    });
+  });
+
+  await page.goto('/app');
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
+  await page.getByRole('button', { name: /窗口/ }).click();
+  await page.getByRole('button', { name: /下一步：取景/ }).click();
+
+  await expect(page.getByTestId('desktop-framing-controls')).toBeVisible();
+  await page.getByTestId('desktop-framing-controls').getByRole('button', { name: /^开始倒计时$/ }).click();
+  await expect(page.getByTestId('desktop-countdown-controls')).toBeVisible();
+  await expect(page.getByTestId('desktop-countdown-controls')).toHaveAttribute('data-countdown-mode', 'fullscreen');
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.recordingControlsWindow)).toBe('countdown-fullscreen');
+
+  const dock = page.getByTestId('desktop-recording-controls-dock');
+  await expect(dock.getByRole('button', { name: 'Pause recording' })).toBeVisible({ timeout: 9_000 });
+  await expect(dock.getByRole('button', { name: 'Stop recording' })).toBeVisible();
+  await expect(page.getByTestId('in-page-recording-bar')).toHaveCount(0);
 });
 
 test('stopping drains the recorder before the detached controller closes', async ({ page }) => {
@@ -258,22 +428,53 @@ test('stopping drains the recorder before the detached controller closes', async
   });
 
   await page.goto('/app');
-  await page.getByRole('button', { name: /开始录制/ }).first().click();
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
   await page.getByRole('button', { name: /整个桌面/ }).click();
-  await page.getByRole('button', { name: /开始（3 秒倒计时）/ }).click();
-  await page.getByRole('button', { name: /^开始录制$/ }).click();
+  await page.getByRole('button', { name: /下一步：取景/ }).click();
+  await page.getByRole('button', { name: /^开始倒计时$/ }).click();
 
-  const stop = page.getByRole('button', { name: 'Stop recording' });
+  const stop = page.getByTestId('desktop-recording-controls-dock').getByRole('button', { name: 'Stop recording' });
   await expect(stop).toBeEnabled({ timeout: 9_000 });
-  await stop.click({ force: true });
-  await page.waitForURL(/\/zh\/export\//, { timeout: 12_000 });
+  await stop.evaluate((element: HTMLElement) => element.click());
+  await expect(page).toHaveURL(/\/zh\/export\//, { timeout: 12_000 });
   const order = await page.evaluate(() => JSON.parse(window.localStorage.getItem('excalicast.test.controller-stop-order') ?? '[]') as string[]);
   expect(order.indexOf('media-recorder-stop')).toBeGreaterThanOrEqual(0);
   expect(order.indexOf('controller-close')).toBeGreaterThan(order.indexOf('media-recorder-stop'));
 });
 
-test('display recording moves the complete toolbar outside the captured page', async ({ page }) => {
+test('stop navigates away from Saving recording within one second while media finalizes', async ({ page }) => {
   await page.addInitScript(() => {
+    class SlowMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+      state: RecordingState = 'inactive';
+      ondataavailable: ((event: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+      constructor(readonly stream: MediaStream, readonly options?: MediaRecorderOptions) {
+        super();
+      }
+      start() {
+        this.state = 'recording';
+        window.setTimeout(() => this.ondataavailable?.({ data: new Blob(['first'], { type: this.options?.mimeType ?? 'video/webm' }) }), 20);
+      }
+      stop() {
+        if (this.state === 'inactive') return;
+        this.state = 'inactive';
+        window.setTimeout(() => {
+          this.ondataavailable?.({ data: new Blob(['final'], { type: this.options?.mimeType ?? 'video/webm' }) });
+          this.onstop?.();
+          this.dispatchEvent(new Event('stop'));
+        }, 1500);
+      }
+      pause() { if (this.state === 'recording') this.state = 'paused'; }
+      resume() { if (this.state === 'paused') this.state = 'recording'; }
+      requestData() {
+        this.ondataavailable?.({ data: new Blob(['flush'], { type: this.options?.mimeType ?? 'video/webm' }) });
+      }
+    }
+    Object.defineProperty(window, 'MediaRecorder', {
+      configurable: true,
+      value: SlowMediaRecorder,
+    });
     Object.defineProperty(window, 'documentPictureInPicture', {
       configurable: true,
       value: { requestWindow: async () => window },
@@ -296,37 +497,323 @@ test('display recording moves the complete toolbar outside the captured page', a
   });
 
   await page.goto('/app');
-  await page.getByRole('button', { name: /开始录制/ }).first().click();
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
   await page.getByRole('button', { name: /当前标签页/ }).click();
-  await page.getByRole('button', { name: /开始（3 秒倒计时）/ }).click();
-  await page.getByRole('button', { name: /^开始录制$/ }).click();
+  await page.getByRole('button', { name: /下一步：取景/ }).click();
+  await page.getByRole('button', { name: /^开始倒计时$/ }).click();
 
-  const bar = page.getByTestId('desktop-recording-controls').getByTestId('recording-bar');
-  await expect(bar).toBeVisible({ timeout: 7_000 });
-  await expect.poll(() => bar.evaluate((element) => {
-    const root = getComputedStyle(element);
-    const pause = element.querySelector('button[aria-label="Pause recording"]');
-    return {
-      borderRadius: root.borderRadius,
-      background: root.backgroundColor,
-      pauseBackground: pause ? getComputedStyle(pause).backgroundColor : null,
-      pauseShadow: pause ? getComputedStyle(pause).boxShadow : null,
-    };
-  })).toEqual({
-    borderRadius: '999px',
-    background: 'rgba(18, 19, 20, 0.93)',
-    pauseBackground: 'rgba(0, 0, 0, 0)',
-    pauseShadow: 'none',
+  const stop = page.getByRole('button', { name: 'Stop recording' });
+  await expect(stop).toBeEnabled({ timeout: 9_000 });
+  const started = Date.now();
+  await stop.click({ force: true });
+  await expect.poll(() => page.evaluate(() => window.location.pathname), { timeout: 1000 }).toContain('/zh/export/');
+  expect(Date.now() - started).toBeLessThan(1000);
+});
+
+test('export leaves Finishing recording when MediaRecorder never emits stop', async ({ page }) => {
+  await page.addInitScript(() => {
+    class HangingMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+      state: RecordingState = 'inactive';
+      ondataavailable: ((event: { data: Blob }) => void) | null = null;
+      onstop: (() => void) | null = null;
+      constructor(readonly stream: MediaStream, readonly options?: MediaRecorderOptions) {
+        super();
+      }
+      start() {
+        this.state = 'recording';
+        window.setTimeout(() => this.ondataavailable?.({ data: new Blob(['first'], { type: this.options?.mimeType ?? 'video/webm' }) }), 20);
+      }
+      stop() {
+        if (this.state === 'inactive') return;
+        this.state = 'inactive';
+        // Browser bug simulation: no onstop callback and no Event('stop').
+      }
+      pause() { if (this.state === 'recording') this.state = 'paused'; }
+      resume() { if (this.state === 'paused') this.state = 'recording'; }
+      requestData() {
+        this.ondataavailable?.({ data: new Blob(['flush'], { type: this.options?.mimeType ?? 'video/webm' }) });
+      }
+    }
+    Object.defineProperty(window, 'MediaRecorder', {
+      configurable: true,
+      value: HangingMediaRecorder,
+    });
+    Object.defineProperty(window, 'documentPictureInPicture', {
+      configurable: true,
+      value: { requestWindow: async () => window },
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getDisplayMedia: async () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 1280;
+          canvas.height = 720;
+          const stream = canvas.captureStream(30);
+          const [track] = stream.getVideoTracks();
+          if (track) track.getSettings = () => ({ width: 1280, height: 720, frameRate: 30 });
+          return stream;
+        },
+        getUserMedia: async () => new MediaStream(),
+      },
+    });
   });
-  await expect(page.getByTestId('in-page-recording-bar')).toHaveCount(0);
 
-  // 独立 Document PiP 控制条在短暂确认后缩为右侧 REC 边签；鼠标回到边签时
-  // 立即恢复完整工具条，避免桌面/窗口录制时长期遮挡被录内容。
+  await page.goto('/app');
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
+  await page.getByRole('button', { name: /当前标签页/ }).click();
+  await page.getByRole('button', { name: /下一步：取景/ }).click();
+  await page.getByRole('button', { name: /^开始倒计时$/ }).click();
+
+  const stop = page.getByRole('button', { name: 'Stop recording' });
+  await expect(stop).toBeEnabled({ timeout: 9_000 });
+  await stop.click({ force: true });
+  await expect.poll(() => page.evaluate(() => window.location.pathname), { timeout: 1000 }).toContain('/zh/export/');
+  await expect(page.getByText('正在完成录制…')).toHaveCount(0, { timeout: 5_000 });
+});
+
+test('display recording moves the complete toolbar outside the captured page', async ({ page }) => {
+  test.setTimeout(60_000);
+  const chromeInset = { width: 18, height: 40 };
+  await page.addInitScript(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__desktopControlSizes = [] as string[];
+    const chromeInset = { width: 18, height: 40 };
+    let controlWidth = 560 + chromeInset.width;
+    let controlHeight = 64 + chromeInset.height;
+    const host = {
+      get document() { return window.document; },
+      get closed() { return false; },
+      get outerWidth() { return controlWidth; },
+      get outerHeight() { return controlHeight; },
+      get innerWidth() { return Math.max(1, controlWidth - chromeInset.width); },
+      get innerHeight() { return Math.max(1, controlHeight - chromeInset.height); },
+      resizeTo: (width: number, height: number) => {
+        controlWidth = width;
+        controlHeight = height;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).__desktopControlSizes.push(`${width}x${height}`);
+      },
+      addEventListener: window.addEventListener.bind(window),
+      close: () => {},
+    } as unknown as Window;
+    Object.defineProperty(window, 'documentPictureInPicture', {
+      configurable: true,
+      value: { requestWindow: async () => host },
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getDisplayMedia: async () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 1280;
+          canvas.height = 720;
+          const stream = canvas.captureStream(30);
+          const [track] = stream.getVideoTracks();
+          if (track) track.getSettings = () => ({ width: 1280, height: 720, frameRate: 30 });
+          return stream;
+        },
+        getUserMedia: async () => new MediaStream(),
+      },
+    });
+  });
+
+  await page.goto('/app');
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
+  await page.getByRole('button', { name: /整个桌面/ }).click();
+  await page.getByRole('button', { name: /下一步：取景/ }).click();
+  await page.getByRole('button', { name: /^开始倒计时$/ }).click();
+
   const controller = page.getByTestId('desktop-recording-controls');
-  await expect(controller).toHaveAttribute('data-docked', 'true', { timeout: 4_000 });
+  await expect(controller).toHaveAttribute('data-docked', 'true', { timeout: 7_000 });
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).alignItems)).toBe('flex-end');
   const dock = page.getByTestId('desktop-recording-controls-dock');
   await expect(dock).toBeVisible();
-  await dock.hover();
+  await expect(dock.getByRole('button', { name: 'Pause recording' })).toBeVisible();
+  await expect(dock.getByRole('button', { name: 'Stop recording' })).toBeVisible();
+  const dockSize = await dock.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return `${Math.ceil(rect.width)}x${Math.ceil(rect.height)}`;
+  });
+  const [dockTargetWidth, dockTargetHeight] = dockSize.split('x').map((part) => Number(part));
+  expect(dockTargetWidth).toBeGreaterThan(0);
+  expect(dockTargetHeight).toBeLessThanOrEqual(50);
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.recordingControlsTargetSize)).toBe(dockSize);
+  const dockOuterSize = await page.evaluate(() => document.documentElement.dataset.recordingControlsOuterTargetSize);
+  const expectedDockOuterSize = addChromeInset(dockSize, chromeInset);
+  expect(dockOuterSize).toBe(expectedDockOuterSize);
+  await expect.poll(() => page.evaluate((size) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sizes = (window as any).__desktopControlSizes as string[];
+    return sizes.includes(size);
+  }, expectedDockOuterSize)).toBe(true);
+
+  await page.evaluate(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__desktopControlSizes = [] as string[];
+  });
+  await dock.evaluate((element) => {
+    element.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+  });
+  await page.waitForTimeout(600);
+  await expect(controller).toHaveAttribute('data-docked', 'true');
+  await expect.poll(() => page.evaluate(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return ((window as any).__desktopControlSizes as string[]).length;
+  })).toBe(0);
+
+  await dock.getByRole('button', { name: 'Show recording controls' }).evaluate((element: HTMLElement) => element.click());
   await expect(controller).toHaveAttribute('data-docked', 'false');
+
+  const bar = controller.getByTestId('recording-bar');
   await expect(bar).toBeVisible();
+  await expect.poll(() => bar.evaluate((element) => getComputedStyle(element).borderRadius)).toBe('999px');
+  await expect(bar.getByRole('button', { name: 'Pause recording' })).toBeVisible();
+  await expect(bar.getByRole('button', { name: 'Stop recording' })).toBeVisible();
+  await expect(page.getByTestId('in-page-recording-bar')).toHaveCount(0);
+
+  // 独立 Document PiP 控制条根据真实内容尺寸动态恢复，外层窗口不再保留固定留白。
+  // 展开态的完整可见内容 = RecordingBar + 右侧收起按钮，因此量 controller 总尺寸。
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.recordingControlsTargetSize ?? '')).not.toBe(dockSize);
+  const fullTargetSize = await page.evaluate(() => document.documentElement.dataset.recordingControlsTargetSize ?? '');
+  const [fullTargetWidth, fullTargetHeight] = fullTargetSize.split('x').map((part) => Number(part));
+  expect(fullTargetWidth).toBeGreaterThan(dockTargetWidth);
+  expect(fullTargetHeight).toBeGreaterThanOrEqual(dockTargetHeight);
+  const fullOuterSize = await page.evaluate(() => document.documentElement.dataset.recordingControlsOuterTargetSize);
+  const expectedFullOuterSize = addChromeInset(fullTargetSize, chromeInset);
+  expect(fullOuterSize).toBe(expectedFullOuterSize);
+  await expect.poll(() => page.evaluate((size) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sizes = (window as any).__desktopControlSizes as string[];
+    return sizes.includes(size);
+  }, expectedFullOuterSize)).toBe(true);
+
+  await page.evaluate(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__desktopControlSizes = [] as string[];
+  });
+  await controller.getByRole('button', { name: 'Collapse recording controls' }).evaluate((element: HTMLElement) => element.click());
+  await expect(page.getByTestId('desktop-recording-controls-dock')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.recordingControlsTargetSize)).toBe(dockSize);
+  await expect.poll(() => page.evaluate((size) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sizes = (window as any).__desktopControlSizes as string[];
+    return sizes.includes(size);
+  }, expectedDockOuterSize)).toBe(true);
+});
+
+test('display recording keeps controls usable when the PiP host rejects resize', async ({ page }) => {
+  await page.addInitScript(() => {
+    const host = {
+      get document() { return window.document; },
+      get closed() { return false; },
+      get outerWidth() { return 560; },
+      get outerHeight() { return 64; },
+      get innerWidth() { return 560; },
+      get innerHeight() { return 64; },
+      resizeTo: () => {
+        throw new Error('resize rejected by browser');
+      },
+      addEventListener: window.addEventListener.bind(window),
+      close: () => {},
+    } as unknown as Window;
+    Object.defineProperty(window, 'documentPictureInPicture', {
+      configurable: true,
+      value: { requestWindow: async () => host },
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getDisplayMedia: async () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 1280;
+          canvas.height = 720;
+          const stream = canvas.captureStream(30);
+          const [track] = stream.getVideoTracks();
+          if (track) track.getSettings = () => ({ width: 1280, height: 720, frameRate: 30 });
+          return stream;
+        },
+        getUserMedia: async () => new MediaStream(),
+      },
+    });
+  });
+
+  await page.goto('/app');
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
+  await page.getByRole('button', { name: /整个桌面/ }).click();
+  await page.getByRole('button', { name: /下一步：取景/ }).click();
+  await page.getByRole('button', { name: /^开始倒计时$/ }).click();
+
+  const controller = page.getByTestId('desktop-recording-controls');
+  await expect(controller).toHaveAttribute('data-docked', 'true', { timeout: 7_000 });
+  await expect(controller).toHaveAttribute('data-resize-status', 'failed');
+
+  const dock = page.getByTestId('desktop-recording-controls-dock');
+  await expect(page.getByTestId('desktop-recording-controls-resize-note')).toHaveCount(0);
+  await expect(dock.getByRole('button', { name: 'Pause recording' })).toBeVisible();
+  await expect(dock.getByRole('button', { name: 'Stop recording' })).toBeVisible();
+  await dock.evaluate((element) => {
+    element.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+  });
+  await expect(controller).toHaveAttribute('data-docked', 'true');
+  await dock.getByRole('button', { name: 'Show recording controls' }).evaluate((element: HTMLElement) => element.click());
+  await expect(controller).toHaveAttribute('data-docked', 'false');
+});
+
+test('current tab keeps the original in-page framing and countdown path', async ({ page }) => {
+  await page.addInitScript(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__desktopControlRequests = 0;
+    const host = {
+      get document() { return window.document; },
+      get closed() { return false; },
+      addEventListener: window.addEventListener.bind(window),
+      close: () => {},
+    } as unknown as Window;
+    Object.defineProperty(window, 'documentPictureInPicture', {
+      configurable: true,
+      value: {
+        requestWindow: async () => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (window as any).__desktopControlRequests += 1;
+          return host;
+        },
+      },
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getDisplayMedia: async () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 1280;
+          canvas.height = 720;
+          const stream = canvas.captureStream(30);
+          const [track] = stream.getVideoTracks();
+          if (track) track.getSettings = () => ({ width: 1280, height: 720, frameRate: 30 });
+          return stream;
+        },
+        getUserMedia: async () => new MediaStream(),
+      },
+    });
+  });
+
+  await page.goto('/app');
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
+  await page.getByRole('button', { name: /当前标签页/ }).click();
+  await page.getByRole('button', { name: /下一步：取景/ }).click();
+
+  await expect(page.getByTestId('desktop-framing-controls')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (window as any).__desktopControlRequests;
+  })).toBe(0);
+
+  await page.getByRole('button', { name: /^开始倒计时$/ }).click();
+  await expect(page.getByTestId('desktop-countdown-controls')).toHaveCount(0);
+  await expect(page.locator('.workspace-craft-countdown').first()).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (window as any).__desktopControlRequests;
+  })).toBe(1);
 });

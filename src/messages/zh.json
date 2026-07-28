@@ -388,7 +388,7 @@
     "welcome": "欢迎",
     "title": "三步开始录制",
     "step1": "在画板上随便画点东西——或从模板开始。",
-    "step2": "点红色 ● 开始按钮，录制画板 + 语音。",
+    "step2": "点「新建录制」完成设置，确认取景后开始倒计时。",
     "step3": "停止后选画幅比例，导出你的 MP4。",
     "tipIsolation": "其他窗口、通知、甚至最小化都毁不掉录制——我们采集的是画板，不是你的屏幕。",
     "startDrawing": "开始画吧",
@@ -491,9 +491,10 @@
     "dragToMove": "拖动以移动",
     "loadingWhiteboard": "加载白板…",
     "libraryToggle": "模板库",
-    "framingHint": "拖动调整裁切框，确认后开始",
-    "framingStart": "开始录制",
-    "framingCancel": "取消",
+    "framingReady": "取景中",
+    "framingHint": "调整裁切框/摄像头，确认后进入 3 秒倒计时",
+    "framingStart": "开始倒计时",
+    "framingCancel": "取消准备",
     "framingCameraOutside": "请先把摄像头气泡移到裁切框内再开始。"
   },
   "libraryDrawer": {
@@ -516,7 +517,7 @@
   "recordingBar": {
     "cameraOnTooltip": "摄像头已开启 · 点击关闭",
     "cameraOffTooltip": "摄像头已关闭 · 点击开启",
-    "start": "开始录制",
+    "start": "新建录制",
     "fromTemplate": "从模板开始",
     "pause": "暂停",
     "resume": "继续",
@@ -525,6 +526,11 @@
     "processing": "正在保存录制…",
     "rec": "REC",
     "paused": "PAUSED",
+    "mic": "麦克风",
+    "camera": "摄像头",
+    "laser": "激光笔",
+    "zoom": "缩放",
+    "teleprompter": "提词器",
     "micTooltip": "麦克风",
     "cameraTooltip": "摄像头",
     "muteAudio": "静音麦克风（录制继续，仅这段无声）",
@@ -540,7 +546,7 @@
     "teleprompterOff": "提词器 · 粘贴讲稿自动滚动（不进录制）"
   },
   "recordingSetup": {
-    "step": "第 1 步 / 共 1 步 — 录制前准备",
+    "step": "第 1 步 / 共 2 步 — 录制设置",
     "title": "新建录制",
     "close": "关闭",
     "cropLocked": "已锁定裁切",
@@ -553,7 +559,7 @@
         "desc": "只记录画板讲解"
       },
       "current_tab": {
-        "title": "本标签页",
+        "title": "当前标签页",
         "desc": "浏览器控制授权"
       },
       "window": {
@@ -572,6 +578,7 @@
     "background": {
       "title": "视频背景",
       "subtitle": "用于最终视频画幅，也可在导出页继续调整。",
+      "preview": "实时预览",
       "none": "无背景",
       "customColor": "自定义颜色",
       "tones": {
@@ -603,6 +610,11 @@
     "camera": {
       "title": "摄像头气泡",
       "subtitle": "录制时把人像叠加在画布上。",
+      "decisionLabel": "是否在本次录制中打开摄像头",
+      "enableTitle": "打开摄像头",
+      "enableDescription": "将人像放入录制画面",
+      "skipTitle": "暂不打开",
+      "skipDescription": "只录制画面与声音",
       "size": "尺寸 · {px}px",
       "shape": "形状",
       "shapeCircle": "圆形",
@@ -619,7 +631,7 @@
     "footer": {
       "local": "全程本地 · 永不上传",
       "cancel": "取消",
-      "start": "开始（{sec} 秒倒计时）"
+      "start": "下一步：取景"
     },
     "hint": {
       "16:9": "YouTube · B站 · Zoom",
@@ -704,6 +716,8 @@
     "watermarkBadge": "👁️ 含水印预览",
     "cleanBadge": "✓ 干净导出",
     "renderingTag": "渲染中…",
+    "hideSelectionOverlays": "隐藏选框",
+    "showSelectionOverlays": "显示选框",
     "previewFailed": "预览失败：{message}",
     "generating": "正在生成视频",
     "phase": {

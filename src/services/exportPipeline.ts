@@ -1,7 +1,7 @@
 'use client';
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
+import { getLocalizedTrack, getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
 import {
   cropRectForAspect,
   cropRectForSnapshot,
@@ -569,6 +569,11 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   opts.onProgress?.(0.05);
   const { metadata, snapshots, audioBlob, cameraBlob, screenBlob, cameraEvents, laserEvents, binaryFiles } = await loadFullRecording(opts.recordingId);
   opts.onProgress?.(0.08);
+  const localizedTrack = opts.localizedTrackId ? await getLocalizedTrack(opts.localizedTrackId) : undefined;
+  const useLocalizedTrack = !!localizedTrack && opts.muteOriginalAudio !== false;
+  const effectiveAudioBlob = useLocalizedTrack ? localizedTrack.audioBlob : audioBlob;
+  const effectiveCameraBlob = useLocalizedTrack && localizedTrack.cameraBlob ? localizedTrack.cameraBlob : cameraBlob;
+  const effectiveSubtitleSrt = useLocalizedTrack ? localizedTrack.translatedSrt : metadata.subtitleSrt;
   // ffmpeg 仅在兜底路径才加载（WebCodecs 快路径不需要）。
 
   const preset = ASPECT_PRESETS[opts.aspectRatio];
@@ -591,10 +596,10 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   for (const bf of binaryFiles) filesForExport[bf.fileId] = bf.data;
 
   // 字幕与水印：在帧画布上直接绘制（不再走 ffmpeg overlay 滤镜）
-  const burnSubs = (opts.burnSubtitles ?? true) && !!metadata.subtitleSrt;
-  const cues = burnSubs ? compileSubtitles(metadata.subtitleSrt) : [];
+  const burnSubs = (opts.burnSubtitles ?? true) && !!effectiveSubtitleSrt;
+  const cues = burnSubs && effectiveSubtitleSrt ? compileSubtitles(effectiveSubtitleSrt) : [];
   // 水印开启 + 摄像头存在时，水印改放左下角避免与人像气泡视觉打架
-  const watermarkPos: 'bottom-right' | 'bottom-left' = cameraBlob ? 'bottom-left' : 'bottom-right';
+  const watermarkPos: 'bottom-right' | 'bottom-left' = effectiveCameraBlob ? 'bottom-left' : 'bottom-right';
 
   // 工作区 UI 外壳 —— 若录制时捕获到了 shell 且 toggle 开启，叠加到画幅上方。
   // 注意：输出尺寸恒为 picker 选定的比例。shell 与画幅比例不一致时按 cover 缩放裁切。
@@ -641,7 +646,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 仍会创建独立 VideoFrame，因此分辨率、帧率和用户选择的画质都完全不变。
   const canReuseFinalFrame = laserEvents.length === 0
     && !screenBlob
-    && !cameraBlob
+    && !effectiveCameraBlob
     && !(opts.autoZooms?.length);
   let lastFinalSig: string | null = null;
   let lastFinalCanvas: HTMLCanvasElement | null = null;
@@ -664,7 +669,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
 
   // 字幕分页：用常驻测量 ctx（导出字体/尺寸恒定）算当前页索引，供去重签名使用，
   // 否则同一 cue 内不同分页的相邻帧会被误判相同而复用 → 分页卡住不翻页。
-  const subLayout = subtitleLayout(outputW, outputH, cameraBlob ? 0.3 : 0);
+  const subLayout = subtitleLayout(outputW, outputH, effectiveCameraBlob ? 0.3 : 0);
   const subMeasureCtx = document.createElement('canvas').getContext('2d');
   if (subMeasureCtx) subMeasureCtx.font = subLayout.fontSpec;
   const subPagesCache = new Map<number, number>(); // cue.startMs → pageCount
@@ -714,7 +719,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       }
       if (cues.length > 0) {
         drawSubtitle(foregroundCtx, foreground.width, foreground.height, cues, t, {
-          reservedRightFraction: cameraBlob ? 0.3 : 0,
+          reservedRightFraction: effectiveCameraBlob ? 0.3 : 0,
         });
       }
       if (compositeCamera && cameraSource) {
@@ -876,8 +881,8 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // the proven ffmpeg fallback is selected rather than failing after export has started.
   if (format !== 'gif' && typeof VideoEncoder !== 'undefined' && typeof AudioEncoder !== 'undefined') {
     try {
-      if (cameraBlob) {
-        cameraSource = await createCameraFrameSource(cameraBlob); // 失败抛错 → 回退 ffmpeg
+      if (effectiveCameraBlob) {
+        cameraSource = await createCameraFrameSource(effectiveCameraBlob); // 失败抛错 → 回退 ffmpeg
         compositeCamera = true;
       }
       const { encodeWebCodecsMp4 } = await import('./webCodecsExport');
@@ -888,7 +893,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         fps,
         width: outputW,
         height: outputH,
-        audioBlob: audioBlob ?? null,
+        audioBlob: effectiveAudioBlob ?? null,
         audioSegments: trimmed ? kept : undefined,
         renderFrame: async (i) => composeFrame(frameInputs(i)),
         onProgress: (p) => opts.onProgress?.(0.08 + p * 0.9),
@@ -921,9 +926,9 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // —— ffmpeg 兜底路径（JPEG 中间帧）——
   // 裁剪场景下摄像头改走画布内合成（getFrameAt(源时间)），避免多段把连续摄像头流
   // 用 overlay 重映射的复杂度；不裁时仍走下方 ffmpeg overlay 滤镜。
-  if (trimmed && cameraBlob && !compositeCamera) {
+  if (trimmed && effectiveCameraBlob && !compositeCamera) {
     try {
-      cameraSource = await createCameraFrameSource(cameraBlob);
+      cameraSource = await createCameraFrameSource(effectiveCameraBlob);
       compositeCamera = true;
       dedupEnabled = false; // 逐帧含摄像头视频，关掉整帧去重
     } catch (err) {
@@ -956,16 +961,16 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   }
 
   let audioFile: string | null = null;
-  if (audioBlob && format !== 'gif') { // GIF 无音轨
+  if (effectiveAudioBlob && format !== 'gif') { // GIF 无音轨
     audioFile = 'audio.webm';
-    await ffmpeg.writeFile(audioFile, new Uint8Array(await audioBlob.arrayBuffer()));
+    await ffmpeg.writeFile(audioFile, new Uint8Array(await effectiveAudioBlob.arrayBuffer()));
   }
 
   let cameraFile: string | null = null;
   // 裁剪时摄像头改走画布内合成（见上），不再作为 ffmpeg overlay 输入；不裁时用 overlay 滤镜。
-  if (cameraBlob && !trimmed) {
+  if (effectiveCameraBlob && !trimmed) {
     cameraFile = 'camera.webm';
-    await ffmpeg.writeFile(cameraFile, new Uint8Array(await cameraBlob.arrayBuffer()));
+    await ffmpeg.writeFile(cameraFile, new Uint8Array(await effectiveCameraBlob.arrayBuffer()));
   }
 
   opts.onPhase?.('encoding');
@@ -1145,6 +1150,10 @@ export async function renderPreviewFrame(
 ): Promise<void> {
   const { exportToCanvas } = await import('@excalidraw/excalidraw');
   const { metadata, snapshots, binaryFiles, cameraBlob, screenBlob, laserEvents } = await loadFullRecording(recordingId);
+  const localizedTrack = config.localizedTrackId ? await getLocalizedTrack(config.localizedTrackId) : undefined;
+  const useLocalizedTrack = !!localizedTrack && config.muteOriginalAudio !== false;
+  const effectiveCameraBlob = useLocalizedTrack && localizedTrack.cameraBlob ? localizedTrack.cameraBlob : cameraBlob;
+  const effectiveSubtitleSrt = useLocalizedTrack ? localizedTrack.translatedSrt : metadata.subtitleSrt;
   const preset = ASPECT_PRESETS[config.aspectRatio];
 
   // 预览也要走 shell-aware 路径
@@ -1166,9 +1175,9 @@ export async function renderPreviewFrame(
   const foreground = createContentLayer(target.width, target.height);
   const foregroundCtx = foreground.getContext('2d')!;
 
-  const hasCamera = !!cameraBlob;
-  const cues = ((config.burnSubtitles ?? true) && metadata.subtitleSrt)
-    ? compileSubtitles(metadata.subtitleSrt)
+  const hasCamera = !!effectiveCameraBlob;
+  const cues = ((config.burnSubtitles ?? true) && effectiveSubtitleSrt)
+    ? compileSubtitles(effectiveSubtitleSrt)
     : [];
 
   const finalizePreviewForeground = (zoomBounds: CanvasRect) => {

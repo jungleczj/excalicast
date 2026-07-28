@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, type JSX, type ReactNode } from 'react';
+import { useState, type CSSProperties, type JSX, type ReactNode } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
-import { DEFAULT_VIDEO_BACKGROUND, VIDEO_BACKGROUND_PRESETS, type VideoBackgroundPreset } from '@/config/videoBackgrounds';
+import { DEFAULT_VIDEO_BACKGROUND, getVideoBackgroundPreset, VIDEO_BACKGROUND_PRESETS, type VideoBackgroundPreset } from '@/config/videoBackgrounds';
 import {
   ASPECT_PRESETS,
   type AspectRatio,
@@ -90,6 +90,14 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
     }
   };
 
+  const selectSource = (next: RecordingSourceConfig) => {
+    setSource(next);
+    if (next.kind !== 'whiteboard') {
+      setTab('default');
+      setFraming('default');
+    }
+  };
+
   const handleStart = () => {
     const config: RecordingSetupConfig = {
       framing,
@@ -111,7 +119,7 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
       <div
         className="setup-craft-card max-h-[92vh] max-w-[94vw] overflow-auto"
         style={{
-          width: 760,
+          width: 1180,
           background: 'var(--paper)',
           border: '2px solid var(--ink)',
           borderRadius: 5,
@@ -140,7 +148,30 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
           </button>
         </div>
 
-        <div style={{ padding: 28 }}>
+        <div className="recording-setup-body">
+          <aside className="recording-setup-preview-pane">
+            <div className="recording-setup-preview-copy">
+              <span className="label-mono" style={{ fontSize: 10, color: 'var(--ink-3)' }}>{t('background.preview')}</span>
+              <h3 style={{ margin: '7px 0 0', fontSize: 18, letterSpacing: '-.035em' }}>{t('title')}</h3>
+              <p style={{ margin: '5px 0 0', color: 'var(--ink-3)', fontSize: 12, lineHeight: 1.5 }}>{t('background.subtitle')}</p>
+            </div>
+            <RecordingBackgroundPreview
+              background={videoBackground}
+              framing={framing}
+              sourceKind={source.kind}
+              cameraEnabled={camEnabled}
+              cameraSize={size}
+              cameraShape={shape}
+              cameraPosition={pos}
+              label={t('background.preview')}
+            />
+            <div className="recording-setup-preview-facts">
+              <PreviewFact label={t('source.title')} value={t(`source.${source.kind}.title`)} />
+              <PreviewFact label={t('aspect.title')} value={framing === 'default' ? t('aspect.defaultTitle') : framing} />
+              <PreviewFact label={t('camera.title')} value={camEnabled ? t('camera.enableTitle') : t('camera.skipTitle')} />
+            </div>
+          </aside>
+          <div className="recording-setup-config" style={{ padding: 28 }}>
           {/* Recording source */}
           <SetupSection title={t('source.title')} subtitle={t('source.subtitle')}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8 }}>
@@ -151,7 +182,7 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
                   selected={source.kind === option.kind}
                   title={t(`source.${option.kind}.title`)}
                   desc={t(`source.${option.kind}.desc`)}
-                  onSelect={setSource}
+                  onSelect={selectSource}
                 />
               ))}
             </div>
@@ -324,7 +355,23 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
           <SectionDivider />
 
           {/* Camera */}
-          <SetupSection title={t('camera.title')} subtitle={t('camera.subtitle')} right={<Toggle on={camEnabled} onChange={setCamEnabled} />}>
+          <SetupSection title={t('camera.title')} subtitle={t('camera.subtitle')}>
+            <div role="radiogroup" aria-label={t('camera.decisionLabel')} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: camEnabled ? 14 : 0 }}>
+              <CameraDecision
+                active={camEnabled}
+                Icon={I.Camera}
+                title={t('camera.enableTitle')}
+                description={t('camera.enableDescription')}
+                onClick={() => setCamEnabled(true)}
+              />
+              <CameraDecision
+                active={!camEnabled}
+                Icon={I.CameraOff}
+                title={t('camera.skipTitle')}
+                description={t('camera.skipDescription')}
+                onClick={() => setCamEnabled(false)}
+              />
+            </div>
             {camEnabled && (
               <div style={{ display: 'grid', gap: 12 }}>
                 <SetupRow label={t('camera.size', { px: size })}>
@@ -384,6 +431,7 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
               </div>
             </div>
           </SetupSection>
+          </div>
         </div>
 
         {/* Footer */}
@@ -407,6 +455,150 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function PreviewFact({ label, value }: { label: string; value: string }): JSX.Element {
+  return (
+    <div aria-label={label} title={label} style={{ padding: '10px 0', borderTop: '1px solid rgba(31,34,37,.10)' }}>
+      <div style={{ fontSize: 12, fontWeight: 700 }}>{value}</div>
+    </div>
+  );
+}
+
+function CameraDecision({
+  active,
+  Icon,
+  title,
+  description,
+  onClick,
+}: {
+  active: boolean;
+  Icon: (props: { size?: number }) => JSX.Element;
+  title: string;
+  description: string;
+  onClick: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      onClick={onClick}
+      className="press"
+      style={{
+        display: 'flex', alignItems: 'center', gap: 11, minHeight: 68, padding: '12px 14px', textAlign: 'left',
+        borderRadius: 14, cursor: 'pointer', color: active ? '#fffdf8' : 'var(--ink)',
+        border: active ? '1px solid var(--ink)' : '1px solid rgba(31,34,37,.14)',
+        background: active ? 'var(--ink)' : 'var(--paper-2)',
+        boxShadow: active ? '0 10px 24px rgba(31,34,37,.15)' : '0 7px 16px rgba(48,38,26,.045)',
+      }}
+    >
+      <span style={{ display: 'grid', placeItems: 'center', width: 34, height: 34, borderRadius: 999, background: active ? 'rgba(255,255,255,.13)' : '#fffdf8', border: active ? '1px solid rgba(255,255,255,.18)' : '1px solid rgba(31,34,37,.10)' }}>
+        <Icon size={16} />
+      </span>
+      <span>
+        <span style={{ display: 'block', fontSize: 12.5, fontWeight: 750 }}>{title}</span>
+        <span style={{ display: 'block', marginTop: 3, fontSize: 10.5, lineHeight: 1.35, color: active ? 'rgba(255,253,248,.7)' : 'var(--ink-3)' }}>{description}</span>
+      </span>
+    </button>
+  );
+}
+
+function RecordingBackgroundPreview({
+  background,
+  framing,
+  sourceKind,
+  cameraEnabled,
+  cameraSize,
+  cameraShape,
+  cameraPosition,
+  label,
+}: {
+  background: VideoBackgroundConfig;
+  framing: RecordingSetupConfig['framing'];
+  sourceKind: RecordingSourceKind;
+  cameraEnabled: boolean;
+  cameraSize: number;
+  cameraShape: CameraShape;
+  cameraPosition: CameraCorner;
+  label: string;
+}): JSX.Element {
+  const preset = background.kind === 'preset' ? getVideoBackgroundPreset(background.presetId) : null;
+  const [width, height] = framing !== 'default' && framing !== 'custom'
+    ? [ASPECT_PRESETS[framing].width, ASPECT_PRESETS[framing].height]
+    : [16, 9];
+  const backgroundImage = preset ? `url(${preset.preview})` : undefined;
+  const backgroundColor = background.kind === 'color' ? background.color ?? '#fffdf8' : '#eef1ee';
+  // 把真实 80–480px 摄像头尺寸映射到左侧小预览。位置 / 形状直接复用录制配置，
+  // 让用户不必猜测最终成片中的气泡会落在哪里。
+  const cameraPreviewSize = Math.round(24 + ((Math.max(80, Math.min(480, cameraSize)) - 80) / 400) * 52);
+  const cameraInset = '13%';
+  const cameraStyle: CSSProperties = {
+    position: 'absolute',
+    width: cameraPreviewSize,
+    height: cameraPreviewSize,
+    borderRadius: cameraShape === 'circle' ? '50%' : Math.max(8, Math.round(cameraPreviewSize * 0.24)),
+    background: 'linear-gradient(135deg, #d7ded8, #938e86)',
+    border: '3px solid rgba(255,253,248,.95)',
+    boxShadow: '0 5px 12px rgba(31,34,37,.18)',
+    transition: 'width 160ms ease, height 160ms ease, border-radius 160ms ease, inset 160ms ease',
+  };
+  if (cameraPosition.startsWith('top')) cameraStyle.top = cameraInset;
+  else cameraStyle.bottom = cameraInset;
+  if (cameraPosition.endsWith('left')) cameraStyle.left = cameraInset;
+  else cameraStyle.right = cameraInset;
+
+  return (
+    <div data-testid="recording-background-preview" data-camera-enabled={cameraEnabled} style={{ marginBottom: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 }}>
+        <span className="label-mono" style={{ fontSize: 10, color: 'var(--ink-3)' }}>{label}</span>
+        <span className="label-mono" style={{ fontSize: 10, color: 'var(--ink-3)' }}>{framing === 'default' ? '16:9' : framing}</span>
+      </div>
+      <div data-testid="recording-background-preview-frame" data-source-kind={sourceKind} data-camera-shape={cameraShape} data-camera-position={cameraPosition} data-camera-size={cameraSize} style={{ position: 'relative', width: '100%', aspectRatio: `${width} / ${height}`, overflow: 'hidden', borderRadius: 18, background: backgroundImage ? `${backgroundImage} center / cover no-repeat` : backgroundColor, boxShadow: 'inset 0 0 0 1px rgba(31,34,37,.09), 0 12px 26px rgba(48,38,26,.08)' }}>
+        <div className="recording-background-preview-surface" data-testid="recording-background-preview-surface" style={{ position: 'absolute', inset: '14% 10%', borderRadius: 12, background: 'rgba(255,253,248,.94)', border: '1px solid rgba(255,255,255,.62)', boxShadow: '0 10px 18px rgba(23,28,33,.10), 0 2px 6px rgba(23,28,33,.05)', overflow: 'hidden' }}>
+          <div style={{ height: 24, padding: '0 9px', display: 'flex', alignItems: 'center', gap: 6, borderBottom: '1px solid rgba(31,34,37,.07)' }}>
+            <span style={{ width: 6, height: 6, borderRadius: 999, background: 'var(--rec)' }} />
+            <span style={{ width: '25%', height: 4, borderRadius: 999, background: 'rgba(31,34,37,.14)' }} />
+          </div>
+          {sourceKind === 'whiteboard' ? <PreviewWhiteboardSurface /> : <PreviewDisplaySurface />}
+        </div>
+        {cameraEnabled && (
+          <span
+            data-testid="recording-background-preview-camera"
+            data-shape={cameraShape}
+            data-position={cameraPosition}
+            data-size={cameraSize}
+            style={cameraStyle}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PreviewWhiteboardSurface(): JSX.Element {
+  return (
+    <div
+      data-testid="recording-background-preview-whiteboard"
+      style={{ position: 'relative', height: 'calc(100% - 24px)', backgroundImage: 'radial-gradient(rgba(31,34,37,.10) .7px, transparent .7px)', backgroundSize: '10px 10px' }}
+    >
+      <span style={{ position: 'absolute', left: '12%', top: '23%', width: '25%', height: '27%', border: '1.4px solid rgba(31,34,37,.72)', borderRadius: 4, background: 'rgba(221,210,242,.58)' }} />
+      <span style={{ position: 'absolute', left: '44%', top: '32%', width: '22%', borderTop: '1.4px solid rgba(31,34,37,.72)' }} />
+      <span style={{ position: 'absolute', left: '64%', top: '27%', width: 0, height: 0, borderTop: '4px solid transparent', borderBottom: '4px solid transparent', borderLeft: '6px solid rgba(31,34,37,.72)' }} />
+      <span style={{ position: 'absolute', right: '12%', top: '18%', width: '18%', height: '36%', border: '1.4px solid rgba(31,34,37,.72)', borderRadius: '50%', background: 'rgba(255,236,153,.62)' }} />
+      <span style={{ position: 'absolute', left: '25%', bottom: '17%', width: '48%', height: 4, borderRadius: 999, background: 'rgba(31,34,37,.16)' }} />
+    </div>
+  );
+}
+
+function PreviewDisplaySurface(): JSX.Element {
+  return (
+    <div style={{ padding: '12% 11%' }}>
+      <span style={{ display: 'block', width: '54%', height: 7, borderRadius: 999, background: 'rgba(31,34,37,.17)', marginBottom: 8 }} />
+      <span style={{ display: 'block', width: '76%', height: 5, borderRadius: 999, background: 'rgba(31,34,37,.10)', marginBottom: 6 }} />
+      <span style={{ display: 'block', width: '67%', height: 5, borderRadius: 999, background: 'rgba(31,34,37,.10)' }} />
     </div>
   );
 }
@@ -558,6 +750,7 @@ function BackgroundSwatches({
         return (
           <button
             key={preset?.id ?? 'none'}
+            data-testid={`recording-background-swatch-${preset?.id ?? 'none'}`}
             type="button"
             aria-pressed={selected}
             onClick={() => onChange(preset ? { kind: 'preset', presetId: preset.id, tone: preset.tone } : DEFAULT_VIDEO_BACKGROUND)}

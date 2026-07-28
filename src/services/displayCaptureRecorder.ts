@@ -1,7 +1,10 @@
 'use client';
 
 import { getClientDb } from '@/lib/db-client';
+import { stopMediaRecorderSafely } from '@/services/mediaRecorderStop';
 import type { RecordingSourceConfig, RecordingSourceKind, SourceCropWindow } from '@/types/recording';
+
+const RECORDER_TIMESLICE_MS = 250;
 
 export interface DisplayCaptureHandle {
   sourceStream: MediaStream;
@@ -254,12 +257,13 @@ export async function startDisplayCaptureRecorder(
     videoBitsPerSecond: bitrateFor(recordedStream, source.kind),
   });
   let chunkIndex = 0;
+  const pendingWrites: Promise<unknown>[] = [];
   recorder.ondataavailable = (event) => {
     if (event.data.size > 0) {
-      void db.screenChunks.add({ recordingId, index: chunkIndex++, blob: event.data });
+      pendingWrites.push(db.screenChunks.add({ recordingId, index: chunkIndex++, blob: event.data }).catch(() => undefined));
     }
   };
-  recorder.start(1000);
+  recorder.start(RECORDER_TIMESLICE_MS);
 
   return {
     sourceStream,
@@ -267,11 +271,8 @@ export async function startDisplayCaptureRecorder(
     pause: () => { if (recorder.state === 'recording') recorder.pause(); },
     resume: () => { if (recorder.state === 'paused') recorder.resume(); },
     stop: async () => {
-      await new Promise<void>((resolve) => {
-        recorder.onstop = () => resolve();
-        if (recorder.state !== 'inactive') recorder.stop();
-        else resolve();
-      });
+      await stopMediaRecorderSafely(recorder);
+      await Promise.allSettled(pendingWrites);
       selectedArea?.cleanup();
       sourceStream.getTracks().forEach((track) => track.stop());
     },

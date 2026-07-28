@@ -5397,6 +5397,63 @@ body {
   opacity: 0.38;
 }
 
+.timeline-craft-autoedit {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.timeline-craft-select {
+  min-height: 34px;
+  max-width: 92px;
+  padding: 0 22px 0 9px;
+  border: 0;
+  border-radius: 999px;
+  outline: none;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: inset 0 0 0 1px rgba(24, 25, 26, 0.06);
+  color: rgba(24, 25, 26, 0.62);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  letter-spacing: -0.01em;
+}
+
+.timeline-craft-autoedit-result,
+.timeline-craft-autoedit-error {
+  max-width: 210px;
+  overflow: hidden;
+  color: rgba(24, 25, 26, 0.58);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-craft-autoedit-result button {
+  margin-left: 5px;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  background: transparent;
+  color: rgba(24, 25, 26, 0.78);
+  cursor: pointer;
+  font: inherit;
+}
+
+.timeline-craft-autoedit-error { color: #b94a45; }
+
+.timeline-craft-spinner {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid rgba(24, 25, 26, 0.22);
+  border-top-color: rgba(24, 25, 26, 0.78);
+  border-radius: 50%;
+  animation: timeline-craft-spin 0.7s linear infinite;
+}
+
+@keyframes timeline-craft-spin { to { transform: rotate(360deg); } }
+
 .timeline-craft-danger {
   color: #df3f3b !important;
   background: rgba(255, 245, 241, 0.9) !important;
@@ -5458,6 +5515,10 @@ body {
   margin-top: 6px !important;
 }
 
+.timeline-craft-audio-lane {
+  height: 30px !important;
+}
+
 .timeline-craft-mirror > div:last-child {
   border: 1px solid rgba(24, 25, 26, 0.06) !important;
   border-radius: 999px !important;
@@ -5510,13 +5571,31 @@ body {
   box-shadow: 0 0 0 2px rgba(135, 93, 207, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.55);
 }
 
-.timeline-craft-autozoom-segment > span {
+.timeline-craft-autozoom-segment > button {
   min-width: 0;
   padding: 0 4px;
   overflow: hidden;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
-  pointer-events: none;
+  cursor: text;
+}
+
+.timeline-craft-autozoom-segment > input {
+  width: 42px;
+  min-width: 0;
+  padding: 0 4px;
+  overflow: hidden;
+  border: none;
+  border-radius: 4px;
+  outline: none;
+  background: rgba(255, 253, 248, 0.9);
+  color: rgba(44, 28, 76, 0.94);
+  font: inherit;
+  text-align: center;
 }
 
 .timeline-craft-autozoom-edge {
@@ -5525,6 +5604,13 @@ body {
   flex: 0 0 7px;
   background: rgba(64, 35, 111, 0.24);
   cursor: ew-resize;
+}
+
+@media (max-width: 760px) {
+  .timeline-craft-toolbar { align-items: flex-start; }
+  .timeline-craft-kept { display: none; }
+  .timeline-craft-autoedit-result,
+  .timeline-craft-autoedit-error { max-width: 150px; }
 }
 
 .timeline-craft-playhead {
@@ -6334,11 +6420,19 @@ body {
 }
 
 .editor-craft-radio,
-.editor-craft-ratio-card,
 .editor-craft-segment-card,
 .editor-craft-panel-message {
   border: var(--craft-hairline) !important;
   border-radius: 22px !important;
+  background: rgba(255, 253, 248, 0.68) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72) !important;
+  color: var(--craft-ink) !important;
+}
+
+/* 比例选择是一组紧凑的小矩形，圆角收窄到原来的一半，避免像胶囊按钮。 */
+.editor-craft-ratio-card {
+  border: var(--craft-hairline) !important;
+  border-radius: 11px !important;
   background: rgba(255, 253, 248, 0.68) !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72) !important;
   color: var(--craft-ink) !important;
@@ -6381,7 +6475,7 @@ body {
 
 .editor-craft-ratio-shape {
   border-color: rgba(24, 25, 26, 0.18) !important;
-  border-radius: 5px !important;
+  border-radius: 2.5px !important;
   background: rgba(255, 255, 255, 0.78) !important;
 }
 
@@ -6668,7 +6762,7 @@ body {
   box-shadow: 0 16px 34px rgba(0, 0, 0, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.13) !important;
 }
 
-.workspace-craft-shell :where(.workspace-craft-floating-button, .workspace-craft-framing, .workspace-craft-framing button, .rb-no-record button) {
+.workspace-craft-shell :where(.workspace-craft-floating-button, .workspace-craft-framing, .workspace-craft-framing button) {
   border-color: var(--craft-line) !important;
   border-radius: 999px !important;
   box-shadow: var(--craft-shadow) !important;
@@ -6679,6 +6773,36 @@ body {
 .workspace-craft-shell :where(.workspace-craft-framing [style*="font-family: var(--font-mono)"], .rb-no-record [style*="font-family: var(--font-mono)"]) {
   font-family: var(--font-sans) !important;
   letter-spacing: -0.01em !important;
+}
+
+.setup-craft-card .recording-background-preview-surface {
+  box-shadow: 0 10px 18px rgba(23, 28, 33, 0.10), 0 2px 6px rgba(23, 28, 33, 0.05) !important;
+}
+
+.workspace-craft-shell .workspace-craft-framing-dark {
+  border-color: rgba(255, 255, 255, 0.09) !important;
+  background: rgba(18, 19, 20, 0.93) !important;
+  color: #fffdf8 !important;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.10) !important;
+}
+
+.desktop-recording-controls-pip .workspace-craft-framing-dark {
+  border-color: rgba(255, 255, 255, 0.09) !important;
+  background: rgba(18, 19, 20, 0.93) !important;
+  color: #fffdf8 !important;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.10) !important;
+}
+
+.workspace-craft-shell .workspace-craft-framing-dark button {
+  border-color: transparent !important;
+  color: inherit !important;
+  box-shadow: none !important;
+}
+
+.desktop-recording-controls-pip .workspace-craft-framing-dark button {
+  border-color: transparent !important;
+  color: inherit !important;
+  box-shadow: none !important;
 }
 
 .app-craft-modal-actions {
@@ -8275,4 +8399,50 @@ body {
 
 .teleprompter-craft-panel :where(input[type="range"]) {
   accent-color: var(--craft-blue-strong) !important;
+}
+/* Recording setup: the preview remains a stable visual reference while settings change. */
+.recording-setup-body {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.84fr) minmax(0, 1.16fr);
+  min-height: 610px;
+}
+
+.recording-setup-preview-pane {
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  min-height: 610px;
+  padding: 28px;
+  background: linear-gradient(145deg, #f7f5f1 0%, #f1eee8 100%);
+  border-right: 1px solid rgba(31, 34, 37, 0.12);
+}
+
+.recording-setup-preview-copy {
+  margin-bottom: 20px;
+}
+
+.recording-setup-preview-facts {
+  display: grid;
+  grid-template-columns: 1fr;
+  margin-top: auto;
+}
+
+.recording-setup-config {
+  min-width: 0;
+}
+
+@media (max-width: 820px) {
+  .recording-setup-body {
+    display: block;
+    min-height: 0;
+  }
+
+  .recording-setup-preview-pane {
+    position: static;
+    min-height: 0;
+    border-right: 0;
+    border-bottom: 1px solid rgba(31, 34, 37, 0.12);
+  }
 }

@@ -21,6 +21,8 @@ export interface TierPermissions {
   cloudBackup: boolean;
   shareLink: boolean;
   handout: boolean;
+  dubbing: boolean;
+  lipSync: boolean;
 }
 
 export const TIER_PERMISSIONS: Record<SubscriptionTier, TierPermissions> = {
@@ -30,6 +32,8 @@ export const TIER_PERMISSIONS: Record<SubscriptionTier, TierPermissions> = {
     cloudBackup: false,
     shareLink: false,
     handout: false,
+    dubbing: false,
+    lipSync: false,
   },
   pro: {
     exportWithoutWatermark: true,
@@ -37,6 +41,8 @@ export const TIER_PERMISSIONS: Record<SubscriptionTier, TierPermissions> = {
     cloudBackup: true,
     shareLink: false,
     handout: false,
+    dubbing: false,
+    lipSync: false,
   },
   max: {
     exportWithoutWatermark: true,
@@ -44,6 +50,8 @@ export const TIER_PERMISSIONS: Record<SubscriptionTier, TierPermissions> = {
     cloudBackup: true,
     shareLink: true,
     handout: true,
+    dubbing: true,
+    lipSync: true,
   },
 };
 

@@ -1,6 +1,9 @@
 'use client';
 
 import { getClientDb } from '@/lib/db-client';
+import { stopMediaRecorderSafely } from '@/services/mediaRecorderStop';
+
+const RECORDER_TIMESLICE_MS = 250;
 
 export interface AudioRecorderHandle {
   /** 麦克风 MediaStream —— 给上层做软静音（track.enabled toggle）用。 */
@@ -44,27 +47,25 @@ export async function startAudioRecorder(
   const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 32000 });
 
   let chunkIndex = 0;
+  const pendingWrites: Promise<unknown>[] = [];
   const db = getClientDb();
-  recorder.ondataavailable = async (e) => {
+  recorder.ondataavailable = (e) => {
     if (e.data && e.data.size > 0) {
-      await db.audioChunks.add({
+      pendingWrites.push(db.audioChunks.add({
         recordingId,
         index: chunkIndex++,
         blob: e.data,
-      });
+      }).catch(() => undefined));
     }
   };
 
-  const stopped = new Promise<void>((resolve) => {
-    recorder.onstop = () => resolve();
-  });
-  recorder.start(1000);
+  recorder.start(RECORDER_TIMESLICE_MS);
 
   return {
     stream,
     async stop() {
-      if (recorder.state !== 'inactive') recorder.stop();
-      await stopped;
+      await stopMediaRecorderSafely(recorder);
+      await Promise.allSettled(pendingWrites);
       stream.getTracks().forEach((t) => t.stop());
     },
     pause() {

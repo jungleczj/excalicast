@@ -48,6 +48,8 @@ export interface RecordingMetadata {
   segments?: TimeSegment[];
   /** 自动放大段（ms，相对录制开始）。 */
   autoZooms?: AutoZoomSegment[];
+  /** 当前用于预览/导出的本地化音轨；只引用 localizedTracks，不把大 Blob 塞进 metadata。 */
+  localizedTrackId?: string;
 }
 
 /** 保留段：导出时只输出 [start,end]（ms）内的内容，多段按序拼接。 */
@@ -82,6 +84,25 @@ export interface ScreenChunk {
   recordingId: string;
   index: number;
   blob: Blob;
+}
+
+export type LocalizedTrackStatus = 'ready' | 'failed';
+
+export interface LocalizedTrack {
+  id: string;
+  recordingId: string;
+  targetLang: 'en';
+  status: LocalizedTrackStatus;
+  createdAt: number;
+  provider: string;
+  sourceAudioHash: string;
+  translatedSrt: string;
+  audioBlob: Blob;
+  /** lip-sync 后的人像气泡视频；没有摄像头或服务不可用时为空。 */
+  cameraBlob?: Blob;
+  /** skipped 表示没有摄像头或未配置 lip-sync；failed 表示不阻塞英文音轨。 */
+  lipSync?: 'done' | 'skipped' | 'failed';
+  error?: string;
 }
 
 /**
@@ -206,6 +227,10 @@ export interface ExportConfig {
   autoZooms?: AutoZoomSegment[];
   /** 视频背景。旧录制缺省为 none。 */
   videoBackground?: VideoBackgroundConfig;
+  /** 英文配音 / 本地化音轨。缺省不启用，旧录制兼容。 */
+  localizedTrackId?: string;
+  /** 启用 localizedTrack 时默认 true：不混入中文原声。 */
+  muteOriginalAudio?: boolean;
 }
 
 export interface ShellCanvasRect {

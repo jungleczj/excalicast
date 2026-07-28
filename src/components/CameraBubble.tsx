@@ -101,6 +101,7 @@ export function CameraBubble({ stream, size = 160, shape = 'circle', position, o
 
   return (
     <div
+      data-testid="camera-bubble"
       onMouseDown={handleMouseDown}
       className="camera-craft-bubble fade-in fixed z-40 select-none overflow-hidden"
       style={{

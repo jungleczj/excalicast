@@ -15,6 +15,46 @@ export const DEFAULT_VIDEO_BACKGROUND: VideoBackgroundConfig = {
 
 export const VIDEO_BACKGROUND_PRESETS: VideoBackgroundPreset[] = [
   {
+    id: 'coral-silk',
+    tone: 'fresh',
+    labelZh: '珊瑚丝光',
+    labelEn: 'Coral silk',
+    asset: '/video-backgrounds/coral-silk.png',
+    preview: '/video-backgrounds/coral-silk.png',
+  },
+  {
+    id: 'botanical-frame',
+    tone: 'natural',
+    labelZh: '花叶留白',
+    labelEn: 'Botanical frame',
+    asset: '/video-backgrounds/botanical-frame.png',
+    preview: '/video-backgrounds/botanical-frame.png',
+  },
+  {
+    id: 'dawn-alpine',
+    tone: 'natural',
+    labelZh: '晨光雪岭',
+    labelEn: 'Dawn alpine',
+    asset: '/video-backgrounds/dawn-alpine.png',
+    preview: '/video-backgrounds/dawn-alpine.png',
+  },
+  {
+    id: 'indigo-aurora',
+    tone: 'dark',
+    labelZh: '靛紫极光',
+    labelEn: 'Indigo aurora',
+    asset: '/video-backgrounds/indigo-aurora.png',
+    preview: '/video-backgrounds/indigo-aurora.png',
+  },
+  {
+    id: 'paper-horizon',
+    tone: 'soft',
+    labelZh: '纸艺天际',
+    labelEn: 'Paper horizon',
+    asset: '/video-backgrounds/paper-horizon.png',
+    preview: '/video-backgrounds/paper-horizon.png',
+  },
+  {
     id: 'paper-sky',
     tone: 'fresh',
     labelZh: '纸感蓝',

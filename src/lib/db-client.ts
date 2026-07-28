@@ -8,6 +8,7 @@ import type {
   CameraChunk,
   CameraPositionEvent,
   LaserEvent,
+  LocalizedTrack,
   RecordingMetadata,
   ScreenChunk,
   ShellCanvasRect,
@@ -42,6 +43,8 @@ interface LaserEventRow extends LaserEvent {
   id?: number;
 }
 
+interface LocalizedTrackRow extends LocalizedTrack {}
+
 interface BinaryFileRow extends BinaryFileEntry {
   id?: number;
 }
@@ -57,6 +60,7 @@ class ExcalicastDB extends Dexie {
   workspaceShells!: Table<WorkspaceShellRow, number>;
   libraryItems!: Table<LibraryItemRow, string>;
   laserEvents!: Table<LaserEventRow, number>;
+  localizedTracks!: Table<LocalizedTrackRow, string>;
 
   constructor() {
     super('excalicast');
@@ -180,6 +184,20 @@ class ExcalicastDB extends Dexie {
       libraryItems: 'id, status, created',
       laserEvents: '++id, recordingId, timestamp, [recordingId+timestamp]',
     });
+    // v11: localizedTracks 表 —— 英文配音/字幕/lip-sync 人像作为本地非破坏性资产。
+    this.version(11).stores({
+      recordings: 'id, startedAt, status, ownerKey',
+      snapshots: '++id, recordingId, timestamp',
+      audioChunks: '++id, recordingId, index',
+      cameraChunks: '++id, recordingId, index',
+      screenChunks: '++id, recordingId, index',
+      binaryFiles: '++id, recordingId, fileId',
+      workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
+      cameraPositions: '++id, recordingId, timestamp, [recordingId+timestamp]',
+      libraryItems: 'id, status, created',
+      laserEvents: '++id, recordingId, timestamp, [recordingId+timestamp]',
+      localizedTracks: 'id, recordingId, targetLang, status, createdAt, [recordingId+targetLang]',
+    });
   }
 }
 
@@ -274,13 +292,37 @@ export async function clearSubtitleSrt(recordingId: string): Promise<void> {
   await getClientDb().recordings.update(recordingId, { subtitleSrt: undefined });
 }
 
+export async function listLocalizedTracks(recordingId: string): Promise<LocalizedTrack[]> {
+  return getClientDb().localizedTracks
+    .where('recordingId').equals(recordingId)
+    .sortBy('createdAt')
+    .then((rows) => rows.reverse());
+}
+
+export async function getLocalizedTrack(trackId: string | null | undefined): Promise<LocalizedTrack | undefined> {
+  if (!trackId) return undefined;
+  return getClientDb().localizedTracks.get(trackId);
+}
+
+export async function saveLocalizedTrack(track: LocalizedTrack, activate = true): Promise<void> {
+  const db = getClientDb();
+  await db.transaction('rw', [db.localizedTracks, db.recordings], async () => {
+    await db.localizedTracks.put(track);
+    if (activate) await db.recordings.update(track.recordingId, { localizedTrackId: track.id });
+  });
+}
+
+export async function setActiveLocalizedTrack(recordingId: string, trackId: string | undefined): Promise<void> {
+  await getClientDb().recordings.update(recordingId, { localizedTrackId: trackId });
+}
+
 export async function deleteRecording(recordingId: string, ownerKey?: string): Promise<void> {
   const db = getClientDb();
   // 传了 ownerKey 时只允许删自己的（防同设备他号经 id 删除他人录制）。
   if (ownerKey && !(await ownsRecording(recordingId, ownerKey))) return;
   await db.transaction(
     'rw',
-    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.screenChunks, db.cameraPositions, db.binaryFiles, db.workspaceShells, db.laserEvents],
+    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.screenChunks, db.cameraPositions, db.binaryFiles, db.workspaceShells, db.laserEvents, db.localizedTracks],
     async () => {
       await db.recordings.delete(recordingId);
       await db.snapshots.where('recordingId').equals(recordingId).delete();
@@ -291,6 +333,7 @@ export async function deleteRecording(recordingId: string, ownerKey?: string): P
       await db.binaryFiles.where('recordingId').equals(recordingId).delete();
       await db.workspaceShells.where('recordingId').equals(recordingId).delete();
       await db.laserEvents.where('recordingId').equals(recordingId).delete();
+      await db.localizedTracks.where('recordingId').equals(recordingId).delete();
     },
   );
 }

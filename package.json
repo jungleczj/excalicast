@@ -13,6 +13,10 @@
     "build": "next build",
     "start": "next start -p 3001",
     "typecheck": "tsc --noEmit",
+    "geo:generate": "node scripts/geo-answer-benchmark.mjs generate",
+    "geo:run": "node scripts/geo-answer-benchmark.mjs run",
+    "geo:analyze": "node scripts/geo-answer-benchmark.mjs analyze",
+    "geo:score": "node scripts/score-geo-benchmark.mjs",
     "db:reset": "rm -f data/excalicast.db"
   },
   "dependencies": {

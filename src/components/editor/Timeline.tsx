@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { I } from '@/components/icons';
+import { AutoEditControl } from '@/components/editor/AutoEditControl';
+import type { AutoEditMode, AutoEditResult } from '@/services/autoEditAnalyzer';
 import type { AutoZoomSegment, TimeSegment } from '@/types/recording';
 import { keptDuration, splitSegments, removeSegmentAt, trimSegmentEdge } from '@/utils/segments';
 
@@ -22,12 +24,25 @@ interface Props {
   onAutoZoomChange?: (next: AutoZoomSegment[]) => void;
   selectedAutoZoomId?: string | null;
   onAutoZoomSelect?: (id: string | null) => void;
+  /** 本地静音分析；结果仍写入既有的 clips/segments，而非重编码原始媒体。 */
+  autoEdit?: {
+    phase: 'idle' | 'analyzing' | 'applied' | 'failed';
+    result: AutoEditResult | null;
+    error: string | null;
+    onRun: (preset: AutoEditMode) => void;
+    onUndo: () => void;
+    labels: {
+      autoEdit: string; chatCut: string; lecture: string; walkthrough: string; shorts: string; timing: string;
+      gentle: string; standard: string; tight: string; analyzing: string; noAudio: string;
+      removed: (cuts: number, seconds: string) => string; noCuts: string; sceneAware: (transitions: number, alignedCuts: number) => string; undo: string;
+    };
+  };
   hasAudio: boolean;
   hasCaptions: boolean;
   labels: {
     edit: string; reset: string; kept: string; mic: string; captions: string;
     split: string; deleteClip: string; hint: string;
-    autoZoom: string; autoZoomHint: string;
+    autoZoom: string; autoZoomHint: string; editAutoZoomScale: string;
   };
 }
 
@@ -46,6 +61,7 @@ function fmt(ms: number): string {
 export function Timeline({
   durationMs, clips, playheadMs, onScrub, onChange, onReset,
   autoZooms = [], onAutoZoomChange, selectedAutoZoomId, onAutoZoomSelect,
+  autoEdit,
   hasAudio, hasCaptions, labels,
 }: Props): JSX.Element {
   const laneRef = useRef<HTMLDivElement>(null);
@@ -53,6 +69,7 @@ export function Timeline({
   const trimmed = !(clips.length === 1 && clips[0].start <= 0 && clips[0].end >= durationMs);
   const kept = keptDuration(clips);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [editingZoomId, setEditingZoomId] = useState<string | null>(null);
 
   const pct = (ms: number) => (ms / dur) * 100;
 
@@ -115,8 +132,15 @@ export function Timeline({
       if (zoom.id !== id) return zoom;
       const start = Math.max(0, Math.min(durationMs - 100, Math.round(patch.start ?? zoom.start)));
       const end = Math.max(start + 100, Math.min(durationMs, Math.round(patch.end ?? zoom.end)));
-      return { ...zoom, ...patch, start, end };
+      const scale = Math.max(1.05, Math.min(4, Number(patch.scale ?? zoom.scale)));
+      return { ...zoom, ...patch, start, end, scale };
     }).sort((a, b) => a.start - b.start));
+  };
+
+  const updateZoomScale = (id: string, raw: string) => {
+    const scale = Number(raw);
+    if (!Number.isFinite(scale)) return;
+    replaceZoom(id, { scale: Math.round(scale * 100) / 100 });
   };
 
   const addZoomAt = (timeMs: number) => {
@@ -173,7 +197,7 @@ export function Timeline({
   return (
     <div className="timeline-craft-panel">
       <div className="timeline-craft-toolbar mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <span className="timeline-craft-label" style={{ marginRight: 4 }}>
             {labels.edit}
           </span>
@@ -201,6 +225,17 @@ export function Timeline({
               <I.Search size={11} /> {labels.autoZoom}
             </button>
           )}
+          {autoEdit && (
+            <AutoEditControl
+              hasAudio={hasAudio}
+              phase={autoEdit.phase}
+              result={autoEdit.result}
+              error={autoEdit.error}
+              onRun={autoEdit.onRun}
+              onUndo={autoEdit.onUndo}
+              labels={autoEdit.labels}
+            />
+          )}
           {trimmed && (
             <button type="button" onClick={() => { onReset(); setSelectedIdx(null); }} className="timeline-craft-action btn-sketch" style={{ padding: '3px 8px' }}>
               {labels.reset}
@@ -215,7 +250,7 @@ export function Timeline({
         <div className="timeline-craft-ruler" onMouseDown={startScrub} style={{ height: 14, cursor: 'ew-resize' }} />
 
         {/* 片段轨：整轨可拖刮擦（空白/gap 处）；clips=block 可点选 + 边缘 Trim；gap 变暗 */}
-        <div className="timeline-craft-track" onMouseDown={startScrub} style={{ position: 'relative', height: 30, overflow: 'hidden', cursor: 'ew-resize' }}>
+        <div data-testid="timeline-video-track" className="timeline-craft-track" onMouseDown={startScrub} style={{ position: 'relative', height: 30, overflow: 'hidden', cursor: 'ew-resize' }}>
           {gaps.map((g, i) => (
             <div key={`g${i}`} className="timeline-craft-gap" style={{ position: 'absolute', top: 0, bottom: 0, left: `${pct(g.start)}%`, width: `${pct(g.end - g.start)}%` }} />
           ))}
@@ -239,8 +274,8 @@ export function Timeline({
           })}
         </div>
 
-        {/* 麦克风 / 字幕 视觉镜像条（跟随 clips，非交互） */}
-        {hasAudio && <MirrorBar clips={clips} pct={pct} fill="var(--hi-soft)" icon={<I.Mic size={10} />} label={labels.mic} />}
+        {/* 麦克风轨始终占位：无音频时仍保留与视频轨相同高度，便于后续对齐配音。 */}
+        <AudioLane clips={clips} pct={pct} hasAudio={hasAudio} label={labels.mic} />
         {hasCaptions && <MirrorBar clips={clips} pct={pct} fill="var(--pro)" icon={<I.Subtitles size={10} />} label={labels.captions} />}
 
         {onAutoZoomChange && (
@@ -279,7 +314,42 @@ export function Timeline({
                   title={`${labels.autoZoom} · ${fmt(zoom.start)}–${fmt(zoom.end)}`}
                 >
                   <i className="timeline-craft-autozoom-edge" onMouseDown={startZoomDrag(zoom.id, 'start')} />
-                  <span>×{zoom.scale.toFixed(1)}</span>
+                  {editingZoomId === zoom.id ? (
+                    <input
+                      data-testid="autozoom-scale-input"
+                      autoFocus
+                      aria-label={`${labels.autoZoom} scale`}
+                      type="number"
+                      min={1.05}
+                      max={4}
+                      step={0.05}
+                      value={zoom.scale}
+                      onMouseDown={(event) => { event.stopPropagation(); }}
+                      onClick={(event) => { event.stopPropagation(); }}
+                      onChange={(event) => updateZoomScale(zoom.id, event.target.value)}
+                      onBlur={() => setEditingZoomId(null)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === 'Escape') {
+                          event.preventDefault();
+                          setEditingZoomId(null);
+                        }
+                      }}
+                    />
+                  ) : (
+                    <button
+                      data-testid="autozoom-scale"
+                      type="button"
+                      aria-label={`${labels.autoZoom} scale ×${zoom.scale.toFixed(1)}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onAutoZoomSelect?.(zoom.id);
+                        setEditingZoomId(zoom.id);
+                      }}
+                      title={labels.editAutoZoomScale}
+                    >
+                      ×{zoom.scale.toFixed(1)}
+                    </button>
+                  )}
                   <i className="timeline-craft-autozoom-edge" onMouseDown={startZoomDrag(zoom.id, 'end')} />
                 </div>
               );
@@ -301,6 +371,26 @@ export function Timeline({
         <span>{labels.hint}</span>
         <span>{fmt(playheadMs)}</span>
       </div>
+    </div>
+  );
+}
+
+function AudioLane({ clips, pct, hasAudio, label }: {
+  clips: TimeSegment[]; pct: (ms: number) => number; hasAudio: boolean; label: string;
+}): JSX.Element {
+  return (
+    <div
+      data-testid="timeline-audio-track"
+      className={`timeline-craft-mirror timeline-craft-audio-lane${hasAudio ? '' : ' is-silent'}`}
+      style={{ position: 'relative', height: 30, marginTop: 4, overflow: 'hidden', borderRadius: 6, background: hasAudio ? 'rgba(186, 227, 202, .45)' : 'rgba(251, 216, 222, .72)' }}
+      title={label}
+    >
+      <div className="flex items-center gap-1 timeline-craft-label" style={{ position: 'absolute', left: 5, top: 0, bottom: 0, zIndex: 2, fontSize: 9, pointerEvents: 'none', opacity: hasAudio ? 0.72 : 0.58 }}>
+        <I.Mic size={11} />
+      </div>
+      {hasAudio && clips.map((clip, index) => (
+        <div key={index} style={{ position: 'absolute', top: 5, bottom: 5, left: `${pct(clip.start)}%`, width: `${pct(clip.end - clip.start)}%`, background: 'var(--hi-soft)', opacity: 0.78 }} />
+      ))}
     </div>
   );
 }

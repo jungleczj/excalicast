@@ -388,7 +388,7 @@
     "welcome": "Welcome",
     "title": "Record in 3 steps",
     "step1": "Draw anything on the canvas — or start from a template.",
-    "step2": "Hit the red ● Start button to record canvas + voice.",
+    "step2": "Click “New recording”, finish setup, then confirm framing to start the countdown.",
     "step3": "Stop, then pick a ratio and export your MP4.",
     "tipIsolation": "Other windows, notifications, even minimizing won't ruin the recording — we capture the canvas, not your screen.",
     "startDrawing": "Start drawing",
@@ -491,9 +491,10 @@
     "dragToMove": "Drag to move",
     "loadingWhiteboard": "Loading whiteboard…",
     "libraryToggle": "Library",
-    "framingHint": "Drag to frame the crop, then start",
-    "framingStart": "Start recording",
-    "framingCancel": "Cancel",
+    "framingReady": "FRAMING",
+    "framingHint": "Adjust crop/camera, then enter the 3-second countdown.",
+    "framingStart": "Start countdown",
+    "framingCancel": "Cancel setup",
     "framingCameraOutside": "Move the camera bubble inside the crop frame to start."
   },
   "libraryDrawer": {
@@ -516,7 +517,7 @@
   "recordingBar": {
     "cameraOnTooltip": "Camera on · click to turn off",
     "cameraOffTooltip": "Camera off · click to turn on",
-    "start": "Start recording",
+    "start": "New recording",
     "fromTemplate": "Start from a template",
     "pause": "Pause",
     "resume": "Resume",
@@ -525,6 +526,11 @@
     "processing": "Saving recording…",
     "rec": "REC",
     "paused": "PAUSED",
+    "mic": "Mic",
+    "camera": "Camera",
+    "laser": "Laser",
+    "zoom": "Zoom",
+    "teleprompter": "Notes",
     "micTooltip": "Microphone",
     "cameraTooltip": "Camera",
     "muteAudio": "Mute mic (recording continues silent)",
@@ -540,7 +546,7 @@
     "teleprompterOff": "Teleprompter · paste a script that auto-scrolls (not recorded)"
   },
   "recordingSetup": {
-    "step": "step 1 of 1 — pre-flight",
+    "step": "step 1 of 2 — recording setup",
     "title": "New recording",
     "close": "Close",
     "cropLocked": "CROP LOCKED",
@@ -572,6 +578,7 @@
     "background": {
       "title": "Video background",
       "subtitle": "Used in the final video frame. You can adjust it again on export.",
+      "preview": "Live preview",
       "none": "No background",
       "customColor": "Custom color",
       "tones": {
@@ -603,6 +610,11 @@
     "camera": {
       "title": "Camera bubble",
       "subtitle": "Overlays your face on the canvas while recording.",
+      "decisionLabel": "Use camera in this recording",
+      "enableTitle": "Use camera",
+      "enableDescription": "Place your portrait in the recording",
+      "skipTitle": "No camera",
+      "skipDescription": "Record the canvas and voice only",
       "size": "Size · {px}px",
       "shape": "Shape",
       "shapeCircle": "Circle",
@@ -619,7 +631,7 @@
     "footer": {
       "local": "STAYS LOCAL · NEVER UPLOADED",
       "cancel": "Cancel",
-      "start": "Start ({sec}s countdown)"
+      "start": "Next: frame"
     },
     "hint": {
       "16:9": "YouTube · Bilibili · Zoom",
@@ -704,6 +716,8 @@
     "watermarkBadge": "👁️ Watermarked preview",
     "cleanBadge": "✓ Clean export",
     "renderingTag": "Rendering…",
+    "hideSelectionOverlays": "Hide frames",
+    "showSelectionOverlays": "Show frames",
     "previewFailed": "Preview failed: {message}",
     "generating": "Generating video",
     "phase": {
