@@ -13,20 +13,12 @@ const AUTO_DOCK_DELAY_MS = 1400;
 const DOCK_AFTER_LEAVE_DELAY_MS = 380;
 const HOST_RESIZE_STEPS = 6;
 const HOST_RESIZE_STEP_MS = 28;
+const CONTROLS_ROOT_ID = 'desktop-recording-controls-root';
+const CONTROLS_RESET_STYLE_ID = 'desktop-recording-controls-reset';
 
 type ControlWindowSize = { width: number; height: number };
 type ControlWindowMode = 'docked' | 'full';
 type MeasuredControlWindow = { mode: ControlWindowMode; size: ControlWindowSize };
-
-function getFullscreenCountdownWindowSize(): ControlWindowSize {
-  if (typeof window === 'undefined') return { width: 1280, height: 720 };
-  const screenWidth = finitePositive(window.screen?.availWidth) ?? window.innerWidth;
-  const screenHeight = finitePositive(window.screen?.availHeight) ?? window.innerHeight;
-  return {
-    width: Math.max(960, Math.round(screenWidth)),
-    height: Math.max(640, Math.round(screenHeight)),
-  };
-}
 
 function finitePositive(value: number): number | null {
   return Number.isFinite(value) && value > 0 ? value : null;
@@ -71,45 +63,58 @@ function applyShrinkWrappedDocumentStyles(
   body.boxSizing = 'border-box';
   body.minWidth = '0';
   body.minHeight = '0';
-  // Use viewport-sized body so if the browser keeps a larger PiP minimum size,
-  // the tiny REC dock can still sit on the lower-right edge instead of floating
-  // in the upper-left corner. When resizeTo succeeds, 100vw/100vh equals `size`.
-  body.width = '100vw';
-  body.height = '100vh';
+  // The document box is the measured control box. Do not keep a viewport-sized
+  // transparent wrapper around a smaller control.
+  body.width = `${size.width}px`;
+  body.height = `${size.height}px`;
   body.display = 'flex';
   body.alignItems = docked ? 'flex-end' : 'flex-start';
   body.justifyContent = docked ? 'flex-end' : 'center';
   body.fontFamily = 'ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
   body.transition = options?.transition ?? 'none';
+
+  const controlsRoot = doc.getElementById(CONTROLS_ROOT_ID);
+  if (controlsRoot) {
+    controlsRoot.style.width = `${size.width}px`;
+    controlsRoot.style.height = `${size.height}px`;
+    controlsRoot.style.display = 'flex';
+    controlsRoot.style.alignItems = docked ? 'flex-end' : 'flex-start';
+    controlsRoot.style.justifyContent = docked ? 'flex-end' : 'center';
+  }
 }
 
-function applyFullscreenCountdownDocumentStyles(doc: Document, size: ControlWindowSize): void {
-  const root = doc.documentElement.style;
-  root.background = 'rgba(241, 241, 237, 0.72)';
-  root.colorScheme = 'light';
-  root.overflow = 'hidden';
-  root.boxSizing = 'border-box';
-  root.minWidth = '0';
-  root.minHeight = '0';
-  root.width = `${size.width}px`;
-  root.height = `${size.height}px`;
+function ensureControlsRoot(doc: Document): HTMLElement {
+  const existing = doc.getElementById(CONTROLS_ROOT_ID);
+  if (existing) return existing;
+  const root = doc.createElement('div');
+  root.id = CONTROLS_ROOT_ID;
+  doc.body.replaceChildren(root);
+  return root;
+}
 
-  const body = doc.body.style;
-  body.margin = '0';
-  body.padding = '0';
-  body.background = 'rgba(241, 241, 237, 0.72)';
-  body.overflow = 'hidden';
-  body.boxSizing = 'border-box';
-  body.minWidth = '0';
-  body.minHeight = '0';
-  body.width = `${size.width}px`;
-  body.height = `${size.height}px`;
-  body.display = 'grid';
-  body.alignItems = 'stretch';
-  body.justifyContent = 'stretch';
-  body.fontFamily = 'ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
-  body.transition = 'background 180ms ease';
-  doc.body.classList.add('desktop-countdown-pip');
+function appendControlsReset(doc: Document): void {
+  doc.getElementById(CONTROLS_RESET_STYLE_ID)?.remove();
+  const style = doc.createElement('style');
+  style.id = CONTROLS_RESET_STYLE_ID;
+  style.textContent = `
+    html, body, #${CONTROLS_ROOT_ID} {
+      margin: 0 !important;
+      padding: 0 !important;
+      border: 0 !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
+      max-width: none !important;
+      max-height: none !important;
+      overflow: hidden !important;
+      box-sizing: border-box !important;
+      background: transparent !important;
+    }
+  `;
+  doc.head.appendChild(style);
+}
+
+export function getDesktopRecordingControlsRoot(host: Window): HTMLElement {
+  return host.document === document ? host.document.body : ensureControlsRoot(host.document);
 }
 
 type DocumentPictureInPictureApi = {
@@ -147,10 +152,12 @@ export async function requestDesktopRecordingControlsWindow(): Promise<Window | 
       ) ?? null;
   if (!host) return null;
   const doc = host.document;
-  if (host !== window) {
+  if (doc !== document) {
     document.querySelectorAll('link[rel="stylesheet"], style').forEach((node) => {
       doc.head.appendChild(node.cloneNode(true));
     });
+    ensureControlsRoot(doc);
+    appendControlsReset(doc);
     // 空标题 + 透明文档底色，避免标题文字和白色页面底成为第二层“窗口”。
     // 原生窗口的边缘/阴影仍由浏览器和操作系统决定，无法由网页进一步覆盖。
     doc.title = '';
@@ -165,53 +172,19 @@ export async function requestDesktopRecordingControlsWindow(): Promise<Window | 
   return host;
 }
 
-/**
- * Full-screen-ish countdown host for desktop/window capture. It is requested
- * directly from the user's “start countdown” click because Document PiP cannot
- * be opened later from an automatic timer without transient activation.
- */
-export async function requestFullscreenCountdownWindow(): Promise<Window | null> {
-  if (typeof window === 'undefined') return null;
-  const api = (window as Window & { documentPictureInPicture?: DocumentPictureInPictureApi }).documentPictureInPicture;
-  const size = getFullscreenCountdownWindowSize();
-  const host = api?.requestWindow
-    ? await api.requestWindow({
-        ...size,
-        disallowReturnToOpener: true,
-        preferInitialWindowPlacement: true,
-      })
-    : window.open(
-        '',
-        'excalicast-countdown',
-        `popup=yes,width=${size.width},height=${size.height},left=0,top=0,resizable=yes`,
-      ) ?? null;
-  if (!host) return null;
-  const doc = host.document;
-  if (host !== window) {
-    document.querySelectorAll('link[rel="stylesheet"], style').forEach((node) => {
-      doc.head.appendChild(node.cloneNode(true));
-    });
-    doc.title = '';
-    doc.documentElement.dataset.recordingControlsWindow = 'countdown-fullscreen';
-    doc.documentElement.dataset.recordingControlsTargetSize = `${size.width}x${size.height}`;
-    doc.body.dataset.recordingControlsWindow = 'countdown-fullscreen';
-    applyFullscreenCountdownDocumentStyles(doc, size);
-    try { host.resizeTo(size.width, size.height); } catch { /* best-effort */ }
-  }
-  return host;
-}
-
 interface Props {
   host: Window | null;
   bar: RecordingBarProps | null;
+  countdown?: number | null;
   /** True for desktop/window capture: the host should open already docked after countdown. */
   initialDocked?: boolean;
   /** True for desktop/window capture: resize the outer host to the measured control content. */
   adaptiveWindow?: boolean;
 }
 
-export function DesktopRecordingControls({ host, bar, initialDocked = false, adaptiveWindow = false }: Props): JSX.Element | null {
-  const isActive = !!host && !!bar && (bar.state === 'recording' || bar.state === 'paused');
+export function DesktopRecordingControls({ host, bar, countdown = null, initialDocked = false, adaptiveWindow = false }: Props): JSX.Element | null {
+  const isCountdown = countdown !== null && countdown > 0;
+  const isActive = !!host && !!bar && (isCountdown || bar.state === 'recording' || bar.state === 'paused');
 
   const [docked, setDocked] = useState(initialDocked);
   const [measuredWindow, setMeasuredWindow] = useState<MeasuredControlWindow | null>(null);
@@ -221,6 +194,7 @@ export function DesktopRecordingControls({ host, bar, initialDocked = false, ada
   const fullSizerRef = useRef<HTMLDivElement>(null);
   const leaveTimerRef = useRef<number | null>(null);
   const resizeTimerRef = useRef<number | null>(null);
+  const effectiveDocked = isCountdown || docked;
 
   const clearLeaveTimer = useCallback(() => {
     if (leaveTimerRef.current !== null) {
@@ -323,12 +297,39 @@ export function DesktopRecordingControls({ host, bar, initialDocked = false, ada
     setDocked(true);
   }, [adaptiveWindow, applyHostSize, clearLeaveTimer, clearResizeTimer, measureMode]);
 
+  const handlePointerEnter = useCallback(() => {
+    if (isCountdown) return;
+    if (adaptiveWindow) {
+      if (effectiveDocked) expandControls();
+      else clearLeaveTimer();
+      return;
+    }
+    reveal();
+  }, [adaptiveWindow, clearLeaveTimer, effectiveDocked, expandControls, isCountdown, reveal]);
+
+  const handlePointerLeave = useCallback(() => {
+    if (isCountdown) return;
+    if (!adaptiveWindow) {
+      scheduleDock();
+      return;
+    }
+    clearLeaveTimer();
+    leaveTimerRef.current = window.setTimeout(() => {
+      collapseControls();
+      leaveTimerRef.current = null;
+    }, DOCK_AFTER_LEAVE_DELAY_MS);
+  }, [adaptiveWindow, clearLeaveTimer, collapseControls, isCountdown, scheduleDock]);
+
   // 开录后不需要整段工具条长期遮在桌面/窗口上：先留一小段时间让用户确认状态，
   // 再收成可见的 REC 边签。鼠标回到边签即可恢复所有控制。
   useEffect(() => {
     if (!isActive) {
       setDocked(initialDocked);
       setResizeStatus('ok');
+      return;
+    }
+    if (isCountdown) {
+      setDocked(true);
       return;
     }
     if (initialDocked) {
@@ -345,17 +346,17 @@ export function DesktopRecordingControls({ host, bar, initialDocked = false, ada
       clearLeaveTimer();
       clearResizeTimer();
     };
-  }, [clearLeaveTimer, clearResizeTimer, initialDocked, isActive]);
+  }, [clearLeaveTimer, clearResizeTimer, initialDocked, isActive, isCountdown]);
 
   useLayoutEffect(() => {
     if (!isActive || !contentRef.current) return;
-    const node = contentRef.current;
-    const mode: ControlWindowMode = docked ? 'docked' : 'full';
+    const wrapper = contentRef.current;
+    const node = wrapper.querySelector<HTMLElement>('[data-pip-control-surface]') ?? wrapper;
+    const mode: ControlWindowMode = effectiveDocked ? 'docked' : 'full';
     const measure = () => {
-      const measured = adaptiveWindow ? measureMode(mode) : null;
       const rect = node.getBoundingClientRect();
-      const width = measured?.width ?? Math.max(1, Math.ceil(rect.width));
-      const height = measured?.height ?? Math.max(1, Math.ceil(rect.height));
+      const width = Math.max(1, Math.ceil(rect.width));
+      const height = Math.max(1, Math.ceil(rect.height));
       setMeasuredWindow((current) => (
         current?.mode === mode && current.size.width === width && current.size.height === height
           ? current
@@ -367,21 +368,33 @@ export function DesktopRecordingControls({ host, bar, initialDocked = false, ada
     const ro = new ResizeObserver(measure);
     ro.observe(node);
     return () => ro.disconnect();
-  }, [adaptiveWindow, docked, isActive, measureMode]);
+  }, [adaptiveWindow, effectiveDocked, isActive, measureMode]);
 
   // 普通 popup 可以真实缩小窗口；Document PiP 的 resizeTo 支持由浏览器决定，
   // 但外层窗口必须跟随内容尺寸尽力同步：自动收起为 REC 边签时，也不能留下
   // 一块固定 560px 的透明宿主空白。
   useLayoutEffect(() => {
     if (!isActive || !host || host.closed) return;
-    const mode: ControlWindowMode = docked ? 'docked' : 'full';
-    const fallback = docked
+    const mode: ControlWindowMode = effectiveDocked ? 'docked' : 'full';
+    const fallback = effectiveDocked
       ? (adaptiveWindow ? ADAPTIVE_DOCKED_CONTROLS_WINDOW_SIZE : LEGACY_DOCKED_CONTROLS_WINDOW_SIZE)
       : CONTROLS_WINDOW_SIZE;
     const measuredSize = measuredWindow?.mode === mode ? measuredWindow.size : null;
     const next = adaptiveWindow && measuredSize ? measuredSize : fallback;
     applyHostSize(mode, next, adaptiveWindow);
-    if (adaptiveWindow) return;
+    if (adaptiveWindow) {
+      // Chrome may coalesce a resize requested in the same commit that swaps
+      // countdown/REC content. Retry across the following frames while keeping
+      // every document layer pinned to the exact measured control dimensions.
+      const frame = window.requestAnimationFrame(() => applyHostSize(mode, next, true));
+      const retries = [60, 180, 360].map((delay) => (
+        window.setTimeout(() => applyHostSize(mode, next, true), delay)
+      ));
+      return () => {
+        window.cancelAnimationFrame(frame);
+        retries.forEach((id) => window.clearTimeout(id));
+      };
+    }
 
     clearResizeTimer();
     let step = 0;
@@ -406,7 +419,7 @@ export function DesktopRecordingControls({ host, bar, initialDocked = false, ada
     };
     tick();
     return clearResizeTimer;
-  }, [adaptiveWindow, applyHostSize, clearResizeTimer, host, docked, isActive, measuredWindow]);
+  }, [adaptiveWindow, applyHostSize, clearResizeTimer, host, effectiveDocked, isActive, measuredWindow]);
 
   if (!isActive || !host || !bar) return null;
 
@@ -414,7 +427,7 @@ export function DesktopRecordingControls({ host, bar, initialDocked = false, ada
     <>
     <div
       data-testid="desktop-recording-controls"
-      data-docked={docked ? 'true' : 'false'}
+      data-docked={effectiveDocked ? 'true' : 'false'}
       data-resize-status={resizeStatus}
       ref={contentRef}
       className="rb-no-record"
@@ -427,13 +440,15 @@ export function DesktopRecordingControls({ host, bar, initialDocked = false, ada
         boxSizing: 'border-box',
         alignItems: 'center',
         justifyContent: 'center',
-        justifySelf: docked ? 'end' : 'center',
+        justifySelf: effectiveDocked ? 'end' : 'center',
         transition: 'opacity 160ms ease, transform 180ms cubic-bezier(.2,.8,.2,1)',
       }}
-      onPointerEnter={adaptiveWindow ? undefined : reveal}
-      onPointerLeave={adaptiveWindow ? undefined : scheduleDock}
+      onPointerEnter={handlePointerEnter}
+      onPointerLeave={handlePointerLeave}
     >
-      {docked ? (
+      {isCountdown ? (
+        <CountdownDock value={countdown} />
+      ) : effectiveDocked ? (
         <DockButton bar={bar} onExpand={adaptiveWindow ? expandControls : reveal} />
       ) : <FullRecordingControls bar={bar} onCollapse={adaptiveWindow ? collapseControls : undefined} />}
     </div>
@@ -460,7 +475,38 @@ export function DesktopRecordingControls({ host, bar, initialDocked = false, ada
       </div>
     </div>
     </>,
-    host.document.body,
+    getDesktopRecordingControlsRoot(host),
+  );
+}
+
+function CountdownDock({ value }: { value: number }): JSX.Element {
+  return (
+    <div
+      data-testid="desktop-countdown-controls"
+      data-countdown-mode="compact"
+      data-pip-control-surface
+      className="rb-no-record"
+      style={{
+        display: 'grid',
+        placeItems: 'center',
+        boxSizing: 'border-box',
+        width: ADAPTIVE_DOCKED_CONTROLS_WINDOW_SIZE.width,
+        height: ADAPTIVE_DOCKED_CONTROLS_WINDOW_SIZE.height,
+        margin: 0,
+        padding: 0,
+        border: '1px solid rgba(255,255,255,.12)',
+        borderRadius: 999,
+        overflow: 'hidden',
+        background: 'rgba(18,19,20,.98)',
+        color: '#fffdf8',
+        fontFamily: 'var(--font-display)',
+        fontSize: 28,
+        fontWeight: 750,
+        lineHeight: 1,
+      }}
+    >
+      {value}
+    </div>
   );
 }
 
@@ -471,14 +517,15 @@ function DockButton({ bar, onExpand, measurement = false }: { bar: RecordingBarP
   return (
     <div
       data-testid={measurement ? undefined : 'desktop-recording-controls-dock'}
+      data-pip-control-surface={measurement ? undefined : ''}
       role="group"
       aria-label="Docked recording controls"
       style={{
         display: 'flex',
         boxSizing: 'border-box',
         alignItems: 'center',
-        width: 'max-content',
-        minHeight: 0,
+        width: ADAPTIVE_DOCKED_CONTROLS_WINDOW_SIZE.width,
+        height: ADAPTIVE_DOCKED_CONTROLS_WINDOW_SIZE.height,
         gap: 4,
         padding: '4px 6px',
         border: '1px solid rgba(255,255,255,.12)',
@@ -581,7 +628,7 @@ function DockControlButton({
 
 function FullRecordingControls({ bar, onCollapse, measurement = false }: { bar: RecordingBarProps; onCollapse?: () => void; measurement?: boolean }): JSX.Element {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', width: 'max-content', gap: 4 }}>
+    <div data-pip-control-surface={measurement ? undefined : ''} style={{ display: 'flex', alignItems: 'center', width: 'max-content', gap: 4 }}>
       <RecordingBar {...bar} />
       {onCollapse && (
         <button

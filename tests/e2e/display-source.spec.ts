@@ -319,24 +319,64 @@ test('desktop capture requests a detached recording controller before countdown'
   await expect(page.getByTestId('desktop-framing-controls')).toBeVisible();
   await expect(page.getByTestId('framing-bar').getByText('取景中')).toBeVisible();
   await expect(page.getByTestId('framing-bar-hint')).toHaveCount(0);
+  const framingBar = page.getByTestId('framing-bar');
+  await expect.poll(() => framingBar.evaluate((element) => ({
+    display: (element as HTMLElement).style.display,
+    alignItems: (element as HTMLElement).style.alignItems,
+    flexWrap: (element as HTMLElement).style.flexWrap,
+  }))).toEqual({
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'nowrap',
+  });
+  const framingBounds = await framingBar.boundingBox();
+  const startBounds = await framingBar.getByRole('button', { name: /^开始倒计时$/ }).boundingBox();
+  const cancelBounds = await framingBar.getByRole('button', { name: /取消/ }).boundingBox();
+  expect(framingBounds).not.toBeNull();
+  expect(startBounds).not.toBeNull();
+  expect(cancelBounds).not.toBeNull();
+  expect((startBounds?.x ?? 0) + (startBounds?.width ?? 0)).toBeLessThanOrEqual((framingBounds?.x ?? 0) + (framingBounds?.width ?? 0));
+  expect((cancelBounds?.x ?? 0) + (cancelBounds?.width ?? 0)).toBeLessThanOrEqual((framingBounds?.x ?? 0) + (framingBounds?.width ?? 0));
 
   await page.getByRole('button', { name: /^开始倒计时$/ }).click();
   await expect(page.getByTestId('desktop-countdown-controls')).toBeVisible();
-  await expect(page.getByTestId('desktop-countdown-controls')).toHaveAttribute('data-countdown-mode', 'fullscreen');
+  await expect(page.getByTestId('desktop-countdown-controls')).toHaveAttribute('data-countdown-mode', 'compact');
+  await expect(page.getByTestId('desktop-recording-controls')).toHaveAttribute('data-docked', 'true');
   await expect.poll(() => page.evaluate(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (window as any).__desktopControlRequests;
-  })).toBe(2);
-  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.recordingControlsWindow)).toBe('countdown-fullscreen');
-  const countdownTarget = await page.evaluate(() => document.documentElement.dataset.recordingControlsTargetSize ?? '');
-  const [countdownWidth, countdownHeight] = countdownTarget.split('x').map((part) => Number(part));
-  expect(countdownWidth).toBeGreaterThanOrEqual(960);
-  expect(countdownHeight).toBeGreaterThanOrEqual(640);
+  })).toBe(1);
+  const countdown = page.getByTestId('desktop-countdown-controls');
+  const countdownSize = await countdown.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return `${Math.ceil(rect.width)}x${Math.ceil(rect.height)}`;
+  });
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.recordingControlsWindow)).toBe('docked');
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.recordingControlsTargetSize)).toBe(countdownSize);
+  await expect.poll(() => page.evaluate(() => ({
+    htmlMargin: getComputedStyle(document.documentElement).margin,
+    htmlPadding: getComputedStyle(document.documentElement).padding,
+    bodyMargin: getComputedStyle(document.body).margin,
+    bodyPadding: getComputedStyle(document.body).padding,
+    overflow: getComputedStyle(document.body).overflow,
+  }))).toEqual({
+    htmlMargin: '0px',
+    htmlPadding: '0px',
+    bodyMargin: '0px',
+    bodyPadding: '0px',
+    overflow: 'hidden',
+  });
 
   // 测试桩把 Document PiP host 指到当前 document，因此可直接验证脱离主录制条的控制动作。
   const dock = page.getByTestId('desktop-recording-controls-dock');
   await expect(dock).toBeVisible({ timeout: 9_000 });
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.recordingControlsWindow)).toBe('docked');
+  const dockSize = await dock.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return `${Math.ceil(rect.width)}x${Math.ceil(rect.height)}`;
+  });
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.recordingControlsTargetSize)).toBe(dockSize);
+  expect(dockSize).toBe(countdownSize);
   const pause = page.getByRole('button', { name: 'Pause recording' });
   await expect(pause).toBeEnabled();
   await pause.click();
@@ -377,8 +417,8 @@ test('window capture also moves framing and recording controls outside the captu
   await expect(page.getByTestId('desktop-framing-controls')).toBeVisible();
   await page.getByTestId('desktop-framing-controls').getByRole('button', { name: /^开始倒计时$/ }).click();
   await expect(page.getByTestId('desktop-countdown-controls')).toBeVisible();
-  await expect(page.getByTestId('desktop-countdown-controls')).toHaveAttribute('data-countdown-mode', 'fullscreen');
-  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.recordingControlsWindow)).toBe('countdown-fullscreen');
+  await expect(page.getByTestId('desktop-countdown-controls')).toHaveAttribute('data-countdown-mode', 'compact');
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.recordingControlsWindow)).toBe('docked');
 
   const dock = page.getByTestId('desktop-recording-controls-dock');
   await expect(dock.getByRole('button', { name: 'Pause recording' })).toBeVisible({ timeout: 9_000 });
@@ -653,17 +693,7 @@ test('display recording moves the complete toolbar outside the captured page', a
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).__desktopControlSizes = [] as string[];
   });
-  await dock.evaluate((element) => {
-    element.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
-  });
-  await page.waitForTimeout(600);
-  await expect(controller).toHaveAttribute('data-docked', 'true');
-  await expect.poll(() => page.evaluate(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return ((window as any).__desktopControlSizes as string[]).length;
-  })).toBe(0);
-
-  await dock.getByRole('button', { name: 'Show recording controls' }).evaluate((element: HTMLElement) => element.click());
+  await dock.dispatchEvent('pointerover', { pointerType: 'mouse' });
   await expect(controller).toHaveAttribute('data-docked', 'false');
 
   const bar = controller.getByTestId('recording-bar');
@@ -693,7 +723,7 @@ test('display recording moves the complete toolbar outside the captured page', a
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).__desktopControlSizes = [] as string[];
   });
-  await controller.getByRole('button', { name: 'Collapse recording controls' }).evaluate((element: HTMLElement) => element.click());
+  await controller.dispatchEvent('pointerout', { pointerType: 'mouse' });
   await expect(page.getByTestId('desktop-recording-controls-dock')).toBeVisible();
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.recordingControlsTargetSize)).toBe(dockSize);
   await expect.poll(() => page.evaluate((size) => {

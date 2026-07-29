@@ -13,7 +13,7 @@ import { Teleprompter } from '@/components/Teleprompter';
 import { AspectCropOverlay } from '@/components/AspectCropOverlay';
 import { DisplaySourceCropOverlay } from '@/components/DisplaySourceCropOverlay';
 import { DisplaySourcePreview } from '@/components/DisplaySourcePreview';
-import { DesktopRecordingControls, requestDesktopRecordingControlsWindow, requestFullscreenCountdownWindow } from '@/components/DesktopRecordingControls';
+import { ADAPTIVE_DOCKED_CONTROLS_WINDOW_SIZE, DesktopRecordingControls, getDesktopRecordingControlsRoot, requestDesktopRecordingControlsWindow } from '@/components/DesktopRecordingControls';
 import { I } from '@/components/icons';
 import { useSubscription } from '@/hooks/useSubscription';
 import { startRecording, type SessionHandle, type CameraFrameRect } from '@/services/recordingSession';
@@ -504,23 +504,6 @@ export default function HomePage(): JSX.Element {
     }
   }, [desktopControlHost]);
 
-  const openFullscreenCountdownControls = useCallback(async (): Promise<Window | null> => {
-    try {
-      const host = await requestFullscreenCountdownWindow();
-      if (!host) return null;
-      if (host !== window) {
-        host.addEventListener('pagehide', () => setDesktopControlHost(null), { once: true });
-      }
-      setDesktopControlHost(host);
-      return host;
-    } catch {
-      // If the browser refuses Document PiP, avoid falling back to an in-page
-      // countdown for desktop/window/selected-area capture because that overlay
-      // would be recorded into the source.
-      return null;
-    }
-  }, []);
-
   const resizeDesktopControlsHost = useCallback((host: Window | null, size: { width: number; height: number }, mode: string, options?: { background?: string }) => {
     if (!host || host.closed) return;
     const doc = host.document;
@@ -535,6 +518,12 @@ export default function HomePage(): JSX.Element {
       doc.documentElement.style.height = `${size.height}px`;
       doc.body.style.width = `${size.width}px`;
       doc.body.style.height = `${size.height}px`;
+      const root = getDesktopRecordingControlsRoot(host);
+      root.style.width = `${size.width}px`;
+      root.style.height = `${size.height}px`;
+      root.style.display = 'grid';
+      root.style.placeItems = 'center';
+      root.style.overflow = 'hidden';
     }
     try { host.resizeTo(size.width, size.height); } catch { /* Document PiP may not be resizable */ }
   }, []);
@@ -695,19 +684,16 @@ export default function HomePage(): JSX.Element {
       source: selectedSource,
     };
     if (selectedSource?.kind && selectedSource.kind !== 'whiteboard') {
-      // 在用户点击「开始录制」这一手势内请求 Document PiP。桌面/窗口/选定区域先
-      // 切到全屏浅灰倒计时，避免把页面内倒计时或录制条录进源画面；倒计时结束后
-      // 复用同一宿主渲染录制条（timer 回调里再 requestWindow 会被浏览器拦截）。
-      if (usesFullscreenCountdownSource(selectedSource)) {
-        closeDesktopControls();
-        void openFullscreenCountdownControls();
-      } else {
-        void openDesktopControls();
+      // 复用取景阶段已经打开的 PiP。倒计时只替换宿主内的控件，不再重新申请
+      // 一个全屏文档窗口；选定区域此前没有独立取景条，因此在此用户手势内创建。
+      void openDesktopControls();
+      if (usesFullscreenCountdownSource(selectedSource) && desktopControlHost && !desktopControlHost.closed) {
+        resizeDesktopControlsHost(desktopControlHost, ADAPTIVE_DOCKED_CONTROLS_WINDOW_SIZE, 'docked', { background: 'transparent' });
       }
     }
     pendingStartRef.current = { config: finalConfig, pos: cameraPos, size: cameraSize };
     setCountdown(3);
-  }, [setupConfig, cameraPos, cameraSize, cameraEnabled, sourceCropWindow, closeDesktopControls, openDesktopControls, openFullscreenCountdownControls]);
+  }, [setupConfig, cameraPos, cameraSize, cameraEnabled, sourceCropWindow, desktopControlHost, openDesktopControls, resizeDesktopControlsHost]);
 
   // 取景取消：停掉摄像头/麦克风预览、清裁切框、回 idle
   const handleCancelFraming = useCallback(() => {
@@ -913,9 +899,9 @@ export default function HomePage(): JSX.Element {
   const usesExternalFramingControls = state !== 'idle' && usesDetachedSourceControls(setupConfig.source);
   const usesFullscreenCountdown = state !== 'idle' && usesFullscreenCountdownSource(setupConfig.source);
   const hasExternalControlsHost = !!desktopControlHost && !desktopControlHost.closed;
-  const showExternalFramingControls = usesExternalFramingControls && hasExternalControlsHost && state === 'framing' && countdown === null;
+  const showExternalFramingControls = usesExternalFramingControls && hasExternalControlsHost && state === 'framing' && countdown === null && !recordingStarting;
   const showExternalCountdown = usesFullscreenCountdown && hasExternalControlsHost && countdown !== null && countdown > 0;
-  const showInPageFramingControls = state === 'framing' && countdown === null && !showExternalFramingControls;
+  const showInPageFramingControls = state === 'framing' && countdown === null && !recordingStarting && !showExternalFramingControls;
   const showInPageCountdown = countdown !== null && countdown > 0 && !showExternalCountdown && !usesFullscreenCountdown;
   const canDockRecordingBar = isRecording && !usesExternalRecordingControls;
   const framingHint = setupConfig.source?.kind === 'desktop' ? '' : t('framingHint');
@@ -1115,7 +1101,18 @@ export default function HomePage(): JSX.Element {
 
         <DesktopRecordingControls
           host={desktopControlHost}
-          bar={usesExternalRecordingControls && isRecording ? recordingBarProps : null}
+          bar={usesExternalRecordingControls && (showExternalCountdown || isRecording || recordingStarting)
+            ? (!isRecording
+                ? {
+                    ...recordingBarProps,
+                    state: 'recording',
+                    elapsedMs: 0,
+                    onPause: undefined,
+                    onStop: async () => undefined,
+                  }
+                : recordingBarProps)
+            : null}
+          countdown={showExternalCountdown ? countdown : null}
           initialDocked={usesExternalRecordingControls}
           adaptiveWindow={usesExternalRecordingControls}
         />
@@ -1194,13 +1191,6 @@ export default function HomePage(): JSX.Element {
           </div>
         )}
 
-        {showExternalCountdown && desktopControlHost && (
-          <ExternalFullscreenCountdownControls
-            host={desktopControlHost}
-            value={countdown ?? 0}
-          />
-        )}
-
         {/* 首次访问引导浮层 */}
         {showIntro && (
           <FirstRunGuide
@@ -1261,67 +1251,7 @@ function ExternalFramingControls({
     >
       {children}
     </div>,
-    host.document.body,
-  );
-}
-
-function ExternalFullscreenCountdownControls({
-  host,
-  value,
-}: {
-  host: Window;
-  value: number;
-}): JSX.Element {
-  useLayoutEffect(() => {
-    const doc = host.document;
-    const width = Math.max(960, Math.round(host.innerWidth || window.screen?.availWidth || window.innerWidth));
-    const height = Math.max(640, Math.round(host.innerHeight || window.screen?.availHeight || window.innerHeight));
-    doc.documentElement.dataset.recordingControlsWindow = 'countdown-fullscreen';
-    doc.documentElement.dataset.recordingControlsTargetSize = `${width}x${height}`;
-    doc.body.dataset.recordingControlsWindow = 'countdown-fullscreen';
-    if (host !== window) {
-      doc.documentElement.style.background = 'rgba(241, 241, 237, 0.72)';
-      doc.documentElement.style.colorScheme = 'light';
-      doc.documentElement.style.overflow = 'hidden';
-      doc.documentElement.style.width = `${width}px`;
-      doc.documentElement.style.height = `${height}px`;
-      doc.body.style.margin = '0';
-      doc.body.style.padding = '0';
-      doc.body.style.background = 'rgba(241, 241, 237, 0.72)';
-      doc.body.style.overflow = 'hidden';
-      doc.body.style.width = `${width}px`;
-      doc.body.style.height = `${height}px`;
-      doc.body.style.display = 'grid';
-      doc.body.style.alignItems = 'stretch';
-      doc.body.style.justifyContent = 'stretch';
-      doc.body.classList.add('desktop-countdown-pip');
-    }
-  }, [host, value]);
-
-  return createPortal(
-    <div
-      data-testid="desktop-countdown-controls"
-      data-countdown-mode="fullscreen"
-      className="workspace-craft-countdown rb-no-record"
-      style={{
-        display: 'grid',
-        position: 'fixed',
-        inset: 0,
-        zIndex: 2147483647,
-        width: '100vw',
-        height: '100vh',
-        minWidth: '100vw',
-        minHeight: '100vh',
-        boxSizing: 'border-box',
-        placeItems: 'center',
-        background: 'rgba(241, 241, 237, 0.72)',
-        backdropFilter: 'blur(10px)',
-        WebkitBackdropFilter: 'blur(10px)',
-      }}
-    >
-      <CountdownRing value={value} />
-    </div>,
-    host.document.body,
+    getDesktopRecordingControlsRoot(host),
   );
 }
 
@@ -1377,7 +1307,12 @@ function FramingBar({
       data-testid="framing-bar"
       className="workspace-craft-framing workspace-craft-framing-dark flex items-center gap-3"
       style={{
+        display: 'flex',
+        alignItems: 'center',
+        flexWrap: 'nowrap',
+        gap: 12,
         width: 'max-content',
+        boxSizing: 'border-box',
         padding: '6px 10px',
         background: 'rgba(18, 19, 20, 0.93)',
         color: '#fffdf8',
@@ -1400,15 +1335,16 @@ function FramingBar({
           fontWeight: 780,
           letterSpacing: '.035em',
           whiteSpace: 'nowrap',
+          flexShrink: 0,
         }}
       >
         <span style={{ width: 8, height: 8, borderRadius: 999, background: 'rgba(255,255,255,.52)' }} />
         {readyLabel}
       </span>
       {warn
-        ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: dark ? '#ff6b64' : 'var(--rec)', fontWeight: 600, letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>{warn}</span>
+        ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: dark ? '#ff6b64' : 'var(--rec)', fontWeight: 600, letterSpacing: '0.02em', whiteSpace: 'nowrap', flexShrink: 0 }}>{warn}</span>
         : hint
-          ? <span data-testid="framing-bar-hint" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: dark ? 'rgba(255,253,248,0.74)' : 'var(--ink-2)', letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>{hint}</span>
+          ? <span data-testid="framing-bar-hint" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: dark ? 'rgba(255,253,248,0.74)' : 'var(--ink-2)', letterSpacing: '0.02em', whiteSpace: 'nowrap', flexShrink: 0 }}>{hint}</span>
           : null}
       <MicLevelMeter stream={micStream} variant="dark" />
       <button
@@ -1417,6 +1353,10 @@ function FramingBar({
         onClick={onCancel}
         style={dark
           ? {
+              display: 'inline-flex',
+              alignItems: 'center',
+              flexShrink: 0,
+              whiteSpace: 'nowrap',
               padding: '7px 12px',
               background: 'transparent',
               border: 'none',
@@ -1438,6 +1378,10 @@ function FramingBar({
         onClick={onStart}
         style={dark
           ? {
+              display: 'inline-flex',
+              alignItems: 'center',
+              flexShrink: 0,
+              whiteSpace: 'nowrap',
               gap: 8,
               padding: '8px 16px',
               background: 'var(--rec)',
@@ -1496,6 +1440,9 @@ function MicLevelMeter({ stream, variant = 'light' }: { stream: MediaStream | nu
     <div
       className="flex items-center"
       style={{
+        display: 'flex',
+        alignItems: 'center',
+        flexShrink: 0,
         gap: 6,
         padding: dark ? '5px 9px' : '4px 8px',
         border: dark ? '1px solid rgba(255,255,255,0.12)' : '1.4px solid var(--ink)',
@@ -1505,7 +1452,7 @@ function MicLevelMeter({ stream, variant = 'light' }: { stream: MediaStream | nu
       }}
     >
       <I.Mic size={13} />
-      <div className="flex items-end" style={{ gap: 2, height: 14 }}>
+      <div className="flex items-end" style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 14 }}>
         {bars.map((threshold, i) => (
           <div
             key={i}
