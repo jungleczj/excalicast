@@ -381,7 +381,7 @@ test('autozoom keeps the video background at its original scale in the export pr
           ...recording,
           setup: {
             ...recording.setup,
-            videoBackground: { kind: 'preset', presetId: 'candy-flow' },
+            videoBackground: { kind: 'preset', presetId: 'cyanotype-garden' },
           },
           autoZooms: [],
         });
@@ -465,7 +465,7 @@ test('autozoom keeps the video background at its original scale in the export pr
     expected.width = canvas.width;
     expected.height = canvas.height;
     const image = new Image();
-    image.src = '/video-backgrounds/candy-flow.svg';
+    image.src = '/video-backgrounds/curated/bg-01-cyanotype-garden.png';
     await new Promise<void>((resolve, reject) => {
       image.onload = () => resolve();
       image.onerror = () => reject(new Error('fixture wallpaper did not load'));

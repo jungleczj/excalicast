@@ -34,11 +34,29 @@ test('recording setup can select a video background', async ({ page }) => {
   await page.goto('/app');
   await page.getByRole('button', { name: /新建录制/ }).first().click();
   await expect(page.getByText('视频背景').first()).toBeVisible();
-  for (const label of ['纸感蓝', '柔和绿', '暖黄纸', '淡紫便笺', '深色纸面', '糖果流光', '柔粉花园', '粉彩薄雾', '极光雪原', '晨色山脊', '叶影纸面', '霓虹暮色']) {
+  for (const label of [
+    '蓝晒植物',
+    '地中海窗影',
+    '雾岭晨曦',
+    '月光水纹',
+    '赤陶拱廊',
+    '极地柔光',
+    '沙丘暮色',
+    '星图浮雕',
+    '矿物薄雾',
+    '和纸远山',
+    '浅海日光',
+    '潮汐细鳞',
+    '细密花织',
+  ]) {
     await expect(page.getByRole('button', { name: new RegExp(label) })).toBeVisible();
   }
   await page.getByRole('button', { name: /自定义颜色/ }).click();
   await expect(page.getByRole('button', { name: /自定义颜色/ })).toHaveAttribute('aria-pressed', 'true');
-  await page.getByRole('button', { name: /纸感蓝/ }).click();
-  await expect(page.getByRole('button', { name: /纸感蓝/ })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: /蓝晒植物/ }).click();
+  await expect(page.getByRole('button', { name: /蓝晒植物/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('recording-background-preview-frame')).toHaveCSS(
+    'background-image',
+    /bg-01-cyanotype-garden\.png/,
+  );
 });
