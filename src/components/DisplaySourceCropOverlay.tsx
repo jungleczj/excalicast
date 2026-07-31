@@ -8,6 +8,8 @@ interface Props {
   mediaAspect: number | null;
   onChange: (next: SourceCropWindow) => void;
   label?: string;
+  /** Pixel-space output aspect. The crop remains locked to this ratio. */
+  lockedAspect?: number;
   /** 录制后锁定选区，只保留边界作为所录范围的明确反馈。 */
   interactive?: boolean;
 }
@@ -61,7 +63,40 @@ function pointForEvent(event: PointerEvent<HTMLDivElement>, ref: RefObject<HTMLD
   };
 }
 
-function resizeCrop(base: SourceCropWindow, handle: Handle, x: number, y: number): SourceCropWindow {
+function lockCropAspect(
+  crop: SourceCropWindow,
+  lockedAspect: number | undefined,
+  mediaAspect: number | null,
+  anchor: Handle = 'nw',
+): SourceCropWindow {
+  if (!lockedAspect || !mediaAspect || lockedAspect <= 0 || mediaAspect <= 0) return clampCrop(crop);
+  const normalizedAspect = lockedAspect / mediaAspect;
+  let rw = crop.rw;
+  let rh = rw / normalizedAspect;
+  if (rh > 1) {
+    rh = Math.min(1, crop.rh);
+    rw = rh * normalizedAspect;
+  }
+  rw = Math.max(MIN_SIZE, Math.min(1, rw));
+  rh = Math.max(MIN_SIZE, Math.min(1, rh));
+  const right = crop.rx + crop.rw;
+  const bottom = crop.ry + crop.rh;
+  return clampCrop({
+    rx: anchor.includes('w') ? right - rw : crop.rx,
+    ry: anchor.includes('n') ? bottom - rh : crop.ry,
+    rw,
+    rh,
+  });
+}
+
+function resizeCrop(
+  base: SourceCropWindow,
+  handle: Handle,
+  x: number,
+  y: number,
+  lockedAspect?: number,
+  mediaAspect: number | null = null,
+): SourceCropWindow {
   let left = base.rx;
   let right = base.rx + base.rw;
   let top = base.ry;
@@ -70,16 +105,28 @@ function resizeCrop(base: SourceCropWindow, handle: Handle, x: number, y: number
   else right = Math.min(1, Math.max(left + MIN_SIZE, x));
   if (handle.includes('n')) top = Math.max(0, Math.min(bottom - MIN_SIZE, y));
   else bottom = Math.min(1, Math.max(top + MIN_SIZE, y));
-  return clampCrop({ rx: left, ry: top, rw: right - left, rh: bottom - top });
+  return lockCropAspect(
+    { rx: left, ry: top, rw: right - left, rh: bottom - top },
+    lockedAspect,
+    mediaAspect,
+    handle,
+  );
 }
 
-export function DisplaySourceCropOverlay({ value, mediaAspect, onChange, label, interactive = true }: Props): JSX.Element {
+export function DisplaySourceCropOverlay({
+  value,
+  mediaAspect,
+  onChange,
+  label,
+  lockedAspect,
+  interactive = true,
+}: Props): JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
 
   useEffect(() => {
-    if (!value) onChange(DEFAULT_CROP);
-  }, [value, onChange]);
+    if (!value) onChange(lockCropAspect(DEFAULT_CROP, lockedAspect, mediaAspect));
+  }, [lockedAspect, mediaAspect, onChange, value]);
 
   const crop = value ?? DEFAULT_CROP;
 
@@ -95,12 +142,12 @@ export function DisplaySourceCropOverlay({ value, mediaAspect, onChange, label, 
     if (!drag) return;
     const point = pointForEvent(event, ref);
     if (drag.mode === 'create') {
-      onChange(clampCrop({
+      onChange(lockCropAspect({
         rx: Math.min(drag.startX, point.x),
         ry: Math.min(drag.startY, point.y),
         rw: Math.max(MIN_SIZE, Math.abs(point.x - drag.startX)),
         rh: Math.max(MIN_SIZE, Math.abs(point.y - drag.startY)),
-      }));
+      }, lockedAspect, mediaAspect, 'nw'));
       return;
     }
     if (drag.mode === 'move') {
@@ -111,7 +158,7 @@ export function DisplaySourceCropOverlay({ value, mediaAspect, onChange, label, 
       }));
       return;
     }
-    onChange(resizeCrop(drag.crop, drag.handle ?? 'se', point.x, point.y));
+    onChange(resizeCrop(drag.crop, drag.handle ?? 'se', point.x, point.y, lockedAspect, mediaAspect));
   };
 
   const startDrag = (event: PointerEvent<HTMLDivElement>) => {

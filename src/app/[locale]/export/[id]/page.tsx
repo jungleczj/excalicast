@@ -21,8 +21,8 @@ import { ShareButton } from '@/components/ShareButton';
 import { useSubscription } from '@/hooks/useSubscription';
 import { getRecording, deleteRecording, updateRecordingTitle, updateRecordingSegments, updateRecordingAutoZooms } from '@/lib/db-client';
 import { getCurrentOwnerKey } from '@/lib/ownerKey';
-import type { AspectRatio, AutoZoomSegment, ExportConfig, LocalizedTrack, RecordingMetadata, RecordingSetupConfig, TimeSegment } from '@/types/recording';
-import { ASPECT_PRESETS } from '@/types/recording';
+import { projectRecordingSetupToExport } from '@/services/recordingSetupProjection';
+import type { AutoZoomSegment, ExportConfig, LocalizedTrack, RecordingMetadata, TimeSegment } from '@/types/recording';
 import { normalizeSegments, isTrimmed } from '@/utils/segments';
 import { Link, useRouter } from '@/i18n/navigation';
 
@@ -33,76 +33,6 @@ const DEFAULT_CONFIG: ExportConfig = {
   fps: 15,
   withWatermark: true,
 };
-
-/** 自定义 W×H → 最接近的预设比例（ExportConfig.aspectRatio 只接受预设）。 */
-function nearestPreset(w: number, h: number): AspectRatio {
-  if (!w || !h) return '16:9';
-  const target = w / h;
-  let best: AspectRatio = '16:9';
-  let bestDiff = Infinity;
-  for (const [id, p] of Object.entries(ASPECT_PRESETS) as [AspectRatio, (typeof ASPECT_PRESETS)[AspectRatio]][]) {
-    const diff = Math.abs(p.width / p.height - target);
-    if (diff < bestDiff) { bestDiff = diff; best = id; }
-  }
-  return best;
-}
-
-function rememberInitialFraming(config: ExportConfig): ExportConfig {
-  if (!config.cropWindow && !config.customOutput) return config;
-  return {
-    ...config,
-    ratioFraming: {
-      [config.aspectRatio]: {
-        croppingMode: config.croppingMode,
-        alwaysKeepZoomedIn: config.alwaysKeepZoomedIn,
-        cropWindow: config.cropWindow,
-        customOutput: config.customOutput,
-      },
-    },
-  };
-}
-
-/** 录制前 Setup 配置 → 导出默认（沿用比例 / 裁切模式 / 含工作区 / 裁切框）。 */
-function exportDefaultsFromSetup(setup: RecordingSetupConfig): ExportConfig {
-  const base: ExportConfig = {
-    ...DEFAULT_CONFIG,
-    includeWorkspaceShell: setup.includeWorkspaceShell,
-    videoBackground: setup.videoBackground,
-  };
-  const sourceSize = setup.source?.kind && setup.source.kind !== 'whiteboard'
-    ? setup.source.sourceSize
-    : undefined;
-  if (sourceSize?.width && sourceSize.height) {
-    return rememberInitialFraming({
-      ...base,
-      aspectRatio: nearestPreset(sourceSize.width, sourceSize.height),
-      croppingMode: 'fit_all_content',
-      alwaysKeepZoomedIn: false,
-      customOutput: { width: sourceSize.width, height: sourceSize.height },
-    });
-  }
-  if (setup.framing === 'default') {
-    return { ...base, aspectRatio: '16:9', croppingMode: 'fit_all_content' };
-  }
-  if (setup.framing === 'custom') {
-    const out = setup.customOutput;
-    return rememberInitialFraming({
-      ...base,
-      aspectRatio: nearestPreset(out?.width ?? 16, out?.height ?? 9),
-      croppingMode: 'fit_all_content',
-      alwaysKeepZoomedIn: false,
-      cropWindow: setup.cropWindow,
-      customOutput: out,
-    });
-  }
-  return rememberInitialFraming({
-    ...base,
-    aspectRatio: setup.framing,
-    croppingMode: 'fit_all_content',
-    alwaysKeepZoomedIn: false,
-    cropWindow: setup.cropWindow,
-  });
-}
 
 type Tab = 'export' | 'captions' | 'dubbing' | 'outline' | 'handout';
 
@@ -162,7 +92,7 @@ export default function EditorRecordingPage(): JSX.Element {
       setSelectedAutoZoomId(savedAutoZooms[0]?.id ?? null);
       if (m.setup) {
         setConfig({
-          ...exportDefaultsFromSetup(m.setup),
+          ...projectRecordingSetupToExport(m.setup, DEFAULT_CONFIG),
           ...localizedDefaults,
           autoZooms: savedAutoZooms.length ? savedAutoZooms : undefined,
         });

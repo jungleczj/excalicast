@@ -94,3 +94,32 @@ test('starting a whiteboard recording immediately stores the existing drawing', 
     return dark;
   }), { timeout: 12_000 }).toBeGreaterThan(100);
 });
+
+test('whiteboard recording does not run workspace screenshots when shell capture is disabled', async ({ page }) => {
+  await page.goto('/app');
+  await page.locator('.excalidraw').waitFor();
+
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
+  await page.getByRole('button', { name: /下一步：取景/ }).click();
+  await page.getByRole('button', { name: /^开始倒计时$/ }).click();
+  await expect(page.getByText('暂停', { exact: true })).toBeVisible({ timeout: 9_000 });
+
+  // The old implementation started a 2x DOM screenshot loop for every recording,
+  // even though includeWorkspaceShell defaults to false. Give that loop enough
+  // time to run, then verify it stayed completely idle.
+  await page.waitForTimeout(2_000);
+  const shellCount = await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const tx = db.transaction('workspaceShells', 'readonly');
+    return await new Promise<number>((resolve, reject) => {
+      const request = tx.objectStore('workspaceShells').count();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+  });
+  expect(shellCount).toBe(0);
+});

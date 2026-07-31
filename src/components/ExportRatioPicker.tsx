@@ -151,6 +151,7 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
         <button
           type="button"
           role="switch"
+          className="editor-craft-keep-zoomed-switch"
           aria-label={t('modes.keepZoomedLabel')}
           aria-checked={keepZoomedIn}
           onClick={() => {
@@ -161,30 +162,10 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
               croppingMode: next ? 'follow_viewport' : 'fit_all_content',
             });
           }}
-          style={{
-            position: 'relative',
-            width: 42,
-            height: 24,
-            flexShrink: 0,
-            border: '1.5px solid var(--ink)',
-            borderRadius: 999,
-            background: keepZoomedIn ? 'var(--ink)' : 'var(--paper-2)',
-            cursor: 'pointer',
-          }}
         >
           <span
             aria-hidden
-            style={{
-              position: 'absolute',
-              left: keepZoomedIn ? 20 : 3,
-              top: 3,
-              width: 16,
-              height: 16,
-              borderRadius: '50%',
-              background: keepZoomedIn ? 'var(--hi)' : 'var(--paper)',
-              border: '1px solid var(--ink)',
-              transition: 'left 140ms ease',
-            }}
+            className="editor-craft-keep-zoomed-thumb"
           />
         </button>
       </div>

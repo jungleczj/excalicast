@@ -142,7 +142,11 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
 
   // 工作区 UI 快照采集器（best-effort，失败不影响录制）
   let shellCapturer: ShellCapturer | null = null;
-  if (opts.workspaceRoot) {
+  // Capturing the whole Excalidraw workspace at 2x resolution is expensive and
+  // can keep the main thread busy while the editor route is trying to mount.
+  // Only start it for recordings whose final composition explicitly includes
+  // the application shell.
+  if (opts.workspaceRoot && opts.setup?.includeWorkspaceShell) {
     shellCapturer = new ShellCapturer({
       recordingId,
       rootEl: opts.workspaceRoot,

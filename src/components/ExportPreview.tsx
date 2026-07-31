@@ -33,6 +33,7 @@ const CANVAS_REDRAW_INTERVAL_MS = 200;
 
 const PREVIEW_MIN_WIDTH = 300;
 const PREVIEW_MIN_HEIGHT = 180;
+const PREVIEW_MAX_HEIGHT = 900;
 const PREVIEW_PREFERRED_WIDTH = 860;
 
 function clamp(value: number, min: number, max: number): number {
@@ -436,17 +437,17 @@ export function ExportPreview({
   // scrub 由时间轴驱动（onPlayheadChange → playheadMs）；预览不再自带进度条。
   const preset = resolveExportOutputSize(config);
   const aspect = preset.width / preset.height;
-  const maxPreviewHeight = useMemo(() => {
+  const responsiveInitialMaxHeight = useMemo(() => {
     if (!editorViewportHeight) return 560;
     return Math.round(clamp(editorViewportHeight - 316, PREVIEW_MIN_HEIGHT, 544));
   }, [editorViewportHeight]);
 
   const initialPreviewHeight = useMemo(() => {
     const maxW = Math.max(1, Math.floor((parentWidth || PREVIEW_PREFERRED_WIDTH) - 16));
-    const minW = Math.min(PREVIEW_MIN_WIDTH, maxW, maxPreviewHeight * aspect);
+    const minW = Math.min(PREVIEW_MIN_WIDTH, maxW, responsiveInitialMaxHeight * aspect);
     const preferred = Math.min(maxW, Math.max(minW, Math.min(PREVIEW_PREFERRED_WIDTH, maxW * 0.78)));
-    return Math.round(clamp(preferred / aspect, PREVIEW_MIN_HEIGHT, maxPreviewHeight));
-  }, [aspect, maxPreviewHeight, parentWidth]);
+    return Math.round(clamp(preferred / aspect, PREVIEW_MIN_HEIGHT, responsiveInitialMaxHeight));
+  }, [aspect, parentWidth, responsiveInitialMaxHeight]);
 
   useEffect(() => {
     if (requestedHeight === null && parentWidth > 0) {
@@ -455,16 +456,16 @@ export function ExportPreview({
   }, [initialPreviewHeight, parentWidth, requestedHeight]);
 
   const previewBox = useMemo(() => {
-    const h = Math.round(clamp(requestedHeight ?? initialPreviewHeight, PREVIEW_MIN_HEIGHT, maxPreviewHeight));
+    const h = Math.round(clamp(requestedHeight ?? initialPreviewHeight, PREVIEW_MIN_HEIGHT, PREVIEW_MAX_HEIGHT));
     return {
       w: Math.round(h * aspect),
       h,
     };
-  }, [aspect, initialPreviewHeight, maxPreviewHeight, requestedHeight]);
+  }, [aspect, initialPreviewHeight, requestedHeight]);
 
   const resizePreview = useCallback((nextHeight: number) => {
-    setRequestedHeight(Math.round(clamp(nextHeight, PREVIEW_MIN_HEIGHT, maxPreviewHeight)));
-  }, [maxPreviewHeight]);
+    setRequestedHeight(Math.round(clamp(nextHeight, PREVIEW_MIN_HEIGHT, PREVIEW_MAX_HEIGHT)));
+  }, []);
 
   const startResize = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
     event.preventDefault();

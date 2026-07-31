@@ -8446,3 +8446,104 @@ body {
     border-bottom: 1px solid rgba(31, 34, 37, 0.12);
   }
 }
+
+/* Export editor left surface: compact corners preserve more of the real frame. */
+.editor-craft-main .export-preview-craft-stage {
+  border-radius: 18px !important;
+}
+
+.editor-craft-main :where(.export-preview-craft-error, .export-preview-craft-progress-card, .export-preview-craft-rendering) {
+  border-radius: 14px !important;
+}
+
+.editor-craft-main .export-preview-craft-controls {
+  border-radius: 10px !important;
+}
+
+.editor-craft-main .timeline-craft-panel {
+  border-radius: 18px !important;
+}
+
+.editor-craft-main .timeline-craft-toolbar {
+  border-radius: 14px !important;
+}
+
+.editor-craft-main :where(.timeline-craft-action, .timeline-craft-select) {
+  border-radius: 10px !important;
+}
+
+.editor-craft-main :where(.timeline-craft-lane, .timeline-craft-clip, .timeline-craft-autozoom-track, .timeline-craft-autozoom-segment) {
+  border-radius: 6px !important;
+}
+
+/* This control must not inherit the side panel's generic button dimensions. */
+.editor-craft-side .editor-craft-keep-zoomed-switch {
+  position: relative !important;
+  display: block !important;
+  width: 40px !important;
+  min-width: 40px !important;
+  height: 22px !important;
+  min-height: 22px !important;
+  flex: 0 0 40px !important;
+  padding: 0 !important;
+  border: 1px solid rgba(24, 25, 26, 0.18) !important;
+  border-radius: 999px !important;
+  background: rgba(255, 253, 248, 0.9) !important;
+  box-shadow: inset 0 1px 2px rgba(24, 25, 26, 0.06) !important;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease !important;
+}
+
+.editor-craft-side .editor-craft-keep-zoomed-switch[aria-checked="true"] {
+  border-color: var(--craft-blue-strong) !important;
+  background: var(--craft-blue-strong) !important;
+}
+
+.editor-craft-side .editor-craft-keep-zoomed-switch:hover {
+  border-color: rgba(84, 156, 220, 0.56) !important;
+}
+
+.editor-craft-side .editor-craft-keep-zoomed-switch:focus-visible {
+  outline: 3px solid rgba(109, 174, 228, 0.26) !important;
+  outline-offset: 3px;
+}
+
+.editor-craft-side .editor-craft-keep-zoomed-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.editor-craft-keep-zoomed-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(24, 25, 26, 0.13);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 5px rgba(24, 25, 26, 0.16);
+  transition: transform 140ms ease;
+}
+
+.editor-craft-keep-zoomed-switch[aria-checked="true"] .editor-craft-keep-zoomed-thumb {
+  transform: translateX(18px);
+}
+
+.display-source-framing-tools button {
+  min-width: 34px !important;
+  min-height: 32px !important;
+  padding: 6px 10px !important;
+  border: 1px solid rgba(255, 253, 248, 0.18) !important;
+  border-radius: 8px !important;
+  background: rgba(255, 253, 248, 0.08) !important;
+  color: #fffdf8 !important;
+  box-shadow: none !important;
+  font-size: 12px !important;
+}
+
+.display-source-framing-tools button:hover,
+.display-source-framing-tools button[aria-pressed="true"] {
+  border-color: rgba(109, 174, 228, 0.72) !important;
+  background: rgba(109, 174, 228, 0.2) !important;
+}

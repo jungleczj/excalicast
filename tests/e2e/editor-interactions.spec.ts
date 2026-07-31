@@ -113,6 +113,34 @@ test('the user-selected preview height stays fixed while switching aspect ratios
   }
 });
 
+test('the preview can grow and keeps the enlarged height across ratios', async ({ page }) => {
+  const preview = page.getByTestId('export-preview-stage');
+  const before = await preview.boundingBox();
+  if (!before) throw new Error('preview height was not measured');
+
+  await page.getByRole('button', { name: 'Enlarge preview' }).click();
+  await page.getByRole('button', { name: 'Enlarge preview' }).click();
+  await expect.poll(async () => (await preview.boundingBox())?.height ?? 0).toBeGreaterThan(before.height);
+  const enlargedBox = await preview.boundingBox();
+  if (!enlargedBox) throw new Error('enlarged preview was not measured');
+
+  for (const ratio of ['9:16', '21:9', '1:1']) {
+    await page.locator('.editor-craft-ratio-card').filter({ hasText: ratio }).click();
+    await expect.poll(async () => (await preview.boundingBox())?.height ?? 0).toBeCloseTo(enlargedBox.height, 0);
+  }
+});
+
+test('export preview, timeline and keep-zoomed switch use scoped compact geometry', async ({ page }) => {
+  const stageRadius = await page.getByTestId('export-preview-stage').evaluate((element) => getComputedStyle(element).borderRadius);
+  const timelineRadius = await page.locator('.timeline-craft-panel').evaluate((element) => getComputedStyle(element).borderRadius);
+  const switchBox = await page.getByRole('switch', { name: 'Always keep zoomed in' }).boundingBox();
+
+  expect(stageRadius).toBe('18px');
+  expect(timelineRadius).toBe('18px');
+  expect(switchBox?.width).toBeCloseTo(40, 0);
+  expect(switchBox?.height).toBeCloseTo(22, 0);
+});
+
 test('always keep zoomed in is off by default, remembered per ratio, and disabled by fit all', async ({ page }) => {
   const keepZoomed = page.getByRole('switch', { name: 'Always keep zoomed in' });
   const fitAll = page.locator('.editor-craft-segment-card').filter({ hasText: 'Fit all content' });
@@ -584,8 +612,9 @@ test('autozoom preview frames can be hidden without removing the zoom target', a
   await page.mouse.click(track.x + track.width * 0.12, track.y + track.height / 2);
   await page.getByTestId('autozoom-drag-source').click();
   const preview = page.getByTestId('export-preview-stage');
-  const regionValue = await preview.getAttribute('data-autozoom-region');
   await expect(page.getByTestId('autozoom-region')).toBeVisible();
+  await expect(preview).toHaveAttribute('data-autozoom-region', /\d/);
+  const regionValue = await preview.getAttribute('data-autozoom-region');
 
   await page.getByTestId('toggle-preview-selection-overlays').click();
   await expect(page.getByTestId('autozoom-region')).toHaveCount(0);

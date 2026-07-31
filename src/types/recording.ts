@@ -344,7 +344,7 @@ export interface RecordingSourceConfig {
   displaySurface?: 'browser' | 'window' | 'monitor';
   /** 授权后拿到的源画面原始像素尺寸，用于像素级默认导出。 */
   sourceSize?: { width: number; height: number; frameRate?: number };
-  /** selected_area 模式：浏览器授权后的源画面内部裁切区域。 */
+  /** 浏览器授权后的源画面内部裁切区域；相对原始显示源归一化，不使用白板坐标。 */
   sourceCropWindow?: SourceCropWindow;
   /** Tab/system audio is only available when the browser grants it. */
   captureSystemAudio?: boolean;

@@ -123,7 +123,7 @@ test('non-whiteboard sources default to their native source frame without an asp
   await expect(page.locator('.crop-craft-overlay')).toHaveCount(0);
 });
 
-test('window capture never mounts an in-page live preview that could recursively capture itself', async ({ page }) => {
+test('window capture uses a large dedicated live framing surface instead of whiteboard coordinates', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
@@ -144,7 +144,18 @@ test('window capture never mounts an in-page live preview that could recursively
   await page.getByRole('button', { name: /窗口/ }).click();
   await page.getByRole('button', { name: /下一步：取景/ }).click();
 
-  await expect(page.getByTestId('display-source-live-preview')).toHaveCount(0);
+  const surface = page.getByTestId('display-source-framing-surface');
+  const preview = page.getByTestId('display-source-live-preview');
+  await expect(surface).toBeVisible();
+  await expect(surface).toHaveAttribute('data-source-kind', 'window');
+  await expect(surface).toHaveAttribute('data-preview-mode', 'live');
+  const [previewBox, viewport] = await Promise.all([
+    preview.boundingBox(),
+    page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
+  ]);
+  if (!previewBox) throw new Error('display source framing preview was not measured');
+  expect(previewBox.width).toBeGreaterThanOrEqual(viewport.width * 0.8);
+  expect(previewBox.height).toBeGreaterThanOrEqual(viewport.height * 0.6);
 });
 
 test('selected area stays adjustable before recording and removes capture overlays before countdown', async ({ page }) => {
@@ -791,7 +802,7 @@ test('display recording keeps controls usable when the PiP host rejects resize',
   await expect(controller).toHaveAttribute('data-docked', 'false');
 });
 
-test('current tab keeps the original in-page framing and countdown path', async ({ page }) => {
+test('current tab uses a frozen framing surface and keeps the in-page countdown path', async ({ page }) => {
   await page.addInitScript(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).__desktopControlRequests = 0;
@@ -833,6 +844,7 @@ test('current tab keeps the original in-page framing and countdown path', async 
   await page.getByRole('button', { name: /当前标签页/ }).click();
   await page.getByRole('button', { name: /下一步：取景/ }).click();
 
+  await expect(page.getByTestId('display-source-framing-surface')).toHaveAttribute('data-preview-mode', 'frozen');
   await expect(page.getByTestId('desktop-framing-controls')).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -11,8 +11,7 @@ import { RecordingSetup } from '@/components/RecordingSetup';
 import { CameraBubble } from '@/components/CameraBubble';
 import { Teleprompter } from '@/components/Teleprompter';
 import { AspectCropOverlay } from '@/components/AspectCropOverlay';
-import { DisplaySourceCropOverlay } from '@/components/DisplaySourceCropOverlay';
-import { DisplaySourcePreview } from '@/components/DisplaySourcePreview';
+import { DisplaySourceFramingSurface } from '@/components/DisplaySourceFramingSurface';
 import { ADAPTIVE_DOCKED_CONTROLS_WINDOW_SIZE, DesktopRecordingControls, getDesktopRecordingControlsRoot, requestDesktopRecordingControlsWindow } from '@/components/DesktopRecordingControls';
 import { I } from '@/components/icons';
 import { useSubscription } from '@/hooks/useSubscription';
@@ -153,7 +152,7 @@ export default function HomePage(): JSX.Element {
   const [displayStream, setDisplayStream] = useState<MediaStream | null>(null);
   const displayStreamRef = useRef<MediaStream | null>(null);
   displayStreamRef.current = displayStream;
-  const [displayAspect, setDisplayAspect] = useState<number | null>(null);
+  const [, setDisplayAspect] = useState<number | null>(null);
   const [sourceCropWindow, setSourceCropWindow] = useState<SourceCropWindow | null>(null);
   // 裁切框（画布区比例）+ Custom 输出尺寸；录制中由 overlay 编辑
   const [cropWindow, setCropWindow] = useState<CropWindow | null>(null);
@@ -299,12 +298,19 @@ export default function HomePage(): JSX.Element {
   // 摄像头位置变更：(1) 录制中转发给 session；(2) debounced 写 localStorage
   // 当前裁切框的 viewport 矩形（固定比例时；default 返回 null=相对 shell）
   const getCropFrameRect = useCallback((): CameraFrameRect | null => {
+    if (setupConfig.source?.kind && setupConfig.source.kind !== 'whiteboard') {
+      const frame = document.querySelector<HTMLElement>('[data-testid="display-source-crop-frame"]')
+        ?? document.querySelector<HTMLElement>('[data-display-source-content-frame="true"]');
+      if (!frame) return null;
+      const rect = frame.getBoundingClientRect();
+      return { x: rect.left, y: rect.top, w: rect.width, h: rect.height };
+    }
     const cw = cropWindowRef.current;
     const area = canvasAreaRef.current;
     if (!cw || !area || setupConfig.framing === 'default') return null;
     const r = area.getBoundingClientRect();
     return { x: r.left + cw.rx * r.width, y: r.top + cw.ry * r.height, w: cw.rw * r.width, h: cw.rh * r.height };
-  }, [setupConfig.framing]);
+  }, [setupConfig.framing, setupConfig.source?.kind]);
 
   const handleCameraPositionChange = useCallback((p: { x: number; y: number }) => {
     // 选定裁切框后（非 default）：把气泡钳制在裁切框屏幕矩形内
@@ -341,6 +347,36 @@ export default function HomePage(): JSX.Element {
       catch { /* quota / private mode */ }
     }, 250);
   }, [cameraPos.x, cameraPos.y, getCropFrameRect]);
+
+  useEffect(() => {
+    if (
+      state !== 'framing'
+      || !cameraEnabled
+      || !displayStream
+      || setupConfig.source?.kind === 'whiteboard'
+    ) return;
+    const frameId = window.requestAnimationFrame(() => {
+      const frame = getCropFrameRect();
+      if (!frame) return;
+      const next = {
+        x: Math.max(frame.x, Math.min(frame.x + frame.w - cameraSize, cameraPos.x)),
+        y: Math.max(frame.y, Math.min(frame.y + frame.h - cameraSize, cameraPos.y)),
+      };
+      if (next.x !== cameraPos.x || next.y !== cameraPos.y) handleCameraPositionChange(next);
+    });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [
+    cameraEnabled,
+    cameraPos.x,
+    cameraPos.y,
+    cameraSize,
+    displayStream,
+    getCropFrameRect,
+    handleCameraPositionChange,
+    setupConfig.source?.kind,
+    sourceCropWindow,
+    state,
+  ]);
 
   // 演示缩放：双击画布某点放大 ~2× 并居中、再双击还原；缓入缓出避免镜头突跳。
   const zoomToPoint = useCallback((clientX: number, clientY: number) => {
@@ -616,7 +652,8 @@ export default function HomePage(): JSX.Element {
     });
     // 裁切框重置 → overlay 按所选比例居中初始化（default 不显框）
     setCropWindow(null);
-    setCustomOutput(undefined);
+    setSourceCropWindow(null);
+    setCustomOutput(config.customOutput);
     clearDisplayStream();
     setCameraEnabled(config.camera.enabled);
     setCameraSize(config.camera.sizePx);
@@ -671,15 +708,16 @@ export default function HomePage(): JSX.Element {
   // 取景确认：校验摄像头在裁切框内 → 用当前相机位置/尺寸构建待开录参数 → 启动 3 秒倒计时
   const handleConfirmFraming = useCallback(() => {
     // 开了摄像头 + 固定比例 + 已有裁切框时，气泡必须完全落在框内才允许开录
-    if (cameraEnabled && setupConfig.framing !== 'default') {
-      const cw = cropWindowRef.current;
-      const area = canvasAreaRef.current;
-      if (cw && area) {
-        const r = area.getBoundingClientRect();
-        const fx = r.left + cw.rx * r.width;
-        const fy = r.top + cw.ry * r.height;
-        const fw = cw.rw * r.width;
-        const fh = cw.rh * r.height;
+    if (
+      cameraEnabled
+      && (
+        setupConfig.framing !== 'default'
+        || (setupConfig.source?.kind && setupConfig.source.kind !== 'whiteboard')
+      )
+    ) {
+      const frame = getCropFrameRect();
+      if (frame) {
+        const { x: fx, y: fy, w: fw, h: fh } = frame;
         const EPS = 1;
         const inside =
           cameraPos.x >= fx - EPS &&
@@ -693,19 +731,27 @@ export default function HomePage(): JSX.Element {
       }
     }
     setFramingWarn(false);
-    const selectedSource = setupConfig.source?.kind === 'selected_area'
+    const setupSource = setupConfig.source;
+    const isDisplay = !!setupSource && setupSource.kind !== 'whiteboard';
+    const shouldStoreSourceCrop = isDisplay
+      && (setupSource?.kind === 'selected_area' || setupConfig.framing !== 'default');
+    const selectedSource = shouldStoreSourceCrop && setupSource
       ? (() => {
           const crop = sourceCropWindow ?? { rx: 0.1, ry: 0.1, rw: 0.8, rh: 0.8 };
           return {
-            ...setupConfig.source,
+            ...setupSource,
             sourceCropWindow: crop,
-            sourceSize: sourceSizeForCrop(setupConfig.source.sourceSize, crop) ?? setupConfig.source.sourceSize,
+            sourceSize: setupSource.kind === 'selected_area'
+              ? sourceSizeForCrop(setupSource.sourceSize, crop) ?? setupSource.sourceSize
+              : setupSource.sourceSize,
           };
         })()
-      : setupConfig.source;
+      : setupSource;
     const finalConfig: RecordingSetupConfig = {
       ...setupConfig,
       source: selectedSource,
+      cropWindow: isDisplay ? undefined : cropWindowRef.current ?? setupConfig.cropWindow,
+      customOutput: setupConfig.framing === 'custom' ? customOutput ?? setupConfig.customOutput : undefined,
     };
     if (selectedSource?.kind && selectedSource.kind !== 'whiteboard') {
       // 复用取景阶段已经打开的 PiP。倒计时只替换宿主内的控件，不再重新申请
@@ -717,7 +763,7 @@ export default function HomePage(): JSX.Element {
     }
     pendingStartRef.current = { config: finalConfig, pos: cameraPos, size: cameraSize };
     setCountdown(3);
-  }, [setupConfig, cameraPos, cameraSize, cameraEnabled, sourceCropWindow, desktopControlHost, openDesktopControls, resizeDesktopControlsHost]);
+  }, [setupConfig, cameraPos, cameraSize, cameraEnabled, sourceCropWindow, customOutput, desktopControlHost, getCropFrameRect, openDesktopControls, resizeDesktopControlsHost]);
 
   // 取景取消：停掉摄像头/麦克风预览、清裁切框、回 idle
   const handleCancelFraming = useCallback(() => {
@@ -971,11 +1017,8 @@ export default function HomePage(): JSX.Element {
     onPause: handlePause,
     onResume: handleResume,
   };
-  // 只有“选定区域”需要在页面内显示源画面供用户拖拽裁切。
-  // 桌面、窗口和标签页取景一律不挂回显层：即使用户误选本页面，也不会形成
-  // 叠加的递归镜像；真正录制仍直接使用原始 display stream。
-  const showLiveDisplayPreview = displayStream
-    && setupConfig.source?.kind === 'selected_area'
+  const showDisplaySourceFraming = displayStream
+    && isDisplaySource
     && state === 'framing'
     && countdown === null;
 
@@ -990,24 +1033,23 @@ export default function HomePage(): JSX.Element {
           laserPointRef={laserPointRef}
         />
 
-        {showLiveDisplayPreview && (
-          <div data-testid="display-source-live-preview" className="rb-no-record absolute inset-0 z-10">
-            <DisplaySourcePreview stream={displayStream} onAspectChange={setDisplayAspect} />
-          </div>
-        )}
-
-        {displayStream && !hideCaptureSensitiveVisuals && (state === 'framing' || isRecording) && setupConfig.source?.kind === 'selected_area' && (
-          <DisplaySourceCropOverlay
-            value={sourceCropWindow}
-            mediaAspect={displayAspect}
-            onChange={setSourceCropWindow}
-            label={isRecording ? (en ? 'Recording selected area' : '正在录制选定区域') : (en ? 'Selected area' : '选定区域')}
-            interactive={state === 'framing' && countdown === null}
+        {showDisplaySourceFraming && displayStream && setupConfig.source?.kind && setupConfig.source.kind !== 'whiteboard' && (
+          <DisplaySourceFramingSurface
+            stream={displayStream}
+            sourceKind={setupConfig.source.kind}
+            sourceSize={setupConfig.source.sourceSize}
+            framing={setupConfig.framing}
+            customOutput={customOutput ?? setupConfig.customOutput}
+            crop={sourceCropWindow}
+            onCropChange={setSourceCropWindow}
+            onCustomOutputChange={setCustomOutput}
+            onAspectChange={setDisplayAspect}
+            english={en}
           />
         )}
 
         {/* 裁切框 viewfinder：取景态 + 录制中显示（'default' 整画板不画） */}
-        {!hideCaptureSensitiveVisuals && (state === 'framing' || isRecording) && setupConfig.framing !== 'default' && setupConfig.source?.kind !== 'selected_area' && (
+        {!hideCaptureSensitiveVisuals && (state === 'framing' || isRecording) && setupConfig.framing !== 'default' && setupConfig.source?.kind === 'whiteboard' && (
           <AspectCropOverlay
             framing={setupConfig.framing}
             value={cropWindow}
