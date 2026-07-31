@@ -140,6 +140,22 @@ export interface LaserEvent {
   button: 'down' | 'up';
 }
 
+export interface CursorFocusSample {
+  timestamp: number;
+  x: number;
+  y: number;
+  confidence: number;
+}
+
+export interface CursorFocusTrack {
+  recordingId: string;
+  detectorVersion: number;
+  sourceSignature: string;
+  analyzedAt: number;
+  quality: 'good' | 'partial' | 'poor';
+  samples: CursorFocusSample[];
+}
+
 // ----- 导出配置 -----
 
 export type AspectRatio =
@@ -205,6 +221,8 @@ export const RESOLUTION_SCALE: Record<ExportResolution, number> = {
 export interface ExportConfig {
   aspectRatio: AspectRatio;
   croppingMode: CroppingMode;
+  /** 持续按目标比例铺满，并由焦点轨迹移动可见区域。缺省关闭。 */
+  alwaysKeepZoomedIn?: boolean;
   fps: number;
   withWatermark: boolean;
   /** 多选导出比例（缺省=[aspectRatio]）；导出逐个生成下载。aspectRatio 仍为预览/主比例。 */
@@ -224,6 +242,7 @@ export interface ExportConfig {
   /** 各导出比例独立保存的裁切与自定义输出；切换预览比例时不会互相覆盖。 */
   ratioFraming?: Partial<Record<AspectRatio, {
     croppingMode?: CroppingMode;
+    alwaysKeepZoomedIn?: boolean;
     cropWindow?: CropWindow;
     customOutput?: { width: number; height: number };
   }>>;

@@ -9,6 +9,7 @@ import { resolveExportOutputSize } from '@/types/recording';
 import { keptDuration, normalizeSegments, outputToSource, sourceToOutput } from '@/utils/segments';
 import { I } from '@/components/icons';
 import type { ExportProgressState } from '@/components/ExportPanel';
+import { analyzeCursorFocusTrack } from '@/services/cursorFocusTracker';
 
 interface Props {
   recordingId: string;
@@ -31,6 +32,7 @@ interface Props {
 const CANVAS_REDRAW_INTERVAL_MS = 200;
 
 const PREVIEW_MIN_WIDTH = 300;
+const PREVIEW_MIN_HEIGHT = 180;
 const PREVIEW_PREFERRED_WIDTH = 860;
 
 function clamp(value: number, min: number, max: number): number {
@@ -77,12 +79,18 @@ export function ExportPreview({
   const [firstShell, setFirstShell] = useState<{ shellSize: ShellSize; canvasRect: ShellCanvasRect } | null>(null);
   const [playing, setPlaying] = useState(false);
   const [selectionOverlaysHidden, setSelectionOverlaysHidden] = useState(false);
-  // 预览外框尺寸独立于画面渲染倍率：拖拽/按钮只改变承载视频的盒子，画面始终 contain-fit。
-  // 这个容器处于普通文档流中，变高时 Timeline 会自然向下移动。
+  const [cursorTracking, setCursorTracking] = useState<{
+    progress: number;
+    quality?: 'good' | 'partial' | 'poor';
+    failed?: boolean;
+  } | null>(null);
+  const [focusTrackRevision, setFocusTrackRevision] = useState(0);
+  // 预览高度是用户控制的稳定尺寸。切换比例只按 height * aspect 改变宽度，
+  // 直到用户再次通过按钮或拖拽调整高度。
   const parentRef = useRef<HTMLDivElement>(null);
   const [parentWidth, setParentWidth] = useState(0);
   const [editorViewportHeight, setEditorViewportHeight] = useState(0);
-  const [requestedWidth, setRequestedWidth] = useState<number | null>(null);
+  const [requestedHeight, setRequestedHeight] = useState<number | null>(null);
 
   // useLayoutEffect：挂载/重渲染后、浏览器 paint 前同步读宽度，避免首帧 0 宽闪烁
   // 把 config.aspectRatio 放进依赖：每次切换比例都强制重新测量一次父宽（兜底
@@ -141,6 +149,34 @@ export function ExportPreview({
       if (createdCameraUrl) URL.revokeObjectURL(createdCameraUrl);
     };
   }, [recordingId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!config.alwaysKeepZoomedIn) {
+      setCursorTracking(null);
+      return;
+    }
+    void loadFullRecording(recordingId)
+      .then(async (recording) => {
+        if (cancelled || !recording.screenBlob) return;
+        setCursorTracking({ progress: 0 });
+        const track = await analyzeCursorFocusTrack({
+          recordingId,
+          screenBlob: recording.screenBlob,
+          durationMs: metadata.durationMs,
+          onProgress: (progress) => {
+            if (!cancelled) setCursorTracking((current) => ({ ...current, progress }));
+          },
+        });
+        if (cancelled) return;
+        setCursorTracking({ progress: 1, quality: track.quality });
+        setFocusTrackRevision((revision) => revision + 1);
+      })
+      .catch(() => {
+        if (!cancelled) setCursorTracking({ progress: 1, failed: true });
+      });
+    return () => { cancelled = true; };
+  }, [config.alwaysKeepZoomedIn, metadata.durationMs, recordingId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -263,7 +299,7 @@ export function ExportPreview({
       })
       .catch((err) => { if (renderToken.current === my) setError(err instanceof Error ? err.message : 'render_failed'); })
       .finally(() => { if (renderToken.current === my) setRendering(false); });
-  }, [recordingId, config]);
+  }, [recordingId, config, focusTrackRevision]);
 
   // config 切换 或 暂停态下播放头被外部（时间轴）拖动 → 重绘该源帧。
   // 播放中由播放循环负责重绘，这里跳过避免双重绘制。
@@ -400,42 +436,50 @@ export function ExportPreview({
   // scrub 由时间轴驱动（onPlayheadChange → playheadMs）；预览不再自带进度条。
   const preset = resolveExportOutputSize(config);
   const aspect = preset.width / preset.height;
+  const maxPreviewHeight = useMemo(() => {
+    if (!editorViewportHeight) return 560;
+    return Math.round(clamp(editorViewportHeight - 316, PREVIEW_MIN_HEIGHT, 544));
+  }, [editorViewportHeight]);
 
-  // 同时受编辑列宽度和可视高度约束，避免竖屏沿用横屏宽度后无限向下增长。
-  const previewBox = useMemo(() => {
+  const initialPreviewHeight = useMemo(() => {
     const maxW = Math.max(1, Math.floor((parentWidth || PREVIEW_PREFERRED_WIDTH) - 16));
-    const viewportH = editorViewportHeight || window.innerHeight;
-    const maxH = Math.max(240, Math.min(620, viewportH >= 760 ? viewportH - 300 : viewportH - 70));
-    const minW = Math.min(PREVIEW_MIN_WIDTH, maxW, maxH * aspect);
-    // 默认留出一档可放大的空间；如果编辑列很窄则自然退化为满宽。
+    const minW = Math.min(PREVIEW_MIN_WIDTH, maxW, maxPreviewHeight * aspect);
     const preferred = Math.min(maxW, Math.max(minW, Math.min(PREVIEW_PREFERRED_WIDTH, maxW * 0.78)));
-    const w = Math.round(Math.max(minW, Math.min(maxW, maxH * aspect, requestedWidth ?? preferred)));
-    return {
-      w,
-      h: Math.round(w / aspect),
-    };
-  }, [aspect, editorViewportHeight, parentWidth, requestedWidth]);
+    return Math.round(clamp(preferred / aspect, PREVIEW_MIN_HEIGHT, maxPreviewHeight));
+  }, [aspect, maxPreviewHeight, parentWidth]);
 
-  const resizePreview = useCallback((nextWidth: number) => {
-    const maxW = Math.max(1, Math.floor((parentWidth || PREVIEW_PREFERRED_WIDTH) - 16));
-    const minW = Math.min(PREVIEW_MIN_WIDTH, maxW);
-    setRequestedWidth(Math.max(minW, Math.min(maxW, Math.round(nextWidth))));
-  }, [parentWidth]);
+  useEffect(() => {
+    if (requestedHeight === null && parentWidth > 0) {
+      setRequestedHeight(initialPreviewHeight);
+    }
+  }, [initialPreviewHeight, parentWidth, requestedHeight]);
+
+  const previewBox = useMemo(() => {
+    const h = Math.round(clamp(requestedHeight ?? initialPreviewHeight, PREVIEW_MIN_HEIGHT, maxPreviewHeight));
+    return {
+      w: Math.round(h * aspect),
+      h,
+    };
+  }, [aspect, initialPreviewHeight, maxPreviewHeight, requestedHeight]);
+
+  const resizePreview = useCallback((nextHeight: number) => {
+    setRequestedHeight(Math.round(clamp(nextHeight, PREVIEW_MIN_HEIGHT, maxPreviewHeight)));
+  }, [maxPreviewHeight]);
 
   const startResize = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    const startX = event.clientX;
-    const startWidth = previewBox.w;
+    const startY = event.clientY;
+    const startHeight = previewBox.h;
     event.currentTarget.setPointerCapture(event.pointerId);
-    const move = (moveEvent: PointerEvent) => resizePreview(startWidth + moveEvent.clientX - startX);
+    const move = (moveEvent: PointerEvent) => resizePreview(startHeight + moveEvent.clientY - startY);
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
-  }, [previewBox.w, resizePreview]);
+  }, [previewBox.h, resizePreview]);
 
   const controlScale = Math.max(0.78, Math.min(1.35, previewBox.w / 720));
 
@@ -559,8 +603,12 @@ export function ExportPreview({
 
   return (
     <div className="export-preview-craft-wrap w-full">
-      {/* 外层 wrapper 用 ref + ResizeObserver 实时拿可用宽度；不再受预览区高度限制。 */}
-      <div ref={parentRef} className="flex w-full justify-center p-2">
+      <div
+        ref={parentRef}
+        data-testid="export-preview-workspace"
+        className="flex w-full items-center overflow-x-auto overflow-y-hidden p-2"
+        style={{ height: previewBox.h + 16 }}
+      >
       <div
         data-testid="export-preview-stage"
         data-autozoom-scale={previewAutoZoomScale.toFixed(3)}
@@ -731,6 +779,28 @@ export function ExportPreview({
             {t('renderingTag')}
           </span>
         )}
+        {cursorTracking && !exporting && (
+          <span
+            data-testid="cursor-tracking-status"
+            className="absolute left-1/2 top-3 z-40 -translate-x-1/2"
+            style={{
+              padding: '3px 9px',
+              borderRadius: 999,
+              border: '1px solid rgba(31,34,37,.18)',
+              background: 'rgba(255,253,248,.9)',
+              color: 'var(--ink-2)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 9.5,
+              backdropFilter: 'blur(10px)',
+            }}
+          >
+            {cursorTracking.failed
+              ? t('cursorTrackingFallback')
+              : cursorTracking.progress < 1
+                ? t('cursorTrackingProgress', { progress: Math.round(cursorTracking.progress * 100) })
+                : t(`cursorTrackingQuality.${cursorTracking.quality ?? 'poor'}` as never)}
+          </span>
+        )}
         {error && (
           <span
             className="export-preview-craft-error fade-in absolute inset-x-3 top-12"
@@ -824,9 +894,9 @@ export function ExportPreview({
             className="absolute right-3 top-3 z-40 flex items-center gap-1"
             style={{ background: 'rgba(255,253,248,.9)', border: '1px solid rgba(31,34,37,.12)', borderRadius: 999, padding: 3, backdropFilter: 'blur(10px)' }}
           >
-            <button type="button" aria-label="Shrink preview" onClick={() => resizePreview(previewBox.w - 120)} style={resizeButtonStyle}>−</button>
-            <span style={{ padding: '0 5px', color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', fontSize: 10 }}>{Math.round(previewBox.w)}px</span>
-            <button data-testid="preview-enlarge" type="button" aria-label="Enlarge preview" onClick={() => resizePreview(previewBox.w + 120)} style={resizeButtonStyle}>+</button>
+            <button type="button" aria-label="Shrink preview" onClick={() => resizePreview(previewBox.h - 68)} style={resizeButtonStyle}>−</button>
+            <span style={{ padding: '0 5px', color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', fontSize: 10 }}>{Math.round(previewBox.h)}px</span>
+            <button data-testid="preview-enlarge" type="button" aria-label="Enlarge preview" onClick={() => resizePreview(previewBox.h + 68)} style={resizeButtonStyle}>+</button>
           </div>
         )}
 

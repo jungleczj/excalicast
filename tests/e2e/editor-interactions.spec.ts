@@ -55,16 +55,21 @@ test.beforeEach(async ({ context, page }) => {
   await expect(page.getByTestId('preview-resize-handle')).toBeVisible();
 });
 
-test('resizing the preview container pushes the timeline down without zooming its content', async ({ page }) => {
+test('resizing the preview changes the shared height used by the preview window', async ({ page }) => {
   const preview = page.getByTestId('export-preview-stage');
+  const workspace = page.getByTestId('export-preview-workspace');
   const timeline = page.getByTestId('editor-timeline');
   const initialPreview = await preview.boundingBox();
   const initialTimeline = await timeline.boundingBox();
   if (!initialPreview || !initialTimeline) throw new Error('editor layout was not measured');
 
-  await page.getByTestId('preview-enlarge').click();
-  await expect.poll(async () => (await preview.boundingBox())?.height ?? 0).toBeGreaterThan(initialPreview.height);
-  await expect.poll(async () => (await timeline.boundingBox())?.y ?? 0).toBeGreaterThan(initialTimeline.y);
+  await page.getByRole('button', { name: 'Shrink preview' }).click();
+  await expect.poll(async () => (await preview.boundingBox())?.height ?? Infinity).toBeLessThan(initialPreview.height);
+  await expect.poll(async () => (await timeline.boundingBox())?.y ?? Infinity).toBeLessThan(initialTimeline.y);
+  await expect.poll(async () => {
+    const [stageBox, workspaceBox] = await Promise.all([preview.boundingBox(), workspace.boundingBox()]);
+    return stageBox && workspaceBox ? workspaceBox.height - stageBox.height : Infinity;
+  }).toBeCloseTo(16, 0);
 });
 
 test('a portrait preview fits beside the export panel without pushing the timeline out of view', async ({ page }) => {
@@ -88,6 +93,126 @@ test('a portrait preview fits beside the export panel without pushing the timeli
   expect(previewBox.height).toBeLessThanOrEqual(560);
   expect(timelineBox.y).toBeGreaterThan(previewBox.y + previewBox.height);
   expect(timelineBox.y).toBeLessThan(mainBox.y + mainBox.height);
+});
+
+test('the user-selected preview height stays fixed while switching aspect ratios', async ({ page }) => {
+  const preview = page.getByTestId('export-preview-stage');
+  const workspace = page.getByTestId('export-preview-workspace');
+  const timeline = page.getByTestId('editor-timeline');
+  await page.getByRole('button', { name: 'Shrink preview' }).click();
+  const initialPreview = await preview.boundingBox();
+  const initialWorkspace = await workspace.boundingBox();
+  const initialTimeline = await timeline.boundingBox();
+  if (!initialPreview || !initialWorkspace || !initialTimeline) throw new Error('preview height was not measured');
+
+  for (const ratio of ['9:16', '21:9', '1:1']) {
+    await page.locator('.editor-craft-ratio-card').filter({ hasText: ratio }).click();
+    await expect.poll(async () => (await preview.boundingBox())?.height ?? 0).toBeCloseTo(initialPreview.height, 0);
+    await expect.poll(async () => (await workspace.boundingBox())?.height ?? 0).toBeCloseTo(initialWorkspace.height, 0);
+    await expect.poll(async () => (await timeline.boundingBox())?.y ?? 0).toBeCloseTo(initialTimeline.y, 0);
+  }
+});
+
+test('always keep zoomed in is off by default, remembered per ratio, and disabled by fit all', async ({ page }) => {
+  const keepZoomed = page.getByRole('switch', { name: 'Always keep zoomed in' });
+  const fitAll = page.locator('.editor-craft-segment-card').filter({ hasText: 'Fit all content' });
+  const followViewport = page.locator('.editor-craft-segment-card').filter({ hasText: 'Follow my viewport' });
+
+  await page.locator('.editor-craft-ratio-card').filter({ hasText: '9:16' }).click();
+  await expect(keepZoomed).toHaveAttribute('aria-checked', 'false');
+  await keepZoomed.click();
+  await expect(keepZoomed).toHaveAttribute('aria-checked', 'true');
+  await expect(followViewport).toHaveAttribute('data-active', 'true');
+
+  await page.locator('.editor-craft-ratio-card').filter({ hasText: '1:1' }).click();
+  await expect(keepZoomed).toHaveAttribute('aria-checked', 'false');
+  await page.locator('.editor-craft-ratio-card').filter({ hasText: '9:16' }).click();
+  await expect(keepZoomed).toHaveAttribute('aria-checked', 'true');
+
+  await fitAll.click();
+  await expect(keepZoomed).toHaveAttribute('aria-checked', 'false');
+});
+
+test('a display recording fills a newly selected portrait ratio without white bars', async ({ page }) => {
+  await page.evaluate(async (id) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 160;
+    canvas.height = 90;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('screen fixture canvas unavailable');
+    context.fillStyle = '#176f87';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    const stream = canvas.captureStream(12);
+    const screenBlob = await new Promise<Blob>((resolve, reject) => {
+      const chunks: BlobPart[] = [];
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onerror = () => reject(new Error('screen fixture recorder failed'));
+      recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
+      recorder.start();
+      window.setTimeout(() => recorder.stop(), 250);
+    });
+    stream.getTracks().forEach((track) => track.stop());
+
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(['recordings', 'screenChunks'], 'readwrite');
+      const recordings = tx.objectStore('recordings');
+      const request = recordings.get(id);
+      request.onsuccess = () => {
+        const source = { kind: 'desktop', sourceSize: { width: 160, height: 90 } };
+        recordings.put({
+          ...request.result,
+          durationMs: 500,
+          source,
+          setup: { ...request.result.setup, source },
+        });
+      };
+      tx.objectStore('screenChunks').add({ recordingId: id, index: 0, blob: screenBlob });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, recordingId);
+  await page.reload();
+
+  await page.locator('.editor-craft-ratio-card').filter({ hasText: '9:16' }).click();
+  const fitAll = page.locator('.editor-craft-segment-card').filter({ hasText: 'Fit all content' });
+  await expect(fitAll).toHaveAttribute('data-active', 'true');
+
+  await expect.poll(async () => page.getByTestId('export-preview-stage').locator('canvas').evaluate((canvas) => {
+    const element = canvas as HTMLCanvasElement;
+    const context = element.getContext('2d');
+    if (!context || element.width === 0 || element.height === 0) return false;
+    const [red, green, blue, alpha] = context.getImageData(Math.floor(element.width / 2), 2, 1, 1).data;
+    return red < 60 && green > 80 && blue > 100 && alpha === 255;
+  }), { timeout: 15_000 }).toBe(true);
+
+  await page.getByRole('switch', { name: 'Always keep zoomed in' }).click();
+  await expect(page.getByTestId('cursor-tracking-status')).toBeVisible();
+  await expect.poll(async () => page.evaluate(async (id) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    if (!db.objectStoreNames.contains('cursorFocusTracks')) {
+      db.close();
+      return false;
+    }
+    const found = await new Promise<boolean>((resolve, reject) => {
+      const request = db.transaction('cursorFocusTracks').objectStore('cursorFocusTracks').get(id);
+      request.onsuccess = () => resolve(!!request.result);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return found;
+  }, recordingId), { timeout: 15_000 }).toBe(true);
 });
 
 test('switching away from a custom recording ratio restores its original framing when returning', async ({ page }) => {

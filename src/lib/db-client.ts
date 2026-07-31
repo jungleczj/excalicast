@@ -7,6 +7,7 @@ import type {
   BinaryFileEntry,
   CameraChunk,
   CameraPositionEvent,
+  CursorFocusTrack,
   LaserEvent,
   LocalizedTrack,
   RecordingMetadata,
@@ -61,6 +62,7 @@ class ExcalicastDB extends Dexie {
   libraryItems!: Table<LibraryItemRow, string>;
   laserEvents!: Table<LaserEventRow, number>;
   localizedTracks!: Table<LocalizedTrackRow, string>;
+  cursorFocusTracks!: Table<CursorFocusTrack, string>;
 
   constructor() {
     super('excalicast');
@@ -198,6 +200,21 @@ class ExcalicastDB extends Dexie {
       laserEvents: '++id, recordingId, timestamp, [recordingId+timestamp]',
       localizedTracks: 'id, recordingId, targetLang, status, createdAt, [recordingId+targetLang]',
     });
+    // v12: 光标识别产生的本地派生焦点轨迹。云端不上传，源视频恢复后可重新生成。
+    this.version(12).stores({
+      recordings: 'id, startedAt, status, ownerKey',
+      snapshots: '++id, recordingId, timestamp',
+      audioChunks: '++id, recordingId, index',
+      cameraChunks: '++id, recordingId, index',
+      screenChunks: '++id, recordingId, index',
+      binaryFiles: '++id, recordingId, fileId',
+      workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
+      cameraPositions: '++id, recordingId, timestamp, [recordingId+timestamp]',
+      libraryItems: 'id, status, created',
+      laserEvents: '++id, recordingId, timestamp, [recordingId+timestamp]',
+      localizedTracks: 'id, recordingId, targetLang, status, createdAt, [recordingId+targetLang]',
+      cursorFocusTracks: 'recordingId, analyzedAt, detectorVersion',
+    });
   }
 }
 
@@ -316,13 +333,21 @@ export async function setActiveLocalizedTrack(recordingId: string, trackId: stri
   await getClientDb().recordings.update(recordingId, { localizedTrackId: trackId });
 }
 
+export async function getCursorFocusTrack(recordingId: string): Promise<CursorFocusTrack | undefined> {
+  return getClientDb().cursorFocusTracks.get(recordingId);
+}
+
+export async function saveCursorFocusTrack(track: CursorFocusTrack): Promise<void> {
+  await getClientDb().cursorFocusTracks.put(track);
+}
+
 export async function deleteRecording(recordingId: string, ownerKey?: string): Promise<void> {
   const db = getClientDb();
   // 传了 ownerKey 时只允许删自己的（防同设备他号经 id 删除他人录制）。
   if (ownerKey && !(await ownsRecording(recordingId, ownerKey))) return;
   await db.transaction(
     'rw',
-    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.screenChunks, db.cameraPositions, db.binaryFiles, db.workspaceShells, db.laserEvents, db.localizedTracks],
+    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.screenChunks, db.cameraPositions, db.binaryFiles, db.workspaceShells, db.laserEvents, db.localizedTracks, db.cursorFocusTracks],
     async () => {
       await db.recordings.delete(recordingId);
       await db.snapshots.where('recordingId').equals(recordingId).delete();
@@ -334,6 +359,7 @@ export async function deleteRecording(recordingId: string, ownerKey?: string): P
       await db.workspaceShells.where('recordingId').equals(recordingId).delete();
       await db.laserEvents.where('recordingId').equals(recordingId).delete();
       await db.localizedTracks.where('recordingId').equals(recordingId).delete();
+      await db.cursorFocusTracks.delete(recordingId);
     },
   );
 }

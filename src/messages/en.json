@@ -668,7 +668,9 @@
       "followViewportLabel": "Follow my viewport",
       "followViewportHint": "Camera follows what you see at each moment",
       "fitAllLabel": "Fit all content",
-      "fitAllHint": "Union bbox of all elements, static framing"
+      "fitAllHint": "Union bbox of all elements, static framing",
+      "keepZoomedLabel": "Always keep zoomed in",
+      "keepZoomedHint": "Fill the selected ratio and keep the active focus in view"
     }
   },
   "subtitlePanel": {
@@ -721,12 +723,20 @@
     "watermarkBadge": "👁️ Watermarked preview",
     "cleanBadge": "✓ Clean export",
     "renderingTag": "Rendering…",
+    "cursorTrackingProgress": "Tracking cursor {progress}%",
+    "cursorTrackingFallback": "Focus fallback",
+    "cursorTrackingQuality": {
+      "good": "Cursor focus ready",
+      "partial": "Cursor focus · partial",
+      "poor": "Cursor focus · fallback"
+    },
     "hideSelectionOverlays": "Hide frames",
     "showSelectionOverlays": "Show frames",
     "previewFailed": "Preview failed: {message}",
     "generating": "Generating video",
     "phase": {
       "loading": "Loading recording data",
+      "tracking_cursor": "Tracking cursor",
       "rendering_frames": "Rendering frames",
       "encoding": "Encoding video",
       "done": "Done",

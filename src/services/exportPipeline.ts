@@ -1,7 +1,7 @@
 'use client';
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { getLocalizedTrack, getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
+import { getCursorFocusTrack, getLocalizedTrack, getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
 import {
   cropRectForAspect,
   cropRectForSnapshot,
@@ -17,6 +17,7 @@ import {
   type CameraPositionEvent,
   type CameraShape,
   type AutoZoomSegment,
+  type CroppingMode,
   type ExportConfig,
   type ExportFormat,
   type ExportQuality,
@@ -34,6 +35,7 @@ import { createCameraFrameSource, type CameraFrameSource } from './webmCameraFra
 import { drawLaserOverlay } from '@/utils/laserRender';
 import { paintVideoBackground } from '@/services/videoBackgroundRenderer';
 import { createDisplayFrameSource, type DisplayFrameSource } from '@/services/displayFrameSource';
+import { analyzeCursorFocusTrack, focusedCoverPlacement, focusPointAt } from '@/services/cursorFocusTracker';
 
 export interface ExportOptions extends ExportConfig {
   recordingId: string;
@@ -224,8 +226,11 @@ function drawDisplayFrame(
   },
   sourceKind: RecordingSourceKind,
   sourceCrop: SourceCropWindow | undefined,
+  croppingMode: CroppingMode,
   targetW: number,
   targetH: number,
+  insetScale = 1,
+  focus?: { x: number; y: number },
 ): void {
   const vw = frame.videoWidth ?? frame.displayWidth ?? frame.codedWidth ?? targetW;
   const vh = frame.videoHeight ?? frame.displayHeight ?? frame.codedHeight ?? targetH;
@@ -238,12 +243,69 @@ function drawDisplayFrame(
         sh: effectiveCrop.rh * vh,
       }
     : { sx: 0, sy: 0, sw: vw, sh: vh };
-  const scale = Math.min(targetW / crop.sw, targetH / crop.sh);
-  const dw = crop.sw * scale;
-  const dh = crop.sh * scale;
-  const dx = (targetW - dw) / 2;
-  const dy = (targetH - dh) / 2;
+  const focusSourceX = Math.max(crop.sx, Math.min(crop.sx + crop.sw, (focus?.x ?? 0.5) * vw));
+  const focusSourceY = Math.max(crop.sy, Math.min(crop.sy + crop.sh, (focus?.y ?? 0.5) * vh));
+  const relativeFocus = {
+    x: (focusSourceX - crop.sx) / crop.sw,
+    y: (focusSourceY - crop.sy) / crop.sh,
+  };
+  const placement = croppingMode === 'fit_all_content'
+    ? (() => {
+        const scale = Math.min((targetW * insetScale) / crop.sw, (targetH * insetScale) / crop.sh);
+        const dw = crop.sw * scale;
+        const dh = crop.sh * scale;
+        return { scale, dw, dh, dx: (targetW - dw) / 2, dy: (targetH - dh) / 2 };
+      })()
+    : focusedCoverPlacement(crop.sw, crop.sh, targetW, targetH, relativeFocus);
+  const { scale, dw, dh, dx, dy } = placement;
+  if (croppingMode === 'fit_all_content') {
+    const radius = Math.max(0, Math.round(Math.min(dw, dh) * 0.018));
+    ctx.save();
+    ctx.shadowColor = 'rgba(20, 25, 30, 0.24)';
+    ctx.shadowBlur = Math.max(12, Math.round(Math.min(targetW, targetH) * 0.025));
+    ctx.shadowOffsetY = Math.max(5, Math.round(targetH * 0.012));
+    ctx.fillStyle = 'rgba(20, 25, 30, 0.16)';
+    roundedRectPath(ctx, { x: dx, y: dy, width: dw, height: dh }, radius);
+    ctx.fill();
+    ctx.restore();
+    ctx.save();
+    roundedRectPath(ctx, { x: dx, y: dy, width: dw, height: dh }, radius);
+    ctx.clip();
+    ctx.drawImage(frame, crop.sx, crop.sy, crop.sw, crop.sh, dx, dy, dw, dh);
+    ctx.restore();
+    return;
+  }
   ctx.drawImage(frame, crop.sx, crop.sy, crop.sw, crop.sh, dx, dy, dw, dh);
+}
+
+function hasSelectedVideoBackground(background?: VideoBackgroundConfig): boolean {
+  return !!background && background.kind !== 'none';
+}
+
+function paintDisplaySourceFallback(
+  ctx: CanvasRenderingContext2D,
+  frame: CanvasImageSource & {
+    videoWidth?: number;
+    videoHeight?: number;
+    displayWidth?: number;
+    displayHeight?: number;
+    codedWidth?: number;
+    codedHeight?: number;
+  },
+  width: number,
+  height: number,
+): void {
+  const sourceW = frame.videoWidth ?? frame.displayWidth ?? frame.codedWidth ?? width;
+  const sourceH = frame.videoHeight ?? frame.displayHeight ?? frame.codedHeight ?? height;
+  const scale = Math.max(width / sourceW, height / sourceH) * 1.06;
+  const drawW = sourceW * scale;
+  const drawH = sourceH * scale;
+  ctx.save();
+  ctx.filter = `blur(${Math.max(18, Math.round(Math.min(width, height) * 0.025))}px)`;
+  ctx.drawImage(frame, (width - drawW) / 2, (height - drawH) / 2, drawW, drawH);
+  ctx.restore();
+  ctx.fillStyle = 'rgba(255, 253, 248, 0.14)';
+  ctx.fillRect(0, 0, width, height);
 }
 
 /** Auto Zoom 在片段边缘使用对称缓动，避免倍率从 1 直接跳到目标值。 */
@@ -575,6 +637,20 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const effectiveAudioBlob = useLocalizedTrack ? localizedTrack.audioBlob : audioBlob;
   const effectiveCameraBlob = useLocalizedTrack && localizedTrack.cameraBlob ? localizedTrack.cameraBlob : cameraBlob;
   const effectiveSubtitleSrt = useLocalizedTrack ? localizedTrack.translatedSrt : metadata.subtitleSrt;
+  let cursorFocusTrack = opts.alwaysKeepZoomedIn ? await getCursorFocusTrack(opts.recordingId) : undefined;
+  if (opts.alwaysKeepZoomedIn && screenBlob) {
+    opts.onPhase?.('tracking_cursor');
+    try {
+      cursorFocusTrack = await analyzeCursorFocusTrack({
+        recordingId: opts.recordingId,
+        screenBlob,
+        durationMs: metadata.durationMs,
+        onProgress: (progress) => opts.onProgress?.(0.08 + progress * 0.04),
+      });
+    } catch {
+      cursorFocusTrack = undefined;
+    }
+  }
   // ffmpeg 仅在兜底路径才加载（WebCodecs 快路径不需要）。
 
   const preset = ASPECT_PRESETS[opts.aspectRatio];
@@ -712,7 +788,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     const foreground = createContentLayer(target.width, target.height);
     const foregroundCtx = foreground.getContext('2d')!;
 
-    const finalizeForeground = async (zoomBounds: CanvasRect) => {
+    const finalizeForeground = async (zoomBounds: CanvasRect, useRecordingWindow = true) => {
       drawZoomedContentLayer(foregroundCtx, content, autoZoomAt(opts.autoZooms, t), zoomBounds);
 
       if (opts.withWatermark) {
@@ -742,21 +818,33 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         }
       }
 
-      drawRecordingWindow(targetCtx, foreground, opts.videoBackground);
+      if (useRecordingWindow) drawRecordingWindow(targetCtx, foreground, opts.videoBackground);
+      else targetCtx.drawImage(foreground, 0, 0);
     };
 
     if (displaySource) {
       const displayFrame = await displaySource.getFrameAt(t);
       if (!displayFrame) return target;
+      const manualFocus = autoZoomAt(opts.autoZooms, t);
+      if (opts.croppingMode === 'fit_all_content' && !hasSelectedVideoBackground(opts.videoBackground)) {
+        paintDisplaySourceFallback(targetCtx, displayFrame, target.width, target.height);
+      }
       drawDisplayFrame(
         contentCtx,
         displayFrame,
         metadata.source?.kind ?? 'desktop',
         metadata.source?.sourceCropWindow,
+        opts.croppingMode,
         target.width,
         target.height,
+        hasSelectedVideoBackground(opts.videoBackground) && opts.croppingMode === 'fit_all_content' ? 0.88 : 1,
+        opts.alwaysKeepZoomedIn
+          ? (manualFocus
+              ? { x: manualFocus.cx ?? 0.5, y: manualFocus.cy ?? 0.5 }
+              : focusPointAt(cursorFocusTrack, t))
+          : undefined,
       );
-      await finalizeForeground({ x: 0, y: 0, width: content.width, height: content.height });
+      await finalizeForeground({ x: 0, y: 0, width: content.width, height: content.height }, false);
       return target;
     }
 
@@ -1151,6 +1239,7 @@ export async function renderPreviewFrame(
 ): Promise<void> {
   const { exportToCanvas } = await import('@excalidraw/excalidraw');
   const { metadata, snapshots, binaryFiles, cameraBlob, screenBlob, laserEvents } = await loadFullRecording(recordingId);
+  const cursorFocusTrack = config.alwaysKeepZoomedIn ? await getCursorFocusTrack(recordingId) : undefined;
   const localizedTrack = config.localizedTrackId ? await getLocalizedTrack(config.localizedTrackId) : undefined;
   const useLocalizedTrack = !!localizedTrack && config.muteOriginalAudio !== false;
   const effectiveCameraBlob = useLocalizedTrack && localizedTrack.cameraBlob ? localizedTrack.cameraBlob : cameraBlob;
@@ -1181,7 +1270,7 @@ export async function renderPreviewFrame(
     ? compileSubtitles(effectiveSubtitleSrt)
     : [];
 
-  const finalizePreviewForeground = (zoomBounds: CanvasRect) => {
+  const finalizePreviewForeground = (zoomBounds: CanvasRect, useRecordingWindow = true) => {
     drawZoomedContentLayer(foregroundCtx, content, autoZoomAt(config.autoZooms, timeMs), zoomBounds);
     if (config.withWatermark) {
       drawFrostedWatermark(foregroundCtx, foreground.width, foreground.height, hasCamera ? 'bottom-left' : 'bottom-right');
@@ -1191,7 +1280,8 @@ export async function renderPreviewFrame(
         reservedRightFraction: hasCamera ? 0.3 : 0,
       });
     }
-    drawRecordingWindow(ctx, foreground, config.videoBackground);
+    if (useRecordingWindow) drawRecordingWindow(ctx, foreground, config.videoBackground);
+    else ctx.drawImage(foreground, 0, 0);
   };
 
   if (screenBlob) {
@@ -1199,15 +1289,26 @@ export async function renderPreviewFrame(
     try {
       const displayFrame = await display.getFrameAt(timeMs);
       if (!displayFrame) return;
+      const manualFocus = autoZoomAt(config.autoZooms, timeMs);
+      if (config.croppingMode === 'fit_all_content' && !hasSelectedVideoBackground(config.videoBackground)) {
+        paintDisplaySourceFallback(ctx, displayFrame, target.width, target.height);
+      }
       drawDisplayFrame(
         contentCtx,
         displayFrame,
         metadata.source?.kind ?? 'desktop',
         metadata.source?.sourceCropWindow,
+        config.croppingMode,
         target.width,
         target.height,
+        hasSelectedVideoBackground(config.videoBackground) && config.croppingMode === 'fit_all_content' ? 0.88 : 1,
+        config.alwaysKeepZoomedIn
+          ? (manualFocus
+              ? { x: manualFocus.cx ?? 0.5, y: manualFocus.cy ?? 0.5 }
+              : focusPointAt(cursorFocusTrack, timeMs))
+          : undefined,
       );
-      finalizePreviewForeground({ x: 0, y: 0, width: content.width, height: content.height });
+      finalizePreviewForeground({ x: 0, y: 0, width: content.width, height: content.height }, false);
     } finally {
       disposeShells(decodedShells);
     }

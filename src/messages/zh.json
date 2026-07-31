@@ -668,7 +668,9 @@
       "followViewportLabel": "跟随我的视口",
       "followViewportHint": "镜头随用户当时看到的区域走",
       "fitAllLabel": "自动套全部内容",
-      "fitAllHint": "所有元素的并集 bbox 静态展示"
+      "fitAllHint": "所有元素的并集 bbox 静态展示",
+      "keepZoomedLabel": "始终保持聚焦",
+      "keepZoomedHint": "铺满所选比例，并持续把当前焦点保持在画面内"
     }
   },
   "subtitlePanel": {
@@ -721,12 +723,20 @@
     "watermarkBadge": "👁️ 含水印预览",
     "cleanBadge": "✓ 干净导出",
     "renderingTag": "渲染中…",
+    "cursorTrackingProgress": "识别光标 {progress}%",
+    "cursorTrackingFallback": "使用焦点回退",
+    "cursorTrackingQuality": {
+      "good": "光标焦点已就绪",
+      "partial": "光标焦点 · 部分识别",
+      "poor": "光标焦点 · 使用回退"
+    },
     "hideSelectionOverlays": "隐藏选框",
     "showSelectionOverlays": "显示选框",
     "previewFailed": "预览失败：{message}",
     "generating": "正在生成视频",
     "phase": {
       "loading": "加载录制数据",
+      "tracking_cursor": "正在识别光标",
       "rendering_frames": "逐帧渲染",
       "encoding": "视频编码",
       "done": "完成",

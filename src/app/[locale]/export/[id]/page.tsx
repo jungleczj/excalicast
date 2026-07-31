@@ -28,7 +28,8 @@ import { Link, useRouter } from '@/i18n/navigation';
 
 const DEFAULT_CONFIG: ExportConfig = {
   aspectRatio: '16:9',
-  croppingMode: 'follow_viewport',
+  croppingMode: 'fit_all_content',
+  alwaysKeepZoomedIn: false,
   fps: 15,
   withWatermark: true,
 };
@@ -53,6 +54,7 @@ function rememberInitialFraming(config: ExportConfig): ExportConfig {
     ratioFraming: {
       [config.aspectRatio]: {
         croppingMode: config.croppingMode,
+        alwaysKeepZoomedIn: config.alwaysKeepZoomedIn,
         cropWindow: config.cropWindow,
         customOutput: config.customOutput,
       },
@@ -74,7 +76,8 @@ function exportDefaultsFromSetup(setup: RecordingSetupConfig): ExportConfig {
     return rememberInitialFraming({
       ...base,
       aspectRatio: nearestPreset(sourceSize.width, sourceSize.height),
-      croppingMode: 'follow_viewport',
+      croppingMode: 'fit_all_content',
+      alwaysKeepZoomedIn: false,
       customOutput: { width: sourceSize.width, height: sourceSize.height },
     });
   }
@@ -86,7 +89,8 @@ function exportDefaultsFromSetup(setup: RecordingSetupConfig): ExportConfig {
     return rememberInitialFraming({
       ...base,
       aspectRatio: nearestPreset(out?.width ?? 16, out?.height ?? 9),
-      croppingMode: 'follow_viewport',
+      croppingMode: 'fit_all_content',
+      alwaysKeepZoomedIn: false,
       cropWindow: setup.cropWindow,
       customOutput: out,
     });
@@ -94,7 +98,8 @@ function exportDefaultsFromSetup(setup: RecordingSetupConfig): ExportConfig {
   return rememberInitialFraming({
     ...base,
     aspectRatio: setup.framing,
-    croppingMode: 'follow_viewport',
+    croppingMode: 'fit_all_content',
+    alwaysKeepZoomedIn: false,
     cropWindow: setup.cropWindow,
   });
 }
@@ -217,6 +222,7 @@ export default function EditorRecordingPage(): JSX.Element {
         ...prev.ratioFraming,
         [prev.aspectRatio]: {
           croppingMode: prev.croppingMode,
+          alwaysKeepZoomedIn: prev.alwaysKeepZoomedIn,
           cropWindow: prev.cropWindow,
           customOutput: prev.customOutput,
         },
@@ -225,6 +231,7 @@ export default function EditorRecordingPage(): JSX.Element {
       return {
         ...next,
         croppingMode: targetFraming?.croppingMode ?? 'fit_all_content',
+        alwaysKeepZoomedIn: targetFraming?.alwaysKeepZoomedIn ?? false,
         cropWindow: targetFraming?.cropWindow,
         customOutput: targetFraming?.customOutput,
         ratioFraming,
@@ -359,7 +366,14 @@ export default function EditorRecordingPage(): JSX.Element {
       <ExportRatioPicker config={config} onChange={handleConfigChange} />
       <ExportFormatPanel config={config} onChange={setConfig} en={en} />
       <div style={{ height: 1.5, background: 'var(--ink)', opacity: 0.4 }} />
-      <ExportPanel recordingId={id} config={config} onConfigChange={setConfig} onPaidStateChange={handlePaidChange} onProgress={setExportProgress} />
+      <ExportPanel
+        recordingId={id}
+        config={config}
+        fallbackCroppingMode="fit_all_content"
+        onConfigChange={setConfig}
+        onPaidStateChange={handlePaidChange}
+        onProgress={setExportProgress}
+      />
     </div>
   );
 

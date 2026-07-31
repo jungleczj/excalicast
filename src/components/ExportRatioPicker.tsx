@@ -14,6 +14,7 @@ const ORDER = (r: AspectRatio) => RATIOS.indexOf(r);
 
 export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
   const t = useTranslations('ratioPicker');
+  const keepZoomedIn = config.alwaysKeepZoomedIn ?? false;
 
   const MODES: { value: CroppingMode; label: string; hint: string }[] = [
     { value: 'follow_viewport', label: t('modes.followViewportLabel'), hint: t('modes.followViewportHint') },
@@ -102,7 +103,11 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
               <button
                 key={m.value}
                 type="button"
-                onClick={() => onChange({ ...config, croppingMode: m.value })}
+                onClick={() => onChange({
+                  ...config,
+                  croppingMode: m.value,
+                  alwaysKeepZoomedIn: m.value === 'follow_viewport',
+                })}
                 className="editor-craft-segment-card press flex w-full items-start gap-3 p-3 text-left"
                 data-active={active}
                 style={{
@@ -131,6 +136,57 @@ export function ExportRatioPicker({ config, onChange }: Props): JSX.Element {
             );
           })}
         </div>
+      </div>
+
+      <div
+        className="flex items-center justify-between gap-4"
+        style={{ borderTop: '1px solid rgba(31,34,37,.14)', paddingTop: 14 }}
+      >
+        <div className="min-w-0">
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{t('modes.keepZoomedLabel')}</div>
+          <div style={{ marginTop: 2, fontSize: 11, lineHeight: 1.4, color: 'var(--ink-3)' }}>
+            {t('modes.keepZoomedHint')}
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-label={t('modes.keepZoomedLabel')}
+          aria-checked={keepZoomedIn}
+          onClick={() => {
+            const next = !keepZoomedIn;
+            onChange({
+              ...config,
+              alwaysKeepZoomedIn: next,
+              croppingMode: next ? 'follow_viewport' : 'fit_all_content',
+            });
+          }}
+          style={{
+            position: 'relative',
+            width: 42,
+            height: 24,
+            flexShrink: 0,
+            border: '1.5px solid var(--ink)',
+            borderRadius: 999,
+            background: keepZoomedIn ? 'var(--ink)' : 'var(--paper-2)',
+            cursor: 'pointer',
+          }}
+        >
+          <span
+            aria-hidden
+            style={{
+              position: 'absolute',
+              left: keepZoomedIn ? 20 : 3,
+              top: 3,
+              width: 16,
+              height: 16,
+              borderRadius: '50%',
+              background: keepZoomedIn ? 'var(--hi)' : 'var(--paper)',
+              border: '1px solid var(--ink)',
+              transition: 'left 140ms ease',
+            }}
+          />
+        </button>
       </div>
     </div>
   );

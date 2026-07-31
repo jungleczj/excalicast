@@ -11,7 +11,7 @@ import { ProUpgradeModal } from '@/components/ProUpgradeModal';
 import { useSubscription } from '@/hooks/useSubscription';
 import { formatPrice, usePaymentConfig } from '@/hooks/usePaymentConfig';
 import { ProBadge } from '@/components/ProBadge';
-import type { ExportConfig } from '@/types/recording';
+import type { CroppingMode, ExportConfig } from '@/types/recording';
 
 export interface ExportProgressState {
   phase: string;
@@ -21,12 +21,20 @@ export interface ExportProgressState {
 interface Props {
   recordingId: string;
   config: ExportConfig;
+  fallbackCroppingMode?: CroppingMode;
   onConfigChange: (next: ExportConfig) => void;
   onPaidStateChange?: (paid: boolean) => void;
   onProgress?: (state: ExportProgressState | null) => void;
 }
 
-export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateChange, onProgress }: Props): JSX.Element {
+export function ExportPanel({
+  recordingId,
+  config,
+  fallbackCroppingMode = 'fit_all_content',
+  onConfigChange,
+  onPaidStateChange,
+  onProgress,
+}: Props): JSX.Element {
   const t = useTranslations('exportPanel');
   const subscription = useSubscription();
   const { config: paymentCfg } = usePaymentConfig();
@@ -92,6 +100,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
         const ratioFraming = ar === config.aspectRatio
           ? {
               croppingMode: config.croppingMode,
+              alwaysKeepZoomedIn: config.alwaysKeepZoomedIn,
               cropWindow: config.cropWindow,
               customOutput: config.customOutput,
             }
@@ -103,7 +112,10 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
         const blob = await exportRecording({
           ...config,
           aspectRatio: ar,
-          croppingMode: ratioFraming?.croppingMode ?? 'fit_all_content',
+          croppingMode: ratioFraming?.alwaysKeepZoomedIn
+            ? 'follow_viewport'
+            : (ratioFraming?.croppingMode ?? fallbackCroppingMode),
+          alwaysKeepZoomedIn: ratioFraming?.alwaysKeepZoomedIn ?? false,
           cropWindow: ratioFraming?.cropWindow,
           customOutput: ratioFraming?.customOutput,
           recordingId,
@@ -121,7 +133,7 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
       setBusy(false);
       onProgress?.(null);
     }
-  }, [config, recordingId, effectivelyUnlocked, onProgress, t]);
+  }, [config, recordingId, effectivelyUnlocked, fallbackCroppingMode, onProgress, t]);
 
   useEffect(() => {
     if (effectivelyUnlocked && pendingExport) {
