@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { autoZoomAt, cameraPositionAt, getRecordingWindowRect, renderPreviewFrame } from '@/services/exportPipeline';
 import { getLocalizedTrack, getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
 import type { AutoZoomSegment, CameraPositionEvent, ExportConfig, LocalizedTrack, RecordingMetadata, ShellCanvasRect, ShellSize, TimeSegment } from '@/types/recording';
-import { ASPECT_PRESETS } from '@/types/recording';
+import { resolveExportOutputSize } from '@/types/recording';
 import { keptDuration, normalizeSegments, outputToSource, sourceToOutput } from '@/utils/segments';
 import { I } from '@/components/icons';
 import type { ExportProgressState } from '@/components/ExportPanel';
@@ -81,6 +81,7 @@ export function ExportPreview({
   // 这个容器处于普通文档流中，变高时 Timeline 会自然向下移动。
   const parentRef = useRef<HTMLDivElement>(null);
   const [parentWidth, setParentWidth] = useState(0);
+  const [editorViewportHeight, setEditorViewportHeight] = useState(0);
   const [requestedWidth, setRequestedWidth] = useState<number | null>(null);
 
   // useLayoutEffect：挂载/重渲染后、浏览器 paint 前同步读宽度，避免首帧 0 宽闪烁
@@ -91,16 +92,20 @@ export function ExportPreview({
     if (!el) return;
     const measure = () => {
       setParentWidth(el.clientWidth);
+      const editorViewport = el.closest<HTMLElement>('.editor-craft-main');
+      setEditorViewportHeight(editorViewport?.clientHeight ?? window.innerHeight);
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver((entries) => {
-      const box = entries[0]?.contentRect;
-      const w = box?.width ?? el.clientWidth;
-      if (w > 0) setParentWidth(w);
-    });
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
+    const editorViewport = el.closest<HTMLElement>('.editor-craft-main');
+    if (editorViewport) ro.observe(editorViewport);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
   }, [config.aspectRatio]);
   const renderToken = useRef(0);
   const rafRef = useRef<number | null>(null);
@@ -180,7 +185,7 @@ export function ExportPreview({
   // shell on 时，气泡定位用 letterboxed shell 区作为坐标系（跟导出 pipeline 一致）；
   // shell off / 无 shell 时，整张预览框作为坐标系。
   const cameraOverlayStyle = useMemo<React.CSSProperties>(() => {
-    const preset = ASPECT_PRESETS[config.aspectRatio];
+    const preset = resolveExportOutputSize(config);
     const useShell = !!firstShell && (config.includeWorkspaceShell ?? true);
 
     // 把 camBounds 表达成"占整张预览框的比例"，方便用 % 写 CSS。
@@ -393,24 +398,28 @@ export function ExportPreview({
   }, [kept, keptDur, playing, scrubBarToClientX]);
 
   // scrub 由时间轴驱动（onPlayheadChange → playheadMs）；预览不再自带进度条。
-  const preset = ASPECT_PRESETS[config.aspectRatio];
+  const preset = resolveExportOutputSize(config);
   const aspect = preset.width / preset.height;
 
-  // 容器可拉伸，但不会超过编辑栏可用宽度；高度永远由当前视频比例推导。
+  // 同时受编辑列宽度和可视高度约束，避免竖屏沿用横屏宽度后无限向下增长。
   const previewBox = useMemo(() => {
-    const maxW = Math.max(PREVIEW_MIN_WIDTH, Math.floor((parentWidth || PREVIEW_PREFERRED_WIDTH) - 16));
+    const maxW = Math.max(1, Math.floor((parentWidth || PREVIEW_PREFERRED_WIDTH) - 16));
+    const viewportH = editorViewportHeight || window.innerHeight;
+    const maxH = Math.max(240, Math.min(620, viewportH >= 760 ? viewportH - 300 : viewportH - 70));
+    const minW = Math.min(PREVIEW_MIN_WIDTH, maxW, maxH * aspect);
     // 默认留出一档可放大的空间；如果编辑列很窄则自然退化为满宽。
-    const preferred = Math.min(maxW, Math.max(PREVIEW_MIN_WIDTH, Math.min(PREVIEW_PREFERRED_WIDTH, maxW * 0.78)));
-    const w = Math.round(Math.max(PREVIEW_MIN_WIDTH, Math.min(maxW, requestedWidth ?? preferred)));
+    const preferred = Math.min(maxW, Math.max(minW, Math.min(PREVIEW_PREFERRED_WIDTH, maxW * 0.78)));
+    const w = Math.round(Math.max(minW, Math.min(maxW, maxH * aspect, requestedWidth ?? preferred)));
     return {
       w,
       h: Math.round(w / aspect),
     };
-  }, [aspect, parentWidth, requestedWidth]);
+  }, [aspect, editorViewportHeight, parentWidth, requestedWidth]);
 
   const resizePreview = useCallback((nextWidth: number) => {
-    const maxW = Math.max(PREVIEW_MIN_WIDTH, Math.floor((parentWidth || PREVIEW_PREFERRED_WIDTH) - 16));
-    setRequestedWidth(Math.max(PREVIEW_MIN_WIDTH, Math.min(maxW, Math.round(nextWidth))));
+    const maxW = Math.max(1, Math.floor((parentWidth || PREVIEW_PREFERRED_WIDTH) - 16));
+    const minW = Math.min(PREVIEW_MIN_WIDTH, maxW);
+    setRequestedWidth(Math.max(minW, Math.min(maxW, Math.round(nextWidth))));
   }, [parentWidth]);
 
   const startResize = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
@@ -455,7 +464,7 @@ export function ExportPreview({
   // 与 exportPipeline 的 zoomBounds / drawRecordingWindow 一致：框选目标永远位于实际
   // 会被放大的内容区域中；workspace shell 与视频背景的边框、留白都不会被框进去。
   const zoomContentBounds = useMemo(() => {
-    const preset = ASPECT_PRESETS[config.aspectRatio];
+    const preset = resolveExportOutputSize(config);
     let bounds = { x: 0, y: 0, width: 1, height: 1 };
     const useShell = !!firstShell && (config.includeWorkspaceShell ?? true);
     if (useShell && firstShell) {

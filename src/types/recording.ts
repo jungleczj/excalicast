@@ -221,6 +221,12 @@ export interface ExportConfig {
   cropWindow?: CropWindow;
   /** Custom framing 的输出像素尺寸（优先于 ASPECT_PRESETS）。 */
   customOutput?: { width: number; height: number };
+  /** 各导出比例独立保存的裁切与自定义输出；切换预览比例时不会互相覆盖。 */
+  ratioFraming?: Partial<Record<AspectRatio, {
+    croppingMode?: CroppingMode;
+    cropWindow?: CropWindow;
+    customOutput?: { width: number; height: number };
+  }>>;
   /** 时间轴裁剪保留段（ms）；缺省=整段。导出只输出这些段、按序拼接。 */
   segments?: TimeSegment[];
   /** 指定时间窗口内自动放大画面。 */
@@ -231,6 +237,12 @@ export interface ExportConfig {
   localizedTrackId?: string;
   /** 启用 localizedTrack 时默认 true：不混入中文原声。 */
   muteOriginalAudio?: boolean;
+}
+
+export function resolveExportOutputSize(
+  config: Pick<ExportConfig, 'aspectRatio' | 'customOutput'>,
+): { width: number; height: number } {
+  return config.customOutput ?? ASPECT_PRESETS[config.aspectRatio];
 }
 
 export interface ShellCanvasRect {

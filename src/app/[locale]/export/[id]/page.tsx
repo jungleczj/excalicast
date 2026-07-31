@@ -46,6 +46,20 @@ function nearestPreset(w: number, h: number): AspectRatio {
   return best;
 }
 
+function rememberInitialFraming(config: ExportConfig): ExportConfig {
+  if (!config.cropWindow && !config.customOutput) return config;
+  return {
+    ...config,
+    ratioFraming: {
+      [config.aspectRatio]: {
+        croppingMode: config.croppingMode,
+        cropWindow: config.cropWindow,
+        customOutput: config.customOutput,
+      },
+    },
+  };
+}
+
 /** 录制前 Setup 配置 → 导出默认（沿用比例 / 裁切模式 / 含工作区 / 裁切框）。 */
 function exportDefaultsFromSetup(setup: RecordingSetupConfig): ExportConfig {
   const base: ExportConfig = {
@@ -57,27 +71,32 @@ function exportDefaultsFromSetup(setup: RecordingSetupConfig): ExportConfig {
     ? setup.source.sourceSize
     : undefined;
   if (sourceSize?.width && sourceSize.height) {
-    return {
+    return rememberInitialFraming({
       ...base,
       aspectRatio: nearestPreset(sourceSize.width, sourceSize.height),
       croppingMode: 'follow_viewport',
       customOutput: { width: sourceSize.width, height: sourceSize.height },
-    };
+    });
   }
   if (setup.framing === 'default') {
     return { ...base, aspectRatio: '16:9', croppingMode: 'fit_all_content' };
   }
   if (setup.framing === 'custom') {
     const out = setup.customOutput;
-    return {
+    return rememberInitialFraming({
       ...base,
       aspectRatio: nearestPreset(out?.width ?? 16, out?.height ?? 9),
       croppingMode: 'follow_viewport',
       cropWindow: setup.cropWindow,
       customOutput: out,
-    };
+    });
   }
-  return { ...base, aspectRatio: setup.framing, croppingMode: 'follow_viewport', cropWindow: setup.cropWindow };
+  return rememberInitialFraming({
+    ...base,
+    aspectRatio: setup.framing,
+    croppingMode: 'follow_viewport',
+    cropWindow: setup.cropWindow,
+  });
 }
 
 type Tab = 'export' | 'captions' | 'dubbing' | 'outline' | 'handout';
@@ -193,12 +212,25 @@ export default function EditorRecordingPage(): JSX.Element {
 
   const handleConfigChange = useCallback((next: ExportConfig) => {
     setConfig((prev) => {
-      if (next.aspectRatio !== prev.aspectRatio && meta?.setup?.framing !== next.aspectRatio) {
-        return { ...next, cropWindow: undefined, customOutput: undefined };
-      }
-      return next;
+      if (next.aspectRatio === prev.aspectRatio) return next;
+      const ratioFraming = {
+        ...prev.ratioFraming,
+        [prev.aspectRatio]: {
+          croppingMode: prev.croppingMode,
+          cropWindow: prev.cropWindow,
+          customOutput: prev.customOutput,
+        },
+      };
+      const targetFraming = ratioFraming[next.aspectRatio];
+      return {
+        ...next,
+        croppingMode: targetFraming?.croppingMode ?? 'fit_all_content',
+        cropWindow: targetFraming?.cropWindow,
+        customOutput: targetFraming?.customOutput,
+        ratioFraming,
+      };
     });
-  }, [meta]);
+  }, []);
 
   const commitTitle = useCallback(() => {
     if (!id) return;

@@ -67,6 +67,134 @@ test('resizing the preview container pushes the timeline down without zooming it
   await expect.poll(async () => (await timeline.boundingBox())?.y ?? 0).toBeGreaterThan(initialTimeline.y);
 });
 
+test('a portrait preview fits beside the export panel without pushing the timeline out of view', async ({ page }) => {
+  await page.locator('.editor-craft-ratio-card').filter({ hasText: '9:16' }).click();
+
+  const preview = page.getByTestId('export-preview-stage');
+  const timeline = page.getByTestId('editor-timeline');
+  const main = page.locator('.editor-craft-main');
+  await expect.poll(async () => {
+    const box = await preview.boundingBox();
+    return box ? box.height / box.width : 0;
+  }).toBeCloseTo(16 / 9, 2);
+
+  const [previewBox, timelineBox, mainBox] = await Promise.all([
+    preview.boundingBox(),
+    timeline.boundingBox(),
+    main.boundingBox(),
+  ]);
+  if (!previewBox || !timelineBox || !mainBox) throw new Error('portrait editor layout was not measured');
+
+  expect(previewBox.height).toBeLessThanOrEqual(560);
+  expect(timelineBox.y).toBeGreaterThan(previewBox.y + previewBox.height);
+  expect(timelineBox.y).toBeLessThan(mainBox.y + mainBox.height);
+});
+
+test('switching away from a custom recording ratio restores its original framing when returning', async ({ page }) => {
+  await page.evaluate(async (id) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('recordings', 'readwrite');
+      const store = tx.objectStore('recordings');
+      const request = store.get(id);
+      request.onsuccess = () => store.put({
+        ...request.result,
+        setup: {
+          ...request.result.setup,
+          framing: 'custom',
+          customOutput: { width: 1000, height: 700 },
+          cropWindow: { rx: 0.1, ry: 0.1, rw: 0.8, rh: 0.8 },
+        },
+      });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, recordingId);
+  await page.reload();
+
+  const preview = page.getByTestId('export-preview-stage');
+  const stageAspect = async () => {
+    const box = await preview.boundingBox();
+    return box ? box.width / box.height : 0;
+  };
+  await expect.poll(stageAspect).toBeCloseTo(10 / 7, 2);
+
+  await page.locator('.editor-craft-ratio-card').filter({ hasText: '9:16' }).click();
+  await expect.poll(stageAspect).toBeCloseTo(9 / 16, 2);
+  await page.locator('.editor-craft-ratio-card').filter({ hasText: '3:2' }).click();
+  await expect.poll(stageAspect).toBeCloseTo(10 / 7, 2);
+});
+
+test('a new portrait ratio starts fitted and remembers its own crop mode', async ({ page }) => {
+  await page.locator('.editor-craft-ratio-card').filter({ hasText: '9:16' }).click();
+  const fitAll = page.locator('.editor-craft-segment-card').filter({ hasText: 'Fit all content' });
+  const followViewport = page.locator('.editor-craft-segment-card').filter({ hasText: 'Follow my viewport' });
+  await expect(fitAll).toHaveAttribute('data-active', 'true');
+
+  await followViewport.click();
+  await expect(followViewport).toHaveAttribute('data-active', 'true');
+  await page.locator('.editor-craft-ratio-card').filter({ hasText: '1:1' }).click();
+  await expect(fitAll).toHaveAttribute('data-active', 'true');
+  await page.locator('.editor-craft-ratio-card').filter({ hasText: '9:16' }).click();
+  await expect(followViewport).toHaveAttribute('data-active', 'true');
+});
+
+test('all export ratios keep the preview chrome inside the stage', async ({ page }) => {
+  const ratios = new Map([
+    ['16:9', 16 / 9], ['4:3', 4 / 3], ['21:9', 2560 / 1080], ['16:10', 16 / 10], ['3:2', 3 / 2],
+    ['9:16', 9 / 16], ['4:5', 4 / 5], ['3:4', 3 / 4], ['2:3', 2 / 3], ['1:1', 1],
+  ]);
+  const preview = page.getByTestId('export-preview-stage');
+
+  for (const [ratio, expectedAspect] of ratios) {
+    await page.locator('.editor-craft-ratio-card').filter({ hasText: ratio }).click();
+    await expect.poll(async () => {
+      const box = await preview.boundingBox();
+      return box ? box.width / box.height : 0;
+    }).toBeCloseTo(expectedAspect, 2);
+
+    const bounds = await preview.evaluate((stage) => {
+      const stageBox = stage.getBoundingClientRect();
+      const controls = stage.querySelector<HTMLElement>('.export-preview-craft-controls')?.getBoundingClientRect();
+      const resize = stage.querySelector<HTMLElement>('[data-testid="preview-resize-handle"]')?.getBoundingClientRect();
+      return {
+        stage: { left: stageBox.left, top: stageBox.top, right: stageBox.right, bottom: stageBox.bottom },
+        controls: controls && { left: controls.left, top: controls.top, right: controls.right, bottom: controls.bottom },
+        resize: resize && { left: resize.left, top: resize.top, right: resize.right, bottom: resize.bottom },
+      };
+    });
+    for (const child of [bounds.controls, bounds.resize]) {
+      if (!child) throw new Error(`${ratio} preview chrome was not measured`);
+      expect(child.left).toBeGreaterThanOrEqual(bounds.stage.left);
+      expect(child.top).toBeGreaterThanOrEqual(bounds.stage.top);
+      expect(child.right).toBeLessThanOrEqual(bounds.stage.right);
+      expect(child.bottom).toBeLessThanOrEqual(bounds.stage.bottom);
+    }
+  }
+});
+
+test('portrait preview does not create horizontal overflow on a mobile editor', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.reload();
+  await page.locator('.editor-craft-ratio-card').filter({ hasText: '9:16' }).click();
+
+  const preview = page.getByTestId('export-preview-stage');
+  await expect.poll(async () => {
+    const box = await preview.boundingBox();
+    return box ? box.width / box.height : 0;
+  }).toBeCloseTo(9 / 16, 2);
+  const dimensions = await page.evaluate(() => ({
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: document.documentElement.clientWidth,
+  }));
+  expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.viewportWidth);
+});
+
 test('a silent recording keeps an equal-height pale pink audio lane', async ({ page }) => {
   const videoTrack = page.getByTestId('timeline-video-track');
   const audioTrack = page.getByTestId('timeline-audio-track');

@@ -13,6 +13,7 @@ import {
 import {
   ASPECT_PRESETS,
   RESOLUTION_SCALE,
+  resolveExportOutputSize,
   type CameraPositionEvent,
   type CameraShape,
   type AutoZoomSegment,
@@ -1154,7 +1155,7 @@ export async function renderPreviewFrame(
   const useLocalizedTrack = !!localizedTrack && config.muteOriginalAudio !== false;
   const effectiveCameraBlob = useLocalizedTrack && localizedTrack.cameraBlob ? localizedTrack.cameraBlob : cameraBlob;
   const effectiveSubtitleSrt = useLocalizedTrack ? localizedTrack.translatedSrt : metadata.subtitleSrt;
-  const preset = ASPECT_PRESETS[config.aspectRatio];
+  const preset = resolveExportOutputSize(config);
 
   // 预览也要走 shell-aware 路径
   const rawShells = await getWorkspaceShells(recordingId);
@@ -1163,8 +1164,8 @@ export async function renderPreviewFrame(
 
   // 输出尺寸：Custom 用 customOutput（取偶），否则 picker 比例；shell 按 cover 缩放后绘制
   const evenize = (n: number) => Math.max(2, Math.round(n / 2) * 2);
-  const outputW = config.customOutput ? evenize(config.customOutput.width) : preset.width;
-  const outputH = config.customOutput ? evenize(config.customOutput.height) : preset.height;
+  const outputW = evenize(preset.width);
+  const outputH = evenize(preset.height);
 
   target.width = outputW;
   target.height = outputH;

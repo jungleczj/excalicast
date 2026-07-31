@@ -89,6 +89,13 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
     try {
       for (let i = 0; i < ratios.length; i++) {
         const ar = ratios[i];
+        const ratioFraming = ar === config.aspectRatio
+          ? {
+              croppingMode: config.croppingMode,
+              cropWindow: config.cropWindow,
+              customOutput: config.customOutput,
+            }
+          : config.ratioFraming?.[ar];
         setStatusMsg(ratios.length > 1
           ? t('exportingStatus', { ratio: `${ar} (${i + 1}/${ratios.length})`, wm: config.withWatermark ? t('wmWithLabel') : t('wmCleanLabel') })
           : t('exportingStatus', { ratio: ar, wm: config.withWatermark ? t('wmWithLabel') : t('wmCleanLabel') }));
@@ -96,9 +103,9 @@ export function ExportPanel({ recordingId, config, onConfigChange, onPaidStateCh
         const blob = await exportRecording({
           ...config,
           aspectRatio: ar,
-          // cropWindow/customOutput 只对其对应的（主）比例有效；其它比例用该比例的默认居中裁切。
-          cropWindow: ar === config.aspectRatio ? config.cropWindow : undefined,
-          customOutput: ar === config.aspectRatio ? config.customOutput : undefined,
+          croppingMode: ratioFraming?.croppingMode ?? 'fit_all_content',
+          cropWindow: ratioFraming?.cropWindow,
+          customOutput: ratioFraming?.customOutput,
           recordingId,
           onPhase: (p) => { lastPhase = p; onProgress?.({ phase: p, ratio: lastRatio }); },
           onProgress: (r) => { lastRatio = Math.min(1, Math.max(0, r)); onProgress?.({ phase: lastPhase, ratio: lastRatio }); },
