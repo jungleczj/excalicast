@@ -18,7 +18,10 @@ interface Row {
   event: string;
   user_id: string | null;
   guest_id: string | null;
+  session_id: string | null;
   path: string | null;
+  locale: string | null;
+  props: Record<string, string | number | boolean> | null;
   created_at: string;
 }
 
@@ -41,7 +44,7 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   const { data, error } = await admin
     .from('analytics_events')
-    .select('event, user_id, guest_id, path, created_at')
+    .select('event, user_id, guest_id, session_id, path, locale, props, created_at')
     .gte('created_at', since)
     .order('created_at', { ascending: false })
     .limit(MAX_ROWS);
@@ -100,6 +103,86 @@ export async function GET(req: Request): Promise<NextResponse> {
     at: r.created_at,
   }));
 
+  // Build one attribution record per session, then aggregate session outcomes.
+  // This prevents comparison CTAs (which emit a generic and comparison event)
+  // from being counted twice.
+  interface AttributedSession {
+    entryPath: string;
+    contentType: string;
+    slug: string;
+    locale: string;
+    sourceKind: string;
+    trafficKind: string;
+    events: Set<string>;
+  }
+  const attributedSessions = new Map<string, AttributedSession>();
+  for (const row of rows) {
+    const entryPath = typeof row.props?.entry_path === 'string' ? row.props.entry_path : '';
+    const sessionKey = row.session_id ?? identity(row);
+    if (!entryPath || !sessionKey) continue;
+    const session = attributedSessions.get(sessionKey) ?? {
+      entryPath,
+      contentType: '',
+      slug: '',
+      locale: row.locale ?? '',
+      sourceKind: '',
+      trafficKind: typeof row.props?.traffic_kind === 'string' ? row.props.traffic_kind : '',
+      events: new Set<string>(),
+    };
+    if (typeof row.props?.content_type === 'string') session.contentType = row.props.content_type;
+    if (typeof row.props?.slug === 'string') session.slug = row.props.slug;
+    if (typeof row.props?.source_kind === 'string') session.sourceKind = row.props.source_kind;
+    if (!session.locale && row.locale) session.locale = row.locale;
+    session.events.add(row.event);
+    attributedSessions.set(sessionKey, session);
+  }
+
+  const acquisitionMap = new Map<string, {
+    entryPath: string;
+    contentType: string;
+    slug: string;
+    locale: string;
+    sourceKind: string;
+    trafficKind: string;
+    sessions: number;
+    ctaClicks: number;
+    recordingStarts: number;
+    recordingCompletes: number;
+    exports: number;
+  }>();
+  for (const session of attributedSessions.values()) {
+    const key = [
+      session.entryPath,
+      session.contentType,
+      session.slug,
+      session.locale,
+      session.sourceKind,
+      session.trafficKind,
+    ].join('\u0000');
+    const bucket = acquisitionMap.get(key) ?? {
+      entryPath: session.entryPath,
+      contentType: session.contentType,
+      slug: session.slug,
+      locale: session.locale,
+      sourceKind: session.sourceKind,
+      trafficKind: session.trafficKind,
+      sessions: 0,
+      ctaClicks: 0,
+      recordingStarts: 0,
+      recordingCompletes: 0,
+      exports: 0,
+    };
+    bucket.sessions++;
+    if (session.events.has('content_cta_click')) bucket.ctaClicks++;
+    if (session.events.has('recording_start')) bucket.recordingStarts++;
+    if (session.events.has('recording_complete')) bucket.recordingCompletes++;
+    if (session.events.has('export_success')) bucket.exports++;
+    acquisitionMap.set(key, bucket);
+  }
+  const acquisition = Array.from(acquisitionMap.entries())
+    .map(([, value]) => value)
+    .sort((a, b) => b.sessions - a.sessions);
+
   return NextResponse.json({
     range: rangeDays,
     capped: rows.length >= MAX_ROWS,
@@ -108,5 +191,6 @@ export async function GET(req: Request): Promise<NextResponse> {
     funnel,
     daily,
     recent,
+    acquisition,
   });
 }

@@ -7,7 +7,19 @@ import { pageMetadata } from '@/lib/seo/meta';
 import { JsonLd } from '@/components/seo/JsonLd';
 import { faqPageSchema, breadcrumbSchema } from '@/lib/seo/schema';
 import { ContentShell } from '@/components/content/ContentShell';
-import { PageTitle, Lead, SectionHeading, FaqList, CtaRow } from '@/components/content/ContentPieces';
+import {
+  CtaRow,
+  DirectAnswer,
+  FactList,
+  FaqList,
+  FitLists,
+  Lead,
+  LimitationsList,
+  PageTitle,
+  SectionHeading,
+  SourceList,
+  WorkflowList,
+} from '@/components/content/ContentPieces';
 import { RelatedLinks } from '@/components/content/RelatedLinks';
 import { USE_CASE_ENTRIES, getUseCaseEntry, pick } from '@/content';
 
@@ -36,6 +48,8 @@ export default async function UseCasePage({ params }: Props): Promise<JSX.Elemen
   setRequestLocale(locale);
   const entry = getUseCaseEntry(slug);
   if (!entry) notFound();
+  const workflow = entry.workflow ?? entry.steps ?? [];
+  const hasFitGuidance = Boolean(entry.bestFor?.length || entry.notBestFor?.length);
 
   const faqSchema = faqPageSchema(
     entry.faqs.map((f) => ({ question: pick(f.q, locale), answer: pick(f.a, locale) })),
@@ -47,48 +61,49 @@ export default async function UseCasePage({ params }: Props): Promise<JSX.Elemen
   ]);
 
   return (
-    <ContentShell locale={locale}>
+    <ContentShell locale={locale} contentType="use-case" slug={slug}>
       <JsonLd data={[faqSchema, crumb]} />
       <PageTitle>{pick(entry.title, locale)}</PageTitle>
       <Lead>{pick(entry.intro, locale)}</Lead>
+      <DirectAnswer answer={entry.directAnswer} locale={locale} />
 
-      <SectionHeading>{locale === 'zh' ? '步骤' : 'Steps'}</SectionHeading>
-      <ol style={{ marginTop: 8, paddingLeft: 0, listStyle: 'none', counterReset: 'step' }}>
-        {entry.steps.map((s, i) => (
-          <li key={i} className="content-craft-step" style={{ display: 'flex', gap: 16, marginTop: 18 }}>
-            <span
-              className="content-craft-step-index"
-              style={{
-                flexShrink: 0,
-                width: 34,
-                height: 34,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 800,
-                background: 'var(--hi)',
-                border: '2px solid var(--ink)',
-                borderRadius: 10,
-              }}
-            >
-              {i + 1}
-            </span>
-            <div>
-              <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>{pick(s.title, locale)}</h3>
-              <p style={{ marginTop: 6, fontSize: 16, lineHeight: 1.6, color: 'var(--ink-2)' }}>
-                {pick(s.body, locale)}
-              </p>
-            </div>
-          </li>
-        ))}
-      </ol>
+      {hasFitGuidance ? (
+        <>
+          <SectionHeading>{locale === 'zh' ? '适用场景' : 'Who this workflow fits'}</SectionHeading>
+          <FitLists bestFor={entry.bestFor} notBestFor={entry.notBestFor} locale={locale} />
+        </>
+      ) : null}
+
+      <SectionHeading>{locale === 'zh' ? '工作流程' : 'Workflow'}</SectionHeading>
+      <WorkflowList steps={workflow} locale={locale} />
+
+      {entry.facts?.length ? (
+        <>
+          <SectionHeading>{locale === 'zh' ? '工作流事实' : 'Workflow facts'}</SectionHeading>
+          <FactList facts={entry.facts} locale={locale} />
+        </>
+      ) : null}
+
+      {entry.limitations?.length ? (
+        <>
+          <SectionHeading>{locale === 'zh' ? '边界与限制' : 'Limits and boundaries'}</SectionHeading>
+          <LimitationsList limitations={entry.limitations} locale={locale} />
+        </>
+      ) : null}
 
       <SectionHeading>{locale === 'zh' ? '常见问题' : 'FAQ'}</SectionHeading>
       <FaqList faqs={entry.faqs} locale={locale} />
 
+      {entry.sources?.length ? (
+        <>
+          <SectionHeading>{locale === 'zh' ? '参考来源' : 'References'}</SectionHeading>
+          <SourceList sources={entry.sources} verifiedAt={entry.verifiedAt} locale={locale} />
+        </>
+      ) : null}
+
       <RelatedLinks refs={entry.related} locale={locale} />
 
-      <CtaRow locale={locale} type="use-case" slug={slug} />
+      <CtaRow locale={locale} type="use-case" slug={slug} preset={entry.ctaPreset} />
     </ContentShell>
   );
 }

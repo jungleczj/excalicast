@@ -9,7 +9,11 @@ import { SITE_URL } from '@/lib/seo/alternates';
  * disallowed.
  */
 export default function robots(): MetadataRoute.Robots {
-  const disallow = ['/api/', '/app', '/library', '/s/'];
+  const privateSegments = ['app', 'library', 'export/', 'play/', 's/', 'admin/'];
+  const localizedPrivateRoutes = ['en', 'zh'].flatMap((locale) =>
+    privateSegments.map((segment) => `/${locale}/${segment}`),
+  );
+  const disallow = ['/api/', ...localizedPrivateRoutes];
   const aiBots = [
     'GPTBot',
     'OAI-SearchBot',

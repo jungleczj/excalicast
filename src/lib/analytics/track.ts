@@ -5,6 +5,22 @@ import { getOrCreateGuestId } from '@/lib/ownerKey';
 import type { KnownEvent } from './events';
 
 type Props = Record<string, string | number | boolean>;
+type AttributionProps = Record<string, string>;
+
+const ATTRIBUTION_KEY = 'excalicast.attribution';
+const ORGANIC_HOSTS = [
+  'google.',
+  'bing.',
+  'baidu.',
+  'sogou.',
+  'so.com',
+  'duckduckgo.',
+  'yahoo.',
+  'yandex.',
+  'brave.',
+  'perplexity.',
+  'chatgpt.',
+];
 
 function sessionId(): string {
   try {
@@ -23,18 +39,51 @@ function safeGuestId(): string | undefined {
   try { return getOrCreateGuestId(); } catch { return undefined; }
 }
 
+function safeHost(value: string): string {
+  if (!value) return '';
+  try { return new URL(value).hostname.toLowerCase().slice(0, 120); } catch { return ''; }
+}
+
+export function sessionAttribution(): AttributionProps {
+  if (typeof window === 'undefined') return {};
+  try {
+    const saved = sessionStorage.getItem(ATTRIBUTION_KEY);
+    if (saved) return JSON.parse(saved) as AttributionProps;
+
+    const params = new URLSearchParams(window.location.search);
+    const referrerHost = safeHost(document.referrer);
+    const organic = ORGANIC_HOSTS.some((part) => referrerHost.includes(part));
+    const attribution: AttributionProps = {
+      entry_path: window.location.pathname.slice(0, 256),
+      referrer_host: referrerHost,
+      traffic_kind: organic ? 'organic' : referrerHost ? 'referral' : 'direct',
+    };
+    for (const key of ['utm_source', 'utm_medium', 'utm_campaign'] as const) {
+      const value = params.get(key);
+      if (value) attribution[key] = value.slice(0, 120);
+    }
+    sessionStorage.setItem(ATTRIBUTION_KEY, JSON.stringify(attribution));
+    return attribution;
+  } catch {
+    return {};
+  }
+}
+
 /**
  * 统一埋点：① Vercel Analytics（保留现网）；② 自有 Supabase（sendBeacon，
  * 即便随导航卸载也可靠送达）。两路都失败也绝不阻塞 UI。
  */
 export function trackEvent(event: KnownEvent, props?: Props): void {
-  try { track(event, props); } catch { /* ignore */ }
+  const mergedProps = typeof window === 'undefined'
+    ? (props ?? {})
+    : { ...sessionAttribution(), ...(props ?? {}) };
+  try { track(event, mergedProps); } catch { /* ignore */ }
 
   try {
     if (typeof window === 'undefined') return;
     const body = JSON.stringify({
       event,
-      props: props ?? {},
+      props: mergedProps,
       path: window.location.pathname,
       locale: document.documentElement.lang || undefined,
       sessionId: sessionId(),

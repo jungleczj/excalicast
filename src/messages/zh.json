@@ -124,6 +124,11 @@
       "footer": {
         "pricing": "价格",
         "product": "产品",
+        "learn": "指南",
+        "workflow": "从录制到发布就绪",
+        "excalicord": "Excalicast 与 Excalicord 对比",
+        "excalidraw": "把 Excalidraw 录成视频",
+        "formats": "一次录制，多平台画幅",
         "company": "条款",
         "support": "支持",
         "heading": "讲过的内容，最后都能回到这里。",

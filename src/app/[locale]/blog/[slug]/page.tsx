@@ -65,7 +65,7 @@ export default async function BlogPostPage({ params }: Props): Promise<JSX.Eleme
   }
 
   return (
-    <ContentShell locale={locale}>
+    <ContentShell locale={locale} contentType="blog" slug={slug}>
       <JsonLd data={schemas} />
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--ink-3)' }}>{entry.date}</div>
       <div style={{ marginTop: 8 }}>

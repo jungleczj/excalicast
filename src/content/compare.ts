@@ -1,5 +1,36 @@
 import type { CompareEntry } from './types';
 
+const END_TO_END_WORKFLOW = [
+  {
+    title: { en: 'Capture the right source', zh: '采集正确的来源' },
+    body: {
+      en: 'Record the Excalidraw whiteboard, a browser tab, an app window, or the entire desktop with microphone and optional camera.',
+      zh: '录制 Excalidraw 白板、浏览器标签页、应用窗口或整个桌面，并同步采集麦克风与可选摄像头。',
+    },
+  },
+  {
+    title: { en: 'Edit in the browser', zh: '在浏览器内剪辑' },
+    body: {
+      en: 'Trim, split, delete, and review the recording on the timeline instead of moving the file into a separate desktop editor.',
+      zh: '在时间线上裁剪、分割、删除和检查录制，无需把文件转移到另一个桌面剪辑器。',
+    },
+  },
+  {
+    title: { en: 'Refine attention and supporting assets', zh: '优化观看焦点与配套资产' },
+    body: {
+      en: 'Apply ChatCut-assisted edits, adjust Autozoom focus regions, and generate eligible captions, chapters, and handouts.',
+      zh: '使用 ChatCut 辅助剪辑、调整 Autozoom 焦点区域，并按权益生成字幕、章节与讲义。',
+    },
+  },
+  {
+    title: { en: 'Create publish-ready outputs', zh: '生成发布就绪成品' },
+    body: {
+      en: 'Render landscape, portrait, square, feed, or custom files from the recording, then download them or create an eligible share link.',
+      zh: '从同一录制渲染横屏、竖屏、方形、信息流或自定义文件，再下载成品或按权益创建分享链接。',
+    },
+  },
+];
+
 /**
  * Comparison landing pages. Each targets "X alternative" / "X vs Excalicast"
  * search + AI queries. Keep claims factual and specific — generative engines
@@ -495,6 +526,664 @@ export const COMPARE_ENTRIES: CompareEntry[] = [
       },
     ],
     updatedAt: '2026-06-01',
+  },
+  {
+    slug: 'excalicast-vs-excalicord',
+    competitor: 'Excalicord',
+    title: {
+      en: 'Excalicast vs Excalicord: recording to publish-ready video',
+      zh: 'Excalicast vs Excalicord：从录制到发布就绪视频',
+    },
+    description: {
+      en: 'Compare Excalicast and Excalicord for whiteboard recording, editing, Autozoom, captions, multi-ratio export, and publish-ready output.',
+      zh: '对比 Excalicast 与 Excalicord 的白板录制、在线剪辑、Autozoom、字幕、多比例导出与发布就绪工作流。',
+    },
+    intro: {
+      en: 'Excalicord publicly presents a whiteboard video recorder with webcam for visual explanations. Excalicast covers a broader capture-to-publish-ready workflow: multi-source recording, browser timeline editing, assisted cuts, editable Autozoom, captions and handouts, multi-ratio export, and share links on eligible tiers.',
+      zh: 'Excalicord 公开定位为带摄像头的视觉讲解白板视频录制器。Excalicast 覆盖更完整的采集到发布就绪工作流：多源录制、浏览器时间线剪辑、辅助裁切、可编辑 Autozoom、字幕与讲义、多比例导出，以及符合权益时的分享链接。',
+    },
+    directAnswer: {
+      en: 'Excalicast and Excalicord are different products. Excalicord focuses publicly on fast whiteboard-and-webcam recording; Excalicast is designed for the full workflow from whiteboard, tab, window, or desktop capture through editing and reusable publish-ready outputs.',
+      zh: 'Excalicast 和 Excalicord 是不同产品。Excalicord 的公开重点是快速录制白板与摄像头；Excalicast 面向从白板、标签页、窗口或桌面采集，到剪辑和生成可复用发布就绪成品的完整流程。',
+    },
+    rows: [
+      {
+        feature: { en: 'Public product focus', zh: '公开产品重点' },
+        excalicast: { en: 'End-to-end recording and editing workspace', zh: '端到端录制与剪辑工作区' },
+        competitor: { en: 'Whiteboard videos with webcam', zh: '带摄像头的白板视频' },
+      },
+      {
+        feature: { en: 'Recording sources', zh: '录制来源' },
+        excalicast: { en: 'Whiteboard, browser tab, app window, or desktop', zh: '白板、浏览器标签页、应用窗口或桌面' },
+        competitor: { en: 'Whiteboard and webcam are public; other sources are publicly undocumented', zh: '官网公开白板与摄像头；其他来源未公开说明' },
+      },
+      {
+        feature: { en: 'Post-recording timeline editing', zh: '录制后时间线剪辑' },
+        excalicast: { en: 'Trim, split, delete, and review in browser', zh: '浏览器内裁剪、分割、删除和检查' },
+        competitor: { en: 'Publicly undocumented', zh: '官网未公开说明' },
+      },
+      {
+        feature: { en: 'Assisted cuts and editable Autozoom', zh: '辅助裁切与可编辑 Autozoom' },
+        excalicast: { en: 'ChatCut-assisted cuts plus editable focus regions', zh: 'ChatCut 辅助裁切 + 可编辑焦点区域' },
+        competitor: { en: 'Publicly undocumented', zh: '官网未公开说明' },
+      },
+      {
+        feature: { en: 'Captions and structured handouts', zh: '字幕与结构化讲义' },
+        excalicast: { en: 'Available on eligible Pro/Max tiers', zh: '符合 Pro/Max 权益时可用' },
+        competitor: { en: 'Publicly undocumented', zh: '官网未公开说明' },
+      },
+      {
+        feature: { en: 'Publish-ready formats', zh: '发布就绪格式' },
+        excalicast: { en: 'Landscape, portrait, square, feed, and custom dimensions', zh: '横屏、竖屏、方形、信息流及自定义尺寸' },
+        competitor: { en: 'Publicly undocumented', zh: '官网未公开说明' },
+      },
+      {
+        feature: { en: 'Direct social posting', zh: '直接发布到社交平台' },
+        excalicast: { en: 'No; creates files and links ready for you to publish', zh: '不支持直发；生成由你发布的成品文件与链接' },
+        competitor: { en: 'Publicly undocumented', zh: '官网未公开说明' },
+      },
+    ],
+    bestFor: [
+      {
+        en: 'Choose Excalicast when one recording must continue through editing, attention design, captions or handouts, and several output formats.',
+        zh: '当一段录制需要继续完成剪辑、焦点设计、字幕或讲义，并生成多种成品格式时，选择 Excalicast。',
+      },
+      {
+        en: 'Choose Excalicord when its publicly described whiteboard-and-webcam recording experience matches the complete job you need.',
+        zh: '当官网描述的白板 + 摄像头录制体验已经覆盖你的完整需求时，选择 Excalicord。',
+      },
+    ],
+    notBestFor: [
+      {
+        en: 'Excalicast is not a heavy multi-track editor or an automatic publisher to third-party social accounts.',
+        zh: 'Excalicast 不是重型多轨剪辑器，也不会自动发布到第三方社交账号。',
+      },
+      {
+        en: 'Do not infer Excalicord features that its public website does not document; verify them in the product before deciding.',
+        zh: '不要推断 Excalicord 官网未公开说明的能力；决策前应在产品内核实。',
+      },
+    ],
+    workflow: END_TO_END_WORKFLOW,
+    facts: [
+      {
+        label: { en: 'Excalicord public positioning', zh: 'Excalicord 公开定位' },
+        value: {
+          en: '“Record beautiful whiteboard videos with your webcam” and “Like Loom, but for visual explanations.”',
+          zh: '“使用摄像头录制精美白板视频”，并称其“像 Loom，但面向视觉讲解”。',
+        },
+      },
+      {
+        label: { en: 'Excalicast output boundary', zh: 'Excalicast 输出边界' },
+        value: {
+          en: 'Creates publish-ready files and eligible share links; it does not claim direct social-platform upload.',
+          zh: '生成发布就绪文件和符合权益的分享链接，不声称直接上传社交平台。',
+        },
+      },
+    ],
+    limitations: [
+      {
+        en: 'Excalicord exposes only a small set of product details publicly, so undocumented comparison cells are intentionally left as publicly undocumented.',
+        zh: 'Excalicord 对外公开的产品细节较少，因此未披露的对比项统一标记为“官网未公开说明”。',
+      },
+      {
+        en: 'Excalicast advanced captions, handouts, cloud backup, and share links depend on the applicable plan.',
+        zh: 'Excalicast 的高级字幕、讲义、云备份和分享链接受对应套餐权益限制。',
+      },
+    ],
+    verdict: {
+      en: 'Choose Excalicord for the focused whiteboard-and-webcam recorder it publicly describes. Choose Excalicast when the deliverable needs to move from several capture sources through online editing, Autozoom, supporting knowledge assets, and multiple publish-ready formats in one workflow.',
+      zh: '如果官网描述的聚焦白板 + 摄像头录制器就是你的需求，可以选择 Excalicord；如果交付物需要在一条工作流里从多种来源采集，继续完成在线剪辑、Autozoom、知识资产和多种发布就绪格式，选择 Excalicast。',
+    },
+    faqs: [
+      {
+        q: { en: 'Are Excalicast and Excalicord the same product?', zh: 'Excalicast 和 Excalicord 是同一个产品吗？' },
+        a: {
+          en: 'No. They are separate products. Excalicord publicly focuses on whiteboard video with webcam; Excalicast combines multi-source recording with editing and publish-ready outputs.',
+          zh: '不是。它们是独立产品。Excalicord 的公开重点是白板视频与摄像头；Excalicast 组合了多源录制、剪辑和发布就绪输出。',
+        },
+      },
+      {
+        q: { en: 'Does Excalicast publish directly to social platforms?', zh: 'Excalicast 会直接发布到社交平台吗？' },
+        a: {
+          en: 'No. It prepares downloadable files in platform-ready dimensions and eligible share links; you remain in control of publishing them.',
+          zh: '不会。它生成符合平台尺寸的可下载文件和符合权益的分享链接，最终发布仍由你控制。',
+        },
+      },
+    ],
+    sources: [
+      {
+        label: { en: 'Excalicord official website', zh: 'Excalicord 官网' },
+        url: 'https://www.excalicord.com/',
+      },
+    ],
+    verifiedAt: '2026-07-30',
+    ctaPreset: {
+      label: { en: 'Start a publish-ready recording', zh: '开始制作发布就绪录制' },
+      href: '/app?source=whiteboard',
+    },
+    related: [
+      { type: 'compare', slug: 'excalicast-vs-excalidraw' },
+      { type: 'use-case', slug: 'record-edit-publish-whiteboard-video' },
+    ],
+    updatedAt: '2026-07-30',
+  },
+  {
+    slug: 'excalicast-vs-excalirec',
+    competitor: 'ExcaliRec',
+    title: {
+      en: 'Excalicast vs ExcaliRec: two whiteboard recording workflows',
+      zh: 'Excalicast vs ExcaliRec：两种白板录制工作流',
+    },
+    description: {
+      en: 'Compare Excalicast and ExcaliRec for whiteboard capture, automatic zoom, browser editing, captions, handouts, and multi-format output.',
+      zh: '对比 Excalicast 与 ExcaliRec 的白板采集、自动缩放、浏览器剪辑、字幕、讲义和多格式输出。',
+    },
+    intro: {
+      en: 'ExcaliRec is a focused browser whiteboard recorder with automatic zoom, webcam, visual styling, and local WebM download. Excalicast adds display-source recording and a deeper post-recording workflow for timeline edits, editable Autozoom, supporting assets, and repeated multi-ratio output.',
+      zh: 'ExcaliRec 是聚焦浏览器白板录制的工具，公开支持自动缩放、摄像头、视觉样式和本地 WebM 下载。Excalicast 进一步加入显示源录制，以及时间线剪辑、可编辑 Autozoom、配套资产和反复多比例输出的后期流程。',
+    },
+    directAnswer: {
+      en: 'Use ExcaliRec for a lightweight Excalidraw-style recording that follows drawing activity and downloads locally. Use Excalicast when the same project also needs tab, window, or desktop capture, browser timeline editing, captions or handouts, and several publish-ready renders.',
+      zh: '需要轻量的 Excalidraw 风格录制、跟随绘制自动缩放并本地下载时，可选 ExcaliRec；同一项目还需要标签页、窗口或桌面采集、浏览器时间线、字幕或讲义及多份发布就绪成品时，可选 Excalicast。',
+    },
+    rows: [
+      {
+        feature: { en: 'Core capture', zh: '核心采集' },
+        excalicast: { en: 'Whiteboard plus tab, window, and desktop sources', zh: '白板 + 标签页、窗口与桌面来源' },
+        competitor: { en: 'Built-in Excalidraw-style whiteboard', zh: '内置 Excalidraw 风格白板' },
+      },
+      {
+        feature: { en: 'Zoom behavior', zh: '缩放方式' },
+        excalicast: { en: 'Editable Autozoom regions on the timeline', zh: '时间线上可编辑的 Autozoom 区域' },
+        competitor: { en: 'Automatic zoom follows clicks and drawing activity', zh: '自动缩放跟随点击与绘制活动' },
+      },
+      {
+        feature: { en: 'Recording presentation tools', zh: '录制演示工具' },
+        excalicast: { en: 'Camera, microphone, laser pointer, framing, and backgrounds', zh: '摄像头、麦克风、激光笔、取景与背景' },
+        competitor: { en: 'Webcam, backgrounds, laser/annotation, slides, and teleprompter', zh: '摄像头、背景、激光/标注、幻灯片与提词器' },
+      },
+      {
+        feature: { en: 'Timeline editing after capture', zh: '录制后时间线剪辑' },
+        excalicast: { en: 'Trim, split, delete, assisted cuts, and focus editing', zh: '裁剪、分割、删除、辅助裁切与焦点编辑' },
+        competitor: { en: 'Publicly documented as a record-and-download flow; deeper timeline editing is publicly undocumented', zh: '官网公开为录制后下载流程；更深入的时间线剪辑未公开说明' },
+      },
+      {
+        feature: { en: 'Video output', zh: '视频输出' },
+        excalicast: { en: 'MP4 renders in standard and custom dimensions', zh: '标准及自定义尺寸的 MP4 渲染' },
+        competitor: { en: 'Local WebM, described as ready to convert to MP4', zh: '本地 WebM，官网描述为可继续转换 MP4' },
+      },
+      {
+        feature: { en: 'Captions, chapters, and handouts', zh: '字幕、章节与讲义' },
+        excalicast: { en: 'Available on eligible tiers', zh: '符合套餐权益时可用' },
+        competitor: { en: 'Publicly undocumented', zh: '官网未公开说明' },
+      },
+    ],
+    bestFor: [
+      {
+        en: 'ExcaliRec fits creators who want a narrow, local, Excalidraw-style capture with automatic motion and a quick download.',
+        zh: 'ExcaliRec 适合需要聚焦、本地、带自动运动效果的 Excalidraw 风格录制并快速下载的创作者。',
+      },
+      {
+        en: 'Excalicast fits creators who need capture, post-recording edits, knowledge assets, and reusable platform formats in one workspace.',
+        zh: 'Excalicast 适合需要在一个工作区完成采集、录制后剪辑、知识资产和可复用平台格式的创作者。',
+      },
+    ],
+    notBestFor: [
+      {
+        en: 'ExcaliRec is intentionally presented as a whiteboard-native recorder, not a replacement for generic desktop capture.',
+        zh: 'ExcaliRec 明确定位为白板原生录制器，不是通用桌面采集替代品。',
+      },
+      {
+        en: 'Excalicast is not intended for heavy multi-track filmmaking or direct social-account publishing.',
+        zh: 'Excalicast 不面向重型多轨影视制作或社交账号直发。',
+      },
+    ],
+    workflow: END_TO_END_WORKFLOW,
+    facts: [
+      {
+        label: { en: 'ExcaliRec public export', zh: 'ExcaliRec 公开输出' },
+        value: { en: 'Local WebM with 16:9, 4:3, 3:4, 9:16, and 1:1 capture formats.', zh: '本地 WebM，公开列出 16:9、4:3、3:4、9:16 与 1:1 录制格式。' },
+      },
+      {
+        label: { en: 'Privacy model', zh: '隐私模式' },
+        value: { en: 'Both products publicly describe local browser recording for their whiteboard workflows.', zh: '两款产品都公开说明其白板录制流程在浏览器本地进行。' },
+      },
+    ],
+    limitations: [
+      {
+        en: 'ExcaliRec free exports include a watermark unless a documented bonus or Creator Pass applies.',
+        zh: 'ExcaliRec 免费导出包含水印，除非使用其公开说明的奖励或 Creator Pass。',
+      },
+      {
+        en: 'Excalicast captions, handouts, cloud backup, and share links are plan-dependent and may use opt-in cloud processing.',
+        zh: 'Excalicast 的字幕、讲义、云备份和分享链接取决于套餐，并可能使用主动选择的云端处理。',
+      },
+    ],
+    verdict: {
+      en: 'ExcaliRec is the more focused record-and-download option for a whiteboard-native explainer. Excalicast is the broader production workspace when one recording must be edited, enriched, reframed, and turned into several publish-ready assets.',
+      zh: 'ExcaliRec 更适合白板原生讲解的聚焦录制与下载；当一段录制还要继续剪辑、增强、重新构图并生成多份发布就绪资产时，Excalicast 是更完整的生产工作区。',
+    },
+    faqs: [
+      {
+        q: { en: 'Does ExcaliRec have automatic zoom?', zh: 'ExcaliRec 有自动缩放吗？' },
+        a: {
+          en: 'Yes. Its official site says the camera follows clicks and zooms toward the action. Excalicast instead exposes editable Autozoom focus regions in the post-recording timeline.',
+          zh: '有。其官网说明镜头会跟随点击并缩放到操作区域。Excalicast 则在录制后的时间线上提供可编辑 Autozoom 焦点区域。',
+        },
+      },
+      {
+        q: { en: 'Which one produces publish-ready MP4 files?', zh: '哪一个能生成发布就绪 MP4？' },
+        a: {
+          en: 'Excalicast renders MP4 files in standard and custom dimensions. ExcaliRec publicly documents local WebM output that can be converted to MP4.',
+          zh: 'Excalicast 可按标准和自定义尺寸渲染 MP4；ExcaliRec 官网公开的是本地 WebM 输出，并说明可继续转换为 MP4。',
+        },
+      },
+    ],
+    sources: [
+      {
+        label: { en: 'ExcaliRec official product and pricing page', zh: 'ExcaliRec 官方产品与定价页' },
+        url: 'https://excalirec.com/',
+      },
+    ],
+    verifiedAt: '2026-07-30',
+    ctaPreset: {
+      label: { en: 'Record and edit a whiteboard video', zh: '录制并剪辑白板视频' },
+      href: '/app?source=whiteboard',
+    },
+    related: [
+      { type: 'compare', slug: 'excalicast-vs-excalidraw' },
+      { type: 'use-case', slug: 'record-edit-publish-whiteboard-video' },
+    ],
+    updatedAt: '2026-07-30',
+  },
+  {
+    slug: 'excalicast-vs-focusee',
+    competitor: 'FocuSee',
+    title: {
+      en: 'Excalicast vs FocuSee: whiteboard workflow or desktop auto-zoom',
+      zh: 'Excalicast vs FocuSee：白板全流程还是桌面自动缩放',
+    },
+    description: {
+      en: 'Compare Excalicast and FocuSee for multi-source recording, automatic zoom, browser or desktop editing, captions, exports, and sharing.',
+      zh: '对比 Excalicast 与 FocuSee 的多源录制、自动缩放、浏览器或桌面剪辑、字幕、导出与分享。',
+    },
+    intro: {
+      en: 'FocuSee is a Windows and Mac screen recorder that automates cursor-following zooms, backgrounds, and presentation styling for software demos. Excalicast is browser-based and adds whiteboard operation-stream capture plus a capture-to-publish-ready workflow for visual explanations.',
+      zh: 'FocuSee 是 Windows 与 Mac 桌面录屏工具，会为软件演示自动生成光标跟随缩放、背景和演示样式。Excalicast 在浏览器中运行，增加白板操作流采集，并为视觉讲解提供从采集到发布就绪的完整工作流。',
+    },
+    directAnswer: {
+      en: 'Choose FocuSee when polished desktop software demos and automatic cursor-driven motion are the priority. Choose Excalicast when whiteboard clarity, browser access, editable focus regions, supporting knowledge assets, and repeated multi-format output matter more.',
+      zh: '优先制作精致桌面软件演示和光标驱动自动运动时，选择 FocuSee；更重视白板清晰度、浏览器使用、可编辑焦点区域、配套知识资产和反复多格式输出时，选择 Excalicast。',
+    },
+    rows: [
+      {
+        feature: { en: 'Platform', zh: '运行平台' },
+        excalicast: { en: 'Browser-based', zh: '浏览器运行' },
+        competitor: { en: 'Desktop app for Windows and Mac', zh: 'Windows 与 Mac 桌面应用' },
+      },
+      {
+        feature: { en: 'Capture specialization', zh: '采集专长' },
+        excalicast: { en: 'Whiteboard operation stream plus display sources', zh: '白板操作流 + 显示源' },
+        competitor: { en: 'Screen, selfie, and voiceover for software demos', zh: '面向软件演示的屏幕、摄像头与旁白' },
+      },
+      {
+        feature: { en: 'Automatic focus', zh: '自动聚焦' },
+        excalicast: { en: 'Editable Autozoom regions and magnification', zh: '可编辑 Autozoom 区域与倍率' },
+        competitor: { en: 'Automatic cursor following and dynamic zoom effects', zh: '自动跟随光标并生成动态缩放' },
+      },
+      {
+        feature: { en: 'Editing', zh: '剪辑' },
+        excalicast: { en: 'Browser timeline plus ChatCut-assisted cut suggestions', zh: '浏览器时间线 + ChatCut 辅助裁切建议' },
+        competitor: { en: 'Trim, cut, crop, and speed controls', zh: '裁剪、切除、画面裁切与变速' },
+      },
+      {
+        feature: { en: 'Captions and handouts', zh: '字幕与讲义' },
+        excalicast: { en: 'Captions plus eligible chapters and structured handouts', zh: '字幕，以及符合权益的章节与结构化讲义' },
+        competitor: { en: 'Automatic editable captions; structured handouts are publicly undocumented', zh: '自动可编辑字幕；结构化讲义未公开说明' },
+      },
+      {
+        feature: { en: 'Exports and sharing', zh: '导出与分享' },
+        excalicast: { en: 'MP4 in standard/custom dimensions plus eligible share links', zh: '标准/自定义尺寸 MP4 + 符合权益的分享链接' },
+        competitor: { en: 'Video up to 4K, GIF, social presets, links, and embeds', zh: '最高 4K 视频、GIF、社交预设、链接与嵌入' },
+      },
+    ],
+    bestFor: [
+      {
+        en: 'FocuSee is best for desktop product demos that benefit from automatic cursor motion, visual frames, and high-resolution video or GIF export.',
+        zh: 'FocuSee 最适合需要自动光标运动、视觉边框及高分辨率视频或 GIF 的桌面产品演示。',
+      },
+      {
+        en: 'Excalicast is best for whiteboard-led explanations that also need display capture, editable focus, captions or handouts, and reusable aspect ratios.',
+        zh: 'Excalicast 最适合以白板为主、同时需要显示源采集、可编辑焦点、字幕或讲义及可复用比例的视觉讲解。',
+      },
+    ],
+    notBestFor: [
+      {
+        en: 'Excalicast is not a desktop-native 4K/GIF product-demo studio.',
+        zh: 'Excalicast 不是桌面原生的 4K/GIF 产品演示工作室。',
+      },
+      {
+        en: 'FocuSee public materials do not document Excalidraw operation-stream capture or structured handout generation.',
+        zh: 'FocuSee 公开资料未说明 Excalidraw 操作流采集或结构化讲义生成。',
+      },
+    ],
+    workflow: END_TO_END_WORKFLOW,
+    facts: [
+      {
+        label: { en: 'FocuSee automation', zh: 'FocuSee 自动化' },
+        value: { en: 'Its official page documents cursor following, dynamic zoom, backgrounds, and automated post-production.', zh: '其官网明确公开光标跟随、动态缩放、背景和自动后期处理。' },
+      },
+      {
+        label: { en: 'Excalicast whiteboard capture', zh: 'Excalicast 白板采集' },
+        value: { en: 'Records whiteboard events rather than displayed pixels, while display sources use screen capture.', zh: '白板模式记录事件而非显示像素；显示源模式则使用屏幕采集。' },
+      },
+    ],
+    limitations: [
+      {
+        en: 'The products overlap on screen recording and zoom but optimize for different primary jobs: desktop demos versus whiteboard-led content production.',
+        zh: '两款产品在录屏和缩放上有交集，但主要任务不同：桌面演示与白板主导的内容生产。',
+      },
+      {
+        en: 'Neither comparison implies automatic posting to third-party social accounts; outputs still need to be published by the creator.',
+        zh: '本对比不暗示自动发布到第三方社交账号；成品仍需创作者自行发布。',
+      },
+    ],
+    verdict: {
+      en: 'FocuSee is the stronger fit for desktop-first software demos with automated visual polish. Excalicast is the stronger fit for browser-based visual explanations that move from several capture sources into editable focus, knowledge assets, and multiple publish-ready formats.',
+      zh: '桌面优先的软件演示和自动视觉润色更适合 FocuSee；需要从多种来源采集，继续完成可编辑焦点、知识资产和多种发布就绪格式的浏览器视觉讲解更适合 Excalicast。',
+    },
+    faqs: [
+      {
+        q: { en: 'Do both Excalicast and FocuSee support automatic zoom?', zh: 'Excalicast 和 FocuSee 都支持自动缩放吗？' },
+        a: {
+          en: 'Yes, with different workflows. FocuSee automatically follows cursor activity; Excalicast stores editable Autozoom regions on the recording timeline.',
+          zh: '支持，但工作方式不同。FocuSee 自动跟随光标活动；Excalicast 把可编辑 Autozoom 区域保存在录制时间线上。',
+        },
+      },
+    ],
+    sources: [
+      {
+        label: { en: 'FocuSee official product page', zh: 'FocuSee 官方产品页' },
+        url: 'https://gemoo.com/focusee/index.htm',
+      },
+    ],
+    verifiedAt: '2026-07-30',
+    ctaPreset: {
+      label: { en: 'Try the browser workflow', zh: '体验浏览器全流程' },
+      href: '/app?source=desktop',
+    },
+    related: [
+      { type: 'compare', slug: 'excalicast-vs-screen-studio' },
+      { type: 'use-case', slug: 'record-edit-publish-whiteboard-video' },
+    ],
+    updatedAt: '2026-07-30',
+  },
+  {
+    slug: 'excalicast-vs-explain-everything',
+    competitor: 'Explain Everything',
+    title: {
+      en: 'Excalicast vs Explain Everything: publishing workflow or collaborative whiteboard',
+      zh: 'Excalicast vs Explain Everything：发布工作流还是协作白板',
+    },
+    description: {
+      en: 'Compare Excalicast and Explain Everything for whiteboard recording, timeline editing, collaboration, video export, captions, and publish-ready assets.',
+      zh: '对比 Excalicast 与 Explain Everything 的白板录制、时间线剪辑、协作、视频导出、字幕和发布就绪资产。',
+    },
+    intro: {
+      en: 'Explain Everything is a collaborative whiteboarding platform with canvas recording, separate audio and visual tracks, timeline editing, slides, and Web Video Links. Excalicast focuses less on live collaboration and more on turning whiteboard or display-source recordings into reusable publish-ready video and knowledge assets.',
+      zh: 'Explain Everything 是协作白板平台，公开支持画布录制、独立音视频轨道、时间线剪辑、幻灯片和 Web Video Link。Excalicast 较少强调实时协作，更专注于把白板或显示源录制变成可复用的发布就绪视频与知识资产。',
+    },
+    directAnswer: {
+      en: 'Choose Explain Everything for collaborative teaching, mixed-media whiteboarding, and layered canvas recordings. Choose Excalicast for a leaner creator workflow spanning source capture, browser editing, editable Autozoom, captions or handouts, and several publish-ready video dimensions.',
+      zh: '需要协作教学、混合媒体白板和分层画布录制时，选择 Explain Everything；需要更精简的创作者流程，从来源采集到浏览器剪辑、可编辑 Autozoom、字幕或讲义及多种发布就绪视频尺寸时，选择 Excalicast。',
+    },
+    rows: [
+      {
+        feature: { en: 'Primary product', zh: '主要产品形态' },
+        excalicast: { en: 'Recording and editing workspace for visual explainers', zh: '视觉讲解录制与剪辑工作区' },
+        competitor: { en: 'Collaborative mixed-media whiteboarding platform', zh: '协作式混合媒体白板平台' },
+      },
+      {
+        feature: { en: 'Recording model', zh: '录制模型' },
+        excalicast: { en: 'Whiteboard event stream or display-source media', zh: '白板事件流或显示源媒体' },
+        competitor: { en: 'Canvas object interactions with separate audio/video tracks', zh: '画布对象交互 + 独立音视频轨道' },
+      },
+      {
+        feature: { en: 'Timeline editing', zh: '时间线剪辑' },
+        excalicast: { en: 'Trim, split, delete, assisted cuts, and Autozoom regions', zh: '裁剪、分割、删除、辅助裁切与 Autozoom 区域' },
+        competitor: { en: 'Selection delete, split, layered clips, and recording modes', zh: '选区删除、分割、分层片段与录制模式' },
+      },
+      {
+        feature: { en: 'Collaboration', zh: '协作' },
+        excalicast: { en: 'Share playback on eligible tiers; live co-editing is not the core workflow', zh: '符合权益时分享回放；实时共编不是核心流程' },
+        competitor: { en: 'Real-time and asynchronous whiteboard collaboration', zh: '实时与异步白板协作' },
+      },
+      {
+        feature: { en: 'Autozoom and assisted cuts', zh: 'Autozoom 与辅助裁切' },
+        excalicast: { en: 'Editable Autozoom plus ChatCut-assisted cuts', zh: '可编辑 Autozoom + ChatCut 辅助裁切' },
+        competitor: { en: 'These specific automation features are publicly undocumented', zh: '这些特定自动化能力未公开说明' },
+      },
+      {
+        feature: { en: 'Outputs', zh: '输出' },
+        excalicast: { en: 'Multi-dimension MP4, captions, eligible handouts and share links', zh: '多尺寸 MP4、字幕，以及符合权益的讲义与分享链接' },
+        competitor: { en: 'Web Video Links; mobile apps also document video-file export', zh: 'Web Video Link；移动端还公开支持视频文件导出' },
+      },
+    ],
+    bestFor: [
+      {
+        en: 'Explain Everything is best for classrooms and teams that need live collaboration, mixed media, slide-based projects, and layered recordings.',
+        zh: 'Explain Everything 最适合需要实时协作、混合媒体、幻灯片项目和分层录制的课堂与团队。',
+      },
+      {
+        en: 'Excalicast is best for individual creators turning whiteboard or screen-based explanations into several publish-ready outputs.',
+        zh: 'Excalicast 最适合把白板或屏幕讲解转成多份发布就绪成品的个人创作者。',
+      },
+    ],
+    notBestFor: [
+      {
+        en: 'Excalicast is not positioned as a live collaborative classroom whiteboard.',
+        zh: 'Excalicast 不定位为实时协作课堂白板。',
+      },
+      {
+        en: 'Explain Everything public documentation does not describe ChatCut-style cut proposals, Excalicast-style Autozoom tracks, or structured handout generation.',
+        zh: 'Explain Everything 公开文档未说明 ChatCut 式裁切建议、Excalicast 式 Autozoom 轨道或结构化讲义生成。',
+      },
+    ],
+    workflow: END_TO_END_WORKFLOW,
+    facts: [
+      {
+        label: { en: 'Explain Everything editing', zh: 'Explain Everything 剪辑' },
+        value: { en: 'Official help documents selection deletion, clip splitting, recording modes, and separate audio/video tracks.', zh: '官方帮助文档公开选区删除、片段分割、录制模式和独立音视频轨道。' },
+      },
+      {
+        label: { en: 'Web export boundary', zh: '网页端输出边界' },
+        value: { en: 'Its official help says the web version shares video through a Web Video Link; mobile apps document file export.', zh: '其官方帮助说明网页版本通过 Web Video Link 分享视频；移动应用公开支持文件导出。' },
+      },
+    ],
+    limitations: [
+      {
+        en: 'Explain Everything capabilities vary by web and mobile platform, so the device-specific official documentation should be checked before choosing.',
+        zh: 'Explain Everything 的能力因网页端和移动端而异，选择前应核对对应设备的官方文档。',
+      },
+      {
+        en: 'Excalicast share links and structured handouts require eligible plans, and live collaboration is outside its core scope.',
+        zh: 'Excalicast 分享链接和结构化讲义需要符合套餐权益，实时协作不在其核心范围。',
+      },
+    ],
+    verdict: {
+      en: 'Explain Everything is the more complete collaborative whiteboard and classroom environment. Excalicast is the more focused capture-to-publish-ready production path for creators who need editable focus, supporting assets, and repeated platform-specific renders.',
+      zh: 'Explain Everything 是更完整的协作白板与课堂环境；Excalicast 是更聚焦的采集到发布就绪生产路径，适合需要可编辑焦点、配套资产和反复生成平台特定成品的创作者。',
+    },
+    faqs: [
+      {
+        q: { en: 'Can Explain Everything edit a whiteboard recording?', zh: 'Explain Everything 能剪辑白板录制吗？' },
+        a: {
+          en: 'Yes. Its official help documents timeline selection deletion, clip splitting, layered clips, and mix, overwrite, and insert recording modes, with some platform differences.',
+          zh: '能。其官方帮助公开了时间线选区删除、片段分割、分层片段，以及混合、覆盖和插入录制模式，部分能力因平台而异。',
+        },
+      },
+    ],
+    sources: [
+      {
+        label: { en: 'Explain Everything product overview', zh: 'Explain Everything 产品概览' },
+        url: 'https://help.explaineverything.com/hc/en-us/articles/360014138733-What-is-Explain-Everything',
+      },
+      {
+        label: { en: 'Explain Everything recording and timeline guide', zh: 'Explain Everything 录制与时间线指南' },
+        url: 'https://help.explaineverything.com/hc/en-us/articles/360013332774-Introduction-to-Recording',
+      },
+      {
+        label: { en: 'Explain Everything editing guide', zh: 'Explain Everything 剪辑指南' },
+        url: 'https://help.explaineverything.com/hc/en-us/articles/360013808794-Edit-recordings',
+      },
+      {
+        label: { en: 'Explain Everything video export and sharing guide', zh: 'Explain Everything 视频导出与分享指南' },
+        url: 'https://help.explaineverything.com/hc/en-us/articles/360015309834-Export-and-Share-a-recording-as-a-video',
+      },
+    ],
+    verifiedAt: '2026-07-30',
+    ctaPreset: {
+      label: { en: 'Create a publish-ready explainer', zh: '制作发布就绪讲解' },
+      href: '/app?source=whiteboard',
+    },
+    related: [
+      { type: 'use-case', slug: 'record-whiteboard-lecture' },
+      { type: 'use-case', slug: 'record-edit-publish-whiteboard-video' },
+    ],
+    updatedAt: '2026-07-30',
+  },
+  {
+    slug: 'excalicast-vs-screenity',
+    competitor: 'Screenity',
+    title: {
+      en: 'Excalicast vs Screenity: whiteboard production or browser screen editing',
+      zh: 'Excalicast vs Screenity：白板生产还是浏览器录屏剪辑',
+    },
+    description: {
+      en: 'Compare Excalicast and Screenity for browser recording, editing, automatic zoom, captions, privacy, sharing, and publish-ready video.',
+      zh: '对比 Excalicast 与 Screenity 的浏览器录制、剪辑、自动缩放、字幕、隐私、分享和发布就绪视频。',
+    },
+    intro: {
+      en: 'Screenity combines a free open-source Chrome recorder with a paid browser editor for scenes, click zooms, captions, layouts, MP4 export, and links. Excalicast adds operation-stream whiteboard capture, structured learning assets, and a workflow built around re-rendering visual explanations for several platform dimensions.',
+      zh: 'Screenity 把免费开源 Chrome 录制器与付费浏览器编辑器组合起来，支持场景、点击缩放、字幕、布局、MP4 导出和链接。Excalicast 增加白板操作流采集、结构化学习资产，以及为多个平台尺寸重新渲染视觉讲解的工作流。',
+    },
+    directAnswer: {
+      en: 'Choose Screenity for a capable general browser screen recorder and scene-based editor. Choose Excalicast when Excalidraw-native clarity, whiteboard events, structured handouts, and reusable landscape, portrait, square, feed, or custom renders are central to the job.',
+      zh: '需要强大的通用浏览器录屏和场景式编辑器时，选择 Screenity；工作核心是 Excalidraw 原生清晰度、白板事件、结构化讲义，以及可复用的横屏、竖屏、方形、信息流或自定义渲染时，选择 Excalicast。',
+    },
+    rows: [
+      {
+        feature: { en: 'Recording access', zh: '录制入口' },
+        excalicast: { en: 'Browser app, no extension required for core recording', zh: '浏览器应用，核心录制无需扩展' },
+        competitor: { en: 'Free Chrome extension or built-in web recorder', zh: '免费 Chrome 扩展或内置网页录制器' },
+      },
+      {
+        feature: { en: 'Sources', zh: '来源' },
+        excalicast: { en: 'Whiteboard, tab, window, or desktop with camera and mic', zh: '白板、标签页、窗口或桌面 + 摄像头与麦克风' },
+        competitor: { en: 'Tab, app/window, whole screen, camera, mic, and supported internal audio', zh: '标签页、应用/窗口、全屏、摄像头、麦克风及支持的内部音频' },
+      },
+      {
+        feature: { en: 'Editing model', zh: '剪辑模型' },
+        excalicast: { en: 'Timeline clips, assisted cuts, and Autozoom regions', zh: '时间线片段、辅助裁切与 Autozoom 区域' },
+        competitor: { en: 'Scenes, layouts, split/trim/cut, overlays, and animations', zh: '场景、布局、分割/裁剪/切除、叠加元素与动画' },
+      },
+      {
+        feature: { en: 'Zoom', zh: '缩放' },
+        excalicast: { en: 'Editable regions with center, timing, and magnification', zh: '可编辑中心、时间与倍率的区域' },
+        competitor: { en: 'Clicks become editable zoom keyframes', zh: '点击转成可编辑缩放关键帧' },
+      },
+      {
+        feature: { en: 'Captions and knowledge assets', zh: '字幕与知识资产' },
+        excalicast: { en: 'Captions plus eligible chapters and structured handouts', zh: '字幕 + 符合权益的章节与结构化讲义' },
+        competitor: { en: 'Editable word-level captions; structured handouts are publicly undocumented', zh: '可编辑逐词字幕；结构化讲义未公开说明' },
+      },
+      {
+        feature: { en: 'Storage and sharing', zh: '存储与分享' },
+        excalicast: { en: 'Local-first recording; opt-in cloud features and eligible share links', zh: '本地优先录制；主动选择云功能和符合权益的分享链接' },
+        competitor: { en: 'Local free recorder; encrypted EU cloud editor and paid share links', zh: '免费录制器本地保存；加密欧盟云编辑器与付费分享链接' },
+      },
+    ],
+    bestFor: [
+      {
+        en: 'Screenity is best for general browser and app demos needing scene composition, overlays, animated layouts, click zooms, and captions.',
+        zh: 'Screenity 最适合需要场景编排、叠加元素、动态布局、点击缩放和字幕的通用浏览器与应用演示。',
+      },
+      {
+        en: 'Excalicast is best for whiteboard-led explainers that need clean event-stream capture, learning assets, and repeatable multi-dimension outputs.',
+        zh: 'Excalicast 最适合需要干净事件流采集、学习资产和可重复多尺寸输出的白板主导讲解。',
+      },
+    ],
+    notBestFor: [
+      {
+        en: 'Excalicast does not match Screenity’s public emphasis on multi-scene composition, overlay animation, music, or device mockups.',
+        zh: 'Excalicast 不以 Screenity 公开强调的多场景编排、叠加动画、音乐或设备样机为重点。',
+      },
+      {
+        en: 'Screenity public materials do not document Excalidraw operation-stream capture or structured chapter-and-handout generation.',
+        zh: 'Screenity 公开资料未说明 Excalidraw 操作流采集或结构化章节与讲义生成。',
+      },
+    ],
+    workflow: END_TO_END_WORKFLOW,
+    facts: [
+      {
+        label: { en: 'Screenity free recorder', zh: 'Screenity 免费录制器' },
+        value: { en: 'Officially described as free, open source, local, without sign-in, watermark, or recording time limit.', zh: '官网描述为免费、开源、本地运行，无需登录、无水印且无录制时长限制。' },
+      },
+      {
+        label: { en: 'Screenity editor', zh: 'Screenity 编辑器' },
+        value: { en: 'The paid editor publicly includes scenes, click zooms, captions, layouts, MP4 export, and share links.', zh: '其付费编辑器公开包含场景、点击缩放、字幕、布局、MP4 导出和分享链接。' },
+      },
+    ],
+    limitations: [
+      {
+        en: 'Screenity’s free extension and paid cloud editor have different feature and account boundaries.',
+        zh: 'Screenity 的免费扩展与付费云编辑器具有不同的功能和账号边界。',
+      },
+      {
+        en: 'Excalicast advanced captions, handouts, cloud backup, and sharing are also tier-dependent; neither product publishes directly to social accounts.',
+        zh: 'Excalicast 高级字幕、讲义、云备份和分享同样受套餐限制；两者都不代表直接发布到社交账号。',
+      },
+    ],
+    verdict: {
+      en: 'Screenity is the more expansive general browser recorder and scene editor. Excalicast is the more specialized end-to-end option for whiteboard-led content that must stay crisp, become knowledge assets, and render repeatedly for different publishing formats.',
+      zh: 'Screenity 是更全面的通用浏览器录制与场景编辑器；Excalicast 是更专门的白板内容端到端方案，让画面保持清晰、生成知识资产，并为不同发布格式反复渲染。',
+    },
+    faqs: [
+      {
+        q: { en: 'Is Screenity free and open source?', zh: 'Screenity 免费且开源吗？' },
+        a: {
+          en: 'Its Chrome recorder is publicly described as free and open source. The advanced browser editor, cloud storage, and sharing are paid features with a trial.',
+          zh: '其 Chrome 录制器公开说明为免费开源；高级浏览器编辑器、云存储和分享是带试用的付费功能。',
+        },
+      },
+      {
+        q: { en: 'Which product is more specialized for Excalidraw videos?', zh: '哪款产品更专注 Excalidraw 视频？' },
+        a: {
+          en: 'Excalicast is built around an Excalidraw whiteboard operation stream as well as display sources. Screenity is a broader pixel-based screen recorder and editor.',
+          zh: 'Excalicast 围绕 Excalidraw 白板操作流构建，同时支持显示源；Screenity 是覆盖更广的像素式录屏与编辑器。',
+        },
+      },
+    ],
+    sources: [
+      {
+        label: { en: 'Screenity official product page', zh: 'Screenity 官方产品页' },
+        url: 'https://screenity.io/',
+      },
+      {
+        label: { en: 'Screenity free recorder page', zh: 'Screenity 免费录制器页面' },
+        url: 'https://screenity.io/extension',
+      },
+    ],
+    verifiedAt: '2026-07-30',
+    ctaPreset: {
+      label: { en: 'Start a whiteboard-first recording', zh: '开始白板优先录制' },
+      href: '/app?source=current_tab',
+    },
+    related: [
+      { type: 'compare', slug: 'excalicast-vs-screen-recording' },
+      { type: 'use-case', slug: 'record-edit-publish-whiteboard-video' },
+    ],
+    updatedAt: '2026-07-30',
   },
 ];
 

@@ -23,6 +23,7 @@ export function softwareApplicationSchema(input: ProductSchemaInput): Record<str
   return {
     '@context': 'https://schema.org',
     '@type': 'SoftwareApplication',
+    '@id': `${SITE_URL}/#software`,
     name: 'Excalicast',
     applicationCategory: 'MultimediaApplication',
     applicationSubCategory: 'Screen & Whiteboard Recorder',
@@ -62,7 +63,7 @@ export function softwareApplicationSchema(input: ProductSchemaInput): Record<str
         category: 'subscription',
       },
     ],
-    publisher: { '@type': 'Organization', name: 'Excalicast' },
+    publisher: { '@id': `${SITE_URL}/#organization` },
   };
 }
 
@@ -71,11 +72,12 @@ export function organizationSchema(): Record<string, unknown> {
   return {
     '@context': 'https://schema.org',
     '@type': 'Organization',
+    '@id': `${SITE_URL}/#organization`,
     name: 'Excalicast',
     url: SITE_URL,
-    logo: `${SITE_URL}/en/icon.png`,
+    logo: `${SITE_URL}/icon.png`,
     description:
-      'Excalicast is a browser-based whiteboard recorder that captures the operation stream and voice, then exports MP4 in multiple aspect ratios.',
+      'Excalicast is a browser-based workflow for multi-source recording, online editing, assisted cuts, editable Autozoom, captions, handouts, and publish-ready video exports.',
   };
 }
 

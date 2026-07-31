@@ -412,6 +412,228 @@ export const USE_CASE_ENTRIES: UseCaseEntry[] = [
     ],
     updatedAt: '2026-06-01',
   },
+  {
+    slug: 'record-edit-publish-whiteboard-video',
+    title: {
+      en: 'Record, edit, and prepare a whiteboard video for every platform',
+      zh: '录制、剪辑并为多平台准备白板视频',
+    },
+    description: {
+      en: 'Capture a whiteboard, tab, window, or desktop, edit online, refine Autozoom, add captions or handouts, and render publish-ready video formats.',
+      zh: '采集白板、标签页、窗口或桌面，在线剪辑、优化 Autozoom、添加字幕或讲义，并渲染发布就绪的视频格式。',
+    },
+    intro: {
+      en: 'Excalicast brings multi-source capture, browser timeline editing, ChatCut-assisted cuts, editable Autozoom, captions, structured handouts, and multi-dimension export into one workflow. The result is a set of publish-ready files and eligible share links that you control; Excalicast does not post directly to third-party social accounts.',
+      zh: 'Excalicast 把多源采集、浏览器时间线剪辑、ChatCut 辅助裁切、可编辑 Autozoom、字幕、结构化讲义和多尺寸导出放进一条工作流。最终得到由你控制的发布就绪文件和符合权益的分享链接；Excalicast 不会直接发布到第三方社交账号。',
+    },
+    directAnswer: {
+      en: 'To turn a whiteboard explanation into publish-ready content, capture the right source once, refine it on the Excalicast timeline, add focus and supporting assets, then render the dimensions each channel needs. You download or share the finished assets and publish them yourself.',
+      zh: '要把白板讲解变成发布就绪内容，只需采集一次正确来源，在 Excalicast 时间线上优化，补充焦点与配套资产，再渲染各渠道需要的尺寸。你可以下载或分享成品，并自行完成发布。',
+    },
+    bestFor: [
+      {
+        en: 'Teachers turning a lesson into a full video, a vertical recap, captions, and a handout.',
+        zh: '把一堂课转成完整视频、竖屏回顾、字幕与讲义的教师。',
+      },
+      {
+        en: 'Knowledge creators producing visual explanations for YouTube, TikTok, Shorts, Reels, and feed formats.',
+        zh: '为 YouTube、抖音、TikTok、Shorts、Reels 和信息流制作视觉讲解的知识创作者。',
+      },
+      {
+        en: 'Architects and product managers recording diagrams, app flows, windows, or complete desktop walkthroughs.',
+        zh: '录制图示、应用流程、窗口或完整桌面讲解的架构师与产品经理。',
+      },
+    ],
+    notBestFor: [
+      {
+        en: 'Heavy multi-track productions that need advanced compositing, color grading, or a full desktop editing suite.',
+        zh: '需要高级合成、调色或完整桌面剪辑套件的重型多轨制作。',
+      },
+      {
+        en: 'Workflows that require a service to sign in to and post automatically on third-party social accounts.',
+        zh: '要求服务登录并自动发布到第三方社交账号的工作流。',
+      },
+      {
+        en: 'Live collaborative classroom whiteboarding with several simultaneous editors.',
+        zh: '需要多人同时编辑的实时协作课堂白板。',
+      },
+    ],
+    workflow: [
+      {
+        title: { en: 'Choose the source', zh: '选择录制来源' },
+        body: {
+          en: 'Start with the Excalidraw whiteboard, the current browser tab, a specific app window, or the entire desktop. Pick only what the final explanation needs.',
+          zh: '从 Excalidraw 白板、当前浏览器标签页、指定应用窗口或整个桌面开始，只选择最终讲解真正需要的内容。',
+        },
+      },
+      {
+        title: { en: 'Frame the output', zh: '确定成品取景' },
+        body: {
+          en: 'Set a landscape, portrait, square, feed, or custom frame and confirm the crop. Framing can be adjusted again in the export workspace.',
+          zh: '设置横屏、竖屏、方形、信息流或自定义画幅并确认裁切；在导出工作区仍可继续调整取景。',
+        },
+      },
+      {
+        title: { en: 'Add voice and optional camera', zh: '加入语音与可选摄像头' },
+        body: {
+          en: 'Select the microphone and, when useful, add a camera bubble. Check the framing before recording so neither the subject nor the presenter is obscured.',
+          zh: '选择麦克风，并在需要时加入摄像头画面。录制前检查构图，避免主体或讲解者被遮挡。',
+        },
+      },
+      {
+        title: { en: 'Record the explanation once', zh: '一次录好讲解' },
+        body: {
+          en: 'Draw, demonstrate, and narrate in one take. Whiteboard mode captures Excalidraw events; tab, window, and desktop modes capture the selected display source.',
+          zh: '在一段录制中完成绘制、演示和旁白。白板模式采集 Excalidraw 事件；标签页、窗口和桌面模式采集所选显示源。',
+        },
+      },
+      {
+        title: { en: 'Trim and structure the timeline', zh: '裁剪并整理时间线' },
+        body: {
+          en: 'Remove rough starts and endings, split clips at decision points, delete unwanted ranges, and preview the kept sequence in the browser.',
+          zh: '删除不理想的开头和结尾，在关键位置分割片段，移除不需要的区间，并在浏览器中预览保留序列。',
+        },
+      },
+      {
+        title: { en: 'Review ChatCut-assisted edits', zh: '检查 ChatCut 辅助剪辑' },
+        body: {
+          en: 'Use ChatCut to propose silence-aware cuts aligned with scene boundaries, then review the proposal before applying it. It assists the edit rather than replacing editorial judgment.',
+          zh: '使用 ChatCut 提出结合静音与场景边界的裁切建议，并在应用前检查结果。它辅助剪辑，不替代人工判断。',
+        },
+      },
+      {
+        title: { en: 'Edit Autozoom focus regions', zh: '编辑 Autozoom 焦点区域' },
+        body: {
+          en: 'Add or adjust focus regions on the timeline, including their center, timing, and magnification, so viewers can follow important strokes, controls, or diagram areas.',
+          zh: '在时间线上添加或调整焦点区域，包括中心、时间和倍率，让观众跟上重要笔画、控件或图示区域。',
+        },
+      },
+      {
+        title: { en: 'Create captions and knowledge assets', zh: '生成字幕与知识资产' },
+        body: {
+          en: 'On eligible tiers, generate editable captions and export SRT, VTT, or ASS; Max can also create timestamped chapters and structured handouts in supported formats.',
+          zh: '符合套餐权益时，可生成可编辑字幕并导出 SRT、VTT 或 ASS；Max 还可创建带时间戳章节和支持格式的结构化讲义。',
+        },
+      },
+      {
+        title: { en: 'Render each publish-ready format', zh: '渲染各类发布就绪格式' },
+        body: {
+          en: 'Render landscape for long-form video, portrait for TikTok, Shorts, or Reels, square or 4:5 for feeds, and custom dimensions when a channel requires them.',
+          zh: '渲染横屏长视频、适合抖音/TikTok/Shorts/Reels 的竖屏、方形或 4:5 信息流，并在渠道需要时使用自定义尺寸。',
+        },
+      },
+      {
+        title: { en: 'Download or share, then publish', zh: '下载或分享，再自行发布' },
+        body: {
+          en: 'Download the finished files or create an eligible playback link. Upload the files to the destination accounts yourself, keeping final publishing and account access under your control.',
+          zh: '下载成品文件或创建符合权益的播放链接。由你自行把文件上传到目标账号，最终发布与账号访问始终由你控制。',
+        },
+      },
+    ],
+    facts: [
+      {
+        label: { en: 'Capture sources', zh: '采集来源' },
+        value: {
+          en: 'Excalidraw whiteboard, browser tab, app window, or desktop, with microphone and optional camera.',
+          zh: 'Excalidraw 白板、浏览器标签页、应用窗口或桌面，并可配合麦克风与摄像头。',
+        },
+      },
+      {
+        label: { en: 'Editing', zh: '剪辑能力' },
+        value: {
+          en: 'Browser timeline with trim, split, delete, ChatCut-assisted suggestions, and editable Autozoom regions.',
+          zh: '浏览器时间线支持裁剪、分割、删除、ChatCut 辅助建议与可编辑 Autozoom 区域。',
+        },
+      },
+      {
+        label: { en: 'Video dimensions', zh: '视频尺寸' },
+        value: {
+          en: 'Landscape, portrait, square, feed, and custom pixel dimensions, including 16:9, 9:16, 1:1, and 4:5.',
+          zh: '横屏、竖屏、方形、信息流和自定义像素尺寸，包括 16:9、9:16、1:1 与 4:5。',
+        },
+      },
+      {
+        label: { en: 'Supporting outputs', zh: '配套输出' },
+        value: {
+          en: 'Eligible tiers add captions, subtitle files, chapters, structured handouts, cloud backup, and playback links.',
+          zh: '符合套餐权益时可增加字幕、字幕文件、章节、结构化讲义、云备份和播放链接。',
+        },
+      },
+      {
+        label: { en: 'Publishing boundary', zh: '发布边界' },
+        value: {
+          en: 'Excalicast creates publish-ready assets but does not upload them directly to third-party social accounts.',
+          zh: 'Excalicast 生成发布就绪资产，但不会直接上传到第三方社交账号。',
+        },
+      },
+    ],
+    limitations: [
+      {
+        en: 'ChatCut proposes edits that should be reviewed; it does not promise a finished film without creator judgment.',
+        zh: 'ChatCut 提供需要检查的剪辑建议，不承诺无需创作者判断即可全自动成片。',
+      },
+      {
+        en: 'Captions, structured handouts, cloud backup, watermark-free output, and share links depend on Free, one-time, Pro, or Max entitlements.',
+        zh: '字幕、结构化讲义、云备份、无水印输出和分享链接取决于 Free、单次购买、Pro 或 Max 权益。',
+      },
+      {
+        en: 'Local-first does not mean every optional feature stays local: selected cloud features send only the data needed for that feature.',
+        zh: '本地优先不代表所有可选功能都完全本地运行；主动选择的云功能会发送完成该功能所需的数据。',
+      },
+    ],
+    faqs: [
+      {
+        q: { en: 'Can one recording produce videos for YouTube, TikTok, Shorts, and Reels?', zh: '一段录制能生成 YouTube、抖音、TikTok、Shorts 和 Reels 视频吗？' },
+        a: {
+          en: 'Yes. Excalicast can render the recording into landscape, portrait, square, feed, and custom dimensions. It creates the files for you to publish; it does not post to those accounts directly.',
+          zh: '可以。Excalicast 可把录制渲染成横屏、竖屏、方形、信息流和自定义尺寸。它生成由你发布的文件，不会直接发布到这些账号。',
+        },
+      },
+      {
+        q: { en: 'Can I record something other than the whiteboard?', zh: '除了白板还能录制其他内容吗？' },
+        a: {
+          en: 'Yes. You can choose a browser tab, an app window, or the entire desktop, then use the same export workspace to edit and render the result.',
+          zh: '可以。你可以选择浏览器标签页、应用窗口或整个桌面，再使用同一个导出工作区剪辑和渲染结果。',
+        },
+      },
+      {
+        q: { en: 'Does automatic editing remove the need to review the timeline?', zh: '自动剪辑后还需要检查时间线吗？' },
+        a: {
+          en: 'You should still review it. ChatCut assists with silence- and scene-aware cut proposals, while the creator decides what belongs in the final explanation.',
+          zh: '仍然需要检查。ChatCut 辅助提出结合静音与场景的裁切建议，最终讲解保留什么仍由创作者决定。',
+        },
+      },
+      {
+        q: { en: 'Does Excalicast publish directly to social networks?', zh: 'Excalicast 会直接发布到社交网络吗？' },
+        a: {
+          en: 'No. It prepares downloadable files and eligible share links. You upload the finished file to each publishing account yourself.',
+          zh: '不会。它准备可下载文件和符合权益的分享链接，你需要自行把成品上传到各发布账号。',
+        },
+      },
+    ],
+    sources: [
+      {
+        label: { en: 'Excalicast product overview', zh: 'Excalicast 产品概览' },
+        url: 'https://excalicast.cc/en',
+      },
+      {
+        label: { en: 'Excalicast plans and feature boundaries', zh: 'Excalicast 套餐与功能边界' },
+        url: 'https://excalicast.cc/en/pricing',
+      },
+    ],
+    verifiedAt: '2026-07-30',
+    ctaPreset: {
+      label: { en: 'Start the end-to-end workflow', zh: '开始端到端制作流程' },
+      href: '/app?source=whiteboard',
+    },
+    related: [
+      { type: 'compare', slug: 'excalicast-vs-excalicord' },
+      { type: 'compare', slug: 'excalicast-vs-excalirec' },
+      { type: 'blog', slug: 'one-recording-every-aspect-ratio' },
+      { type: 'use-case', slug: 'add-subtitles-to-whiteboard-video' },
+    ],
+    updatedAt: '2026-07-30',
+  },
 ];
 
 export function getUseCaseEntry(slug: string): UseCaseEntry | undefined {

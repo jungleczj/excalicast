@@ -12,6 +12,7 @@ import { allContentRoutes } from '@/content';
 export default function sitemap(): MetadataRoute.Sitemap {
   const staticRoutes: { path: string; lastModified: string; priority: number }[] = [
     { path: '/', lastModified: '2026-06-01', priority: 1 },
+    { path: '/pricing', lastModified: '2026-07-30', priority: 0.8 },
     { path: '/terms', lastModified: '2026-06-01', priority: 0.3 },
     { path: '/privacy', lastModified: '2026-06-01', priority: 0.3 },
     { path: '/refund', lastModified: '2026-06-01', priority: 0.3 },

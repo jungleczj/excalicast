@@ -10,6 +10,19 @@ interface Data {
   funnel: { step: string; users: number }[];
   daily: { day: string; count: number }[];
   recent: { event: string; who: string; path: string; at: string }[];
+  acquisition: {
+    entryPath: string;
+    contentType: string;
+    slug: string;
+    locale: string;
+    sourceKind: string;
+    trafficKind: string;
+    sessions: number;
+    ctaClicks: number;
+    recordingStarts: number;
+    recordingCompletes: number;
+    exports: number;
+  }[];
 }
 
 const SECRET_KEY = 'excalicast.adminSecret';
@@ -194,6 +207,38 @@ export default function AdminAnalyticsPage(): JSX.Element {
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+
+        <div className="mt-6" style={card}>
+          <h2 style={h2}>Organic/content acquisition by entry page</h2>
+          <div className="mt-3 overflow-auto">
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+              <thead>
+                <tr style={{ borderBottom: '1.5px solid var(--ink)' }}>
+                  {['Entry page', 'Intent', 'Lang', 'Source', 'Traffic', 'Sessions', 'CTA', 'Started', 'Completed', 'Exports'].map((label) => (
+                    <th key={label} style={{ padding: '7px 8px', textAlign: label === 'Entry page' ? 'left' : 'right' }}>{label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {data.acquisition.map((row) => (
+                  <tr key={[row.entryPath, row.contentType, row.slug, row.locale, row.sourceKind, row.trafficKind].join(':')} style={{ borderBottom: '1px solid var(--rule-soft)' }}>
+                    <td style={{ padding: '7px 8px' }}>{row.entryPath}</td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right' }}>{row.slug || row.contentType || '—'}</td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right' }}>{row.locale || '—'}</td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right' }}>{row.sourceKind || '—'}</td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right' }}>{row.trafficKind || '—'}</td>
+                    {[row.sessions, row.ctaClicks, row.recordingStarts, row.recordingCompletes, row.exports].map((value, index) => (
+                      <td key={index} style={{ padding: '7px 8px', textAlign: 'right' }}>{value.toLocaleString()}</td>
+                    ))}
+                  </tr>
+                ))}
+                {data.acquisition.length === 0 && (
+                  <tr><td colSpan={10} style={{ padding: '12px 8px', color: 'var(--ink-3)' }}>No attributed sessions in this range.</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

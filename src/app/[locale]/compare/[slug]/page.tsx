@@ -7,7 +7,20 @@ import { pageMetadata } from '@/lib/seo/meta';
 import { JsonLd } from '@/components/seo/JsonLd';
 import { faqPageSchema, breadcrumbSchema } from '@/lib/seo/schema';
 import { ContentShell } from '@/components/content/ContentShell';
-import { PageTitle, Lead, SectionHeading, FaqList, CtaRow, CompareTable } from '@/components/content/ContentPieces';
+import {
+  CompareTable,
+  CtaRow,
+  DirectAnswer,
+  FactList,
+  FaqList,
+  FitLists,
+  Lead,
+  LimitationsList,
+  PageTitle,
+  SectionHeading,
+  SourceList,
+  WorkflowList,
+} from '@/components/content/ContentPieces';
 import { RelatedLinks } from '@/components/content/RelatedLinks';
 import { COMPARE_ENTRIES, getCompareEntry, pick } from '@/content';
 
@@ -36,6 +49,7 @@ export default async function ComparePage({ params }: Props): Promise<JSX.Elemen
   setRequestLocale(locale);
   const entry = getCompareEntry(slug);
   if (!entry) notFound();
+  const hasFitGuidance = Boolean(entry.bestFor?.length || entry.notBestFor?.length);
 
   const faqSchema = faqPageSchema(
     entry.faqs.map((f) => ({ question: pick(f.q, locale), answer: pick(f.a, locale) })),
@@ -47,23 +61,59 @@ export default async function ComparePage({ params }: Props): Promise<JSX.Elemen
   ]);
 
   return (
-    <ContentShell locale={locale}>
+    <ContentShell locale={locale} contentType="compare" slug={slug}>
       <JsonLd data={[faqSchema, crumb]} />
       <PageTitle>{pick(entry.title, locale)}</PageTitle>
       <Lead>{pick(entry.intro, locale)}</Lead>
+      <DirectAnswer answer={entry.directAnswer} locale={locale} />
 
       <SectionHeading>{locale === 'zh' ? '功能对比' : 'Feature comparison'}</SectionHeading>
       <CompareTable rows={entry.rows} competitor={entry.competitor} locale={locale} />
 
+      {hasFitGuidance ? (
+        <>
+          <SectionHeading>{locale === 'zh' ? '适用场景' : 'Who each option fits'}</SectionHeading>
+          <FitLists bestFor={entry.bestFor} notBestFor={entry.notBestFor} locale={locale} />
+        </>
+      ) : null}
+
+      {entry.workflow?.length ? (
+        <>
+          <SectionHeading>{locale === 'zh' ? 'Excalicast 端到端工作流' : 'The Excalicast end-to-end workflow'}</SectionHeading>
+          <WorkflowList steps={entry.workflow} locale={locale} />
+        </>
+      ) : null}
+
+      {entry.facts?.length ? (
+        <>
+          <SectionHeading>{locale === 'zh' ? '已核实事实' : 'Verified facts'}</SectionHeading>
+          <FactList facts={entry.facts} locale={locale} />
+        </>
+      ) : null}
+
       <SectionHeading>{locale === 'zh' ? '该选哪个' : 'Which to choose'}</SectionHeading>
       <p style={{ fontSize: 16, lineHeight: 1.6, color: 'var(--ink-2)' }}>{pick(entry.verdict, locale)}</p>
+
+      {entry.limitations?.length ? (
+        <>
+          <SectionHeading>{locale === 'zh' ? '边界与限制' : 'Limits and boundaries'}</SectionHeading>
+          <LimitationsList limitations={entry.limitations} locale={locale} />
+        </>
+      ) : null}
 
       <SectionHeading>{locale === 'zh' ? '常见问题' : 'FAQ'}</SectionHeading>
       <FaqList faqs={entry.faqs} locale={locale} />
 
+      {entry.sources?.length ? (
+        <>
+          <SectionHeading>{locale === 'zh' ? '公开来源' : 'Public sources'}</SectionHeading>
+          <SourceList sources={entry.sources} verifiedAt={entry.verifiedAt} locale={locale} />
+        </>
+      ) : null}
+
       <RelatedLinks refs={entry.related} locale={locale} />
 
-      <CtaRow locale={locale} type="compare" slug={slug} />
+      <CtaRow locale={locale} type="compare" slug={slug} preset={entry.ctaPreset} />
     </ContentShell>
   );
 }

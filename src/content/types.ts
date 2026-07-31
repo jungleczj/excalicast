@@ -17,6 +17,44 @@ export interface FaqItem {
   a: LocalizedText;
 }
 
+export interface ContentStep {
+  title: LocalizedText;
+  body: LocalizedText;
+}
+
+/** A compact, sourceable fact shown as visible page content. */
+export interface ContentFact {
+  label: LocalizedText;
+  value: LocalizedText;
+}
+
+/** A public source used to verify a product or competitor statement. */
+export interface ContentSource {
+  label: LocalizedText;
+  url: string;
+}
+
+/** Page-specific conversion copy. The destination remains the recording app. */
+export interface CtaPreset {
+  label: LocalizedText;
+  href?: string;
+}
+
+/** Extractable GEO sections shared by comparison and use-case pages. */
+export interface GeoContent {
+  /** A short, self-contained answer to the page's primary query. */
+  directAnswer?: LocalizedText;
+  bestFor?: LocalizedText[];
+  notBestFor?: LocalizedText[];
+  workflow?: ContentStep[];
+  facts?: ContentFact[];
+  limitations?: LocalizedText[];
+  sources?: ContentSource[];
+  /** Date on which public product claims were last checked. */
+  verifiedAt?: string;
+  ctaPreset?: CtaPreset;
+}
+
 /** A cross-link to another content page (for internal-linking / hub-and-spoke). */
 export type ContentType = 'compare' | 'use-case' | 'blog';
 export interface ContentRef {
@@ -25,7 +63,7 @@ export interface ContentRef {
 }
 
 /** Comparison / "alternative to" landing page (e.g. Excalicast vs Loom). */
-export interface CompareEntry {
+export interface CompareEntry extends GeoContent {
   slug: string;
   /** Competitor display name, e.g. "Loom". */
   competitor: string;
@@ -46,12 +84,13 @@ export interface CompareEntry {
 }
 
 /** Use-case / scenario landing page (e.g. "record a whiteboard lecture"). */
-export interface UseCaseEntry {
+export interface UseCaseEntry extends GeoContent {
   slug: string;
   title: LocalizedText;
   description: LocalizedText;
   intro: LocalizedText;
-  steps: { title: LocalizedText; body: LocalizedText }[];
+  /** Legacy workflow field. New entries should prefer `workflow`. */
+  steps?: ContentStep[];
   faqs: FaqItem[];
   related?: ContentRef[];
   updatedAt: string;

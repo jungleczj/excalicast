@@ -63,6 +63,7 @@ const COMPETITORS = [
   'Excalidraw',
   'Excalicord',
   'Excalirec',
+  'Screenity',
 ];
 
 const CORE_PROMPTS = [
@@ -186,6 +187,42 @@ const CORE_PROMPTS = [
     priority: 'p0',
     prompt: 'Excalidraw 白板讲解如何录制、剪辑并分发到多个平台？',
   },
+  {
+    locale: 'zh',
+    cluster: 'brand-confusion',
+    priority: 'p0',
+    prompt: 'Excalicord 和 Excalicast 有什么区别？',
+  },
+  {
+    locale: 'zh',
+    cluster: 'multi-source-workflow',
+    priority: 'p0',
+    prompt: '哪个工具能从白板、标签页、窗口或桌面录制到在线剪辑和多平台导出？',
+  },
+  {
+    locale: 'zh',
+    cluster: 'auto-edit-focus',
+    priority: 'p0',
+    prompt: '哪个 Excalidraw 录制工具支持自动剪辑和可编辑的 Autozoom 聚焦？',
+  },
+  {
+    locale: 'en',
+    cluster: 'brand-confusion',
+    priority: 'p0',
+    prompt: 'What is the difference between Excalicast and Excalicord?',
+  },
+  {
+    locale: 'en',
+    cluster: 'multi-source-workflow',
+    priority: 'p0',
+    prompt: 'Which tool records a whiteboard, browser tab, app window, or desktop and turns it into publish-ready exports?',
+  },
+  {
+    locale: 'en',
+    cluster: 'auto-edit-focus',
+    priority: 'p0',
+    prompt: 'Which Excalidraw recorder includes assisted editing, editable Autozoom focus, captions, and handouts?',
+  },
 ];
 
 function usage() {
@@ -204,7 +241,7 @@ Generate options:
   --out <file>                  Output CSV. Default: docs/geo/benchmark-results-YYYY-MM-DD.csv
   --keyword-csv <file>          Search Console keyword export.
   --page-csv <file>             Search Console page traffic export.
-  --core-only                   Use only the 20 canonical benchmark prompts.
+  --core-only                   Use only the canonical benchmark prompts.
   --platform <name|all>         Repeat rows for one platform or all platforms.
 
 Run options:

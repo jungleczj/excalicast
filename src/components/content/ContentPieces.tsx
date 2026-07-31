@@ -2,7 +2,14 @@ import type { JSX } from 'react';
 import { getTranslations } from 'next-intl/server';
 import { Link } from '@/i18n/navigation';
 import { TrackedLink } from '@/components/analytics/TrackedLink';
-import type { FaqItem, LocalizedText } from '@/content/types';
+import type {
+  ContentFact,
+  ContentSource,
+  ContentStep,
+  CtaPreset,
+  FaqItem,
+  LocalizedText,
+} from '@/content/types';
 import { pick } from '@/content/types';
 
 /** Page H1 with the brand marker underline. */
@@ -26,6 +33,186 @@ export function SectionHeading({ children }: { children: React.ReactNode }): JSX
     <h2 className="content-craft-section-title" style={{ fontSize: 24, fontWeight: 700, letterSpacing: '-0.02em', marginTop: 44, marginBottom: 12 }}>
       {children}
     </h2>
+  );
+}
+
+/** A concise answer block that remains useful when lifted out of page context. */
+export function DirectAnswer({
+  answer,
+  locale,
+}: {
+  answer?: LocalizedText;
+  locale: string;
+}): JSX.Element | null {
+  if (!answer || !pick(answer, locale).trim()) return null;
+  return (
+    <section
+      className="content-craft-direct-answer"
+      aria-labelledby="direct-answer-heading"
+      style={{ marginTop: 28, borderLeft: '4px solid var(--hi)', padding: '4px 0 4px 18px' }}
+    >
+      <h2 id="direct-answer-heading" style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>
+        {locale === 'zh' ? '简短回答' : 'Short answer'}
+      </h2>
+      <p style={{ marginTop: 8, fontSize: 17, lineHeight: 1.65, color: 'var(--ink-2)' }}>
+        {pick(answer, locale)}
+      </p>
+    </section>
+  );
+}
+
+export function FitLists({
+  bestFor,
+  notBestFor,
+  locale,
+}: {
+  bestFor?: LocalizedText[];
+  notBestFor?: LocalizedText[];
+  locale: string;
+}): JSX.Element | null {
+  if (!bestFor?.length && !notBestFor?.length) return null;
+
+  const renderList = (title: string, items: LocalizedText[]) => (
+    <section>
+      <h3 style={{ fontSize: 18, fontWeight: 750, margin: 0 }}>{title}</h3>
+      <ul style={{ margin: '10px 0 0', paddingLeft: 20, color: 'var(--ink-2)' }}>
+        {items.map((item, index) => (
+          <li key={index} style={{ marginTop: 7, fontSize: 16, lineHeight: 1.55 }}>
+            {pick(item, locale)}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+
+  return (
+    <div
+      className="content-craft-fit-lists"
+      style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 28 }}
+    >
+      {bestFor?.length ? renderList(locale === 'zh' ? '最适合' : 'Best for', bestFor) : null}
+      {notBestFor?.length ? renderList(locale === 'zh' ? '不太适合' : 'Not best for', notBestFor) : null}
+    </div>
+  );
+}
+
+export function WorkflowList({
+  steps,
+  locale,
+}: {
+  steps: ContentStep[];
+  locale: string;
+}): JSX.Element {
+  return (
+    <ol style={{ marginTop: 8, paddingLeft: 0, listStyle: 'none', counterReset: 'step' }}>
+      {steps.map((step, index) => (
+        <li key={index} className="content-craft-step" style={{ display: 'flex', gap: 16, marginTop: 18 }}>
+          <span
+            className="content-craft-step-index"
+            style={{
+              flexShrink: 0,
+              width: 34,
+              height: 34,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 800,
+              background: 'var(--hi)',
+              border: '2px solid var(--ink)',
+              borderRadius: 10,
+            }}
+          >
+            {index + 1}
+          </span>
+          <div>
+            <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>{pick(step.title, locale)}</h3>
+            <p style={{ marginTop: 6, fontSize: 16, lineHeight: 1.6, color: 'var(--ink-2)' }}>
+              {pick(step.body, locale)}
+            </p>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+export function FactList({
+  facts,
+  locale,
+}: {
+  facts?: ContentFact[];
+  locale: string;
+}): JSX.Element | null {
+  if (!facts?.length) return null;
+  return (
+    <dl style={{ margin: 0, borderTop: '2px solid var(--ink)' }}>
+      {facts.map((fact, index) => (
+        <div
+          key={index}
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(140px, 0.8fr) minmax(220px, 2fr)',
+            gap: 18,
+            padding: '14px 0',
+            borderBottom: '1px solid var(--paper-3)',
+          }}
+        >
+          <dt style={{ fontSize: 15, fontWeight: 750 }}>{pick(fact.label, locale)}</dt>
+          <dd style={{ margin: 0, fontSize: 15, lineHeight: 1.6, color: 'var(--ink-2)' }}>
+            {pick(fact.value, locale)}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+export function LimitationsList({
+  limitations,
+  locale,
+}: {
+  limitations?: LocalizedText[];
+  locale: string;
+}): JSX.Element | null {
+  if (!limitations?.length) return null;
+  return (
+    <ul style={{ margin: 0, paddingLeft: 20, color: 'var(--ink-2)' }}>
+      {limitations.map((item, index) => (
+        <li key={index} style={{ marginTop: 8, fontSize: 16, lineHeight: 1.6 }}>
+          {pick(item, locale)}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function SourceList({
+  sources,
+  verifiedAt,
+  locale,
+}: {
+  sources?: ContentSource[];
+  verifiedAt?: string;
+  locale: string;
+}): JSX.Element | null {
+  if (!sources?.length) return null;
+  return (
+    <div>
+      {verifiedAt ? (
+        <p style={{ margin: 0, fontSize: 14, color: 'var(--ink-2)' }}>
+          {locale === 'zh' ? `公开资料核验日期：${verifiedAt}` : `Public sources verified: ${verifiedAt}`}
+        </p>
+      ) : null}
+      <ul style={{ margin: '10px 0 0', paddingLeft: 20 }}>
+        {sources.map((source, index) => (
+          <li key={index} style={{ marginTop: 7, fontSize: 15, lineHeight: 1.55 }}>
+            <a href={source.url} target="_blank" rel="noreferrer" style={{ color: 'var(--ink)', textDecoration: 'underline' }}>
+              {pick(source.label, locale)}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -54,10 +241,12 @@ export async function CtaRow({
   locale,
   type,
   slug,
+  preset,
 }: {
   locale: string;
   type: 'compare' | 'use-case' | 'blog';
   slug: string;
+  preset?: CtaPreset;
 }): Promise<JSX.Element> {
   const t = await getTranslations({ locale, namespace: 'landing' });
   return (
@@ -67,12 +256,14 @@ export async function CtaRow({
     >
       <TrackedLink
         event="content_cta_click"
-        eventProps={{ type, slug }}
-        href="/app"
+        eventProps={{ content_type: type, slug, surface: 'content_bottom' }}
+        secondaryEvent={type === 'compare' ? 'comparison_cta_click' : undefined}
+        href={preset?.href ?? '/app'}
+        prefetchKind="whiteboard"
         className="btn-sketch btn-sketch-primary"
       >
         <span className="recording-indicator h-1.5 w-1.5 rounded-full" style={{ background: 'var(--rec)' }} />
-        {t('hero.ctaPrimary')}
+        {preset ? pick(preset.label, locale) : t('hero.ctaPrimary')}
       </TrackedLink>
       <Link href="/" className="btn-sketch">{t('hero.ctaSecondary')}</Link>
     </div>

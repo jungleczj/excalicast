@@ -28,6 +28,8 @@ const PREFETCHERS: Record<string, () => Promise<unknown>> = {
 export function TrackedLink({
   event,
   eventProps,
+  secondaryEvent,
+  secondaryEventProps,
   prefetchKind,
   onClick,
   onMouseEnter,
@@ -36,6 +38,8 @@ export function TrackedLink({
 }: {
   event: KnownEvent;
   eventProps?: EventProps;
+  secondaryEvent?: KnownEvent;
+  secondaryEventProps?: EventProps;
   prefetchKind?: keyof typeof PREFETCHERS;
 } & LinkProps): JSX.Element {
   const warmed = useRef(false);
@@ -51,6 +55,7 @@ export function TrackedLink({
       onPointerDown={(e) => { warm(); onPointerDown?.(e); }}
       onClick={(e: MouseEvent<HTMLAnchorElement>) => {
         trackEvent(event, eventProps);
+        if (secondaryEvent) trackEvent(secondaryEvent, secondaryEventProps ?? eventProps);
         onClick?.(e);
       }}
     />

@@ -12,6 +12,7 @@ import { PaddleProvider } from '@/components/providers/PaddleProvider';
 import { LibraryImportHandler } from '@/components/LibraryImportHandler';
 import { locales, type Locale } from '@/i18n/config';
 import { SITE_URL } from '@/lib/seo/alternates';
+import { OrganicLandingTracker } from '@/components/analytics/OrganicLandingTracker';
 
 // 预水合脚本：在 React/Excalidraw 启动前就把市集回流的 `#addLibrary=` 抓走并清掉，
 // 存进 window.__excalicastPendingLib，杜绝任何后续脚本抢跑。无 hash 时立即 return。
@@ -78,6 +79,7 @@ export default async function RootLayout({ children, params }: Props): Promise<J
         <NextIntlClientProvider locale={locale} messages={messages}>
           <PaddleProvider>{children}</PaddleProvider>
           <LibraryImportHandler />
+          <OrganicLandingTracker />
         </NextIntlClientProvider>
         <MotionLayer />
         <Analytics />

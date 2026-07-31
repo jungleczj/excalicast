@@ -124,6 +124,11 @@
       "footer": {
         "pricing": "Pricing",
         "product": "Product",
+        "learn": "Learn",
+        "workflow": "Recording-to-publish workflow",
+        "excalicord": "Excalicast vs Excalicord",
+        "excalidraw": "Record Excalidraw to video",
+        "formats": "One recording, every format",
         "company": "Terms",
         "support": "Support",
         "heading": "What you explained can always come back here.",

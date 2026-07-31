@@ -2,6 +2,8 @@ import type { ReactNode, JSX } from 'react';
 import { getTranslations } from 'next-intl/server';
 import { Link } from '@/i18n/navigation';
 import { LogoMark } from '@/components/icons';
+import { TrackedLink } from '@/components/analytics/TrackedLink';
+import { ContentPageTracker } from '@/components/analytics/ContentPageTracker';
 
 /**
  * Shared chrome for programmatic content pages (compare / use-cases / blog).
@@ -10,14 +12,19 @@ import { LogoMark } from '@/components/icons';
  */
 export async function ContentShell({
   locale,
+  contentType,
+  slug,
   children,
 }: {
   locale: string;
+  contentType?: 'compare' | 'use-case' | 'blog';
+  slug?: string;
   children: ReactNode;
 }): Promise<JSX.Element> {
   const t = await getTranslations({ locale, namespace: 'landing' });
   return (
     <div className="app-craft-screen content-craft-page flex h-full flex-col" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
+      {contentType && slug ? <ContentPageTracker type={contentType} slug={slug} /> : null}
       <header
         className="content-craft-header flex h-16 flex-shrink-0 items-center justify-between px-6 sm:px-10"
         style={{ background: 'var(--paper)', borderBottom: '2px solid var(--ink)' }}
@@ -28,10 +35,21 @@ export async function ContentShell({
             Excalicast
           </span>
         </Link>
-        <Link href="/app" className="btn-sketch btn-sketch-primary" style={{ padding: '9px 16px' }}>
+        <TrackedLink
+          event="content_cta_click"
+          eventProps={{
+            surface: 'content_header',
+            ...(contentType ? { content_type: contentType } : {}),
+            ...(slug ? { slug } : {}),
+          }}
+          prefetchKind="whiteboard"
+          href="/app"
+          className="btn-sketch btn-sketch-primary"
+          style={{ padding: '9px 16px' }}
+        >
           <span className="recording-indicator h-1.5 w-1.5 rounded-full" style={{ background: 'var(--rec)' }} />
           {t('hero.ctaPrimary')}
-        </Link>
+        </TrackedLink>
       </header>
 
       <main className="content-craft-main flex-1 overflow-auto">
@@ -48,7 +66,19 @@ export async function ContentShell({
         >
           <div className="mx-auto flex flex-wrap items-center gap-x-6 gap-y-2" style={{ maxWidth: 860 }}>
             <Link href="/" style={{ color: 'var(--ink-3)' }}>{t('footer.home')}</Link>
-            <Link href="/app" style={{ color: 'var(--ink-3)' }}>{t('hero.ctaPrimary')}</Link>
+            <TrackedLink
+              event="content_cta_click"
+              eventProps={{
+                surface: 'content_footer',
+                ...(contentType ? { content_type: contentType } : {}),
+                ...(slug ? { slug } : {}),
+              }}
+              prefetchKind="whiteboard"
+              href="/app"
+              style={{ color: 'var(--ink-3)' }}
+            >
+              {t('hero.ctaPrimary')}
+            </TrackedLink>
             <Link href="/terms" style={{ color: 'var(--ink-3)' }}>{t('footer.terms')}</Link>
             <Link href="/privacy" style={{ color: 'var(--ink-3)' }}>{t('footer.privacy')}</Link>
             <span style={{ marginLeft: 'auto' }}>© Excalicast</span>

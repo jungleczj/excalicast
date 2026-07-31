@@ -5,6 +5,10 @@ export const KNOWN_EVENTS = [
   'cta_start_recording',
   'pricing_cta_click',
   'content_cta_click',
+  'comparison_cta_click',
+  'organic_landing_view',
+  'content_page_view',
+  'comparison_view',
   'view_demo',
   'feature_click',
   'upgrade_modal_open',
@@ -12,6 +16,8 @@ export const KNOWN_EVENTS = [
   'purchase_success',
   // 录制生命周期
   'recording_start',
+  'recording_setup_open',
+  'recording_source_selected',
   'recording_complete',
   'recording_discard',
   'export_success',
@@ -33,10 +39,11 @@ export const KNOWN_EVENT_SET: ReadonlySet<string> = new Set(KNOWN_EVENTS);
 
 /** 漏斗顺序（Dashboard 用）：每一级取独立用户数。 */
 export const FUNNEL_STEPS: KnownEvent[] = [
-  'cta_start_recording',
+  'organic_landing_view',
+  'content_cta_click',
+  'recording_setup_open',
+  'recording_source_selected',
   'recording_start',
   'recording_complete',
   'export_success',
-  'checkout_start',
-  'purchase_success',
 ];

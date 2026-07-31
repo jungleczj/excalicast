@@ -709,6 +709,13 @@ function CraftFooter({ t }: { t: ReturnType<typeof useTranslations> }): JSX.Elem
             <Link href="/pricing">{t('craft.footer.pricing')}</Link>
           </div>
           <div>
+            <h3>{t('craft.footer.learn')}</h3>
+            <Link href="/use-cases/record-edit-publish-whiteboard-video">{t('craft.footer.workflow')}</Link>
+            <Link href="/compare/excalicast-vs-excalicord">{t('craft.footer.excalicord')}</Link>
+            <Link href="/compare/excalicast-vs-excalidraw">{t('craft.footer.excalidraw')}</Link>
+            <Link href="/blog/one-recording-every-aspect-ratio">{t('craft.footer.formats')}</Link>
+          </div>
+          <div>
             <h3>{t('craft.footer.company')}</h3>
             <Link href="/privacy">{t('footer.privacy')}</Link>
             <Link href="/terms">{t('footer.terms')}</Link>

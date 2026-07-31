@@ -22,7 +22,7 @@ import { acquireCameraStream } from '@/services/cameraRecorder';
 import { acquireDisplayStream, getDisplayStreamPixelSize } from '@/services/displayCaptureRecorder';
 import { trackEvent } from '@/lib/analytics/track';
 import type { WhiteboardChangeFn } from '@/components/Whiteboard';
-import type { CameraCorner, CameraShape, CropWindow, RecordingSetupConfig, SourceCropWindow } from '@/types/recording';
+import type { CameraCorner, CameraShape, CropWindow, RecordingSetupConfig, RecordingSourceConfig, RecordingSourceKind, SourceCropWindow } from '@/types/recording';
 
 const DEFAULT_SETUP: RecordingSetupConfig = {
   framing: '16:9',
@@ -31,6 +31,14 @@ const DEFAULT_SETUP: RecordingSetupConfig = {
   camera: { enabled: false, sizePx: 160, shape: 'circle', position: 'bottom-right', backgroundRemoval: false },
   videoBackground: { kind: 'none' },
   source: { kind: 'whiteboard' },
+};
+
+const SOURCE_PRESETS: Partial<Record<RecordingSourceKind, RecordingSourceConfig>> = {
+  whiteboard: { kind: 'whiteboard' },
+  current_tab: { kind: 'current_tab', displaySurface: 'browser', captureSystemAudio: true },
+  window: { kind: 'window', displaySurface: 'window' },
+  desktop: { kind: 'desktop', displaySurface: 'monitor' },
+  selected_area: { kind: 'selected_area' },
 };
 
 function evenPixel(n: number): number {
@@ -190,6 +198,18 @@ export default function HomePage(): JSX.Element {
       if (new URLSearchParams(window.location.search).get('login') === '1') return;
       if (!localStorage.getItem('excalicast.seenAppIntro')) setShowIntro(true);
     } catch { /* private mode */ }
+  }, []);
+
+  // SEO/use-case CTAs may preselect a recording source without bypassing the
+  // browser permission picker or opening capture automatically.
+  useEffect(() => {
+    try {
+      const requested = new URLSearchParams(window.location.search).get('source') as RecordingSourceKind | null;
+      const source = requested ? SOURCE_PRESETS[requested] : undefined;
+      if (source) setSetupConfig((prev) => ({ ...prev, source }));
+    } catch {
+      // Invalid or unavailable query state falls back to whiteboard.
+    }
   }, []);
   const dismissIntro = useCallback(() => {
     setShowIntro(false);
@@ -470,6 +490,7 @@ export default function HomePage(): JSX.Element {
       ...prev,
       camera: { ...prev.camera, enabled: cameraEnabled, sizePx: cameraSize, shape: cameraShape },
     }));
+    trackEvent('recording_setup_open');
     setSetupOpen(true);
   }, [cameraEnabled, cameraSize, cameraShape]);
 
@@ -590,6 +611,9 @@ export default function HomePage(): JSX.Element {
     setRecordingStarting(false);
     setSetupConfig(nextConfig);
     setSetupOpen(false);
+    trackEvent('recording_source_selected', {
+      source_kind: config.source?.kind ?? 'whiteboard',
+    });
     // 裁切框重置 → overlay 按所选比例居中初始化（default 不显框）
     setCropWindow(null);
     setCustomOutput(undefined);

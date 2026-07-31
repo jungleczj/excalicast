@@ -3,6 +3,7 @@ import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { TermsZh } from './TermsZh';
 import { TermsEn } from './TermsEn';
 import { getActiveConfig, formatPrice } from '@/lib/paymentConfig';
+import { buildAlternates } from '@/lib/seo/alternates';
 
 interface Props {
   params: Promise<{ locale: string }>;
@@ -14,7 +15,11 @@ export const revalidate = 3600;
 export async function generateMetadata({ params }: Props) {
   const { locale } = await params;
   const t = await getTranslations({ locale, namespace: 'terms.meta' });
-  return { title: t('title'), description: t('description') };
+  return {
+    title: { absolute: t('title') },
+    description: t('description'),
+    alternates: buildAlternates('/terms', locale),
+  };
 }
 
 export default async function TermsPage({ params }: Props): Promise<JSX.Element> {

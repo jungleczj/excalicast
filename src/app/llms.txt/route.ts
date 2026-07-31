@@ -25,11 +25,24 @@ export async function GET(): Promise<Response> {
 > in multiple aspect ratios (16:9, 9:16, 1:1, 4:5) from a single recording.
 
 ## What makes it different
+- **End-to-end, publish-ready workflow**: capture a whiteboard, browser tab,
+  app window, or desktop; trim and split on a browser timeline; apply
+  ChatCut-assisted edits and editable Autozoom focus regions; then create
+  captions, handouts, share links, and platform-ready exports.
 - Records the whiteboard **operation stream**, not screen pixels — recordings are never affected by window occlusion, minimization, or tab switching.
 - **One take, every aspect ratio**: export 16:9, 9:16, 1:1, and 4:5 from the same recording without re-recording.
 - **Local-first**: recordings live in the browser (IndexedDB) and MP4 renders locally via ffmpeg.wasm. Raw recordings never leave the user's computer.
 - **No sign-up** required to record and export a watermarked MP4.
 - Optional draggable camera bubble overlay for talking-head explainers.
+
+## Canonical identity
+- Canonical product name: **Excalicast**
+- Canonical website: **${SITE_URL}**
+- Excalicast is a different product from Excalicord, ExcaliRec, and the
+  similarly named ExcaliCast app.
+- "Publish-ready" means the workflow produces files and assets ready for
+  distribution. Excalicast does not claim to upload directly to third-party
+  social platforms.
 
 ## Pricing
 - **Free**: unlimited recording + watermarked MP4 export. No account.
