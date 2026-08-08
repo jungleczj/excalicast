@@ -1,6 +1,7 @@
 'use client';
 
 import { getClientDb } from '@/lib/db-client';
+import { ChunkWriteBatcher } from '@/services/mediaRecorderHealth';
 import { stopMediaRecorderSafely } from '@/services/mediaRecorderStop';
 
 const RECORDER_TIMESLICE_MS = 250;
@@ -67,7 +68,12 @@ export async function startCameraRecorder(
   let chunkIndex = 0;
   let currentStream: MediaStream | null = null;
   let currentRecorder: MediaRecorder | null = null;
-  const pendingWrites: Promise<unknown>[] = [];
+  const chunkWriter = new ChunkWriteBatcher<{ recordingId: string; index: number; blob: Blob }>({
+    writeBatch: (items) => db.cameraChunks.bulkAdd(items),
+    sizeOf: (item) => item.blob.size,
+  });
+  let releasing = false;
+  let endedUnexpectedly = false;
   // 首次 acquire 复用取景预览流；之后（mute→unmute）仍 fresh 获取
   let pendingInitial: MediaStream | null = existingStream ?? null;
 
@@ -75,9 +81,15 @@ export async function startCameraRecorder(
     const stream = pendingInitial ?? (await acquireCameraStream());
     pendingInitial = null;
     const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 300_000 });
+    releasing = false;
+    for (const track of stream.getVideoTracks()) {
+      track.addEventListener('ended', () => {
+        if (!releasing) endedUnexpectedly = true;
+      });
+    }
     recorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) {
-        pendingWrites.push(db.cameraChunks.add({ recordingId, index: chunkIndex++, blob: e.data }).catch(() => undefined));
+        chunkWriter.enqueue({ recordingId, index: chunkIndex++, blob: e.data });
       }
     };
     recorder.start(RECORDER_TIMESLICE_MS);
@@ -86,6 +98,7 @@ export async function startCameraRecorder(
   };
 
   const release = async (): Promise<void> => {
+    releasing = true;
     const recorder = currentRecorder;
     const stream = currentStream;
     currentRecorder = null;
@@ -93,10 +106,12 @@ export async function startCameraRecorder(
     if (recorder && recorder.state !== 'inactive') {
       await stopMediaRecorderSafely(recorder);
     }
-    await Promise.allSettled(pendingWrites);
     if (stream) {
       stream.getTracks().forEach((t) => { try { t.stop(); } catch { /* ignore */ } });
     }
+    try { await chunkWriter.flush(); }
+    catch { throw new Error('camera_chunk_write_failed'); }
+    if (endedUnexpectedly) throw new Error('camera_track_ended');
   };
 
   await acquire();

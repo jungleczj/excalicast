@@ -8,6 +8,12 @@ import type {
   SubscriptionTier,
   UserSubscription,
 } from '@/types/user';
+import type { PaymentMode, PaymentProvider } from '@/lib/paymentConfig';
+import {
+  resolveHighestEntitlement,
+  shouldApplySubscriptionEvent,
+} from '@/lib/paymentDomain';
+import crypto from 'node:crypto';
 
 // ============================================================================
 // Backend selection
@@ -47,8 +53,9 @@ function logBackendOnce(): void {
 // ============================================================================
 
 const isServerless = process.env.VERCEL === '1' || process.env.AWS_LAMBDA_FUNCTION_NAME;
-const DB_DIR = isServerless ? '/tmp' : path.join(process.cwd(), 'data');
-const DB_PATH = path.join(DB_DIR, 'excalicast.db');
+const DB_PATH = process.env.EXCALICAST_DB_PATH
+  ?? path.join(isServerless ? '/tmp' : path.join(process.cwd(), 'data'), 'excalicast.db');
+const DB_DIR = path.dirname(DB_PATH);
 
 let _db: Database.Database | null = null;
 
@@ -84,16 +91,58 @@ function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id);
 
     CREATE TABLE IF NOT EXISTS user_subscriptions (
-      user_id TEXT PRIMARY KEY,
+      id TEXT PRIMARY KEY,
       tier TEXT NOT NULL DEFAULT 'free',
       status TEXT NOT NULL DEFAULT 'inactive',
+      user_id TEXT NOT NULL,
+      provider TEXT NOT NULL DEFAULT 'paddle' CHECK (provider IN ('creem','paddle')),
+      provider_subscription_id TEXT,
+      provider_customer_id TEXT,
       paddle_subscription_id TEXT,
       paddle_customer_id TEXT,
       current_period_end INTEGER,
+      last_event_occurred_at INTEGER,
       updated_at INTEGER NOT NULL,
       raw_payload TEXT
     );
+    CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user ON user_subscriptions(user_id);
     CREATE INDEX IF NOT EXISTS idx_user_subscriptions_paddle ON user_subscriptions(paddle_subscription_id);
+
+    CREATE TABLE IF NOT EXISTS checkout_attempts (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL CHECK (provider IN ('creem','paddle')),
+      mode TEXT NOT NULL CHECK (mode IN ('live','test')),
+      kind TEXT NOT NULL CHECK (kind IN ('one_time','subscription')),
+      tier TEXT,
+      billing TEXT,
+      recording_id TEXT,
+      user_id TEXT,
+      product_id TEXT NOT NULL,
+      provider_transaction_id TEXT,
+      status TEXT NOT NULL,
+      raw_request TEXT,
+      raw_response TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_checkout_attempts_provider_tx
+      ON checkout_attempts(provider, provider_transaction_id);
+    CREATE INDEX IF NOT EXISTS idx_checkout_attempts_user ON checkout_attempts(user_id);
+    CREATE INDEX IF NOT EXISTS idx_checkout_attempts_recording ON checkout_attempts(recording_id);
+
+    CREATE TABLE IF NOT EXISTS payment_webhook_events (
+      id TEXT PRIMARY KEY,
+      provider TEXT NOT NULL CHECK (provider IN ('creem','paddle')),
+      event_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      occurred_at INTEGER,
+      processed_at INTEGER NOT NULL,
+      ignored_reason TEXT,
+      raw_payload TEXT NOT NULL,
+      UNIQUE(provider, event_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_payment_webhook_events_provider_type
+      ON payment_webhook_events(provider, event_type);
 
     CREATE TABLE IF NOT EXISTS subtitle_jobs (
       id TEXT PRIMARY KEY,
@@ -102,6 +151,9 @@ function getDb(): Database.Database {
       status TEXT NOT NULL,
       task_id TEXT,
       audio_token TEXT,
+      asset_path TEXT,
+      asset_bytes INTEGER,
+      mime_type TEXT,
       srt TEXT,
       error TEXT,
       created_at INTEGER NOT NULL,
@@ -117,11 +169,73 @@ function getDb(): Database.Database {
   if (hasOld && !hasNew) {
     db.exec('ALTER TABLE paid_recordings RENAME COLUMN creem_session_id TO paddle_transaction_id');
   }
+  const subtitleCols = db.prepare("PRAGMA table_info(subtitle_jobs)").all() as { name: string }[];
+  if (!subtitleCols.some((c) => c.name === 'asset_path')) db.exec('ALTER TABLE subtitle_jobs ADD COLUMN asset_path TEXT');
+  if (!subtitleCols.some((c) => c.name === 'asset_bytes')) db.exec('ALTER TABLE subtitle_jobs ADD COLUMN asset_bytes INTEGER');
+  if (!subtitleCols.some((c) => c.name === 'mime_type')) db.exec('ALTER TABLE subtitle_jobs ADD COLUMN mime_type TEXT');
 
   db.exec('CREATE INDEX IF NOT EXISTS idx_paid_recordings_paddle ON paid_recordings(paddle_transaction_id);');
+  migrateSqliteSubscriptions(db);
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user ON user_subscriptions(user_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_user_subscriptions_provider_sub
+      ON user_subscriptions(provider, provider_subscription_id);
+    CREATE INDEX IF NOT EXISTS idx_user_subscriptions_paddle ON user_subscriptions(paddle_subscription_id);
+  `);
 
   _db = db;
   return db;
+}
+
+function migrateSqliteSubscriptions(db: Database.Database): void {
+  const cols = db.prepare("PRAGMA table_info(user_subscriptions)").all() as { name: string }[];
+  const hasId = cols.some((c) => c.name === 'id');
+  const hasProvider = cols.some((c) => c.name === 'provider');
+  if (hasId && hasProvider) return;
+
+  const migrate = db.transaction(() => {
+    db.exec('ALTER TABLE user_subscriptions RENAME TO user_subscriptions_legacy');
+    db.exec(`
+      CREATE TABLE user_subscriptions (
+        id TEXT PRIMARY KEY,
+        tier TEXT NOT NULL DEFAULT 'free',
+        status TEXT NOT NULL DEFAULT 'inactive',
+        user_id TEXT NOT NULL,
+        provider TEXT NOT NULL DEFAULT 'paddle' CHECK (provider IN ('creem','paddle')),
+        provider_subscription_id TEXT,
+        provider_customer_id TEXT,
+        paddle_subscription_id TEXT,
+        paddle_customer_id TEXT,
+        current_period_end INTEGER,
+        last_event_occurred_at INTEGER,
+        updated_at INTEGER NOT NULL,
+        raw_payload TEXT
+      );
+    `);
+    const legacyRows = db.prepare('SELECT * FROM user_subscriptions_legacy').all() as Array<{
+      user_id: string;
+      tier: SubscriptionTier;
+      status: SubscriptionStatus;
+      paddle_subscription_id: string | null;
+      paddle_customer_id: string | null;
+      current_period_end: number | null;
+      updated_at: number;
+      raw_payload: string | null;
+    }>;
+    const insert = db.prepare(`
+      INSERT INTO user_subscriptions
+        (id, user_id, provider, tier, status, provider_subscription_id, provider_customer_id,
+         paddle_subscription_id, paddle_customer_id, current_period_end, last_event_occurred_at, updated_at, raw_payload)
+      VALUES
+        (@id, @user_id, 'paddle', @tier, @status, @paddle_subscription_id, @paddle_customer_id,
+         @paddle_subscription_id, @paddle_customer_id, @current_period_end, @updated_at, @updated_at, @raw_payload)
+    `);
+    for (const row of legacyRows) {
+      insert.run({ ...row, id: crypto.randomUUID() });
+    }
+    db.exec('DROP TABLE user_subscriptions_legacy');
+  });
+  migrate();
 }
 
 // ============================================================================
@@ -256,49 +370,69 @@ export async function getPaidRecording(recordingId: string): Promise<PaidRecordi
 // ============================================================================
 
 interface SqliteSubscriptionRow {
+  id: string;
   user_id: string;
+  provider: PaymentProvider;
   tier: SubscriptionTier;
   status: SubscriptionStatus;
+  provider_subscription_id: string | null;
+  provider_customer_id: string | null;
   paddle_subscription_id: string | null;
   paddle_customer_id: string | null;
   current_period_end: number | null;
+  last_event_occurred_at: number | null;
   updated_at: number;
   raw_payload: string | null;
 }
 
 interface SupabaseSubscriptionRow {
+  id?: string;
   user_id: string;
+  provider?: PaymentProvider;
   tier: SubscriptionTier;
   status: SubscriptionStatus;
+  provider_subscription_id?: string | null;
+  provider_customer_id?: string | null;
   paddle_subscription_id: string | null;
   paddle_customer_id: string | null;
   current_period_end: string | null; // timestamptz ISO
+  last_event_occurred_at?: string | null;
   updated_at: string;
   raw_payload: string | null;
 }
 
 function rowToSubscriptionFromSqlite(row: SqliteSubscriptionRow | undefined): UserSubscription | null {
   if (!row) return null;
+  const provider = row.provider ?? 'paddle';
   return {
     userId: row.user_id,
+    provider,
     tier: row.tier,
     status: row.status,
+    providerSubscriptionId: row.provider_subscription_id ?? row.paddle_subscription_id,
+    providerCustomerId: row.provider_customer_id ?? row.paddle_customer_id,
     paddleSubscriptionId: row.paddle_subscription_id,
     paddleCustomerId: row.paddle_customer_id,
     currentPeriodEnd: row.current_period_end,
+    lastEventOccurredAt: row.last_event_occurred_at,
     updatedAt: row.updated_at,
   };
 }
 
 function rowToSubscriptionFromSupabase(row: SupabaseSubscriptionRow | null): UserSubscription | null {
   if (!row) return null;
+  const provider = row.provider ?? 'paddle';
   return {
     userId: row.user_id,
+    provider,
     tier: row.tier,
     status: row.status,
+    providerSubscriptionId: row.provider_subscription_id ?? row.paddle_subscription_id,
+    providerCustomerId: row.provider_customer_id ?? row.paddle_customer_id,
     paddleSubscriptionId: row.paddle_subscription_id,
     paddleCustomerId: row.paddle_customer_id,
     currentPeriodEnd: row.current_period_end ? new Date(row.current_period_end).getTime() : null,
+    lastEventOccurredAt: row.last_event_occurred_at ? new Date(row.last_event_occurred_at).getTime() : null,
     updatedAt: new Date(row.updated_at).getTime(),
   };
 }
@@ -309,15 +443,15 @@ export async function getUserSubscription(userId: string): Promise<UserSubscript
     const { data, error } = await sb()
       .from('user_subscriptions')
       .select('*')
-      .eq('user_id', userId)
-      .maybeSingle();
+      .eq('user_id', userId);
     if (error) throw new Error(`getUserSubscription: ${error.message}`);
-    return rowToSubscriptionFromSupabase(data as SupabaseSubscriptionRow | null);
+    const rows = (data as SupabaseSubscriptionRow[]).map(rowToSubscriptionFromSupabase).filter(Boolean) as UserSubscription[];
+    return pickHighestStoredSubscription(rows);
   }
-  const row = getDb()
+  const rows = getDb()
     .prepare('SELECT * FROM user_subscriptions WHERE user_id = ?')
-    .get(userId) as SqliteSubscriptionRow | undefined;
-  return rowToSubscriptionFromSqlite(row);
+    .all(userId) as SqliteSubscriptionRow[];
+  return pickHighestStoredSubscription(rows.map(rowToSubscriptionFromSqlite).filter(Boolean) as UserSubscription[]);
 }
 
 export async function findSubscriptionByPaddleId(paddleSubscriptionId: string): Promise<UserSubscription | null> {
@@ -326,15 +460,131 @@ export async function findSubscriptionByPaddleId(paddleSubscriptionId: string): 
     const { data, error } = await sb()
       .from('user_subscriptions')
       .select('*')
-      .eq('paddle_subscription_id', paddleSubscriptionId)
+      .or(`paddle_subscription_id.eq.${paddleSubscriptionId},provider_subscription_id.eq.${paddleSubscriptionId}`)
       .maybeSingle();
     if (error) throw new Error(`findSubscriptionByPaddleId: ${error.message}`);
     return rowToSubscriptionFromSupabase(data as SupabaseSubscriptionRow | null);
   }
   const row = getDb()
-    .prepare('SELECT * FROM user_subscriptions WHERE paddle_subscription_id = ?')
-    .get(paddleSubscriptionId) as SqliteSubscriptionRow | undefined;
+    .prepare('SELECT * FROM user_subscriptions WHERE paddle_subscription_id = ? OR provider_subscription_id = ?')
+    .get(paddleSubscriptionId, paddleSubscriptionId) as SqliteSubscriptionRow | undefined;
   return rowToSubscriptionFromSqlite(row);
+}
+
+function pickHighestStoredSubscription(rows: UserSubscription[]): UserSubscription | null {
+  const entitledRows = rows.filter((row): row is UserSubscription & { tier: Exclude<SubscriptionTier, 'free'> } => row.tier !== 'free');
+  const best = resolveHighestEntitlement(entitledRows.map((row) => ({
+    provider: row.provider,
+    tier: row.tier,
+    status: row.status,
+    currentPeriodEnd: row.currentPeriodEnd,
+  })));
+  if (!best) {
+    return [...rows].sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null;
+  }
+  return rows.find((row) => row.provider === best.provider && row.tier === best.tier && row.status === best.status)
+    ?? [...rows].sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    ?? null;
+}
+
+export async function upsertProviderSubscription(params: {
+  userId: string;
+  provider: PaymentProvider;
+  tier: SubscriptionTier;
+  status: SubscriptionStatus;
+  providerSubscriptionId: string | null;
+  providerCustomerId: string | null;
+  currentPeriodEnd: number | null;
+  eventOccurredAt: number | null;
+  rawPayload: string | null;
+}): Promise<{ applied: boolean }> {
+  logBackendOnce();
+  if (isSupabase()) {
+    let existing: SupabaseSubscriptionRow | null = null;
+    if (params.providerSubscriptionId) {
+      const { data, error } = await sb()
+        .from('user_subscriptions')
+        .select('*')
+        .eq('provider', params.provider)
+        .eq('provider_subscription_id', params.providerSubscriptionId)
+        .maybeSingle();
+      if (error) throw new Error(`upsertProviderSubscription (read): ${error.message}`);
+      existing = data as SupabaseSubscriptionRow | null;
+    }
+    const previousOccurredAt = existing?.last_event_occurred_at
+      ? Date.parse(existing.last_event_occurred_at)
+      : null;
+    if (!shouldApplySubscriptionEvent(params.eventOccurredAt, previousOccurredAt)) {
+      return { applied: false };
+    }
+    const now = new Date().toISOString();
+    const row = {
+      id: existing?.id ?? crypto.randomUUID(),
+      user_id: params.userId,
+      provider: params.provider,
+      tier: params.tier,
+      status: params.status,
+      provider_subscription_id: params.providerSubscriptionId,
+      provider_customer_id: params.providerCustomerId,
+      paddle_subscription_id: params.provider === 'paddle' ? params.providerSubscriptionId : null,
+      paddle_customer_id: params.provider === 'paddle' ? params.providerCustomerId : null,
+      current_period_end: params.currentPeriodEnd ? new Date(params.currentPeriodEnd).toISOString() : null,
+      last_event_occurred_at: params.eventOccurredAt ? new Date(params.eventOccurredAt).toISOString() : null,
+      updated_at: now,
+      raw_payload: params.rawPayload,
+    };
+    const { error } = await sb()
+      .from('user_subscriptions')
+      .upsert(row, { onConflict: 'provider,provider_subscription_id' });
+    if (error) throw new Error(`upsertProviderSubscription: ${error.message}`);
+    return { applied: true };
+  }
+
+  const db = getDb();
+  const tx = db.transaction(() => {
+    const existing = params.providerSubscriptionId
+      ? db.prepare('SELECT * FROM user_subscriptions WHERE provider = ? AND provider_subscription_id = ?')
+        .get(params.provider, params.providerSubscriptionId) as SqliteSubscriptionRow | undefined
+      : undefined;
+    if (!shouldApplySubscriptionEvent(params.eventOccurredAt, existing?.last_event_occurred_at ?? null)) {
+      return false;
+    }
+    db.prepare(
+      `INSERT INTO user_subscriptions
+         (id, user_id, provider, tier, status, provider_subscription_id, provider_customer_id,
+          paddle_subscription_id, paddle_customer_id, current_period_end, last_event_occurred_at, updated_at, raw_payload)
+       VALUES
+         (@id, @user_id, @provider, @tier, @status, @provider_subscription_id, @provider_customer_id,
+          @paddle_subscription_id, @paddle_customer_id, @current_period_end, @last_event_occurred_at, @updated_at, @raw_payload)
+       ON CONFLICT(provider, provider_subscription_id) DO UPDATE SET
+         user_id = excluded.user_id,
+         tier = excluded.tier,
+         status = excluded.status,
+         provider_customer_id = excluded.provider_customer_id,
+         paddle_subscription_id = excluded.paddle_subscription_id,
+         paddle_customer_id = excluded.paddle_customer_id,
+         current_period_end = excluded.current_period_end,
+         last_event_occurred_at = excluded.last_event_occurred_at,
+         updated_at = excluded.updated_at,
+         raw_payload = excluded.raw_payload`,
+    ).run({
+      id: existing?.id ?? crypto.randomUUID(),
+      user_id: params.userId,
+      provider: params.provider,
+      tier: params.tier,
+      status: params.status,
+      provider_subscription_id: params.providerSubscriptionId,
+      provider_customer_id: params.providerCustomerId,
+      paddle_subscription_id: params.provider === 'paddle' ? params.providerSubscriptionId : null,
+      paddle_customer_id: params.provider === 'paddle' ? params.providerCustomerId : null,
+      current_period_end: params.currentPeriodEnd,
+      last_event_occurred_at: params.eventOccurredAt,
+      updated_at: Date.now(),
+      raw_payload: params.rawPayload,
+    });
+    return true;
+  });
+  return { applied: tx() };
 }
 
 export async function upsertSubscription(params: {
@@ -346,52 +596,240 @@ export async function upsertSubscription(params: {
   currentPeriodEnd: number | null;
   rawPayload: string | null;
 }): Promise<void> {
+  await upsertProviderSubscription({
+    userId: params.userId,
+    provider: 'paddle',
+    tier: params.tier,
+    status: params.status,
+    providerSubscriptionId: params.paddleSubscriptionId,
+    providerCustomerId: params.paddleCustomerId,
+    currentPeriodEnd: params.currentPeriodEnd,
+    eventOccurredAt: Date.now(),
+    rawPayload: params.rawPayload,
+  });
+}
+
+// ============================================================================
+// checkout_attempts + payment_webhook_events  (Supabase | SQLite)
+// ============================================================================
+
+export interface CheckoutAttemptRow {
+  id: string;
+  provider: PaymentProvider;
+  mode: PaymentMode;
+  kind: 'one_time' | 'subscription';
+  tier: SubscriptionTier | null;
+  billing: 'monthly' | 'yearly' | null;
+  recording_id: string | null;
+  user_id: string | null;
+  product_id: string;
+  provider_transaction_id: string | null;
+  status: 'pending' | 'created' | 'failed';
+  raw_request: string | null;
+  raw_response: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export async function insertCheckoutAttempt(params: {
+  provider: PaymentProvider;
+  mode: PaymentMode;
+  kind: 'one_time' | 'subscription';
+  tier: SubscriptionTier | null;
+  billing: 'monthly' | 'yearly' | null;
+  recordingId: string | null;
+  userId: string | null;
+  productId: string;
+  rawRequest: string | null;
+}): Promise<{ id: string }> {
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  logBackendOnce();
+  if (isSupabase()) {
+    const { error } = await sb().from('checkout_attempts').insert({
+      id,
+      provider: params.provider,
+      mode: params.mode,
+      kind: params.kind,
+      tier: params.tier,
+      billing: params.billing,
+      recording_id: params.recordingId,
+      user_id: params.userId,
+      product_id: params.productId,
+      status: 'pending',
+      raw_request: params.rawRequest,
+      created_at: new Date(now).toISOString(),
+      updated_at: new Date(now).toISOString(),
+    });
+    if (error) throw new Error(`insertCheckoutAttempt: ${error.message}`);
+    return { id };
+  }
+  getDb().prepare(
+    `INSERT INTO checkout_attempts
+       (id, provider, mode, kind, tier, billing, recording_id, user_id, product_id,
+        status, raw_request, created_at, updated_at)
+     VALUES
+       (@id, @provider, @mode, @kind, @tier, @billing, @recording_id, @user_id, @product_id,
+        'pending', @raw_request, @created_at, @updated_at)`,
+  ).run({
+    id,
+    provider: params.provider,
+    mode: params.mode,
+    kind: params.kind,
+    tier: params.tier,
+    billing: params.billing,
+    recording_id: params.recordingId,
+    user_id: params.userId,
+    product_id: params.productId,
+    raw_request: params.rawRequest,
+    created_at: now,
+    updated_at: now,
+  });
+  return { id };
+}
+
+export async function completeCheckoutAttempt(params: {
+  id: string;
+  providerTransactionId: string | null;
+  rawResponse: string | null;
+}): Promise<void> {
   logBackendOnce();
   if (isSupabase()) {
     const { error } = await sb()
-      .from('user_subscriptions')
-      .upsert(
-        {
-          user_id: params.userId,
-          tier: params.tier,
-          status: params.status,
-          paddle_subscription_id: params.paddleSubscriptionId,
-          paddle_customer_id: params.paddleCustomerId,
-          current_period_end: params.currentPeriodEnd
-            ? new Date(params.currentPeriodEnd).toISOString()
-            : null,
-          // updated_at is maintained by trigger touch_updated_at;
-          // skip sending it to let the DB authoritative.
-          raw_payload: params.rawPayload,
-        },
-        { onConflict: 'user_id' },
-      );
-    if (error) throw new Error(`upsertSubscription: ${error.message}`);
+      .from('checkout_attempts')
+      .update({
+        provider_transaction_id: params.providerTransactionId,
+        status: 'created',
+        raw_response: params.rawResponse,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', params.id);
+    if (error) throw new Error(`completeCheckoutAttempt: ${error.message}`);
+    return;
+  }
+  getDb().prepare(
+    `UPDATE checkout_attempts
+     SET provider_transaction_id = ?, status = 'created', raw_response = ?, updated_at = ?
+     WHERE id = ?`,
+  ).run(params.providerTransactionId, params.rawResponse, Date.now(), params.id);
+}
+
+export async function failCheckoutAttempt(params: {
+  id: string;
+  rawResponse: string | null;
+}): Promise<void> {
+  logBackendOnce();
+  if (isSupabase()) {
+    const { error } = await sb()
+      .from('checkout_attempts')
+      .update({ status: 'failed', raw_response: params.rawResponse, updated_at: new Date().toISOString() })
+      .eq('id', params.id);
+    if (error) throw new Error(`failCheckoutAttempt: ${error.message}`);
+    return;
+  }
+  getDb().prepare(
+    `UPDATE checkout_attempts SET status = 'failed', raw_response = ?, updated_at = ? WHERE id = ?`,
+  ).run(params.rawResponse, Date.now(), params.id);
+}
+
+export async function getCheckoutAttempt(id: string): Promise<CheckoutAttemptRow | undefined> {
+  logBackendOnce();
+  if (isSupabase()) {
+    const { data, error } = await sb()
+      .from('checkout_attempts')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw new Error(`getCheckoutAttempt: ${error.message}`);
+    if (!data) return undefined;
+    const row = data as Omit<CheckoutAttemptRow, 'created_at' | 'updated_at'> & { created_at: string; updated_at: string };
+    return {
+      ...row,
+      created_at: new Date(row.created_at).getTime(),
+      updated_at: new Date(row.updated_at).getTime(),
+    };
+  }
+  return getDb().prepare('SELECT * FROM checkout_attempts WHERE id = ?').get(id) as CheckoutAttemptRow | undefined;
+}
+
+export async function recordPaymentWebhookEvent(params: {
+  provider: PaymentProvider;
+  eventId: string;
+  eventType: string;
+  occurredAt: number | null;
+  rawPayload: string;
+}): Promise<{ duplicate: boolean }> {
+  logBackendOnce();
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  if (isSupabase()) {
+    const { error } = await sb().from('payment_webhook_events').insert({
+      id,
+      provider: params.provider,
+      event_id: params.eventId,
+      event_type: params.eventType,
+      occurred_at: params.occurredAt ? new Date(params.occurredAt).toISOString() : null,
+      processed_at: new Date(now).toISOString(),
+      raw_payload: params.rawPayload,
+    });
+    if (error) {
+      if (error.code === '23505') return { duplicate: true };
+      throw new Error(`recordPaymentWebhookEvent: ${error.message}`);
+    }
+    return { duplicate: false };
+  }
+  try {
+    getDb().prepare(
+      `INSERT INTO payment_webhook_events
+         (id, provider, event_id, event_type, occurred_at, processed_at, raw_payload)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, params.provider, params.eventId, params.eventType, params.occurredAt, now, params.rawPayload);
+    return { duplicate: false };
+  } catch (err) {
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return { duplicate: true };
+    }
+    throw err;
+  }
+}
+
+export async function isPaymentWebhookEventRecorded(
+  provider: PaymentProvider,
+  eventId: string,
+): Promise<boolean> {
+  logBackendOnce();
+  if (isSupabase()) {
+    const { data, error } = await sb()
+      .from('payment_webhook_events')
+      .select('id')
+      .eq('provider', provider)
+      .eq('event_id', eventId)
+      .maybeSingle();
+    if (error) throw new Error(`isPaymentWebhookEventRecorded: ${error.message}`);
+    return !!data;
+  }
+  return getDb()
+    .prepare('SELECT 1 FROM payment_webhook_events WHERE provider = ? AND event_id = ?')
+    .get(provider, eventId) !== undefined;
+}
+
+export async function releasePaymentWebhookEvent(
+  provider: PaymentProvider,
+  eventId: string,
+): Promise<void> {
+  logBackendOnce();
+  if (isSupabase()) {
+    const { error } = await sb()
+      .from('payment_webhook_events')
+      .delete()
+      .eq('provider', provider)
+      .eq('event_id', eventId);
+    if (error) throw new Error(`releasePaymentWebhookEvent: ${error.message}`);
     return;
   }
   getDb()
-    .prepare(
-      `INSERT INTO user_subscriptions (user_id, tier, status, paddle_subscription_id, paddle_customer_id, current_period_end, updated_at, raw_payload)
-       VALUES (@user_id, @tier, @status, @paddle_subscription_id, @paddle_customer_id, @current_period_end, @updated_at, @raw_payload)
-       ON CONFLICT(user_id) DO UPDATE SET
-         tier = excluded.tier,
-         status = excluded.status,
-         paddle_subscription_id = excluded.paddle_subscription_id,
-         paddle_customer_id = excluded.paddle_customer_id,
-         current_period_end = excluded.current_period_end,
-         updated_at = excluded.updated_at,
-         raw_payload = excluded.raw_payload`,
-    )
-    .run({
-      user_id: params.userId,
-      tier: params.tier,
-      status: params.status,
-      paddle_subscription_id: params.paddleSubscriptionId,
-      paddle_customer_id: params.paddleCustomerId,
-      current_period_end: params.currentPeriodEnd,
-      updated_at: Date.now(),
-      raw_payload: params.rawPayload,
-    });
+    .prepare('DELETE FROM payment_webhook_events WHERE provider = ? AND event_id = ?')
+    .run(provider, eventId);
 }
 
 // ============================================================================
@@ -405,6 +843,9 @@ export interface SubtitleJobRow {
   status: 'pending' | 'running' | 'done' | 'failed';
   task_id: string | null;
   audio_token: string | null;
+  asset_path: string | null;
+  asset_bytes: number | null;
+  mime_type: string | null;
   srt: string | null;
   error: string | null;
   created_at: number; // ms epoch (normalized at boundary)
@@ -418,6 +859,9 @@ interface SupabaseSubtitleJobRaw {
   status: SubtitleJobRow['status'];
   task_id: string | null;
   audio_token: string | null;
+  asset_path: string | null;
+  asset_bytes: number | null;
+  mime_type: string | null;
   srt: string | null;
   error: string | null;
   created_at: string; // ISO
@@ -433,6 +877,9 @@ function jobFromSupabase(row: SupabaseSubtitleJobRaw | null): SubtitleJobRow | u
     status: row.status,
     task_id: row.task_id,
     audio_token: row.audio_token,
+    asset_path: row.asset_path,
+    asset_bytes: row.asset_bytes,
+    mime_type: row.mime_type,
     srt: row.srt,
     error: row.error,
     created_at: new Date(row.created_at).getTime(),
@@ -444,7 +891,10 @@ export async function createSubtitleJob(params: {
   id: string;
   userId: string;
   recordingId: string;
-  audioToken: string;
+  audioToken?: string;
+  assetPath?: string;
+  assetBytes?: number;
+  mimeType?: string;
 }): Promise<SubtitleJobRow> {
   logBackendOnce();
   if (isSupabase()) {
@@ -455,7 +905,10 @@ export async function createSubtitleJob(params: {
         user_id: params.userId,
         recording_id: params.recordingId,
         status: 'pending',
-        audio_token: params.audioToken,
+        audio_token: params.audioToken ?? null,
+        asset_path: params.assetPath ?? null,
+        asset_bytes: params.assetBytes ?? null,
+        mime_type: params.mimeType ?? null,
       });
     if (error) throw new Error(`createSubtitleJob: ${error.message}`);
     const job = await getSubtitleJob(params.id);
@@ -465,10 +918,10 @@ export async function createSubtitleJob(params: {
   const now = Date.now();
   getDb()
     .prepare(
-      `INSERT INTO subtitle_jobs (id, user_id, recording_id, status, audio_token, created_at, updated_at)
-       VALUES (?, ?, ?, 'pending', ?, ?, ?)`,
+      `INSERT INTO subtitle_jobs (id, user_id, recording_id, status, audio_token, asset_path, asset_bytes, mime_type, created_at, updated_at)
+       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
     )
-    .run(params.id, params.userId, params.recordingId, params.audioToken, now, now);
+    .run(params.id, params.userId, params.recordingId, params.audioToken ?? null, params.assetPath ?? null, params.assetBytes ?? null, params.mimeType ?? null, now, now);
   const got = await getSubtitleJob(params.id);
   if (!got) throw new Error('createSubtitleJob: sqlite row not visible after insert');
   return got;

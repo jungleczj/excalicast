@@ -1,5 +1,11 @@
 import crypto from 'node:crypto';
 import type { SubscriptionStatus, SubscriptionTier } from '@/types/user';
+import {
+  extractPaddlePriceRefs,
+  resolvePaddleEntitlement,
+  type PaymentProducts,
+  type SubscriptionBilling,
+} from '@/lib/paymentDomain';
 
 export interface PaddleTransactionCompleted {
   transactionId: string;
@@ -21,9 +27,17 @@ export interface PaddleSubscriptionEvent {
   subscriptionId: string;
   customerId: string | null;
   userId: string;             // 来自 custom_data.userId（前端打开 checkout 时塞进去）
-  tier: SubscriptionTier;     // 来自 custom_data.tier（默认 pro）
+  tier: Exclude<SubscriptionTier, 'free'>;
+  billing: SubscriptionBilling;
   status: SubscriptionStatus;
   currentPeriodEnd: number | null;
+  occurredAt: number | null;
+}
+
+export interface PaddleWebhookMeta {
+  eventId: string;
+  eventType: string;
+  occurredAt: number | null;
 }
 
 /**
@@ -62,17 +76,67 @@ export function verifyWebhookSignature(rawBody: string, signatureHeader: string 
   }
 }
 
+export function verifyWebhookSignatureWithSecrets(
+  rawBody: string,
+  signatureHeader: string | null,
+  secrets: string[],
+): boolean {
+  if (secrets.length === 0) return process.env.DEV_MODE === 'true';
+  if (!signatureHeader) return false;
+  const parts = signatureHeader.split(';').reduce<Record<string, string>>((acc, p) => {
+    const [k, v] = p.split('=');
+    if (k && v) acc[k.trim()] = v.trim();
+    return acc;
+  }, {});
+  const ts = parts['ts'];
+  const h1 = parts['h1'];
+  if (!ts || !h1) return false;
+  const tsNum = Number(ts);
+  if (!Number.isFinite(tsNum)) return false;
+  const ageSec = Math.abs(Date.now() / 1000 - tsNum);
+  if (ageSec > 300) return false;
+
+  return secrets.some((secret) => {
+    const expected = crypto.createHmac('sha256', secret).update(`${ts}:${rawBody}`).digest('hex');
+    try {
+      return crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(h1, 'hex'));
+    } catch {
+      return false;
+    }
+  });
+}
+
+export function getPaddleWebhookMeta(payload: unknown): PaddleWebhookMeta {
+  if (!payload || typeof payload !== 'object') {
+    return { eventId: '', eventType: '', occurredAt: null };
+  }
+  const p = payload as Record<string, unknown>;
+  const occurredRaw = typeof p.occurred_at === 'string' ? Date.parse(p.occurred_at) : NaN;
+  return {
+    eventId: typeof p.event_id === 'string' ? p.event_id : '',
+    eventType: typeof p.event_type === 'string' ? p.event_type : '',
+    occurredAt: Number.isFinite(occurredRaw) ? occurredRaw : null,
+  };
+}
+
 /**
  * Parse a `transaction.completed` Paddle webhook payload into our internal shape.
  * Returns null if event_type is not `transaction.completed` or required fields are missing.
  */
-export function parseTransactionCompleted(payload: unknown): PaddleTransactionCompleted | null {
+export function parseTransactionCompleted(
+  payload: unknown,
+  products?: PaymentProducts,
+): PaddleTransactionCompleted | null {
   if (!payload || typeof payload !== 'object') return null;
   const p = payload as Record<string, unknown>;
   if (p.event_type !== 'transaction.completed') return null;
 
   const data = p.data as Record<string, unknown> | undefined;
   if (!data) return null;
+  if (products) {
+    const entitlement = resolvePaddleEntitlement(extractPaddlePriceRefs(payload), products);
+    if (entitlement?.kind !== 'one_time') return null;
+  }
 
   const transactionId = typeof data.id === 'string' ? data.id : '';
   if (!transactionId) return null;
@@ -130,7 +194,10 @@ function mapPaddleStatus(eventType: string, paddleStatus: string | undefined): S
  *
  * Returns null if not a subscription event or userId missing.
  */
-export function parseSubscriptionEvent(payload: unknown): PaddleSubscriptionEvent | null {
+export function parseSubscriptionEvent(
+  payload: unknown,
+  products?: PaymentProducts,
+): PaddleSubscriptionEvent | null {
   if (!payload || typeof payload !== 'object') return null;
   const p = payload as Record<string, unknown>;
   const eventType = typeof p.event_type === 'string' ? p.event_type : '';
@@ -147,9 +214,18 @@ export function parseSubscriptionEvent(payload: unknown): PaddleSubscriptionEven
   const userId = customData && typeof customData.userId === 'string' ? customData.userId : '';
   if (!userId) return null;
 
+  const entitlement = products
+    ? resolvePaddleEntitlement(extractPaddlePriceRefs(payload), products)
+    : null;
   const tierRaw = customData && typeof customData.tier === 'string' ? customData.tier : 'pro';
-  const tier: SubscriptionTier =
-    tierRaw === 'pro' || tierRaw === 'max' ? (tierRaw as SubscriptionTier) : 'pro';
+  const tier: Exclude<SubscriptionTier, 'free'> =
+    entitlement?.kind === 'subscription'
+      ? entitlement.tier
+      : tierRaw === 'max'
+        ? 'max'
+        : 'pro';
+  const billing: SubscriptionBilling =
+    entitlement?.kind === 'subscription' ? entitlement.billing : 'monthly';
 
   const paddleStatus = typeof data.status === 'string' ? data.status : undefined;
   const status = mapPaddleStatus(eventType, paddleStatus);
@@ -165,7 +241,9 @@ export function parseSubscriptionEvent(payload: unknown): PaddleSubscriptionEven
     customerId,
     userId,
     tier,
+    billing,
     status,
     currentPeriodEnd: Number.isFinite(currentPeriodEnd ?? NaN) ? currentPeriodEnd : null,
+    occurredAt: getPaddleWebhookMeta(payload).occurredAt,
   };
 }

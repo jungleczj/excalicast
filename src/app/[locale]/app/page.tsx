@@ -16,6 +16,7 @@ import { ADAPTIVE_DOCKED_CONTROLS_WINDOW_SIZE, DesktopRecordingControls, getDesk
 import { I } from '@/components/icons';
 import { useSubscription } from '@/hooks/useSubscription';
 import { startRecording, type SessionHandle, type CameraFrameRect } from '@/services/recordingSession';
+import { recordingLifecycle } from '@/services/recordingLifecycleSingleton';
 import { acquireMicStream } from '@/services/audioRecorder';
 import { acquireCameraStream } from '@/services/cameraRecorder';
 import { acquireDisplayStream, getDisplayStreamPixelSize } from '@/services/displayCaptureRecorder';
@@ -143,7 +144,12 @@ export default function HomePage(): JSX.Element {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [recordingStarting, setRecordingStarting] = useState(false);
   const [framingWarn, setFramingWarn] = useState(false);
-  const pendingStartRef = useRef<{ config: RecordingSetupConfig; pos: { x: number; y: number }; size: number } | null>(null);
+  const pendingStartRef = useRef<{
+    config: RecordingSetupConfig;
+    pos: { x: number; y: number };
+    size: number;
+    cameraFrame: CameraFrameRect | null;
+  } | null>(null);
   // 取景阶段预采集的麦克风流（开录时复用，避免倒计时后才申请权限）
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -164,11 +170,12 @@ export default function HomePage(): JSX.Element {
   // 录制条位置：默认放在 Excalidraw toolbar 之下、右上角，避开顶部菜单
   const [barPos, setBarPos] = useState<{ x: number; y: number } | null>(null);
   const [desktopControlHost, setDesktopControlHost] = useState<Window | null>(null);
+  const intentionallyClosedHostsRef = useRef(new WeakSet<Window>());
   const dragStartRef = useRef<{ mouseX: number; mouseY: number; barX: number; barY: number } | null>(null);
   const [draggingBar, setDraggingBar] = useState(false);
   const [recordingBarDocked, setRecordingBarDocked] = useState(false);
 
-  const sessionRef = useRef<SessionHandle | null>(null);
+  const sessionRef = useRef<SessionHandle | null>(recordingLifecycle.activeSession());
   const stoppingRef = useRef(false);
   const changeRef = useRef<WhiteboardChangeFn | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -183,6 +190,21 @@ export default function HomePage(): JSX.Element {
   // 演示缩放：双击画布放大/还原（开关 or Alt/⌘+双击）
   const [zoomMode, setZoomMode] = useState(false);
   const zoomedRef = useRef(false);
+
+  useEffect(() => {
+    const active = recordingLifecycle.activeSession();
+    if (active) {
+      sessionRef.current = active;
+      changeRef.current = active.onWhiteboardChange;
+      laserPointRef.current = active.recordLaserPoint;
+      setHasAudio(active.hasAudio);
+      setHasCamera(active.hasCamera);
+      setCameraStream(active.cameraStream);
+      if (active.setup) setSetupConfig(active.setup);
+      setState('recording');
+    }
+    return () => recordingLifecycle.detachView();
+  }, []);
   const prevViewportRef = useRef<{ zoom: number; scrollX: number; scrollY: number } | null>(null);
   const zoomAnimRef = useRef<number | null>(null);
   const [laserActive, setLaserActive] = useState(false);
@@ -540,7 +562,10 @@ export default function HomePage(): JSX.Element {
 
   const closeDesktopControls = useCallback(() => {
     setDesktopControlHost((host) => {
-      if (host && host !== window && !host.closed) host.close();
+      if (host && host !== window && !host.closed) {
+        intentionallyClosedHostsRef.current.add(host);
+        host.close();
+      }
       return null;
     });
   }, []);
@@ -551,7 +576,12 @@ export default function HomePage(): JSX.Element {
       const host = await requestDesktopRecordingControlsWindow();
       if (!host) return null;
       if (host !== window) {
-        host.addEventListener('pagehide', () => setDesktopControlHost(null), { once: true });
+        host.addEventListener('pagehide', () => {
+          setDesktopControlHost(null);
+          if (!intentionallyClosedHostsRef.current.has(host) && recordingLifecycle.activeSession()) {
+            window.dispatchEvent(new Event('excalicast:pip-user-closed'));
+          }
+        }, { once: true });
       }
       setDesktopControlHost(host);
       return host;
@@ -585,10 +615,17 @@ export default function HomePage(): JSX.Element {
     try { host.resizeTo(size.width, size.height); } catch { /* Document PiP may not be resizable */ }
   }, []);
 
-  useEffect(() => () => closeDesktopControls(), [closeDesktopControls]);
+  useEffect(() => () => {
+    if (!recordingLifecycle.activeSession()) closeDesktopControls();
+  }, [closeDesktopControls]);
 
   // 真正开录（取景确认 + 倒计时结束后调用）—— 复用取景已采集的麦克风/摄像头流，瞬时开录
-  const beginRecording = useCallback(async (config: RecordingSetupConfig, startPos: { x: number; y: number }, startSize: number) => {
+  const beginRecording = useCallback(async (
+    config: RecordingSetupConfig,
+    startPos: { x: number; y: number },
+    startSize: number,
+    cameraFrame: CameraFrameRect | null,
+  ) => {
     try {
       await waitForCaptureSensitiveVisualsToUnmount(config.source);
       const session = await startRecording({
@@ -604,7 +641,7 @@ export default function HomePage(): JSX.Element {
       setMicStream(null);
       displayStreamRef.current = null;
       sessionRef.current = session;
-      try { router.prefetch(exportHrefForRecording(session.recordingId, locale)); } catch { /* prefetch is best-effort */ }
+      recordingLifecycle.attach(session);
       changeRef.current = session.onWhiteboardChange;
       laserPointRef.current = session.recordLaserPoint;
       // Excalidraw 不会因为「开始录制」自动触发 onChange。若画板在开录前已有内容，
@@ -633,7 +670,7 @@ export default function HomePage(): JSX.Element {
       });
       // 录制开始种一颗 t=0 事件，定位当前气泡位置
       if (session.hasCamera) {
-        session.recordCameraMove(startPos.x, startPos.y, startSize);
+        session.recordCameraMove(startPos.x, startPos.y, startSize, cameraFrame);
       }
     } catch (err) {
       setRecordingStarting(false);
@@ -761,7 +798,12 @@ export default function HomePage(): JSX.Element {
         resizeDesktopControlsHost(desktopControlHost, ADAPTIVE_DOCKED_CONTROLS_WINDOW_SIZE, 'docked', { background: 'transparent' });
       }
     }
-    pendingStartRef.current = { config: finalConfig, pos: cameraPos, size: cameraSize };
+    pendingStartRef.current = {
+      config: finalConfig,
+      pos: cameraPos,
+      size: cameraSize,
+      cameraFrame: cameraEnabled ? getCropFrameRect() : null,
+    };
     setCountdown(3);
   }, [setupConfig, cameraPos, cameraSize, cameraEnabled, sourceCropWindow, customOutput, desktopControlHost, getCropFrameRect, openDesktopControls, resizeDesktopControlsHost]);
 
@@ -788,7 +830,7 @@ export default function HomePage(): JSX.Element {
       setCountdown(null);
       if (pending) {
         setRecordingStarting(true);
-        void beginRecording(pending.config, pending.pos, pending.size);
+        void beginRecording(pending.config, pending.pos, pending.size, pending.cameraFrame);
       }
       return;
     }
@@ -834,12 +876,17 @@ export default function HomePage(): JSX.Element {
     }
     // on ↔ muted（既有路径）
     const next = !cameraMuted;
-    setCameraMuted(next);
-    if (next) setCameraStream(null);
     try {
       await sessionRef.current?.setCameraMuted(next);
-    } catch { /* ignore：UI 状态已经反映 mute */ }
-    if (!next) setCameraStream(sessionRef.current?.cameraStream ?? null);
+      setCameraMuted(next);
+      setCameraStream(next ? null : (sessionRef.current?.cameraStream ?? null));
+    } catch (err) {
+      // Reacquisition can fail after permission/device changes. Keep the UI in
+      // the muted state instead of claiming that a camera stream exists.
+      setCameraMuted(true);
+      setCameraStream(null);
+      alert(t('cameraOpenFailed', { message: err instanceof Error ? err.message : 'unknown' }));
+    }
   }, [hasCamera, cameraMuted, t]);
 
   // 激光笔：调 Excalidraw setActiveTool 切到 laser；再点切回 selection
@@ -856,7 +903,7 @@ export default function HomePage(): JSX.Element {
   }, [laserActive]);
 
   const handleStop = useCallback(async () => {
-    const s = sessionRef.current;
+    const s = sessionRef.current ?? recordingLifecycle.activeSession();
     if (!s || stoppingRef.current) return;
     stoppingRef.current = true;
     setRecordingStarting(false);
@@ -864,7 +911,7 @@ export default function HomePage(): JSX.Element {
     const recordingId = s.recordingId;
     // Stop 可以从 Document PiP 的独立窗口触发；这里把媒体收尾安排到微任务，
     // 让主页面先响应“跳到导出页”的用户意图，同时仍保证它早于下一轮关闭控制窗口。
-    const finalizeRecording = s.stop();
+    const finalizeRecording = recordingLifecycle.stop('done');
     sessionRef.current = null;
     changeRef.current = null;
     laserPointRef.current = null;
@@ -875,23 +922,25 @@ export default function HomePage(): JSX.Element {
     setAudioMuted(false);
     setCameraMuted(false);
     const exportHref = exportHrefForRecording(recordingId, locale);
-    const syncUrlWithoutUnloading = () => {
+    const ensureExportRoute = () => {
       if (!window.location.pathname.includes(`/export/${recordingId}`)) {
-        window.history.pushState(null, '', exportHref);
+        router.replace(exportHref);
       }
     };
-    const urlSyncTimer = window.setTimeout(syncUrlWithoutUnloading, 350);
+    // 首次打开导出页时 Next.js 可能仍在加载 route chunk。过早 replace 会取消
+    // 正在进行的 push；只在确实长时间没有完成导航时启动同路由重试。
+    window.setTimeout(ensureExportRoute, 5_000);
     try {
       router.push(exportHref);
     } catch {
-      window.clearTimeout(urlSyncTimer);
-      syncUrlWithoutUnloading();
+      ensureExportRoute();
     }
     // Stop 可以从 Document PiP 的独立窗口触发。先发起主页面导航，
     // 再在下一轮事件循环释放控制窗口，避免销毁点击上下文导致导出页无法打开。
     window.setTimeout(closeDesktopControls, 0);
 
     void finalizeRecording.then(async (meta) => {
+      if (!meta) return;
       trackEvent('recording_complete', { durationMs: meta.durationMs, framing: setupConfig.framing, hasCamera: meta.hasCamera, hasAudio: meta.hasAudio });
       // 持久化录制中最终框定的裁切框到 recording.setup（导出默认沿用）
       const cw = cropWindowRef.current;
@@ -914,11 +963,19 @@ export default function HomePage(): JSX.Element {
       } catch { /* best-effort: export page will continue to show pending if this fails */ }
     }).finally(() => {
       stoppingRef.current = false;
-      if (window.location.pathname.includes(`/export/${recordingId}`)) {
-        try { router.replace(exportHref); } catch { /* native history fallback already moved the URL */ }
-      }
     });
   }, [router, locale, t, setupConfig, customOutput, clearDisplayStream, closeDesktopControls]);
+
+  useEffect(() => {
+    const onPipUserClosed = () => {
+      if (!recordingLifecycle.activeSession()) return;
+      if (window.confirm(en ? 'Stop recording?' : '是否停止录制？')) {
+        void handleStop();
+      }
+    };
+    window.addEventListener('excalicast:pip-user-closed', onPipUserClosed);
+    return () => window.removeEventListener('excalicast:pip-user-closed', onPipUserClosed);
+  }, [en, handleStop]);
 
   useEffect(() => {
     if (setupConfig.source?.kind !== 'desktop' || (state !== 'recording' && state !== 'paused')) return;
@@ -940,12 +997,13 @@ export default function HomePage(): JSX.Element {
   }, [handlePause, handleResume, handleStop, setupConfig.source?.kind, state]);
 
   const handleDiscard = useCallback(async () => {
-    const s = sessionRef.current;
+    const s = sessionRef.current ?? recordingLifecycle.activeSession();
     if (!s) return;
     if (!confirm(t('discardConfirm'))) return;
     trackEvent('recording_discard');
     try {
-      const meta = await s.stop();
+      const meta = await recordingLifecycle.stop('done');
+      if (!meta) return;
       const { deleteRecording } = await import('@/lib/db-client');
       await deleteRecording(meta.id);
     } catch { /* ignore */ }
@@ -965,10 +1023,12 @@ export default function HomePage(): JSX.Element {
   const hideCaptureSensitiveVisuals = isDisplaySource && (countdown !== null || recordingStarting || isRecording);
   // 显示源录制会直接采集浏览器画面。录制真正开始前，页内控制条必须撤出，
   // 只在 Document PiP 的独立文档中保留同一套完整控制条，避免录入最终素材。
-  const usesExternalRecordingControls = state !== 'idle' && setupConfig.source?.kind !== 'whiteboard';
+  const hasExternalControlsHost = !!desktopControlHost && !desktopControlHost.closed;
+  const usesExternalRecordingControls = state !== 'idle'
+    && setupConfig.source?.kind !== 'whiteboard'
+    && hasExternalControlsHost;
   const usesExternalFramingControls = state !== 'idle' && usesDetachedSourceControls(setupConfig.source);
   const usesFullscreenCountdown = state !== 'idle' && usesFullscreenCountdownSource(setupConfig.source);
-  const hasExternalControlsHost = !!desktopControlHost && !desktopControlHost.closed;
   const showExternalFramingControls = usesExternalFramingControls && hasExternalControlsHost && state === 'framing' && countdown === null && !recordingStarting;
   const showExternalCountdown = usesFullscreenCountdown && hasExternalControlsHost && countdown !== null && countdown > 0;
   const showInPageFramingControls = state === 'framing' && countdown === null && !recordingStarting && !showExternalFramingControls;

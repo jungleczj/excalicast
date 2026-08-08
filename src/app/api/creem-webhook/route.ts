@@ -5,8 +5,9 @@ import {
   extractOneTimePaid,
   extractSubscriptionEvent,
 } from '@/services/creemServer';
-import { markRecordingPaid, upsertSubscription } from '@/lib/db';
+import { markRecordingPaid, recordPaymentWebhookEvent, releasePaymentWebhookEvent, upsertProviderSubscription } from '@/lib/db';
 import { getAllCreemWebhookSecrets } from '@/lib/paymentConfig';
+import crypto from 'node:crypto';
 
 export const runtime = 'nodejs';
 
@@ -38,39 +39,84 @@ export async function POST(req: Request): Promise<NextResponse> {
   } catch {
     return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
   }
-
-  const ev = parseCreemEvent(payload);
-  if (!ev) {
-    return NextResponse.json({ ok: true, ignored: 'unrecognised_payload' });
+  const eventMeta = getCreemWebhookMeta(payload, rawBody);
+  const claim = await recordPaymentWebhookEvent({
+    provider: 'creem',
+    eventId: eventMeta.eventId,
+    eventType: eventMeta.eventType,
+    occurredAt: eventMeta.occurredAt,
+    rawPayload: rawBody,
+  });
+  if (claim.duplicate) {
+    return NextResponse.json({ ok: true, duplicate: true });
   }
 
-  // 1) One-time payment（去水印）
-  const oneTime = extractOneTimePaid(ev);
-  if (oneTime) {
-    await markRecordingPaid({
-      recordingId: oneTime.recordingId,
-      amountCents: oneTime.amountCents,
-      currency: oneTime.currency,
-      paddleTransactionId: `creem:${oneTime.transactionId}`,
-      rawPayload: rawBody,
-    });
-    return NextResponse.json({ ok: true, kind: 'one_time' });
-  }
+  try {
+    const ev = parseCreemEvent(payload);
+    if (!ev) {
+      return NextResponse.json({ ok: true, ignored: 'unrecognised_payload' });
+    }
 
-  // 2) Subscription lifecycle
-  const sub = extractSubscriptionEvent(ev);
-  if (sub) {
-    await upsertSubscription({
-      userId: sub.userId,
-      tier: sub.tier,
-      status: sub.status,
-      paddleSubscriptionId: `creem:${sub.subscriptionId}`,
-      paddleCustomerId: sub.customerId ? `creem:${sub.customerId}` : null,
-      currentPeriodEnd: sub.currentPeriodEnd,
-      rawPayload: rawBody,
-    });
-    return NextResponse.json({ ok: true, kind: 'subscription', status: sub.status });
-  }
+    // 1) One-time payment（去水印）
+    const oneTime = extractOneTimePaid(ev);
+    if (oneTime) {
+      await markRecordingPaid({
+        recordingId: oneTime.recordingId,
+        amountCents: oneTime.amountCents,
+        currency: oneTime.currency,
+        paddleTransactionId: `creem:${oneTime.transactionId}`,
+        rawPayload: rawBody,
+      });
+      return NextResponse.json({ ok: true, kind: 'one_time' });
+    }
 
-  return NextResponse.json({ ok: true, ignored: ev.eventType });
+    // 2) Subscription lifecycle
+    const sub = extractSubscriptionEvent(ev);
+    if (sub) {
+      const result = await upsertProviderSubscription({
+        userId: sub.userId,
+        provider: 'creem',
+        tier: sub.tier,
+        status: sub.status,
+        providerSubscriptionId: sub.subscriptionId,
+        providerCustomerId: sub.customerId,
+        currentPeriodEnd: sub.currentPeriodEnd,
+        eventOccurredAt: eventMeta.occurredAt,
+        rawPayload: rawBody,
+      });
+      return NextResponse.json({ ok: true, kind: 'subscription', status: sub.status, applied: result.applied });
+    }
+
+    return NextResponse.json({ ok: true, ignored: ev.eventType });
+  } catch (error) {
+    await releasePaymentWebhookEvent('creem', eventMeta.eventId);
+    throw error;
+  }
+}
+
+function getCreemWebhookMeta(payload: unknown, rawBody: string): {
+  eventId: string;
+  eventType: string;
+  occurredAt: number | null;
+} {
+  const p = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  const eventId = firstString(p.id, p.event_id) ?? `sha256:${crypto.createHash('sha256').update(rawBody).digest('hex')}`;
+  const eventType = firstString(p.eventType, p.event_type, p.type) ?? 'unknown';
+  const rawOccurred = firstString(p.occurred_at, p.created_at, p.createdAt);
+  const occurredAt = rawOccurred
+    ? (/^\d+$/.test(rawOccurred) ? Number(rawOccurred) * 1000 : Date.parse(rawOccurred))
+    : NaN;
+  return {
+    eventId,
+    eventType,
+    occurredAt: Number.isFinite(occurredAt) ? occurredAt : null,
+  };
+}
+
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value) return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return null;
 }

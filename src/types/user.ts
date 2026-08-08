@@ -7,11 +7,15 @@ export type SubscriptionStatus = 'inactive' | 'active' | 'past_due' | 'paused' |
 
 export interface UserSubscription {
   userId: string;
+  provider: 'creem' | 'paddle';
   tier: SubscriptionTier;
   status: SubscriptionStatus;
+  providerSubscriptionId: string | null;
+  providerCustomerId: string | null;
   paddleSubscriptionId: string | null;
   paddleCustomerId: string | null;
   currentPeriodEnd: number | null; // ms epoch
+  lastEventOccurredAt: number | null;
   updatedAt: number;
 }
 

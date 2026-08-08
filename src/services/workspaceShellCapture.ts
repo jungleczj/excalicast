@@ -12,6 +12,18 @@ const MIN_CAPTURE_GAP_MS = 1500;       // 两次抓取至少间隔，防止 chro
 const APPSTATE_DEBOUNCE_MS = 1000;     // appState 连续变化停止后再抓（也把指纹计算推迟到此刻）
 const SCROLL_ZOOM_DEDUP_EPS = 0.04;    // zoom 差 < 4%、scroll 差 < 4% 视为同一帧
 
+export function dataUrlToBlob(dataUrl: string): Blob {
+  const comma = dataUrl.indexOf(',');
+  if (comma < 0) throw new Error('invalid_data_url');
+  const header = dataUrl.slice(0, comma);
+  const payload = dataUrl.slice(comma + 1);
+  const mime = /^data:([^;,]+)/.exec(header)?.[1] ?? 'application/octet-stream';
+  const binary = header.includes(';base64') ? atob(payload) : decodeURIComponent(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: mime });
+}
+
 const CHROME_KEYS = [
   'selectedElementIds',
   'activeTool',
@@ -191,7 +203,7 @@ export class ShellCapturer {
           setTimeout(() => reject(new Error('shell_capture_timeout')), CAPTURE_TIMEOUT_MS),
         ),
       ]);
-      const blob = await (await fetch(dataUrl)).blob();
+      const blob = dataUrlToBlob(dataUrl);
       const hash = await pngHash(blob);
       if (hash === this.lastHash) return; // dedupe
       this.lastHash = hash;

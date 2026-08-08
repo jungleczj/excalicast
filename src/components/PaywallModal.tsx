@@ -68,7 +68,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
         try {
           if (await isPaid(recordingId)) {
-            trackEvent('purchase_success', { kind: 'one_time' });
+            trackEvent('purchase_success', { kind: 'one_time', payment_provider: provider });
             setStatusMsg(t('unlocked'));
             onPaid?.();
             onClose();
@@ -95,7 +95,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
       pollingRef.current = true;
       try {
         if (await isPaid(recordingId)) {
-          trackEvent('purchase_success', { kind: 'one_time' });
+          trackEvent('purchase_success', { kind: 'one_time', payment_provider: provider });
           setStatusMsg(t('unlocked'));
           onPaid?.();
           onClose();
@@ -120,7 +120,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
     setBusy(true);
     // 关键：在用户点击的同步阶段先开好标签页，避免 await fetch 之后再 window.open 被弹窗拦截。
     const payWin = window.open('about:blank', '_blank');
-    trackEvent('checkout_start', { kind: 'one_time' });
+    trackEvent('checkout_start', { kind: 'one_time', payment_provider: provider });
     try {
       const res = await fetch('/api/checkout/one-time', {
         method: 'POST',
@@ -130,7 +130,7 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
       });
       const j = (await res.json().catch(() => ({}))) as {
         provider?: 'paddle' | 'creem';
-        priceId?: string;
+        transactionId?: string;
         redirectUrl?: string;
         error?: string;
         message?: string;
@@ -150,7 +150,8 @@ export function PaywallModal({ open, recordingId, onClose, onPaid, onUpgradePro 
         setBusy(false);
         return;
       }
-      openCheckout({ paddle, recordingId });
+      if (!j.transactionId) throw new Error('paddle_transaction_missing');
+      openCheckout({ paddle, transactionId: j.transactionId });
     } catch (err) {
       payWin?.close();
       setError(err instanceof Error ? err.message : 'unknown');

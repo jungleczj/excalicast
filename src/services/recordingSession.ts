@@ -6,7 +6,9 @@ import { getCurrentOwnerKey } from '@/lib/ownerKey';
 import { startAudioRecorder, type AudioRecorderHandle } from '@/services/audioRecorder';
 import { startCameraRecorder, type CameraHandle } from '@/services/cameraRecorder';
 import { startDisplayCaptureRecorder, type DisplayCaptureHandle } from '@/services/displayCaptureRecorder';
+import { collectRecorderWarnings, type RecorderTrackKind } from '@/services/mediaRecorderHealth';
 import { ShellCapturer } from '@/services/workspaceShellCapture';
+import { captureCameraPlacement } from '@/services/cameraPlacement';
 import type { LaserEvent, RecordingMetadata, RecordingSetupConfig } from '@/types/recording';
 
 /** 裁切框 viewport 矩形（viewport 像素）。摄像头位置/尺寸相对它归一。 */
@@ -16,6 +18,7 @@ export interface SessionHandle {
   recordingId: string;
   startedAt: number;
   hasAudio: boolean;
+  setup?: RecordingSetupConfig;
   /**
    * getter：随时反映"摄像头是否已经 acquire 过"。可能从 false 升到 true（录制中调用
    * enableCamera()），但 acquire 之后不会回到 false —— 后续的 mute 走 cameraMuted。
@@ -73,7 +76,7 @@ export interface SessionHandle {
   recordLaserPoint: (x: number, y: number, button: 'down' | 'up') => void;
   pause: () => void;
   resume: () => void;
-  stop: () => Promise<RecordingMetadata>;
+  stop: (status?: 'done' | 'interrupted') => Promise<RecordingMetadata>;
   getElapsedMs: () => number;
 }
 
@@ -193,6 +196,32 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
   let lastFlushedMove: { x: number; y: number; s: number; frame?: CameraFrameRect | null } | null = null;
   let cameraMoveTimer: ReturnType<typeof setTimeout> | null = null;
 
+  const normalizeCameraMove = (
+    move: { x: number; y: number; s: number; frame?: CameraFrameRect | null },
+    rootRect: DOMRect,
+  ): { rx: number; ry: number; rs: number; placement: ReturnType<typeof captureCameraPlacement> } => {
+    if (move.frame && move.frame.w > 0 && move.frame.h > 0) {
+      return {
+        rx: (move.x - move.frame.x) / move.frame.w,
+        ry: (move.y - move.frame.y) / move.frame.h,
+        rs: move.s / Math.min(move.frame.w, move.frame.h),
+        placement: captureCameraPlacement({
+          contentRect: { x: move.frame.x, y: move.frame.y, width: move.frame.w, height: move.frame.h },
+          bubbleRect: { x: move.x, y: move.y, width: move.s, height: move.s },
+        }),
+      };
+    }
+    return {
+      rx: (move.x - rootRect.left) / rootRect.width,
+      ry: (move.y - rootRect.top) / rootRect.height,
+      rs: move.s / Math.min(rootRect.width, rootRect.height),
+      placement: captureCameraPlacement({
+        contentRect: { x: rootRect.left, y: rootRect.top, width: rootRect.width, height: rootRect.height },
+        bubbleRect: { x: move.x, y: move.y, width: move.s, height: move.s },
+      }),
+    };
+  };
+
   const flushCameraMove = async () => {
     cameraMoveTimer = null;
     const move = pendingCameraMove;
@@ -204,19 +233,8 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
     if (rect.width <= 0 || rect.height <= 0) return;
     const t = elapsed();
     lastCameraEventAt = t;
-    let rx: number, ry: number, rs: number;
-    if (move.frame && move.frame.w > 0 && move.frame.h > 0) {
-      // 固定比例：相对裁切框存；尺寸按裁切框较短边归一 → 导出与录制所见一致、跨比例协调。
-      rx = (move.x - move.frame.x) / move.frame.w;
-      ry = (move.y - move.frame.y) / move.frame.h;
-      rs = move.s / Math.min(move.frame.w, move.frame.h);
-    } else {
-      // default（整画板）：相对 workspaceRoot（shell）。
-      rx = (move.x - rect.left) / rect.width;
-      ry = (move.y - rect.top) / rect.height;
-      rs = move.s / Math.min(rect.width, rect.height);
-    }
-    await db.cameraPositions.add({ recordingId, timestamp: Math.max(0, t), rx, ry, rs });
+    const normalized = normalizeCameraMove(move, rect);
+    await db.cameraPositions.add({ recordingId, timestamp: Math.max(0, t), ...normalized });
     lastFlushedMove = move;
   };
 
@@ -241,6 +259,7 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
     recordingId,
     startedAt,
     hasAudio,
+    setup: opts.setup,
     get hasCamera() { return camera !== null; },
     get cameraStream() { return camera?.stream ?? null; },
     getElapsedMs: elapsed,
@@ -317,26 +336,22 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
           const rect = root.getBoundingClientRect();
           if (rect.width > 0 && rect.height > 0) {
             const last = pendingCameraMove ?? lastFlushedMove;
-            let rx: number, ry: number, rs: number;
-            if (last && last.frame && last.frame.w > 0 && last.frame.h > 0) {
-              rx = (last.x - last.frame.x) / last.frame.w;
-              ry = (last.y - last.frame.y) / last.frame.h;
-              rs = last.s / Math.min(last.frame.w, last.frame.h);
-            } else if (last) {
-              rx = (last.x - rect.left) / rect.width;
-              ry = (last.y - rect.top) / rect.height;
-              rs = last.s / Math.min(rect.width, rect.height);
+            let normalized: ReturnType<typeof normalizeCameraMove>;
+            if (last) {
+              normalized = normalizeCameraMove(last, rect);
             } else {
               // 默认右下角，160px 直径（相对 shell 较短边）
-              rs = 160 / Math.min(rect.width, rect.height);
-              rx = 1 - rs - 20 / rect.width;
-              ry = 1 - (160 / rect.height) - 20 / rect.height;
+              normalized = normalizeCameraMove({
+                x: rect.right - 180,
+                y: rect.bottom - 180,
+                s: 160,
+              }, rect);
             }
             const t = elapsed();
             await db.cameraPositions.add({
               recordingId,
               timestamp: Math.max(0, t),
-              rx, ry, rs,
+              ...normalized,
               hidden: false,
             });
             lastCameraEventAt = t;
@@ -356,13 +371,11 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
       if (rect.width <= 0 || rect.height <= 0) return;
       const t = elapsed();
       const last = pendingCameraMove ?? lastFlushedMove;
-      const rx = last ? (last.x - rect.left) / rect.width : 0;
-      const ry = last ? (last.y - rect.top) / rect.height : 0;
-      const rs = last ? last.s / rect.width : 0;
+      const normalized = last ? normalizeCameraMove(last, rect) : { rx: 0, ry: 0, rs: 0 };
       await db.cameraPositions.add({
         recordingId,
         timestamp: Math.max(0, t),
-        rx, ry, rs,
+        ...normalized,
         hidden: muted,
       });
       lastCameraEventAt = t;
@@ -383,11 +396,24 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
       camera?.resume();
       display?.resume();
     },
-    async stop() {
+    async stop(finalStatus = 'done') {
       if (paused) {
         pausedTotal += Date.now() - pauseStartedAt;
         paused = false;
       }
+      const durationMs = Date.now() - startedAt - pausedTotal;
+      // Call every MediaRecorder.stop() before the first await. The detached
+      // controller may close immediately after this method returns its promise;
+      // delaying stop behind IndexedDB work can otherwise lose the final chunk.
+      const activeRecorders: Array<{ track: RecorderTrackKind; stop: () => Promise<void> }> = [];
+      if (audio) activeRecorders.push({ track: 'audio', stop: audio.stop });
+      if (camera) activeRecorders.push({ track: 'camera', stop: camera.stop });
+      if (display) activeRecorders.push({ track: 'screen', stop: display.stop });
+      const mediaFinalization = Promise.allSettled(activeRecorders.map((entry) => entry.stop()));
+      await db.recordings.update(recordingId, {
+        durationMs,
+        status: 'finalizing',
+      });
       await drainWhiteboardSnapshots();
       if (cameraMoveTimer !== null) {
         clearTimeout(cameraMoveTimer);
@@ -405,18 +431,18 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
         await flushLaserEvents();
       }
       shellCapturer?.stop();
-      const durationMs = Date.now() - startedAt - pausedTotal;
-      await db.recordings.update(recordingId, {
-        durationMs,
-        status: 'done',
-      });
       // MediaRecorder 最后一帧/最后一个音频分片的收尾可能分别等待编码器回调。
       // 三路互不依赖，串行等待会把停止到导出页的延迟累加；并行收尾只需等待最慢一路。
-      await Promise.all([
-        audio?.stop().catch(() => undefined),
-        camera?.stop().catch(() => undefined),
-        display?.stop().catch(() => undefined),
-      ]);
+      const mediaResults = await mediaFinalization;
+      const warnings = collectRecorderWarnings(activeRecorders.map((entry, index) => ({
+        track: entry.track,
+        result: mediaResults[index],
+      })));
+      await db.recordings.update(recordingId, {
+        durationMs,
+        status: finalStatus === 'done' && warnings.length > 0 ? 'interrupted' : finalStatus,
+        warnings,
+      });
       const meta = await db.recordings.get(recordingId);
       if (!meta) throw new Error('recording_lost_after_stop');
       return meta;

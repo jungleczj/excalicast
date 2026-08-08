@@ -1,6 +1,7 @@
 'use client';
 
 import { getClientDb } from '@/lib/db-client';
+import { ChunkWriteBatcher } from '@/services/mediaRecorderHealth';
 import { stopMediaRecorderSafely } from '@/services/mediaRecorderStop';
 
 const RECORDER_TIMESLICE_MS = 250;
@@ -47,15 +48,25 @@ export async function startAudioRecorder(
   const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 32000 });
 
   let chunkIndex = 0;
-  const pendingWrites: Promise<unknown>[] = [];
+  let stopping = false;
+  let endedUnexpectedly = false;
+  for (const track of stream.getAudioTracks()) {
+    track.addEventListener('ended', () => {
+      if (!stopping) endedUnexpectedly = true;
+    });
+  }
   const db = getClientDb();
+  const chunkWriter = new ChunkWriteBatcher<{ recordingId: string; index: number; blob: Blob }>({
+    writeBatch: (items) => db.audioChunks.bulkAdd(items),
+    sizeOf: (item) => item.blob.size,
+  });
   recorder.ondataavailable = (e) => {
     if (e.data && e.data.size > 0) {
-      pendingWrites.push(db.audioChunks.add({
+      chunkWriter.enqueue({
         recordingId,
         index: chunkIndex++,
         blob: e.data,
-      }).catch(() => undefined));
+      });
     }
   };
 
@@ -64,9 +75,12 @@ export async function startAudioRecorder(
   return {
     stream,
     async stop() {
+      stopping = true;
       await stopMediaRecorderSafely(recorder);
-      await Promise.allSettled(pendingWrites);
       stream.getTracks().forEach((t) => t.stop());
+      try { await chunkWriter.flush(); }
+      catch { throw new Error('audio_chunk_write_failed'); }
+      if (endedUnexpectedly) throw new Error('audio_track_ended');
     },
     pause() {
       if (recorder.state === 'recording') recorder.pause();

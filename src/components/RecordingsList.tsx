@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Link, useRouter } from '@/i18n/navigation';
-import { listRecordings, deleteRecording, updateRecordingTitle, updateRecordingTags, migrateRecordingsOwner } from '@/lib/db-client';
+import { listRecordingSummaries, loadRecordingThumbnail, deleteRecording, updateRecordingTitle, updateRecordingTags, migrateRecordingsOwner } from '@/lib/db-client';
 import { getOrCreateGuestId } from '@/lib/ownerKey';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -19,13 +19,14 @@ import {
 import { useSubscription } from '@/hooks/useSubscription';
 import { I } from '@/components/icons';
 import { trackEvent } from '@/lib/analytics/track';
-import type { RecordingMetadata } from '@/types/recording';
+import type { RecordingLibrarySummary } from '@/types/recording';
 import { ThumbScene } from '@/components/ThumbScene';
 
 interface Props {
   refreshKey?: number;
   /** 来自页面的搜索词（按标题过滤）。 */
   query?: string;
+  onStatsChange?: (stats: { count: number; totalMs: number }) => void;
 }
 
 type FilterKind = 'all' | 'unfinished' | 'backed' | 'local';
@@ -34,7 +35,7 @@ type ViewKind = 'grid' | 'list';
 
 interface MergedItem {
   id: string;
-  local: RecordingMetadata | null;
+  local: RecordingLibrarySummary | null;
   cloud: CloudRecording | null;
 }
 
@@ -69,7 +70,7 @@ interface DisplayMeta {
   hasAudio: boolean;
   hasCamera: boolean;
   thumbnail?: string | null;
-  status: 'recording' | 'done' | 'error';
+  status: 'recording' | 'finalizing' | 'interrupted' | 'done' | 'error';
 }
 
 function displayMeta(it: MergedItem): DisplayMeta {
@@ -82,7 +83,7 @@ function displayMeta(it: MergedItem): DisplayMeta {
       durationMs: m.durationMs,
       hasAudio: m.hasAudio,
       hasCamera: m.hasCamera,
-      thumbnail: m.lastFrameThumbnail,
+      thumbnail: null,
       status: m.status,
     };
   }
@@ -127,11 +128,38 @@ function Pill({ children, hi = false }: { children: React.ReactNode; hi?: boolea
   );
 }
 
-function RecordingThumbnail({ meta, className = '' }: { meta: DisplayMeta; className?: string }): JSX.Element {
-  if (meta.thumbnail) {
+function RecordingThumbnail({
+  meta,
+  localRecordingId,
+  className = '',
+}: {
+  meta: DisplayMeta;
+  localRecordingId?: string | null;
+  className?: string;
+}): JSX.Element {
+  const [localThumbnail, setLocalThumbnail] = useState<string | null>(null);
+  useEffect(() => {
+    if (!localRecordingId || meta.thumbnail) {
+      setLocalThumbnail(null);
+      return;
+    }
+    let disposed = false;
+    let objectUrl: string | null = null;
+    void loadRecordingThumbnail(localRecordingId).then((blob) => {
+      if (!blob || disposed) return;
+      objectUrl = URL.createObjectURL(blob);
+      setLocalThumbnail(objectUrl);
+    }).catch(() => undefined);
+    return () => {
+      disposed = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [localRecordingId, meta.thumbnail]);
+  const thumbnail = meta.thumbnail ?? localThumbnail;
+  if (thumbnail) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
-      <img src={meta.thumbnail} alt="" className={`h-full w-full object-cover ${className}`} />
+      <img src={thumbnail} alt="" className={`h-full w-full object-cover ${className}`} />
     );
   }
   return (
@@ -142,8 +170,36 @@ function RecordingThumbnail({ meta, className = '' }: { meta: DisplayMeta; class
 }
 
 type BusyKind = 'upload' | 'download' | null;
+type LibraryLoadState = 'loading' | 'ready' | 'partial' | 'error';
 
-export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Element {
+function mergeItems(local: RecordingLibrarySummary[], cloud: CloudRecording[]): MergedItem[] {
+  const map = new Map<string, MergedItem>();
+  for (const item of local) map.set(item.id, { id: item.id, local: item, cloud: null });
+  for (const item of cloud) {
+    const existing = map.get(item.id);
+    if (existing) existing.cloud = item;
+    else map.set(item.id, { id: item.id, local: null, cloud: item });
+  }
+  return Array.from(map.values()).sort(
+    (a, b) => displayMeta(b).startedAt - displayMeta(a).startedAt,
+  );
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error('cloud_list_timeout')), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+export function RecordingsList({ refreshKey = 0, query = '', onStatsChange }: Props): JSX.Element {
   const t = useTranslations('library');
   const locale = useLocale();
   const [filter, setFilter] = useState<FilterKind>('all');
@@ -155,7 +211,10 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
   const canCloud = subscription.permissions.cloudBackup && subscription.loggedIn;
 
   const [items, setItems] = useState<MergedItem[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [loadState, setLoadState] = useState<LibraryLoadState>('loading');
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [pendingCloudItems, setPendingCloudItems] = useState<CloudRecording[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<string>('');
   const [editingTagsId, setEditingTagsId] = useState<string | null>(null);
@@ -167,42 +226,95 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const editInputRef = useRef<HTMLInputElement | null>(null);
   const tagsInputRef = useRef<HTMLInputElement | null>(null);
+  const refreshRequestRef = useRef(0);
 
   const refresh = useCallback(async () => {
     // 等 auth settle 再列表/认领：避免在登录态解析前用 guestId 误认领 legacy 录制。
-    if (authLoading) return;
+    if (authLoading) {
+      setLoadState('loading');
+      return;
+    }
+    const requestId = ++refreshRequestRef.current;
+    setLoadState('loading');
+    setErrorMsg(null);
+    setPendingCloudItems([]);
     // 本地录制按 ownerKey 隔离：登录=user.id，匿名=guestId。
     const ownerKey = user?.id ?? getOrCreateGuestId();
     // 登录后把匿名期间录制并入账户（幂等：迁移后 guest 行清零）。
-    if (user?.id) {
-      try { await migrateRecordingsOwner(getOrCreateGuestId(), user.id); } catch { /* ignore */ }
-    }
-    const localList = await listRecordings(ownerKey);
-    let cloudList: CloudRecording[] = [];
-    if (canCloud) {
+    let settled = false;
+    try {
+      if (user?.id) {
+        try { await migrateRecordingsOwner(getOrCreateGuestId(), user.id); } catch { /* ignore */ }
+      }
+      const cloudPromise = canCloud
+        ? withTimeout(listCloudRecordings(), 5_000)
+        : Promise.resolve<CloudRecording[]>([]);
+      const localPage = await listRecordingSummaries(ownerKey);
+      if (refreshRequestRef.current !== requestId) return;
+      onStatsChange?.({ count: localPage.totalCount, totalMs: localPage.totalMs });
+      setItems(mergeItems(localPage.items, []));
+      setNextCursor(localPage.nextCursor);
+      setLoadState(canCloud ? 'partial' : 'ready');
+
+      if (!canCloud) {
+        settled = true;
+        return;
+      }
       try {
-        cloudList = await listCloudRecordings();
+        const cloudList = await cloudPromise;
+        if (refreshRequestRef.current !== requestId) return;
+        setItems((current) => mergeItems(
+          current.flatMap((item) => item.local ? [item.local] : []),
+          cloudList.slice(0, 30),
+        ));
+        setPendingCloudItems(cloudList.slice(30));
+        setLoadState('ready');
       } catch (err) {
         if (process.env.NODE_ENV !== 'production') {
           console.warn('listCloudRecordings failed', err);
         }
+        if (refreshRequestRef.current === requestId) setLoadState('partial');
       }
+      settled = true;
+    } catch (err) {
+      if (refreshRequestRef.current !== requestId) return;
+      setItems([]);
+      setNextCursor(null);
+      setErrorMsg(err instanceof Error ? err.message : 'library_load_failed');
+      setLoadState('error');
+      settled = true;
+    } finally {
+      if (refreshRequestRef.current === requestId && !settled) setLoadState('error');
     }
-    const map = new Map<string, MergedItem>();
-    for (const m of localList) {
-      map.set(m.id, { id: m.id, local: m, cloud: null });
+  }, [canCloud, user?.id, authLoading, onStatsChange]);
+
+  const loadMore = useCallback(async () => {
+    if ((!nextCursor && pendingCloudItems.length === 0) || loadingMore || authLoading) return;
+    setLoadingMore(true);
+    try {
+      const ownerKey = user?.id ?? getOrCreateGuestId();
+      const page = nextCursor
+        ? await listRecordingSummaries(ownerKey, { cursor: nextCursor })
+        : { items: [], nextCursor: null };
+      const nextCloud = pendingCloudItems.slice(0, 30);
+      setItems((current) => {
+        const local = current.flatMap((item) => item.local ? [item.local] : []);
+        const cloud = current.flatMap((item) => item.cloud ? [item.cloud] : []);
+        const localById = new Map(local.map((item) => [item.id, item]));
+        for (const item of page.items) localById.set(item.id, item);
+        const cloudById = new Map(cloud.map((item) => [item.id, item]));
+        for (const item of nextCloud) cloudById.set(item.id, item);
+        return mergeItems(Array.from(localById.values()), Array.from(cloudById.values()));
+      });
+      setNextCursor(page.nextCursor);
+      setPendingCloudItems((current) => current.slice(30));
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'library_load_more_failed');
+      setLoadState(items.length > 0 ? 'partial' : 'error');
+    } finally {
+      setLoadingMore(false);
     }
-    for (const c of cloudList) {
-      const existing = map.get(c.id);
-      if (existing) existing.cloud = c;
-      else map.set(c.id, { id: c.id, local: null, cloud: c });
-    }
-    const arr = Array.from(map.values()).sort(
-      (a, b) => displayMeta(b).startedAt - displayMeta(a).startedAt,
-    );
-    setItems(arr);
-    setLoaded(true);
-  }, [canCloud, user?.id, authLoading]);
+  }, [authLoading, items.length, loadingMore, nextCursor, pendingCloudItems, user?.id]);
 
   useEffect(() => { void refresh(); }, [refresh, refreshKey]);
 
@@ -362,7 +474,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
     const q = query.trim().toLowerCase();
     const arr = items.filter((it) => {
       const d = displayMeta(it);
-      if (filter === 'unfinished' && d.status !== 'recording') return false;
+      if (filter === 'unfinished' && !['recording', 'finalizing', 'interrupted'].includes(d.status)) return false;
       if (filter === 'backed' && !it.cloud) return false;
       if (filter === 'local' && !!it.cloud) return false;
       if (q && !defaultTitle(d, locale).toLowerCase().includes(q)) return false;
@@ -382,13 +494,35 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
     trackEvent('library_filter', { filter: f });
   }, []);
 
-  if (!loaded) {
+  if (loadState === 'loading') {
     return (
       <div
         className="library-craft-note py-12 text-center"
         style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--ink-3)', letterSpacing: '0.08em', textTransform: 'uppercase' }}
       >
         {t('loading')}
+      </div>
+    );
+  }
+
+  if (loadState === 'error' && items.length === 0) {
+    return (
+      <div
+        data-testid="library-load-error"
+        className="library-craft-empty p-12 text-center"
+        style={{ background: 'var(--paper)', border: '2px dashed var(--rec)', borderRadius: 4 }}
+      >
+        <div style={{ color: 'var(--rec)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+          {locale === 'en' ? 'Could not load local recordings.' : '无法加载本地录制。'}
+          {errorMsg ? ` ${errorMsg}` : ''}
+        </div>
+        <button
+          type="button"
+          onClick={() => void refresh()}
+          className="app-craft-login mt-5"
+        >
+          {locale === 'en' ? 'Try again' : '重试'}
+        </button>
       </div>
     );
   }
@@ -629,7 +763,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
             const row = (
               <div className="library-craft-row flex items-center gap-4 px-3 py-2.5" style={{ background: 'var(--paper)', border: '1.5px solid var(--ink)', borderRadius: 4, boxShadow: '2px 2px 0 var(--ink)' }}>
                 <div className="library-craft-thumb relative flex-shrink-0 overflow-hidden" style={{ width: 88, height: 50, background: 'var(--paper-2)', border: '1.2px solid var(--ink)', borderRadius: 2 }}>
-                  <RecordingThumbnail meta={d} />
+                  <RecordingThumbnail meta={d} localRecordingId={it.local?.id} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="truncate" style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)' }}>{defaultTitle(d, locale)}</div>
@@ -721,7 +855,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
                 <div className="absolute inset-0 dots-fine" style={{ opacity: 0.5 }} />
                 {/* 封面 hover 轻放大（被 overflow-hidden 裁切，对标设计 group-hover:scale） */}
                 <div className="absolute inset-0 transition-transform duration-300 ease-out group-hover:scale-105">
-                  <RecordingThumbnail meta={d} />
+                  <RecordingThumbnail meta={d} localRecordingId={it.local?.id} />
                 </div>
                 <span
                   className="absolute right-2 top-2 group-hover:opacity-0"
@@ -917,6 +1051,7 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
           return (
             <div
               key={d.id}
+              data-recording-id={d.id}
               className="library-craft-card group relative overflow-hidden transition hover:-translate-y-[2px]"
               style={{
                 background: 'var(--paper)',
@@ -1011,6 +1146,21 @@ export function RecordingsList({ refreshKey = 0, query = '' }: Props): JSX.Eleme
           );
         })}
       </div>
+      )}
+      {(nextCursor || pendingCloudItems.length > 0) && (
+        <div className="mt-6 flex justify-center">
+          <button
+            type="button"
+            data-testid="library-load-more"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+            className="app-craft-login"
+          >
+            {loadingMore
+              ? t('loading')
+              : locale === 'en' ? 'Load more' : '加载更多'}
+          </button>
+        </div>
       )}
     </div>
   );

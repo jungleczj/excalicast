@@ -5,10 +5,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { AppHeader } from '@/components/AppHeader';
 import { RecordingsList } from '@/components/RecordingsList';
 import { I } from '@/components/icons';
-import { listRecordings } from '@/lib/db-client';
-import { getCurrentOwnerKey } from '@/lib/ownerKey';
 import { trackEvent } from '@/lib/analytics/track';
-import type { RecordingMetadata } from '@/types/recording';
 
 export default function LibraryPage(): JSX.Element {
   const t = useTranslations('library');
@@ -26,16 +23,6 @@ export default function LibraryPage(): JSX.Element {
     setQuery(q);
     if (q) trackEvent('library_search', { len: q.length });
   }, [draft]);
-
-  useEffect(() => {
-    getCurrentOwnerKey()
-      .then((ownerKey) => listRecordings(ownerKey))
-      .then((list: RecordingMetadata[]) => {
-        const totalMs = list.reduce((acc, m) => acc + m.durationMs, 0);
-        setStats({ count: list.length, totalMs });
-      })
-      .catch(() => { /* ignore */ });
-  }, []);
 
   // 兜底：万一 libraries.excalidraw.com 市集把 addLibrary hash 甩到了 /library（理论
   // 上不该，但用户实测出现过），立刻转发到 /app 让 Whiteboard 完成 import。
@@ -106,7 +93,7 @@ export default function LibraryPage(): JSX.Element {
             </div>
           </div>
 
-          <RecordingsList query={query} />
+          <RecordingsList query={query} onStatsChange={setStats} />
         </div>
       </div>
     </div>

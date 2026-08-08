@@ -2,14 +2,17 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { autoZoomAt, cameraPositionAt, getRecordingWindowRect, renderPreviewFrame } from '@/services/exportPipeline';
-import { getLocalizedTrack, getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
+import { autoZoomAt, cameraPositionAt, getRecordingWindowRect, releasePreviewResources, renderPreviewFrame, setPreviewPlayback } from '@/services/exportPipeline';
+import { cameraPlacementFromEvent, projectCameraPlacement } from '@/services/cameraPlacement';
+import { getLocalizedTrack, getWorkspaceShells, loadFullRecording, releaseRecordingMediaCache } from '@/lib/db-client';
 import type { AutoZoomSegment, CameraPositionEvent, ExportConfig, LocalizedTrack, RecordingMetadata, ShellCanvasRect, ShellSize, TimeSegment } from '@/types/recording';
 import { resolveExportOutputSize } from '@/types/recording';
 import { keptDuration, normalizeSegments, outputToSource, sourceToOutput } from '@/utils/segments';
 import { I } from '@/components/icons';
 import type { ExportProgressState } from '@/components/ExportPanel';
 import { analyzeCursorFocusTrack } from '@/services/cursorFocusTracker';
+import { LatestTaskRunner } from '@/lib/latestTaskRunner';
+import { resolvePreviewRenderSize } from '@/services/previewRenderPolicy';
 
 interface Props {
   recordingId: string;
@@ -26,10 +29,8 @@ interface Props {
   onAutoZoomRegionChange?: (id: string, patch: Partial<Pick<AutoZoomSegment, 'scale' | 'cx' | 'cy'>>) => void;
 }
 
-// 预览播放时，主帧画面的最小重渲染间隔（ms）。
-// renderPreviewFrame 较重（要重放快照 + 走 excalidraw exportToCanvas），
-// 这里把它限到 ~5fps，足以让用户感知白板进度，又不会卡 UI。
-const CANVAS_REDRAW_INTERVAL_MS = 200;
+const DISPLAY_REDRAW_INTERVAL_MS = 50;
+const WHITEBOARD_REDRAW_INTERVAL_MS = 100;
 
 const PREVIEW_MIN_WIDTH = 300;
 const PREVIEW_MIN_HEIGHT = 180;
@@ -116,11 +117,74 @@ export function ExportPreview({
       window.removeEventListener('resize', measure);
     };
   }, [config.aspectRatio]);
-  const renderToken = useRef(0);
+  const mountedRef = useRef(true);
+  const renderConfigRef = useRef(config);
+  const renderRecordingIdRef = useRef(recordingId);
+  const renderMetadataRef = useRef(metadata);
+  renderConfigRef.current = config;
+  renderRecordingIdRef.current = recordingId;
+  renderMetadataRef.current = metadata;
   const rafRef = useRef<number | null>(null);
   const clockRef = useRef<{ perfStart: number; baseTime: number } | null>(null);
   const lastDrawAtRef = useRef<number>(0);
   const lastDrawTimeMsRef = useRef<number>(-Infinity);
+  const renderRunnerRef = useRef<LatestTaskRunner<number> | null>(null);
+  if (!renderRunnerRef.current) {
+    renderRunnerRef.current = new LatestTaskRunner<number>(async (requestedTimeMs, signal) => {
+      if (!mountedRef.current) return;
+      const visible = canvasRef.current;
+      if (!visible) return;
+      setRendering(true);
+      setError(null);
+      const renderCanvas = renderCanvasRef.current ?? document.createElement('canvas');
+      renderCanvasRef.current = renderCanvas;
+      try {
+        if (signal.aborted) return;
+        const composition = resolveExportOutputSize(renderConfigRef.current);
+        const renderSize = resolvePreviewRenderSize({
+          compositionWidth: composition.width,
+          compositionHeight: composition.height,
+          displayWidth: visible.clientWidth,
+          displayHeight: visible.clientHeight,
+          devicePixelRatio: window.devicePixelRatio,
+        });
+        await renderPreviewFrame(
+          renderRecordingIdRef.current,
+          requestedTimeMs,
+          renderConfigRef.current,
+          renderCanvas,
+          renderMetadataRef.current,
+          renderSize,
+          signal,
+        );
+        if (signal.aborted || !mountedRef.current || !canvasRef.current) return;
+        visible.width = renderCanvas.width;
+        visible.height = renderCanvas.height;
+        visible.getContext('2d')?.drawImage(renderCanvas, 0, 0);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        if (mountedRef.current) setError(err instanceof Error ? err.message : 'render_failed');
+      } finally {
+        if (mountedRef.current) setRendering(false);
+      }
+    });
+  }
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      releasePreviewResources(recordingId);
+      releaseRecordingMediaCache(recordingId);
+    };
+  }, [recordingId]);
+
+  useEffect(() => {
+    void setPreviewPlayback(recordingId, playing, timeMs).catch(() => undefined);
+    return () => { void setPreviewPlayback(recordingId, false, timeMs).catch(() => undefined); };
+    // timeMs intentionally captures the start position; the media clock advances afterwards.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, recordingId]);
 
   // 加载 audio / camera blob + 摄像头位置事件，用于预览播放
   useEffect(() => {
@@ -255,14 +319,16 @@ export function ExportPreview({
     const aspect = preset.width / preset.height; // = boxW/boxH
     const pos = cameraPositionAt(cameraEvents, timeMs);
     if (pos) {
-      const wFrac = pos.rs * Math.min(bounds.fracW, bounds.fracH / aspect);
-      const hFrac = wFrac * aspect; // 正方形高度占框高的比例
-      const left = Math.max(bounds.offFracX, Math.min(bounds.offFracX + pos.rx * bounds.fracW, bounds.offFracX + bounds.fracW - wFrac));
-      const top = Math.max(bounds.offFracY, Math.min(bounds.offFracY + pos.ry * bounds.fracH, bounds.offFracY + bounds.fracH - hFrac));
+      const projected = projectCameraPlacement(cameraPlacementFromEvent(pos), {
+        x: bounds.offFracX * preset.width,
+        y: bounds.offFracY * preset.height,
+        width: bounds.fracW * preset.width,
+        height: bounds.fracH * preset.height,
+      });
       return {
-        left: `${left * 100}%`,
-        top: `${top * 100}%`,
-        width: `${wFrac * 100}%`,
+        left: `${(projected.x / preset.width) * 100}%`,
+        top: `${(projected.y / preset.height) * 100}%`,
+        width: `${(projected.size / preset.width) * 100}%`,
         // hidden=true（录制时用户软关闭过摄像头）期间不画气泡 —— 跟导出 MP4 一致
         display: pos.hidden ? 'none' : undefined,
       };
@@ -279,27 +345,16 @@ export function ExportPreview({
 
   // 帧渲染：节流到 CANVAS_REDRAW_INTERVAL_MS。静态 scrub 时立即重绘。
   const drawFrame = useCallback((t: number, force: boolean) => {
-    const visible = canvasRef.current;
-    if (!visible) return;
+    if (!canvasRef.current) return;
     const now = performance.now();
-    if (!force && now - lastDrawAtRef.current < CANVAS_REDRAW_INTERVAL_MS) return;
-    if (!force && Math.abs(t - lastDrawTimeMsRef.current) < CANVAS_REDRAW_INTERVAL_MS / 2) return;
+    const redrawInterval = metadata.source?.kind && metadata.source.kind !== 'whiteboard'
+      ? DISPLAY_REDRAW_INTERVAL_MS
+      : WHITEBOARD_REDRAW_INTERVAL_MS;
+    if (!force && now - lastDrawAtRef.current < redrawInterval) return;
+    if (!force && Math.abs(t - lastDrawTimeMsRef.current) < redrawInterval / 2) return;
     lastDrawAtRef.current = now;
     lastDrawTimeMsRef.current = t;
-    const my = ++renderToken.current;
-    setRendering(true);
-    setError(null);
-    const renderCanvas = renderCanvasRef.current ?? document.createElement('canvas');
-    renderCanvasRef.current = renderCanvas;
-    renderPreviewFrame(recordingId, t, config, renderCanvas)
-      .then(() => {
-        if (renderToken.current !== my) return;
-        visible.width = renderCanvas.width;
-        visible.height = renderCanvas.height;
-        visible.getContext('2d')?.drawImage(renderCanvas, 0, 0);
-      })
-      .catch((err) => { if (renderToken.current === my) setError(err instanceof Error ? err.message : 'render_failed'); })
-      .finally(() => { if (renderToken.current === my) setRendering(false); });
+    void renderRunnerRef.current?.push(t);
   }, [recordingId, config, focusTrackRevision]);
 
   // config 切换 或 暂停态下播放头被外部（时间轴）拖动 → 重绘该源帧。
@@ -307,7 +362,7 @@ export function ExportPreview({
   useEffect(() => {
     if (!playing) drawFrame(timeMs, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recordingId, config, timeMs, playing]);
+  }, [recordingId, config, metadata.subtitleSrt, timeMs, playing]);
 
   // 播放循环：performance.now() 主时钟 + 节流 canvas 重绘
   useEffect(() => {
@@ -613,6 +668,7 @@ export function ExportPreview({
       <div
         data-testid="export-preview-stage"
         data-autozoom-scale={previewAutoZoomScale.toFixed(3)}
+        data-has-subtitles={metadata.subtitleSrt ? 'true' : 'false'}
         data-localized-track={localizedTrack?.id}
         data-autozoom-region={selectedAutoZoom ? `${(selectedAutoZoom.cx ?? 0.5).toFixed(3)},${(selectedAutoZoom.cy ?? 0.5).toFixed(3)},${selectedAutoZoom.scale.toFixed(3)}` : undefined}
         data-selection-overlays-hidden={selectionOverlaysHidden ? 'true' : 'false'}
@@ -959,6 +1015,19 @@ export function ExportPreview({
                   >
                     {phaseLabel}
                   </div>
+                  {progress && progress.totalFrames > 0 && (
+                    <div
+                      data-testid="export-performance-details"
+                      className="mt-1"
+                      style={{ fontSize: 9.5, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', lineHeight: 1.45 }}
+                    >
+                      <div>{progress.encoderPath} · {progress.processedFrames}/{progress.totalFrames} · {progress.throughputFps.toFixed(1)} fps</div>
+                      <div>
+                        decoded {progress.decodedSourceFrames}
+                        {progress.estimatedRemainingMs !== null ? ` · ETA ${Math.max(1, Math.ceil(progress.estimatedRemainingMs / 1000))}s` : ''}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
               <div

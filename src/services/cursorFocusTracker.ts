@@ -12,10 +12,47 @@ const HOLD_GAP_MS = 1_000;
 const RETURN_TO_CENTER_MS = 500;
 const activeAnalyses = new Map<string, Promise<CursorFocusTrack>>();
 
-interface FocusPoint {
+export interface FocusPoint {
   x: number;
   y: number;
   confidence: number;
+}
+
+interface PendingFocusRequest {
+  timestamp: number;
+  resolve: (sample: CursorFocusSample) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+export class PendingFocusRequests {
+  private readonly requests = new Map<number, PendingFocusRequest>();
+
+  get size(): number {
+    return this.requests.size;
+  }
+
+  create(id: number, timestamp: number, timeoutMs = 8_000): Promise<CursorFocusSample> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => this.resolve(id, this.fallback(timestamp)), timeoutMs);
+      this.requests.set(id, { timestamp, resolve, timer });
+    });
+  }
+
+  resolve(id: number, sample: CursorFocusSample): void {
+    const request = this.requests.get(id);
+    if (!request) return;
+    clearTimeout(request.timer);
+    this.requests.delete(id);
+    request.resolve(sample);
+  }
+
+  failAll(): void {
+    for (const [id, request] of this.requests) this.resolve(id, this.fallback(request.timestamp));
+  }
+
+  private fallback(timestamp: number): CursorFocusSample {
+    return { timestamp, x: 0.5, y: 0.5, confidence: 0 };
+  }
 }
 
 function clamp01(value: number): number {
@@ -80,8 +117,97 @@ export function focusedCoverPlacement(
   return { dx, dy, dw, dh, scale };
 }
 
-function sourceSignature(blob: Blob, durationMs: number, width: number, height: number): string {
+export function cursorFocusSourceSignature(blob: Blob, durationMs: number, width: number, height: number): string {
   return `${DETECTOR_VERSION}:${blob.size}:${blob.type}:${Math.round(durationMs)}:${width}x${height}`;
+}
+
+export interface CursorFocusExportAnalyzer {
+  analyzeFrame(frame: CanvasImageSource, timestamp: number): Promise<FocusPoint>;
+  save(): Promise<CursorFocusTrack>;
+  close(): void;
+}
+
+/** Uses frames already decoded for export so uncached tracking does not scan the media twice. */
+export function createCursorFocusExportAnalyzer(params: {
+  recordingId: string;
+  screenBlob: Blob;
+  durationMs: number;
+  sourceWidth: number;
+  sourceHeight: number;
+}): CursorFocusExportAnalyzer | null {
+  const scale = Math.min(1, MAX_SAMPLE_EDGE / Math.max(params.sourceWidth, params.sourceHeight));
+  const width = Math.max(2, Math.round(params.sourceWidth * scale));
+  const height = Math.max(2, Math.round(params.sourceHeight * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  const worker = createPixelWorker();
+  if (!context || !worker) {
+    worker?.close();
+    return null;
+  }
+
+  const signature = cursorFocusSourceSignature(
+    params.screenBlob,
+    params.durationMs,
+    params.sourceWidth,
+    params.sourceHeight,
+  );
+  const samples: CursorFocusSample[] = [];
+  let lastSampleAt = -Infinity;
+  let smoothX = 0.5;
+  let smoothY = 0.5;
+  let closed = false;
+
+  const buildTrack = (): CursorFocusTrack => {
+    const confident = samples.filter((sample) => sample.confidence >= MIN_CONFIDENCE).length;
+    const coverage = confident / Math.max(1, samples.length);
+    return {
+      recordingId: params.recordingId,
+      detectorVersion: DETECTOR_VERSION,
+      sourceSignature: signature,
+      analyzedAt: Date.now(),
+      quality: coverage >= 0.7 ? 'good' : coverage >= 0.35 ? 'partial' : 'poor',
+      samples: [...samples],
+    };
+  };
+
+  return {
+    async analyzeFrame(frame, timestamp) {
+      if (closed) return { x: 0.5, y: 0.5, confidence: 0 };
+      if (timestamp - lastSampleAt >= SAMPLE_INTERVAL_MS || samples.length === 0) {
+        context.drawImage(frame, 0, 0, width, height);
+        const pixels = context.getImageData(0, 0, width, height).data;
+        const raw = await worker.analyze(new Uint8ClampedArray(pixels), width, height, timestamp);
+        let sample = raw;
+        if (raw.confidence >= MIN_CONFIDENCE) {
+          const weight = Math.max(0.18, Math.min(0.58, raw.confidence * 0.55));
+          smoothX += (raw.x - smoothX) * weight;
+          smoothY += (raw.y - smoothY) * weight;
+          sample = {
+            ...raw,
+            x: round(clamp01(smoothX)),
+            y: round(clamp01(smoothY)),
+            confidence: round(raw.confidence),
+          };
+        }
+        samples.push(sample);
+        lastSampleAt = timestamp;
+      }
+      return focusPointAt(buildTrack(), timestamp);
+    },
+    async save() {
+      const track = buildTrack();
+      await saveCursorFocusTrack(track);
+      return track;
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      worker.close();
+    },
+  };
 }
 
 function workerSource(): string {
@@ -161,23 +287,35 @@ function createPixelWorker(): {
   const url = URL.createObjectURL(new Blob([workerSource()], { type: 'text/javascript' }));
   const worker = new Worker(url);
   let nextId = 1;
-  const pending = new Map<number, (sample: CursorFocusSample) => void>();
+  let failed = false;
+  const pending = new PendingFocusRequests();
   worker.onmessage = (event: MessageEvent<{ id: number; sample: CursorFocusSample }>) => {
-    const resolve = pending.get(event.data.id);
-    if (!resolve) return;
-    pending.delete(event.data.id);
-    resolve(event.data.sample);
+    pending.resolve(event.data.id, event.data.sample);
+  };
+  worker.onerror = () => {
+    failed = true;
+    pending.failAll();
+    worker.terminate();
+    URL.revokeObjectURL(url);
   };
   return {
-    analyze: (pixels, width, height, timestamp) => new Promise((resolve) => {
+    analyze: (pixels, width, height, timestamp) => {
+      if (failed) return Promise.resolve({ timestamp, x: 0.5, y: 0.5, confidence: 0 });
       const id = nextId++;
-      pending.set(id, resolve);
-      worker.postMessage({ id, pixels: pixels.buffer, width, height, timestamp }, [pixels.buffer]);
-    }),
+      const result = pending.create(id, timestamp);
+      try {
+        worker.postMessage({ id, pixels: pixels.buffer, width, height, timestamp }, [pixels.buffer]);
+      } catch {
+        failed = true;
+        pending.failAll();
+      }
+      return result;
+    },
     close: () => {
+      failed = true;
+      pending.failAll();
       worker.terminate();
       URL.revokeObjectURL(url);
-      pending.clear();
     },
   };
 }
@@ -201,7 +339,7 @@ export async function analyzeCursorFocusTrack(params: {
   onProgress?: (progress: number) => void;
 }): Promise<CursorFocusTrack> {
   const source = await createDisplayFrameSource(params.screenBlob);
-  const signature = sourceSignature(params.screenBlob, params.durationMs, source.width, source.height);
+  const signature = cursorFocusSourceSignature(params.screenBlob, params.durationMs, source.width, source.height);
   const cached = await getCursorFocusTrack(params.recordingId);
   if (cached?.detectorVersion === DETECTOR_VERSION && cached.sourceSignature === signature) {
     params.onProgress?.(1);

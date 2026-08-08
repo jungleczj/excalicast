@@ -1,6 +1,7 @@
 'use client';
 
 import Dexie, { type Table } from 'dexie';
+import type { MediaTaskRecord } from '@/services/mediaTaskDomain';
 import type {
   AudioChunk,
   AutoZoomSegment,
@@ -11,6 +12,7 @@ import type {
   LaserEvent,
   LocalizedTrack,
   RecordingMetadata,
+  RecordingLibrarySummary,
   ScreenChunk,
   ShellCanvasRect,
   ShellSize,
@@ -50,6 +52,41 @@ interface BinaryFileRow extends BinaryFileEntry {
   id?: number;
 }
 
+export interface ExportSegmentRow {
+  id: string;
+  taskId: string;
+  recordingId: string;
+  index: number;
+  startMs: number;
+  endMs: number;
+  blob: Blob;
+  createdAt: number;
+}
+
+export interface AudioPeakTrackRow {
+  id: string;
+  recordingId: string;
+  sourceSignature: string;
+  samplesPerSecond: number;
+  peaks: number[];
+  createdAt: number;
+}
+
+export interface RecordingThumbnailRow {
+  recordingId: string;
+  blob: Blob;
+  updatedAt: number;
+}
+
+export interface AutoEditCacheRow {
+  id: string;
+  recordingId: string;
+  analyzerVersion: string;
+  variant: string;
+  value: unknown;
+  updatedAt: number;
+}
+
 class ExcalicastDB extends Dexie {
   recordings!: Table<RecordingMetadata, string>;
   snapshots!: Table<SnapshotRow, number>;
@@ -63,6 +100,11 @@ class ExcalicastDB extends Dexie {
   laserEvents!: Table<LaserEventRow, number>;
   localizedTracks!: Table<LocalizedTrackRow, string>;
   cursorFocusTracks!: Table<CursorFocusTrack, string>;
+  mediaTasks!: Table<MediaTaskRecord, string>;
+  exportSegments!: Table<ExportSegmentRow, string>;
+  audioPeakTracks!: Table<AudioPeakTrackRow, string>;
+  recordingThumbnails!: Table<RecordingThumbnailRow, string>;
+  autoEditCaches!: Table<AutoEditCacheRow, string>;
 
   constructor() {
     super('excalicast');
@@ -215,6 +257,61 @@ class ExcalicastDB extends Dexie {
       localizedTracks: 'id, recordingId, targetLang, status, createdAt, [recordingId+targetLang]',
       cursorFocusTracks: 'recordingId, analyzedAt, detectorVersion',
     });
+    // v13: 可恢复的本地媒体任务、分段导出检查点和音频波形派生缓存。
+    // 大媒体本身仍只保存在本机 IndexedDB，不上传到任务服务。
+    this.version(13).stores({
+      recordings: 'id, startedAt, status, ownerKey',
+      snapshots: '++id, recordingId, timestamp',
+      audioChunks: '++id, recordingId, index',
+      cameraChunks: '++id, recordingId, index',
+      screenChunks: '++id, recordingId, index',
+      binaryFiles: '++id, recordingId, fileId',
+      workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
+      cameraPositions: '++id, recordingId, timestamp, [recordingId+timestamp]',
+      libraryItems: 'id, status, created',
+      laserEvents: '++id, recordingId, timestamp, [recordingId+timestamp]',
+      localizedTracks: 'id, recordingId, targetLang, status, createdAt, [recordingId+targetLang]',
+      cursorFocusTracks: 'recordingId, analyzedAt, detectorVersion',
+      mediaTasks: 'id, recordingId, kind, status, updatedAt, [recordingId+kind]',
+      exportSegments: 'id, taskId, recordingId, index, [taskId+index]',
+      audioPeakTracks: 'id, recordingId, sourceSignature, createdAt',
+    });
+    // v14: library metadata stays lightweight. Thumbnails and ChatCut results are
+    // derived local assets and can be regenerated without touching source media.
+    this.version(14).stores({
+      recordings: 'id, startedAt, status, ownerKey, [ownerKey+startedAt]',
+      snapshots: '++id, recordingId, timestamp',
+      audioChunks: '++id, recordingId, index',
+      cameraChunks: '++id, recordingId, index',
+      screenChunks: '++id, recordingId, index',
+      binaryFiles: '++id, recordingId, fileId',
+      workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
+      cameraPositions: '++id, recordingId, timestamp, [recordingId+timestamp]',
+      libraryItems: 'id, status, created',
+      laserEvents: '++id, recordingId, timestamp, [recordingId+timestamp]',
+      localizedTracks: 'id, recordingId, targetLang, status, createdAt, [recordingId+targetLang]',
+      cursorFocusTracks: 'recordingId, analyzedAt, detectorVersion',
+      mediaTasks: 'id, recordingId, kind, status, updatedAt, [recordingId+kind]',
+      exportSegments: 'id, taskId, recordingId, index, [taskId+index]',
+      audioPeakTracks: 'id, recordingId, sourceSignature, createdAt',
+      recordingThumbnails: 'recordingId, updatedAt',
+      autoEditCaches: 'id, recordingId, analyzerVersion, updatedAt, [recordingId+analyzerVersion]',
+    }).upgrade(async (tx) => {
+      const recordings = tx.table<RecordingMetadata, string>('recordings');
+      const thumbnails = tx.table<RecordingThumbnailRow, string>('recordingThumbnails');
+      const rows = await recordings.toArray();
+      for (const row of rows) {
+        const legacyThumbnail = row.lastFrameThumbnail;
+        if (legacyThumbnail?.startsWith('data:')) {
+          const blob = thumbnailDataUrlToBlob(legacyThumbnail);
+          if (blob) await thumbnails.put({ recordingId: row.id, blob, updatedAt: Date.now() });
+        }
+        if ('lastFrameThumbnail' in row) {
+          delete row.lastFrameThumbnail;
+          await recordings.put(row);
+        }
+      }
+    });
   }
 }
 
@@ -224,18 +321,177 @@ export function getClientDb(): ExcalicastDB {
   return _db;
 }
 
+export async function markRecordingInterruptionRequested(
+  recordingId: string,
+  requestedAt = Date.now(),
+): Promise<void> {
+  await getClientDb().recordings.update(recordingId, { interruptionRequestedAt: requestedAt });
+}
+
+export async function recoverUnfinishedRecordings(): Promise<number> {
+  const db = getClientDb();
+  const unfinished = await db.recordings.where('status').anyOf('recording', 'finalizing').toArray();
+  if (unfinished.length === 0) return 0;
+  const { recoverUnfinishedRecording } = await import('@/services/recordingRecovery');
+
+  await db.transaction(
+    'rw',
+    [
+      db.recordings,
+      db.snapshots,
+      db.audioChunks,
+      db.cameraChunks,
+      db.screenChunks,
+      db.cameraPositions,
+    ],
+    async () => {
+      for (const recording of unfinished) {
+        const [snapshots, audioChunks, cameraChunks, screenChunks, cameraPositions] = await Promise.all([
+          db.snapshots.where('recordingId').equals(recording.id).toArray(),
+          db.audioChunks.where('recordingId').equals(recording.id).toArray(),
+          db.cameraChunks.where('recordingId').equals(recording.id).toArray(),
+          db.screenChunks.where('recordingId').equals(recording.id).toArray(),
+          db.cameraPositions.where('recordingId').equals(recording.id).toArray(),
+        ]);
+        const mediaChunkDuration = Math.max(
+          ...audioChunks.map((chunk) => (chunk.index + 1) * 250),
+          ...cameraChunks.map((chunk) => (chunk.index + 1) * 250),
+          ...screenChunks.map((chunk) => (chunk.index + 1) * 250),
+          0,
+        );
+        const timedDuration = Math.max(
+          ...snapshots.map((snapshot) => snapshot.timestamp),
+          ...cameraPositions.map((position) => position.timestamp),
+          0,
+        );
+        await db.recordings.put(recoverUnfinishedRecording(
+          recording,
+          Math.max(mediaChunkDuration, timedDuration),
+        ));
+      }
+    },
+  );
+  return unfinished.length;
+}
+
 /**
  * 列出当前 ownerKey 的录制（按用户隔离）。
  * legacy（v9 前无 ownerKey 的旧录制）首次被列出时认领给当前 ownerKey。
  * **调用方必须在 auth 已 settle（useAuth.loading=false）后才调**，否则会用 guestId 误认领。
  */
-export async function listRecordings(ownerKey: string): Promise<RecordingMetadata[]> {
+const legacyClaimedOwners = new Set<string>();
+
+function legacyClaimStorageKey(ownerKey: string): string {
+  return `excalicast:legacy-owner-claimed:v1:${ownerKey}`;
+}
+
+async function claimLegacyRecordingsOnce(ownerKey: string): Promise<void> {
+  const marker = legacyClaimStorageKey(ownerKey);
+  if (legacyClaimedOwners.has(marker)) return;
+  try {
+    if (typeof localStorage !== 'undefined' && localStorage.getItem(marker) === '1') {
+      legacyClaimedOwners.add(marker);
+      return;
+    }
+  } catch {
+    // Storage may be blocked; the in-memory marker still prevents repeated scans this session.
+  }
+
   const db = getClientDb();
-  // 认领 legacy 行（一次性；v9 后新录制都带 ownerKey，之后此扫描命中为空）。
   const legacy = await db.recordings.filter((r) => !r.ownerKey).toArray();
   if (legacy.length > 0) {
     await db.recordings.bulkPut(legacy.map((r) => ({ ...r, ownerKey })));
   }
+  legacyClaimedOwners.add(marker);
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(marker, '1');
+  } catch {
+    // The completed scan remains memoized for this page session.
+  }
+}
+
+function toLibrarySummary(row: RecordingMetadata): RecordingLibrarySummary {
+  return {
+    id: row.id,
+    title: row.title,
+    startedAt: row.startedAt,
+    durationMs: row.durationMs,
+    hasAudio: row.hasAudio,
+    hasCamera: row.hasCamera,
+    status: row.status,
+    tags: row.tags,
+  };
+}
+
+type RecordingSummaryPosition = Pick<RecordingLibrarySummary, 'startedAt' | 'id'>;
+
+function compareLibrarySummary(a: RecordingSummaryPosition, b: RecordingSummaryPosition): number {
+  return b.startedAt - a.startedAt || b.id.localeCompare(a.id);
+}
+
+interface RecordingSummaryCursor {
+  startedAt: number;
+  id: string;
+}
+
+function encodeRecordingSummaryCursor(item: RecordingLibrarySummary): string {
+  return encodeURIComponent(JSON.stringify({ startedAt: item.startedAt, id: item.id }));
+}
+
+function decodeRecordingSummaryCursor(cursor: string | undefined): RecordingSummaryCursor | null {
+  if (!cursor) return null;
+  try {
+    const parsed = JSON.parse(decodeURIComponent(cursor)) as Partial<RecordingSummaryCursor>;
+    if (!Number.isFinite(parsed.startedAt) || typeof parsed.id !== 'string') return null;
+    return { startedAt: parsed.startedAt as number, id: parsed.id };
+  } catch {
+    return null;
+  }
+}
+
+export interface RecordingSummaryPage {
+  items: RecordingLibrarySummary[];
+  nextCursor: string | null;
+  totalCount: number;
+  totalMs: number;
+}
+
+/**
+ * Lists local recording metadata through the ownerKey index. Media chunk tables are never read.
+ * A compound owner/start index is intentionally deferred to a future schema migration, so the
+ * owner's metadata rows are ordered in memory before applying the stable timestamp/id cursor.
+ */
+export async function listRecordingSummaries(
+  ownerKey: string,
+  options: { cursor?: string; limit?: number } = {},
+): Promise<RecordingSummaryPage> {
+  await claimLegacyRecordingsOnce(ownerKey);
+  const db = getClientDb();
+  const limit = Math.max(1, Math.min(100, Math.floor(options.limit ?? 30)));
+  const cursor = decodeRecordingSummaryCursor(options.cursor);
+  const rows = await db.recordings
+    .where('[ownerKey+startedAt]')
+    .between([ownerKey, Dexie.minKey], [ownerKey, Dexie.maxKey], true, true)
+    .reverse()
+    .toArray();
+  const all = rows.map(toLibrarySummary).sort(compareLibrarySummary);
+  const eligible = cursor
+    ? all.filter((item) => compareLibrarySummary(item, cursor) > 0)
+    : all;
+  const items = eligible.slice(0, limit);
+  return {
+    items,
+    nextCursor: eligible.length > limit && items.length > 0
+      ? encodeRecordingSummaryCursor(items[items.length - 1])
+      : null,
+    totalCount: all.length,
+    totalMs: all.reduce((sum, item) => sum + item.durationMs, 0),
+  };
+}
+
+export async function listRecordings(ownerKey: string): Promise<RecordingMetadata[]> {
+  await claimLegacyRecordingsOnce(ownerKey);
+  const db = getClientDb();
   // 用 v9 的 ownerKey 索引查询，避免把其它账号的行读进内存，也不再回退返回 legacy。
   const rows = await db.recordings.where('ownerKey').equals(ownerKey).sortBy('startedAt');
   return rows.reverse(); // startedAt 降序（最新在前）
@@ -284,6 +540,7 @@ export async function updateRecordingSegments(recordingId: string, segments: Tim
     .filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start)
     .sort((a, b) => a.start - b.start);
   await getClientDb().recordings.update(recordingId, { segments: clean.length > 0 ? clean : undefined });
+  invalidateRecordingMediaCache(recordingId);
 }
 
 export async function updateRecordingAutoZooms(recordingId: string, autoZooms: AutoZoomSegment[]): Promise<void> {
@@ -299,14 +556,17 @@ export async function updateRecordingAutoZooms(recordingId: string, autoZooms: A
     }))
     .sort((a, b) => a.start - b.start);
   await getClientDb().recordings.update(recordingId, { autoZooms: clean.length > 0 ? clean : undefined });
+  invalidateRecordingMediaCache(recordingId);
 }
 
 export async function saveSubtitleSrt(recordingId: string, srt: string): Promise<void> {
   await getClientDb().recordings.update(recordingId, { subtitleSrt: srt });
+  invalidateRecordingMediaCache(recordingId);
 }
 
 export async function clearSubtitleSrt(recordingId: string): Promise<void> {
   await getClientDb().recordings.update(recordingId, { subtitleSrt: undefined });
+  invalidateRecordingMediaCache(recordingId);
 }
 
 export async function listLocalizedTracks(recordingId: string): Promise<LocalizedTrack[]> {
@@ -327,10 +587,12 @@ export async function saveLocalizedTrack(track: LocalizedTrack, activate = true)
     await db.localizedTracks.put(track);
     if (activate) await db.recordings.update(track.recordingId, { localizedTrackId: track.id });
   });
+  invalidateRecordingMediaCache(track.recordingId);
 }
 
 export async function setActiveLocalizedTrack(recordingId: string, trackId: string | undefined): Promise<void> {
   await getClientDb().recordings.update(recordingId, { localizedTrackId: trackId });
+  invalidateRecordingMediaCache(recordingId);
 }
 
 export async function getCursorFocusTrack(recordingId: string): Promise<CursorFocusTrack | undefined> {
@@ -347,7 +609,7 @@ export async function deleteRecording(recordingId: string, ownerKey?: string): P
   if (ownerKey && !(await ownsRecording(recordingId, ownerKey))) return;
   await db.transaction(
     'rw',
-    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.screenChunks, db.cameraPositions, db.binaryFiles, db.workspaceShells, db.laserEvents, db.localizedTracks, db.cursorFocusTracks],
+    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.screenChunks, db.cameraPositions, db.binaryFiles, db.workspaceShells, db.laserEvents, db.localizedTracks, db.cursorFocusTracks, db.mediaTasks, db.exportSegments, db.audioPeakTracks, db.recordingThumbnails, db.autoEditCaches],
     async () => {
       await db.recordings.delete(recordingId);
       await db.snapshots.where('recordingId').equals(recordingId).delete();
@@ -360,8 +622,109 @@ export async function deleteRecording(recordingId: string, ownerKey?: string): P
       await db.laserEvents.where('recordingId').equals(recordingId).delete();
       await db.localizedTracks.where('recordingId').equals(recordingId).delete();
       await db.cursorFocusTracks.delete(recordingId);
+      await db.mediaTasks.where('recordingId').equals(recordingId).delete();
+      await db.exportSegments.where('recordingId').equals(recordingId).delete();
+      await db.audioPeakTracks.where('recordingId').equals(recordingId).delete();
+      await db.recordingThumbnails.delete(recordingId);
+      await db.autoEditCaches.where('recordingId').equals(recordingId).delete();
     },
   );
+  invalidateRecordingMediaCache(recordingId);
+}
+
+export function thumbnailDataUrlToBlob(value: string): Blob | null {
+  const match = /^data:([^;,]+)?(?:;charset=[^;,]+)?(;base64)?,(.*)$/s.exec(value);
+  if (!match) return null;
+  try {
+    const mimeType = match[1] || 'image/jpeg';
+    const binary = match[2] ? atob(match[3]) : decodeURIComponent(match[3]);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return new Blob([bytes], { type: mimeType });
+  } catch {
+    return null;
+  }
+}
+
+export async function saveRecordingThumbnail(recordingId: string, thumbnail: Blob | string | null): Promise<void> {
+  const db = getClientDb();
+  if (!thumbnail) {
+    await db.recordingThumbnails.delete(recordingId);
+    return;
+  }
+  const blob = typeof thumbnail === 'string' ? thumbnailDataUrlToBlob(thumbnail) : thumbnail;
+  if (!blob) return;
+  await db.recordingThumbnails.put({ recordingId, blob, updatedAt: Date.now() });
+}
+
+export async function loadRecordingThumbnail(recordingId: string): Promise<Blob | null> {
+  return (await getClientDb().recordingThumbnails.get(recordingId))?.blob ?? null;
+}
+
+export async function loadRecordingThumbnailDataUrl(recordingId: string): Promise<string | null> {
+  const blob = await loadRecordingThumbnail(recordingId);
+  if (!blob) return null;
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function saveMediaTask(task: MediaTaskRecord): Promise<void> {
+  await getClientDb().mediaTasks.put(task);
+}
+
+export async function getMediaTask(taskId: string): Promise<MediaTaskRecord | undefined> {
+  return getClientDb().mediaTasks.get(taskId);
+}
+
+export async function getLatestMediaTask(
+  recordingId: string,
+  kind: MediaTaskRecord['kind'],
+): Promise<MediaTaskRecord | undefined> {
+  const tasks = await getClientDb().mediaTasks.where('[recordingId+kind]').equals([recordingId, kind]).sortBy('updatedAt');
+  return tasks.at(-1);
+}
+
+export async function listRecoverableMediaTasks(): Promise<MediaTaskRecord[]> {
+  return getClientDb().mediaTasks
+    .filter((task) => task.status === 'queued' || task.status === 'running' || task.status === 'paused')
+    .sortBy('updatedAt');
+}
+
+export async function claimMediaTask(taskId: string, ownerId: string): Promise<MediaTaskRecord | undefined> {
+  const db = getClientDb();
+  return db.transaction('rw', db.mediaTasks, async () => {
+    const task = await db.mediaTasks.get(taskId);
+    if (!task || task.status === 'completed' || task.status === 'cancelled') return undefined;
+    const next: MediaTaskRecord = {
+      ...task,
+      ownerId,
+      status: 'running',
+      updatedAt: Date.now(),
+      error: undefined,
+    };
+    await db.mediaTasks.put(next);
+    return next;
+  });
+}
+
+export async function saveExportSegment(segment: ExportSegmentRow): Promise<void> {
+  await getClientDb().exportSegments.put(segment);
+}
+
+export async function listExportSegments(taskId: string): Promise<ExportSegmentRow[]> {
+  return getClientDb().exportSegments.where('taskId').equals(taskId).sortBy('index');
+}
+
+export async function saveAudioPeakTrack(track: AudioPeakTrackRow): Promise<void> {
+  await getClientDb().audioPeakTracks.put(track);
+}
+
+export async function getAudioPeakTrack(recordingId: string): Promise<AudioPeakTrackRow | undefined> {
+  return getClientDb().audioPeakTracks.where('recordingId').equals(recordingId).last();
 }
 
 export async function appendWorkspaceShell(params: {
@@ -387,7 +750,7 @@ export async function countWorkspaceShells(recordingId: string): Promise<number>
     .count();
 }
 
-export async function loadFullRecording(recordingId: string, ownerKey?: string): Promise<{
+export interface FullRecording {
   metadata: RecordingMetadata;
   snapshots: WhiteboardSnapshot[];
   audioBlob: Blob | null;
@@ -396,7 +759,89 @@ export async function loadFullRecording(recordingId: string, ownerKey?: string):
   cameraEvents: CameraPositionEvent[];
   laserEvents: LaserEvent[];
   binaryFiles: BinaryFileEntry[];
-}> {
+  manifest: RecordingMediaManifest;
+}
+
+export interface RecordingMediaManifest {
+  metadata: RecordingMetadata;
+  audio: { chunks: number; bytes: number };
+  camera: { chunks: number; bytes: number };
+  screen: { chunks: number; bytes: number };
+}
+
+export interface RecordingMediaTracks {
+  metadata: RecordingMetadata;
+  audioBlob: Blob | null;
+  cameraBlob: Blob | null;
+  screenBlob: Blob | null;
+}
+
+const fullRecordingCache = new Map<string, Promise<FullRecording>>();
+const FULL_RECORDING_CACHE_LIMIT = 3;
+
+export function invalidateRecordingMediaCache(recordingId: string): void {
+  for (const key of fullRecordingCache.keys()) {
+    if (key.startsWith(`${recordingId}::`)) fullRecordingCache.delete(key);
+  }
+}
+
+export const releaseRecordingMediaCache = invalidateRecordingMediaCache;
+
+export async function loadRecordingMediaTracks(
+  recordingId: string,
+  tracks: ReadonlyArray<'audio' | 'camera' | 'screen'>,
+  ownerKey?: string,
+): Promise<RecordingMediaTracks> {
+  const db = getClientDb();
+  const metadata = await db.recordings.get(recordingId);
+  if (!metadata || (ownerKey && metadata.ownerKey && metadata.ownerKey !== ownerKey)) {
+    throw new Error(`recording_not_found: ${recordingId}`);
+  }
+  const [audioRows, cameraRows, screenRows] = await Promise.all([
+    tracks.includes('audio')
+      ? db.audioChunks.where('recordingId').equals(recordingId).sortBy('index')
+      : Promise.resolve([]),
+    tracks.includes('camera')
+      ? db.cameraChunks.where('recordingId').equals(recordingId).sortBy('index')
+      : Promise.resolve([]),
+    tracks.includes('screen')
+      ? db.screenChunks.where('recordingId').equals(recordingId).sortBy('index')
+      : Promise.resolve([]),
+  ]);
+  return {
+    metadata,
+    audioBlob: audioRows.length > 0
+      ? new Blob(audioRows.map((row) => row.blob), { type: audioRows[0].blob.type || 'audio/webm' })
+      : null,
+    cameraBlob: cameraRows.length > 0
+      ? new Blob(cameraRows.map((row) => row.blob), { type: cameraRows[0].blob.type || 'video/webm' })
+      : null,
+    screenBlob: screenRows.length > 0
+      ? new Blob(screenRows.map((row) => row.blob), { type: screenRows[0].blob.type || 'video/webm' })
+      : null,
+  };
+}
+
+export async function loadRecordingManifest(recordingId: string, ownerKey?: string): Promise<RecordingMediaManifest> {
+  const db = getClientDb();
+  const metadata = await db.recordings.get(recordingId);
+  if (!metadata || (ownerKey && metadata.ownerKey && metadata.ownerKey !== ownerKey)) {
+    throw new Error(`recording_not_found: ${recordingId}`);
+  }
+  const [audioRows, cameraRows, screenRows] = await Promise.all([
+    db.audioChunks.where('recordingId').equals(recordingId).toArray(),
+    db.cameraChunks.where('recordingId').equals(recordingId).toArray(),
+    db.screenChunks.where('recordingId').equals(recordingId).toArray(),
+  ]);
+  return {
+    metadata,
+    audio: { chunks: audioRows.length, bytes: audioRows.reduce((sum, row) => sum + row.blob.size, 0) },
+    camera: { chunks: cameraRows.length, bytes: cameraRows.reduce((sum, row) => sum + row.blob.size, 0) },
+    screen: { chunks: screenRows.length, bytes: screenRows.reduce((sum, row) => sum + row.blob.size, 0) },
+  };
+}
+
+async function loadFullRecordingUncached(recordingId: string, ownerKey?: string): Promise<FullRecording> {
   const db = getClientDb();
   const metadata = await db.recordings.get(recordingId);
   if (!metadata) throw new Error(`recording_not_found: ${recordingId}`);
@@ -405,46 +850,37 @@ export async function loadFullRecording(recordingId: string, ownerKey?: string):
     throw new Error(`recording_not_found: ${recordingId}`);
   }
 
-  const snapshots = await db.snapshots
-    .where('recordingId').equals(recordingId)
-    .sortBy('timestamp');
-
-  const audioRows = await db.audioChunks
-    .where('recordingId').equals(recordingId)
-    .sortBy('index');
+  const [snapshots, audioRows, camRows, screenRows, camPosRows, laserRows, binaryFiles] = await Promise.all([
+    db.snapshots.where('recordingId').equals(recordingId).sortBy('timestamp'),
+    db.audioChunks.where('recordingId').equals(recordingId).sortBy('index'),
+    db.cameraChunks.where('recordingId').equals(recordingId).sortBy('index'),
+    db.screenChunks.where('recordingId').equals(recordingId).sortBy('index'),
+    db.cameraPositions.where('recordingId').equals(recordingId).sortBy('timestamp'),
+    db.laserEvents.where('recordingId').equals(recordingId).sortBy('timestamp'),
+    db.binaryFiles.where('recordingId').equals(recordingId).toArray(),
+  ]);
   const audioBlob = audioRows.length > 0
     ? new Blob(audioRows.map((c) => c.blob), { type: audioRows[0].blob.type || 'audio/webm' })
     : null;
 
-  const camRows = await db.cameraChunks
-    .where('recordingId').equals(recordingId)
-    .sortBy('index');
   const cameraBlob = camRows.length > 0
     ? new Blob(camRows.map((c) => c.blob), { type: camRows[0].blob.type || 'video/webm' })
     : null;
 
-  const screenRows = await db.screenChunks
-    .where('recordingId').equals(recordingId)
-    .sortBy('index');
   const screenBlob = screenRows.length > 0
     ? new Blob(screenRows.map((c) => c.blob), { type: screenRows[0].blob.type || 'video/webm' })
     : null;
 
-  const camPosRows = await db.cameraPositions
-    .where('recordingId').equals(recordingId)
-    .sortBy('timestamp');
   const cameraEvents: CameraPositionEvent[] = camPosRows.map((r) => ({
     recordingId: r.recordingId,
     timestamp: r.timestamp,
     rx: r.rx,
     ry: r.ry,
     rs: r.rs,
+    ...(r.placement ? { placement: r.placement } : {}),
     ...(r.hidden ? { hidden: true } : {}),
   }));
 
-  const laserRows = await db.laserEvents
-    .where('recordingId').equals(recordingId)
-    .sortBy('timestamp');
   const laserEvents: LaserEvent[] = laserRows.map((r) => ({
     recordingId: r.recordingId,
     timestamp: r.timestamp,
@@ -453,9 +889,32 @@ export async function loadFullRecording(recordingId: string, ownerKey?: string):
     button: r.button,
   }));
 
-  const binaryFiles = await db.binaryFiles.where('recordingId').equals(recordingId).toArray();
+  const manifest: RecordingMediaManifest = {
+    metadata,
+    audio: { chunks: audioRows.length, bytes: audioRows.reduce((sum, row) => sum + row.blob.size, 0) },
+    camera: { chunks: camRows.length, bytes: camRows.reduce((sum, row) => sum + row.blob.size, 0) },
+    screen: { chunks: screenRows.length, bytes: screenRows.reduce((sum, row) => sum + row.blob.size, 0) },
+  };
+  return { metadata, snapshots, audioBlob, cameraBlob, screenBlob, cameraEvents, laserEvents, binaryFiles, manifest };
+}
 
-  return { metadata, snapshots, audioBlob, cameraBlob, screenBlob, cameraEvents, laserEvents, binaryFiles };
+export async function loadFullRecording(recordingId: string, ownerKey?: string): Promise<FullRecording> {
+  const key = `${recordingId}::${ownerKey ?? ''}`;
+  const cached = fullRecordingCache.get(key);
+  if (cached) return cached;
+  const pending = loadFullRecordingUncached(recordingId, ownerKey);
+  fullRecordingCache.set(key, pending);
+  while (fullRecordingCache.size > FULL_RECORDING_CACHE_LIMIT) {
+    const oldest = fullRecordingCache.keys().next().value as string | undefined;
+    if (!oldest || oldest === key) break;
+    fullRecordingCache.delete(oldest);
+  }
+  try {
+    return await pending;
+  } catch (error) {
+    fullRecordingCache.delete(key);
+    throw error;
+  }
 }
 
 export async function listLaserEvents(recordingId: string): Promise<LaserEvent[]> {
@@ -488,6 +947,7 @@ export async function listCameraEvents(recordingId: string): Promise<CameraPosit
     rx: r.rx,
     ry: r.ry,
     rs: r.rs,
+    ...(r.placement ? { placement: r.placement } : {}),
     ...(r.hidden ? { hidden: true } : {}),
   }));
 }

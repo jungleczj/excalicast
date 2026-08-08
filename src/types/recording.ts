@@ -31,7 +31,11 @@ export interface RecordingMetadata {
   durationMs: number;
   hasAudio: boolean;
   hasCamera: boolean;
-  status: 'recording' | 'done' | 'error';
+  status: 'recording' | 'finalizing' | 'interrupted' | 'done' | 'error';
+  /** 录制轨提前结束或媒体分片落库失败。存在警告时不会标记为干净的 done。 */
+  warnings?: string[];
+  /** 页面硬关闭前的尽力持久化标记；启动恢复完成后清除。 */
+  interruptionRequestedAt?: number;
   lastFrameThumbnail?: string;
   title?: string;
   subtitleSrt?: string;
@@ -50,6 +54,18 @@ export interface RecordingMetadata {
   autoZooms?: AutoZoomSegment[];
   /** 当前用于预览/导出的本地化音轨；只引用 localizedTracks，不把大 Blob 塞进 metadata。 */
   localizedTrackId?: string;
+}
+
+/** 录制库列表专用的轻量视图；不包含字幕、构图配置或媒体数据。 */
+export interface RecordingLibrarySummary {
+  id: string;
+  title?: string;
+  startedAt: number;
+  durationMs: number;
+  hasAudio: boolean;
+  hasCamera: boolean;
+  status: RecordingMetadata['status'];
+  tags?: string[];
 }
 
 /** 保留段：导出时只输出 [start,end]（ms）内的内容，多段按序拼接。 */
@@ -118,6 +134,20 @@ export interface CameraPositionEvent {
   ry: number;         // bubble top-left Y as fraction of shell height
   rs: number;         // bubble edge length as fraction of shell width
   hidden?: boolean;   // 软关闭标记；缺省视为 false
+  /** v2：相对实际选中内容矩形的中心/尺寸和边缘锚点。旧录制继续读取 rx/ry/rs。 */
+  placement?: CameraPlacementV2;
+}
+
+export interface CameraPlacementV2 {
+  version: 2;
+  coordinateSpace: 'selected-content';
+  cx: number;
+  cy: number;
+  size: number;
+  anchorX: 'left' | 'right' | 'free';
+  anchorY: 'top' | 'bottom' | 'free';
+  edgeInsetX: number;
+  edgeInsetY: number;
 }
 
 export interface BinaryFileEntry {

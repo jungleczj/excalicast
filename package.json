@@ -33,11 +33,13 @@
     "dexie": "^4.4.2",
     "html-to-image": "^1.11.13",
     "marked": "^14.1.4",
+    "mediabunny": "^1.52.2",
     "mp4-muxer": "^5.2.2",
     "next": "^14.2.15",
     "next-intl": "^3.26.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "tus-js-client": "^4.3.1",
     "uuid": "^10.0.0",
     "vosk-browser": "^0.0.8",
     "webm-muxer": "^5.1.4"

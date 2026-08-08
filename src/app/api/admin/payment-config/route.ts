@@ -64,6 +64,7 @@ interface PostBody {
   proYearlyPriceCents?: number;
   maxYearlyPriceCents?: number;
   apiKey?: string | null;
+  clientToken?: string | null;
   webhookSecret?: string | null;
   apiBase?: string | null;
   oneTimeProductId?: string | null;
@@ -109,6 +110,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     proYearlyPriceCents: body.proYearlyPriceCents,
     maxYearlyPriceCents: body.maxYearlyPriceCents,
     apiKey: body.apiKey,
+    clientToken: body.clientToken,
     webhookSecret: body.webhookSecret,
     apiBase: body.apiBase,
     oneTimeProductId: body.oneTimeProductId,
@@ -122,6 +124,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   const existing = await getConfigByProviderMode(patch.provider, patch.mode);
   const effective = {
     apiKey: patch.apiKey !== undefined ? patch.apiKey : existing?.apiKey ?? null,
+    clientToken: patch.clientToken !== undefined ? patch.clientToken : existing?.clientToken ?? null,
     apiBase: patch.apiBase !== undefined ? patch.apiBase : existing?.apiBase ?? null,
     oneTimePriceCents: patch.oneTimePriceCents ?? existing?.oneTimePriceCents ?? 499,
     proMonthlyPriceCents: patch.proMonthlyPriceCents ?? existing?.proMonthlyPriceCents ?? 999,

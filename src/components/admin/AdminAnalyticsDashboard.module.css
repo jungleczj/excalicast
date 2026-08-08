@@ -1,0 +1,45 @@
+.page, .gate { min-height: 100vh; background: #f6f6f3; color: #20211f; }
+.page { padding: 32px clamp(20px, 4vw, 56px) 56px; }
+.header { max-width: 1440px; margin: 0 auto 20px; display: flex; align-items: end; justify-content: space-between; gap: 20px; }
+.header h1, .gatePanel h1 { margin: 2px 0 6px; font-size: clamp(26px, 3vw, 38px); line-height: 1.05; letter-spacing: 0; }
+.header p, .sectionHeading p, .empty p { margin: 0; color: #696b66; font-size: 13px; }
+.eyebrow { margin: 0; color: #5d625c; font: 700 11px/1.4 var(--font-mono), monospace; letter-spacing: 0; }
+.filters { max-width: 1440px; margin: 0 auto 16px; padding: 12px; display: grid; grid-template-columns: repeat(9, minmax(110px, 1fr)); align-items: end; gap: 10px; background: #fff; border: 1px solid #d9dbd5; border-radius: 6px; }
+.filters label, .gatePanel label { display: grid; gap: 5px; color: #5d625c; font-size: 11px; font-weight: 700; }
+.filters input, .filters select, .gatePanel input { width: 100%; min-height: 36px; border: 1px solid #c9ccc5; border-radius: 4px; background: #fff; color: #20211f; padding: 7px 9px; font-size: 12px; }
+.filters input:focus-visible, .filters select:focus-visible, .gatePanel input:focus-visible, .page button:focus-visible, .gate button:focus-visible { outline: 2px solid #2369d8; outline-offset: 2px; }
+.primaryButton, .secondaryButton, .gatePanel button, .errorBand button { min-height: 36px; border: 1px solid #20211f; border-radius: 4px; padding: 7px 14px; font-size: 12px; font-weight: 750; cursor: pointer; }
+.primaryButton, .gatePanel button { background: #20211f; color: #fff; }
+.secondaryButton, .errorBand button { background: #fff; color: #20211f; }
+.primaryButton:disabled, .secondaryButton:disabled, .gatePanel button:disabled { cursor: wait; opacity: .55; }
+.metricStrip { max-width: 1440px; margin: 0 auto 20px; display: grid; grid-template-columns: repeat(4, 1fr); background: #fff; border: 1px solid #d9dbd5; border-radius: 6px; overflow: hidden; }
+.metricStrip > div { min-width: 0; padding: 16px; display: grid; gap: 2px; border-right: 1px solid #e4e5e0; }
+.metricStrip > div:last-child { border-right: 0; }
+.metricStrip span { color: #696b66; font-size: 11px; font-weight: 700; }
+.metricStrip strong { font-size: 30px; line-height: 1.1; letter-spacing: 0; }
+.metricStrip > div:nth-child(1) strong { color: #176b4d; }
+.metricStrip > div:nth-child(3) strong { color: #2369d8; }
+.metricStrip > div:nth-child(4) strong { color: #a53c32; }
+.metricStrip small { color: #858780; font-size: 10px; }
+.section { max-width: 1440px; margin: 0 auto 20px; background: #fff; border: 1px solid #d9dbd5; border-radius: 6px; overflow: hidden; }
+.sectionHeading { min-height: 68px; padding: 14px 16px; display: flex; align-items: end; justify-content: space-between; gap: 16px; border-bottom: 1px solid #e4e5e0; }
+.sectionHeading h2 { margin: 2px 0 0; font-size: 17px; letter-spacing: 0; }
+.tableWrap { width: 100%; overflow: auto; }
+.tableWrap table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.tableWrap th, .tableWrap td { padding: 10px 14px; border-bottom: 1px solid #ecece8; text-align: right; white-space: nowrap; }
+.tableWrap thead th { background: #f7f7f4; color: #656861; font-size: 10px; text-transform: uppercase; }
+.tableWrap th:first-child, .tableWrap td:first-child { text-align: left; }
+.tableWrap tbody th { font-weight: 700; }
+.tableWrap tbody tr:last-child > * { border-bottom: 0; }
+.path { max-width: 720px; overflow: hidden; text-overflow: ellipsis; }
+.loading, .empty, .errorBand { max-width: 1440px; margin: 0 auto 20px; border: 1px solid #d9dbd5; border-radius: 6px; background: #fff; padding: 28px; }
+.empty { text-align: center; padding: 56px 24px; }
+.empty h2 { margin: 0 0 4px; font-size: 18px; }
+.errorBand { display: flex; align-items: center; gap: 12px; border-color: #d99087; background: #fff5f3; }
+.errorBand span { flex: 1; color: #7b3029; font-size: 12px; }
+.error { color: #a43128; font-size: 12px; }
+.footnote { max-width: 1440px; margin: 0 auto; color: #777a74; font-size: 11px; }
+.gate { display: grid; place-items: center; padding: 20px; }
+.gatePanel { width: min(380px, 100%); display: grid; gap: 12px; padding: 24px; background: #fff; border: 1px solid #cfd1cb; border-radius: 6px; box-shadow: 5px 5px 0 #20211f; }
+@media (max-width: 1180px) { .filters { grid-template-columns: repeat(3, minmax(130px, 1fr)); } }
+@media (max-width: 720px) { .page { padding: 22px 12px 40px; } .header { align-items: start; } .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } .metricStrip { grid-template-columns: repeat(2, 1fr); } .metricStrip > div:nth-child(2) { border-right: 0; } .metricStrip > div { border-bottom: 1px solid #e4e5e0; } .metricStrip > div:nth-child(n+3) { border-bottom: 0; } .sectionHeading { align-items: start; flex-direction: column; } }

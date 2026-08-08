@@ -216,10 +216,18 @@ test('a display recording fills a newly selected portrait ratio without white ba
   await expect.poll(async () => page.getByTestId('export-preview-stage').locator('canvas').evaluate((canvas) => {
     const element = canvas as HTMLCanvasElement;
     const context = element.getContext('2d');
-    if (!context || element.width === 0 || element.height === 0) return false;
-    const [red, green, blue, alpha] = context.getImageData(Math.floor(element.width / 2), 2, 1, 1).data;
-    return red < 60 && green > 80 && blue > 100 && alpha === 255;
-  }), { timeout: 15_000 }).toBe(true);
+    if (!context || element.width === 0 || element.height === 0) return 0;
+    return context.getImageData(Math.floor(element.width / 2), 2, 1, 1).data[3];
+  }), { timeout: 15_000 }).toBe(255);
+  const topPixel = await page.getByTestId('export-preview-stage').locator('canvas').evaluate((canvas) => {
+    const element = canvas as HTMLCanvasElement;
+    const context = element.getContext('2d');
+    if (!context) throw new Error('preview canvas unavailable');
+    return Array.from(context.getImageData(Math.floor(element.width / 2), 2, 1, 1).data);
+  });
+  expect(topPixel[0], `top pixel ${topPixel.join(',')}`).toBeLessThan(60);
+  expect(topPixel[1], `top pixel ${topPixel.join(',')}`).toBeGreaterThan(80);
+  expect(topPixel[2], `top pixel ${topPixel.join(',')}`).toBeGreaterThan(100);
 
   await page.getByRole('switch', { name: 'Always keep zoomed in' }).click();
   await expect(page.getByTestId('cursor-tracking-status')).toBeVisible();
@@ -241,6 +249,167 @@ test('a display recording fills a newly selected portrait ratio without white ba
     db.close();
     return found;
   }, recordingId), { timeout: 15_000 }).toBe(true);
+});
+
+test('display preview advances to later source frames while playback is running', async ({ page }) => {
+  await page.evaluate(async (id) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 160;
+    canvas.height = 90;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('screen fixture canvas unavailable');
+    const paint = (color: string) => {
+      context.fillStyle = color;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+    };
+    paint('#145f8a');
+    const stream = canvas.captureStream(12);
+    const screenBlob = await new Promise<Blob>((resolve, reject) => {
+      const chunks: BlobPart[] = [];
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onerror = () => reject(new Error('screen fixture recorder failed'));
+      recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
+      recorder.start();
+      const startedAt = performance.now();
+      const repaint = window.setInterval(() => {
+        paint(performance.now() - startedAt < 550 ? '#145f8a' : '#d94a3a');
+      }, 40);
+      window.setTimeout(() => {
+        window.clearInterval(repaint);
+        paint('#d94a3a');
+        recorder.stop();
+        stream.getTracks().forEach((track) => track.stop());
+      }, 1_200);
+    });
+    const fixtureUrl = URL.createObjectURL(screenBlob);
+    const fixtureVideo = document.createElement('video');
+    fixtureVideo.muted = true;
+    fixtureVideo.src = fixtureUrl;
+    await new Promise<void>((resolve, reject) => {
+      fixtureVideo.onloadeddata = () => resolve();
+      fixtureVideo.onerror = () => reject(new Error('fixture video failed to decode'));
+    });
+    await new Promise<void>((resolve) => {
+      fixtureVideo.onseeked = () => resolve();
+      fixtureVideo.currentTime = Math.min(0.9, Math.max(0, fixtureVideo.duration - 0.05));
+    });
+    const probe = document.createElement('canvas');
+    probe.width = 160;
+    probe.height = 90;
+    const probeContext = probe.getContext('2d');
+    probeContext?.drawImage(fixtureVideo, 0, 0);
+    const [fixtureRed, fixtureGreen, fixtureBlue] = probeContext?.getImageData(80, 45, 1, 1).data ?? [0, 0, 0];
+    URL.revokeObjectURL(fixtureUrl);
+    if (!(fixtureRed > fixtureGreen && fixtureRed > fixtureBlue)) {
+      throw new Error(`fixture did not contain the later red frame: ${fixtureRed},${fixtureGreen},${fixtureBlue}`);
+    }
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(['recordings', 'screenChunks'], 'readwrite');
+      const recordings = tx.objectStore('recordings');
+      const request = recordings.get(id);
+      request.onsuccess = () => {
+        const source = { kind: 'desktop', sourceSize: { width: 160, height: 90 } };
+        recordings.put({ ...request.result, durationMs: 1_200, source, setup: { ...request.result.setup, source } });
+      };
+      tx.objectStore('screenChunks').add({ recordingId: id, index: 0, blob: screenBlob });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, recordingId);
+  await page.reload();
+
+  const centerPixel = () => page.getByTestId('export-preview-stage').locator('canvas').evaluate((node) => {
+    const canvas = node as HTMLCanvasElement;
+    const context = canvas.getContext('2d');
+    if (!context || canvas.width === 0 || canvas.height === 0) return [0, 0, 0, 0];
+    return Array.from(context.getImageData(Math.floor(canvas.width / 2), Math.floor(canvas.height / 2), 1, 1).data);
+  });
+  await expect.poll(async () => {
+    const [red, green, blue] = await centerPixel();
+    return blue > red && blue > green;
+  }).toBe(true);
+  await page.getByTestId('export-preview-play-toggle').click();
+  await expect.poll(async () => {
+    const [red, green, blue] = await centerPixel();
+    return red > green && red > blue;
+  }, { timeout: 5_000 }).toBe(true);
+});
+
+test('a short display recording exports through the local WebCodecs pipeline and reports diagnostics', async ({ page }) => {
+  await page.evaluate(async (id) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 160;
+    canvas.height = 90;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('export fixture canvas unavailable');
+    context.fillStyle = '#176f87';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const stream = canvas.captureStream(15);
+    const screenBlob = await new Promise<Blob>((resolve, reject) => {
+      const chunks: BlobPart[] = [];
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onerror = () => reject(new Error('export fixture recorder failed'));
+      recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
+      recorder.start();
+      window.setTimeout(() => recorder.stop(), 450);
+    });
+    stream.getTracks().forEach((track) => track.stop());
+
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(['recordings', 'screenChunks'], 'readwrite');
+      const recordings = tx.objectStore('recordings');
+      const request = recordings.get(id);
+      request.onsuccess = () => {
+        const source = { kind: 'desktop', sourceSize: { width: 160, height: 90 } };
+        recordings.put({
+          ...request.result,
+          durationMs: 450,
+          source,
+          setup: { ...request.result.setup, source },
+        });
+      };
+      tx.objectStore('screenChunks').add({ recordingId: id, index: 0, blob: screenBlob });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, recordingId);
+  await page.reload();
+
+  await page.locator('.editor-craft-ratio-card').filter({ hasText: '9:16' }).click();
+  await page.locator('.editor-craft-setting-row').filter({ hasText: 'Resolution' }).locator('select').selectOption('sd');
+  await page.locator('.editor-craft-setting-row').filter({ hasText: 'Format' }).locator('select').selectOption('webm');
+  await page.locator('.editor-craft-setting-row').filter({ hasText: 'Frame rate' }).locator('select').selectOption('15');
+
+  const download = page.waitForEvent('download', { timeout: 60_000 });
+  await page.getByRole('button', { name: /Render & download/ }).click();
+  await download;
+  await expect(page.getByTestId('export-diagnostics-summary')).toContainText('webcodecs-vp9');
+  const diagnosticsDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Download diagnostics JSON' }).click();
+  const diagnosticsFile = await diagnosticsDownload;
+  const diagnosticsStream = await diagnosticsFile.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of diagnosticsStream) chunks.push(Buffer.from(chunk));
+  const report = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+    breakdownMs?: Record<string, number>;
+    decoderPaths?: { screen?: string };
+  };
+  expect(report.decoderPaths?.screen).toBe('mediabunny-stream');
+  expect(report.breakdownMs?.background_blur_gpu).toBeGreaterThan(0);
 });
 
 test('switching away from a custom recording ratio restores its original framing when returning', async ({ page }) => {
@@ -445,6 +614,60 @@ test('generated English dubbing becomes the preview and export audio track', asy
   await expect(page.getByTestId('export-preview-audio')).toHaveAttribute('data-localized-audio', 'true');
   await page.getByRole('button', { name: 'Export' }).click();
   await expect(page.getByTestId('export-panel-localized-note')).toContainText('English dubbed audio');
+});
+
+test('generated subtitles repaint the preview immediately without a reload', async ({ page }) => {
+  await page.route('**/api/me/tier', async (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ tier: 'pro', status: 'active', currentPeriodEnd: null, loggedIn: true }),
+  }));
+  await page.route('**/api/asr/submit', async (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ jobId: 'mock-subtitle-job', mock: true }),
+  }));
+  await page.route('**/api/asr/status?**', async (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      status: 'done',
+      srt: '1\n00:00:00,000 --> 00:00:12,000\nSubtitles are visible immediately.\n',
+    }),
+  }));
+  await page.evaluate(async (id) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(['recordings', 'audioChunks'], 'readwrite');
+      const recordings = tx.objectStore('recordings');
+      const request = recordings.get(id);
+      request.onsuccess = () => recordings.put({ ...request.result, hasAudio: true });
+      tx.objectStore('audioChunks').add({
+        recordingId: id,
+        index: 0,
+        blob: new Blob([new Uint8Array(4_096)], { type: 'audio/webm' }),
+      });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, recordingId);
+
+  await page.reload();
+  const stage = page.getByTestId('export-preview-stage');
+  const canvas = stage.locator('canvas');
+  await expect(stage).toHaveAttribute('data-has-subtitles', 'false');
+  const before = await canvas.evaluate((element: HTMLCanvasElement) => element.toDataURL());
+
+  await page.getByRole('button', { name: 'Captions' }).click();
+  await page.getByRole('button', { name: 'Generate subtitles' }).click();
+  await expect(page.getByText(/Subtitles attached to this recording/)).toBeVisible();
+  await expect(stage).toHaveAttribute('data-has-subtitles', 'true');
+  await expect.poll(() => canvas.evaluate((element: HTMLCanvasElement) => element.toDataURL())).not.toBe(before);
 });
 
 test('a rounded camera selected before recording stays rounded in the export preview', async ({ page }) => {
@@ -778,6 +1001,83 @@ test('autozoom keeps the video background at its original scale in the export pr
     const y = Math.round(canvas.height * 0.08) + 12;
     return Array.from(ctx.getImageData(x, y, 1, 1).data);
   }), { timeout: 15_000 }).toEqual(unzoomedWindowPixels);
+});
+
+test('display-source Autozoom stays clipped inside the fixed recording frame', async ({ page }) => {
+  await page.evaluate(async (id) => {
+    const scene = document.createElement('canvas');
+    scene.width = 320;
+    scene.height = 180;
+    const context = scene.getContext('2d');
+    if (!context) throw new Error('display fixture canvas unavailable');
+    context.fillStyle = '#ef3340';
+    context.fillRect(0, 0, scene.width, scene.height);
+    context.fillStyle = '#1438a6';
+    context.fillRect(160, 0, 160, 180);
+    const stream = scene.captureStream(12);
+    const screenBlob = await new Promise<Blob>((resolve, reject) => {
+      const chunks: BlobPart[] = [];
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onerror = () => reject(new Error('display fixture recorder failed'));
+      recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
+      recorder.start();
+      window.setTimeout(() => recorder.stop(), 350);
+    });
+    stream.getTracks().forEach((track) => track.stop());
+
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(['recordings', 'screenChunks'], 'readwrite');
+      const recordings = tx.objectStore('recordings');
+      const getRecording = recordings.get(id);
+      getRecording.onsuccess = () => {
+        const recording = getRecording.result;
+        const source = { kind: 'desktop', sourceSize: { width: 320, height: 180 } };
+        recordings.put({
+          ...recording,
+          durationMs: 350,
+          source,
+          setup: {
+            ...recording.setup,
+            source,
+            videoBackground: { kind: 'preset', presetId: 'cyanotype-garden' },
+          },
+          autoZooms: [{ id: 'display-zoom', start: 0, end: 350, scale: 2.4, cx: 0.75, cy: 0.5 }],
+        });
+      };
+      tx.objectStore('screenChunks').add({ recordingId: id, index: 0, blob: screenBlob });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, recordingId);
+
+  await page.reload();
+  const videoTrack = page.getByTestId('timeline-video-track');
+  const trackBox = await videoTrack.boundingBox();
+  if (!trackBox) throw new Error('display timeline was not measured');
+  await page.mouse.click(trackBox.x + trackBox.width * 0.5, trackBox.y + trackBox.height / 2);
+  const canvas = page.getByTestId('export-preview-stage').locator('canvas');
+  await expect(canvas).toBeVisible();
+  await expect.poll(() => canvas.evaluate((node) => {
+    const element = node as HTMLCanvasElement;
+    const context = element.getContext('2d');
+    if (!context || element.width === 0 || element.height === 0) return false;
+    const corners = [
+      [4, 4], [element.width - 5, 4],
+      [4, element.height - 5], [element.width - 5, element.height - 5],
+    ];
+    return corners.every(([x, y]) => {
+      const pixel = context.getImageData(x, y, 1, 1).data;
+      return pixel[3] > 0 && !(pixel[0] > 210 && pixel[1] < 90 && pixel[2] < 100)
+        && !(pixel[2] > 120 && pixel[0] < 80);
+    });
+  }), { timeout: 15_000 }).toBe(true);
 });
 
 test('auto edit removes locally detected silence and can be undone', async ({ page }) => {

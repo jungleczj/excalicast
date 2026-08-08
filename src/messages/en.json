@@ -673,12 +673,20 @@
       "keepZoomedHint": "Fill the selected ratio and keep the active focus in view"
     }
   },
+  "timelineZoom": {
+    "group": "Timeline zoom",
+    "zoomOut": "Zoom out timeline",
+    "zoomIn": "Zoom in timeline",
+    "fitTimeline": "Fit timeline",
+    "fit": "Fit"
+  },
   "subtitlePanel": {
     "closeAria": "Close",
     "title": "Voice subtitles",
     "subtitle": "Auto-detect Chinese & English. Once generated, subtitles bind to this recording, burn into MP4 exports, and sync on the player page.",
     "start": "Generate subtitles",
     "regenerate": "Regenerate subtitles",
+    "reading": "Reading local audio…",
     "uploading": "Uploading audio…",
     "pending": "Transcription job submitted, waiting to start…",
     "running": "Transcribing (~30-60s depending on audio length)…",
@@ -736,16 +744,27 @@
     "generating": "Generating video",
     "phase": {
       "loading": "Loading recording data",
+      "loading_media": "Loading source media",
+      "loading_manifest": "Reading media manifest",
+      "loading_renderer": "Loading renderer",
+      "assembling_media": "Preparing source media",
+      "initializing_decoder": "Initializing video decoder",
+      "hardware_pipeline": "Composing and hardware encoding",
+      "muxing_audio": "Muxing audio",
+      "fallback_encoding": "Switching to compatibility encoder",
+      "software_encoding_segments": "Encoding local video segments",
       "tracking_cursor": "Tracking cursor",
       "rendering_frames": "Rendering frames",
       "encoding": "Encoding video",
+      "failed": "Export failed",
+      "cancelled": "Export cancelled",
       "done": "Done",
       "preparing": "Preparing"
     }
   },
   "exportPanel": {
     "title": "Export MP4",
-    "lede": "Rendered entirely locally (ffmpeg.wasm). Recording data never leaves your browser.",
+    "lede": "Rendered entirely locally with browser hardware acceleration and a software compatibility path.",
     "withWatermarkTitle": "Watermarked export",
     "withWatermarkMeta": "Free · anyone",
     "withWatermarkHint": "Excalicast watermark in bottom-right corner",
@@ -763,6 +782,10 @@
     "wmWithLabel": "watermarked",
     "wmCleanLabel": "watermark-free",
     "doneStatus": "Export complete. Download started.",
+    "cancelExport": "Cancel export",
+    "cancelledStatus": "Export cancelled.",
+    "diagnosticsTitle": "Export diagnostics",
+    "downloadDiagnostics": "Download diagnostics JSON",
     "errorPrefix": "Error: {message}",
     "unlockedPaidNote": "This recording is unlocked. No extra charge for watermark-free export.",
     "unlockedProNote": "Unlocked — watermark-free export available for every recording",

@@ -201,7 +201,7 @@ test('selected area stays adjustable before recording and removes capture overla
   await expect(frame).toHaveCount(0, { timeout: 7_000 });
 });
 
-test('desktop capture hides the in-page camera bubble before recording starts', async ({ page }) => {
+test('desktop capture preserves the camera position relative to the selected frame', async ({ page }) => {
   await page.addInitScript(() => {
     class InspectingMediaRecorder extends EventTarget {
       static isTypeSupported() { return true; }
@@ -265,13 +265,62 @@ test('desktop capture hides the in-page camera bubble before recording starts', 
   await page.goto('/app');
   await page.getByRole('button', { name: /新建录制/ }).first().click();
   await page.getByRole('button', { name: /整个桌面/ }).click();
+  await page.getByRole('button', { name: /竖屏/ }).click();
+  await page.getByRole('button', { name: /9:16/ }).click();
   await page.getByRole('radio', { name: /打开摄像头/ }).click();
   await page.getByRole('button', { name: /下一步：取景/ }).click();
-  await expect(page.getByTestId('camera-bubble')).toBeVisible();
+  const camera = page.getByTestId('camera-bubble');
+  const frame = page.getByTestId('display-source-crop-frame');
+  await expect(camera).toBeVisible();
+  await expect(frame).toBeVisible();
+  const [initialCameraBox, initialFrameBox] = await Promise.all([camera.boundingBox(), frame.boundingBox()]);
+  if (!initialCameraBox || !initialFrameBox) throw new Error('camera or selected frame was not measurable');
+  await page.mouse.move(initialCameraBox.x + initialCameraBox.width / 2, initialCameraBox.y + initialCameraBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(initialFrameBox.x + initialFrameBox.width / 2, initialFrameBox.y + initialFrameBox.height / 2);
+  await page.mouse.up();
+  const [cameraBox, frameBox] = await Promise.all([camera.boundingBox(), frame.boundingBox()]);
+  if (!cameraBox || !frameBox) throw new Error('camera or selected frame was not measurable');
+  const expected = {
+    rx: (cameraBox.x - frameBox.x) / frameBox.width,
+    ry: (cameraBox.y - frameBox.y) / frameBox.height,
+    rs: cameraBox.width / Math.min(frameBox.width, frameBox.height),
+  };
 
   await page.getByTestId('desktop-framing-controls').getByRole('button', { name: /^开始倒计时$/ }).click();
   await expect(page.getByTestId('camera-bubble')).toHaveCount(0, { timeout: 7_000 });
   await expect.poll(() => page.evaluate(() => (window as any).__displayRecorderCameraBubbleCountAtStart), { timeout: 9_000 }).toBe(0);
+  await expect.poll(() => page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const rows = await new Promise<Array<{ timestamp: number; rx: number; ry: number; rs: number }>>((resolve, reject) => {
+      const request = db.transaction('cameraPositions', 'readonly').objectStore('cameraPositions').getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return rows.sort((a, b) => a.timestamp - b.timestamp)[0] ?? null;
+  }), { timeout: 5_000 }).not.toBeNull();
+  const event = await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const rows = await new Promise<Array<{ timestamp: number; rx: number; ry: number; rs: number }>>((resolve, reject) => {
+      const request = db.transaction('cameraPositions', 'readonly').objectStore('cameraPositions').getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return rows.sort((a, b) => a.timestamp - b.timestamp)[0];
+  });
+  expect(event.rx).toBeCloseTo(expected.rx, 2);
+  expect(event.ry).toBeCloseTo(expected.ry, 2);
+  expect(event.rs).toBeCloseTo(expected.rs, 2);
 });
 
 test('desktop capture requests a detached recording controller before countdown', async ({ page }) => {

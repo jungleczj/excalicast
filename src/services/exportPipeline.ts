@@ -22,8 +22,10 @@ import {
   type ExportFormat,
   type ExportQuality,
   type RecordingSourceKind,
+  type RecordingMetadata,
   type SceneRect,
   type SourceCropWindow,
+  type TimeSegment,
   type VideoBackgroundConfig,
   type WhiteboardSnapshot,
   type WorkspaceShellRow,
@@ -34,18 +36,36 @@ import { cueAt } from '@/utils/srtParser';
 import { createCameraFrameSource, type CameraFrameSource } from './webmCameraFrames';
 import { drawLaserOverlay } from '@/utils/laserRender';
 import { paintVideoBackground } from '@/services/videoBackgroundRenderer';
-import { createDisplayFrameSource, type DisplayFrameSource } from '@/services/displayFrameSource';
-import { analyzeCursorFocusTrack, focusedCoverPlacement, focusPointAt } from '@/services/cursorFocusTracker';
+import { createDisplayFrameSource, createSeekableDisplayFrameSource, type DisplayFrameSource } from '@/services/displayFrameSource';
+import {
+  createCursorFocusExportAnalyzer,
+  cursorFocusSourceSignature,
+  focusedCoverPlacement,
+  focusPointAt,
+  type CursorFocusExportAnalyzer,
+} from '@/services/cursorFocusTracker';
+import { createExportDiagnostics } from '@/services/exportDiagnostics';
+import { planExportFrameBatches } from '@/services/exportFrameBatches';
+import { createDisplayBlurWorker } from '@/services/displayBlurWorker';
+import { cameraPlacementFromEvent, projectCameraPlacement } from '@/services/cameraPlacement';
+import type { ExportDiagnosticReport, ExportProgressDetails } from '@/types/exportDiagnostics';
+import { previewPlaybackRegistry } from '@/services/previewPlaybackRegistry';
+import { resolveFrameTransform } from '@/services/frameTransform';
 
 export interface ExportOptions extends ExportConfig {
   recordingId: string;
   onPhase?: (phase: string) => void;
   onProgress?: (ratio: number) => void;
   onLog?: (message: string) => void;
+  onProgressDetails?: (details: ExportProgressDetails) => void;
+  onDiagnostics?: (report: ExportDiagnosticReport) => void;
+  signal?: AbortSignal;
 }
 
 let _ffmpeg: FFmpeg | null = null;
 const previewDisplayCache = new Map<string, { source: DisplayFrameSource; lastTimeMs: number }>();
+
+const previewShellCache = new Map<string, Promise<DecodedShell[]>>();
 
 async function getFfmpeg(onLog?: (m: string) => void): Promise<FFmpeg> {
   if (_ffmpeg) return _ffmpeg;
@@ -54,6 +74,60 @@ async function getFfmpeg(onLog?: (m: string) => void): Promise<FFmpeg> {
   await ffmpeg.load();
   _ffmpeg = ffmpeg;
   return ffmpeg;
+}
+
+export function cancelActiveExport(): void {
+  try { _ffmpeg?.terminate(); } catch { /* best effort */ }
+  _ffmpeg = null;
+}
+
+async function remuxEncodedVideoWithAudio(
+  videoBlob: Blob,
+  audioBlob: Blob,
+  format: 'mp4' | 'webm',
+  segments: TimeSegment[] | undefined,
+  onLog?: (message: string) => void,
+): Promise<Blob> {
+  const ffmpeg = await getFfmpeg(onLog);
+  const videoName = format === 'webm' ? '__fast_video.webm' : '__fast_video.mp4';
+  const outputName = format === 'webm' ? '__fast_output.webm' : '__fast_output.mp4';
+  const audioName = '__fast_audio.webm';
+  try {
+    await ffmpeg.writeFile(videoName, new Uint8Array(await videoBlob.arrayBuffer()));
+    await ffmpeg.writeFile(audioName, new Uint8Array(await audioBlob.arrayBuffer()));
+
+    const args = ['-i', videoName, '-i', audioName];
+    if (segments && segments.length > 0) {
+      const filters: string[] = [];
+      const labels: string[] = [];
+      segments.forEach((segment, index) => {
+        const label = `__fast_a${index}`;
+        filters.push(
+          `[1:a]atrim=start=${(segment.start / 1000).toFixed(3)}:end=${(segment.end / 1000).toFixed(3)},asetpts=PTS-STARTPTS[${label}]`,
+        );
+        labels.push(`[${label}]`);
+      });
+      if (labels.length > 1) filters.push(`${labels.join('')}concat=n=${labels.length}:v=0:a=1[__fast_aout]`);
+      args.push('-filter_complex', filters.join(';'), '-map', '0:v', '-map', labels.length > 1 ? '[__fast_aout]' : labels[0]);
+    } else {
+      args.push('-map', '0:v', '-map', '1:a');
+    }
+    args.push('-c:v', 'copy');
+    if (format === 'webm') args.push('-c:a', 'libopus');
+    else args.push('-c:a', 'aac');
+    args.push('-shortest', outputName);
+
+    await ffmpeg.exec(args);
+    const data = await ffmpeg.readFile(outputName);
+    const bytes = data instanceof Uint8Array ? data : new TextEncoder().encode(String(data));
+    const buffer = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(buffer).set(bytes);
+    return new Blob([buffer], { type: format === 'webm' ? 'video/webm' : 'video/mp4' });
+  } finally {
+    for (const name of [videoName, audioName, outputName]) {
+      try { await ffmpeg.deleteFile(name); } catch { /* best effort */ }
+    }
+  }
 }
 
 async function getPreviewDisplaySource(recordingId: string, screenBlob: Blob, timeMs: number): Promise<DisplayFrameSource> {
@@ -66,8 +140,11 @@ async function getPreviewDisplaySource(recordingId: string, screenBlob: Blob, ti
     try { cached.source.close(); } catch { /* ignore */ }
     previewDisplayCache.delete(recordingId);
   }
-  const source = await createDisplayFrameSource(screenBlob);
+  // Preview must support arbitrary backward/forward seeks. The sequential WebCodecs
+  // source is reserved for export, where timestamps are monotonic.
+  const source = createSeekableDisplayFrameSource(screenBlob);
   previewDisplayCache.set(recordingId, { source, lastTimeMs: timeMs });
+  await previewPlaybackRegistry.attach(recordingId, source);
   return source;
 }
 
@@ -90,7 +167,7 @@ function snapshotAt(snapshots: WhiteboardSnapshot[], t: number): WhiteboardSnaps
 export function cameraPositionAt(
   events: CameraPositionEvent[],
   timeMs: number,
-): { rx: number; ry: number; rs: number; hidden: boolean } | null {
+): CameraPositionEvent | null {
   if (events.length === 0) return null;
   let lo = 0, hi = events.length - 1, ans = -1;
   while (lo <= hi) {
@@ -99,7 +176,7 @@ export function cameraPositionAt(
     else hi = mid - 1;
   }
   const e = events[ans === -1 ? 0 : ans];
-  return { rx: e.rx, ry: e.ry, rs: e.rs, hidden: !!e.hidden };
+  return { ...e, hidden: !!e.hidden };
 }
 
 export interface CameraSegment {
@@ -149,11 +226,12 @@ export function buildCameraSegments(
     const endMs = i + 1 < events.length ? events[i + 1].timestamp : durationMs;
     if (endMs - startMs < 50) continue;
     // 尺寸按「有效边界较短边」归一（rs 存的也是相对裁切框较短边）→ 跨比例协调、竖屏不再过小。
-    const shortSide = Math.min(bounds.w, bounds.h);
-    const size = Math.max(16, Math.min(Math.round(events[i].rs * shortSide), Math.round(shortSide)));
-    // 位置按宽/高分数定位并钳进边界，避免放大后溢出。
-    const x = Math.round(bounds.offX + Math.max(0, Math.min(events[i].rx * bounds.w, bounds.w - size)));
-    const y = Math.round(bounds.offY + Math.max(0, Math.min(events[i].ry * bounds.h, bounds.h - size)));
+    const projected = projectCameraPlacement(cameraPlacementFromEvent(events[i]), {
+      x: bounds.offX, y: bounds.offY, width: bounds.w, height: bounds.h,
+    });
+    const size = Math.max(16, Math.round(projected.size));
+    const x = Math.round(projected.x);
+    const y = Math.round(projected.y);
     raw.push({ startMs, endMs, x, y, size });
   }
   if (raw.length === 0) return [];
@@ -294,12 +372,44 @@ function paintDisplaySourceFallback(
   },
   width: number,
   height: number,
+  scratch?: { source: HTMLCanvasElement; blurred: HTMLCanvasElement },
 ): void {
   const sourceW = frame.videoWidth ?? frame.displayWidth ?? frame.codedWidth ?? width;
   const sourceH = frame.videoHeight ?? frame.displayHeight ?? frame.codedHeight ?? height;
   const scale = Math.max(width / sourceW, height / sourceH) * 1.06;
   const drawW = sourceW * scale;
   const drawH = sourceH * scale;
+  if (scratch) {
+    const reducedW = Math.max(2, Math.ceil(width / 8));
+    const reducedH = Math.max(2, Math.ceil(height / 8));
+    for (const canvas of [scratch.source, scratch.blurred]) {
+      if (canvas.width !== reducedW) canvas.width = reducedW;
+      if (canvas.height !== reducedH) canvas.height = reducedH;
+    }
+    const reducedScale = Math.max(reducedW / sourceW, reducedH / sourceH) * 1.12;
+    const reducedDrawW = sourceW * reducedScale;
+    const reducedDrawH = sourceH * reducedScale;
+    const sourceCtx = scratch.source.getContext('2d')!;
+    sourceCtx.setTransform(1, 0, 0, 1, 0, 0);
+    sourceCtx.filter = 'none';
+    sourceCtx.clearRect(0, 0, reducedW, reducedH);
+    sourceCtx.drawImage(frame, (reducedW - reducedDrawW) / 2, (reducedH - reducedDrawH) / 2, reducedDrawW, reducedDrawH);
+    const blurredCtx = scratch.blurred.getContext('2d')!;
+    blurredCtx.setTransform(1, 0, 0, 1, 0, 0);
+    blurredCtx.clearRect(0, 0, reducedW, reducedH);
+    blurredCtx.filter = `blur(${Math.max(2, Math.round(Math.min(reducedW, reducedH) * 0.025))}px)`;
+    blurredCtx.drawImage(scratch.source, 0, 0);
+    blurredCtx.filter = 'none';
+    // Keep an opaque cover below the blurred layer. Canvas blur samples outside
+    // its source bounds as transparent; without this underlay the initial white
+    // canvas leaks into portrait/ultrawide edges.
+    ctx.drawImage(scratch.source, 0, 0, reducedW, reducedH, 0, 0, width, height);
+    ctx.drawImage(scratch.blurred, 0, 0, reducedW, reducedH, 0, 0, width, height);
+    ctx.fillStyle = 'rgba(255, 253, 248, 0.14)';
+    ctx.fillRect(0, 0, width, height);
+    return;
+  }
+  ctx.drawImage(frame, (width - drawW) / 2, (height - drawH) / 2, drawW, drawH);
   ctx.save();
   ctx.filter = `blur(${Math.max(18, Math.round(Math.min(width, height) * 0.025))}px)`;
   ctx.drawImage(frame, (width - drawW) / 2, (height - drawH) / 2, drawW, drawH);
@@ -442,44 +552,6 @@ function projectBoundsIntoRecordingWindow(
   };
 }
 
-function applyAutoZoom(
-  canvas: HTMLCanvasElement,
-  segment: AutoZoomSegment | null,
-  bounds: CanvasRect = { x: 0, y: 0, width: canvas.width, height: canvas.height },
-): void {
-  if (!segment) return;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-  const scale = Math.max(1, Math.min(4, segment.scale));
-  // 缓动刚开始/结束时 scale 精确为 1，必须保持原帧，不能因原先的 1.05 下限跳帧。
-  if (scale <= 1.0001) return;
-  const source = document.createElement('canvas');
-  source.width = canvas.width;
-  source.height = canvas.height;
-  source.getContext('2d')!.drawImage(canvas, 0, 0);
-  const safeBounds: CanvasRect = {
-    x: Math.max(0, Math.min(canvas.width, bounds.x)),
-    y: Math.max(0, Math.min(canvas.height, bounds.y)),
-    width: Math.max(1, Math.min(canvas.width - Math.max(0, bounds.x), bounds.width)),
-    height: Math.max(1, Math.min(canvas.height - Math.max(0, bounds.y), bounds.height)),
-  };
-  const cropW = safeBounds.width / scale;
-  const cropH = safeBounds.height / scale;
-  const cx = safeBounds.x + Math.max(0, Math.min(1, segment.cx ?? 0.5)) * safeBounds.width;
-  const cy = safeBounds.y + Math.max(0, Math.min(1, segment.cy ?? 0.5)) * safeBounds.height;
-  const sx = Math.max(safeBounds.x, Math.min(safeBounds.x + safeBounds.width - cropW, cx - cropW / 2));
-  const sy = Math.max(safeBounds.y, Math.min(safeBounds.y + safeBounds.height - cropH, cy - cropH / 2));
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(safeBounds.x, safeBounds.y, safeBounds.width, safeBounds.height);
-  ctx.clip();
-  ctx.clearRect(safeBounds.x, safeBounds.y, safeBounds.width, safeBounds.height);
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(source, sx, sy, cropW, cropH, safeBounds.x, safeBounds.y, safeBounds.width, safeBounds.height);
-  ctx.restore();
-}
-
 /**
  * 背景与录制内容分层合成：AutoZoom 只能作用于透明的内容层，避免把用户选择的
  * 视频背景也一起裁切、放大。白板、工作区壳、屏幕录制和激光笔都属于内容层。
@@ -495,10 +567,38 @@ function drawZoomedContentLayer(
   target: CanvasRenderingContext2D,
   content: HTMLCanvasElement,
   zoom: AutoZoomSegment | null,
-  bounds?: CanvasRect,
+  bounds: CanvasRect = { x: 0, y: 0, width: content.width, height: content.height },
 ): void {
-  applyAutoZoom(content, zoom, bounds);
   target.drawImage(content, 0, 0);
+  if (!zoom) return;
+  const scale = Math.max(1, Math.min(4, zoom.scale));
+  if (scale <= 1.0001) return;
+  const safeBounds: CanvasRect = {
+    x: Math.max(0, Math.min(content.width, bounds.x)),
+    y: Math.max(0, Math.min(content.height, bounds.y)),
+    width: Math.max(1, Math.min(content.width - Math.max(0, bounds.x), bounds.width)),
+    height: Math.max(1, Math.min(content.height - Math.max(0, bounds.y), bounds.height)),
+  };
+  const transform = resolveFrameTransform({ bounds: safeBounds, zoom });
+  target.save();
+  target.beginPath();
+  target.rect(safeBounds.x, safeBounds.y, safeBounds.width, safeBounds.height);
+  target.clip();
+  target.clearRect(safeBounds.x, safeBounds.y, safeBounds.width, safeBounds.height);
+  target.imageSmoothingEnabled = true;
+  target.imageSmoothingQuality = 'high';
+  target.drawImage(
+    content,
+    transform.source.x,
+    transform.source.y,
+    transform.source.width,
+    transform.source.height,
+    transform.destination.x,
+    transform.destination.y,
+    transform.destination.width,
+    transform.destination.height,
+  );
+  target.restore();
 }
 
 interface ShellLayout {
@@ -559,6 +659,35 @@ function disposeShells(decoded: DecodedShell[]): void {
   for (const s of decoded) {
     try { s.bitmap.close(); } catch { /* ignore */ }
   }
+}
+
+async function getPreviewShells(recordingId: string): Promise<DecodedShell[]> {
+  const cached = previewShellCache.get(recordingId);
+  if (cached) return cached;
+  const pending = getWorkspaceShells(recordingId).then(decodeShells);
+  previewShellCache.set(recordingId, pending);
+  try {
+    return await pending;
+  } catch (error) {
+    previewShellCache.delete(recordingId);
+    throw error;
+  }
+}
+
+export function releasePreviewResources(recordingId: string): void {
+  const display = previewDisplayCache.get(recordingId);
+  if (display) {
+    try { display.source.close(); } catch { /* ignore */ }
+    previewDisplayCache.delete(recordingId);
+  }
+  const shells = previewShellCache.get(recordingId);
+  previewShellCache.delete(recordingId);
+  previewPlaybackRegistry.clear(recordingId);
+  void shells?.then(disposeShells).catch(() => undefined);
+}
+
+export async function setPreviewPlayback(recordingId: string, playing: boolean, timeMs: number): Promise<void> {
+  previewPlaybackRegistry.setIntent(recordingId, playing, timeMs);
 }
 
 interface ElementBoxOnly { x: number; y: number; w: number; h: number }
@@ -625,32 +754,58 @@ function buildGhostRect(crop: SceneRect): Record<string, unknown> {
 }
 
 export async function exportRecording(opts: ExportOptions): Promise<Blob> {
-  opts.onPhase?.('loading');
-  // 立即上报 1%，让用户看到进度条「在动」
-  opts.onProgress?.(0.01);
+  const diagnostics = createExportDiagnostics({ recordingId: opts.recordingId, totalFrames: 0 });
+  let diagnosticsCompleted = false;
+  let releaseExportResources = () => {};
+  let abortListener: (() => void) | null = null;
+  let lastDetailsAt = 0;
+  const checkCancelled = () => {
+    if (opts.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
+  };
+  const emitDetails = (force = false) => {
+    const now = performance.now();
+    if (!force && now - lastDetailsAt < 120) return;
+    lastDetailsAt = now;
+    opts.onProgressDetails?.(diagnostics.snapshot());
+  };
+  const setPhase = (phase: string) => {
+    diagnostics.setPhase(phase);
+    opts.onPhase?.(phase);
+    emitDetails(true);
+  };
+  const setProgress = (ratio: number) => {
+    diagnostics.setProgress(ratio);
+    opts.onProgress?.(ratio);
+    emitDetails();
+  };
+  const completeDiagnostics = () => {
+    if (diagnosticsCompleted) return;
+    diagnosticsCompleted = true;
+    const report = diagnostics.complete();
+    opts.onProgressDetails?.(report);
+    opts.onDiagnostics?.(report);
+  };
+  try {
+  checkCancelled();
+  const phaseStartedAt = performance.now();
+  setPhase('loading_media');
+  setProgress(0.01);
+  setPhase('loading_renderer');
   const { exportToCanvas } = await import('@excalidraw/excalidraw');
-  opts.onProgress?.(0.05);
-  const { metadata, snapshots, audioBlob, cameraBlob, screenBlob, cameraEvents, laserEvents, binaryFiles } = await loadFullRecording(opts.recordingId);
-  opts.onProgress?.(0.08);
+  setProgress(0.03);
+  setPhase('assembling_media');
+  const { metadata, snapshots, audioBlob, cameraBlob, screenBlob, cameraEvents, laserEvents, binaryFiles, manifest } = await loadFullRecording(opts.recordingId);
+  diagnostics.setMedia({ audio: manifest.audio, camera: manifest.camera, screen: manifest.screen });
+  diagnostics.addBreakdown('media_loading', performance.now() - phaseStartedAt);
+  setProgress(0.08);
+  opts.onLog?.(`media manifest: audio=${manifest.audio.chunks} chunks/${manifest.audio.bytes} bytes, camera=${manifest.camera.chunks} chunks/${manifest.camera.bytes} bytes, screen=${manifest.screen.chunks} chunks/${manifest.screen.bytes} bytes`);
+  opts.onLog?.(`media ready in ${Math.round(performance.now() - phaseStartedAt)}ms`);
   const localizedTrack = opts.localizedTrackId ? await getLocalizedTrack(opts.localizedTrackId) : undefined;
   const useLocalizedTrack = !!localizedTrack && opts.muteOriginalAudio !== false;
   const effectiveAudioBlob = useLocalizedTrack ? localizedTrack.audioBlob : audioBlob;
   const effectiveCameraBlob = useLocalizedTrack && localizedTrack.cameraBlob ? localizedTrack.cameraBlob : cameraBlob;
   const effectiveSubtitleSrt = useLocalizedTrack ? localizedTrack.translatedSrt : metadata.subtitleSrt;
   let cursorFocusTrack = opts.alwaysKeepZoomedIn ? await getCursorFocusTrack(opts.recordingId) : undefined;
-  if (opts.alwaysKeepZoomedIn && screenBlob) {
-    opts.onPhase?.('tracking_cursor');
-    try {
-      cursorFocusTrack = await analyzeCursorFocusTrack({
-        recordingId: opts.recordingId,
-        screenBlob,
-        durationMs: metadata.durationMs,
-        onProgress: (progress) => opts.onProgress?.(0.08 + progress * 0.04),
-      });
-    } catch {
-      cursorFocusTrack = undefined;
-    }
-  }
   // ffmpeg 仅在兜底路径才加载（WebCodecs 快路径不需要）。
 
   const preset = ASPECT_PRESETS[opts.aspectRatio];
@@ -668,6 +823,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const trimmed = isTrimmed(kept, durationMs);
   const outDurationMs = trimmed ? keptDuration(kept) : durationMs;
   const totalFrames = Math.max(1, Math.round((outDurationMs / 1000) * fps));
+  diagnostics.setTotalFrames(totalFrames);
 
   const filesForExport: Record<string, unknown> = {};
   for (const bf of binaryFiles) filesForExport[bf.fileId] = bf.data;
@@ -707,7 +863,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     cropWindow: useShell ? undefined : opts.cropWindow,
   };
 
-  opts.onPhase?.('rendering_frames');
+  setPhase('rendering_frames');
 
   // 相同帧去重：静止段（场景/外壳/字幕都没变）直接复用上一帧 PNG，跳过最贵的
   // exportToCanvas + 合成 + toBlob。有激光轨迹时逐帧不同，保守关闭去重以保正确。
@@ -728,10 +884,69 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   let lastFinalSig: string | null = null;
   let lastFinalCanvas: HTMLCanvasElement | null = null;
 
+  // 导出会话内复用高分辨率合成层。旧实现每帧创建 3-4 张 Full HD canvas，
+  // 几分钟视频会产生数千次大块内存分配和频繁 GC。
+  const frameTarget = createContentLayer(outputW, outputH);
+  const frameContent = createContentLayer(outputW, outputH);
+  const frameForeground = createContentLayer(outputW, outputH);
+  const frameBlurScratch = {
+    source: createContentLayer(Math.max(2, Math.ceil(outputW / 8)), Math.max(2, Math.ceil(outputH / 8))),
+    blurred: createContentLayer(Math.max(2, Math.ceil(outputW / 8)), Math.max(2, Math.ceil(outputH / 8))),
+  };
+  const displayBlurWorker = screenBlob ? createDisplayBlurWorker(outputW, outputH) : null;
+  const resetLayer = (canvas: HTMLCanvasElement): CanvasRenderingContext2D => {
+    const ctx = canvas.getContext('2d')!;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.filter = 'none';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0)';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return ctx;
+  };
+
   // 摄像头画布内合成（仅 WebCodecs 路径启用；ffmpeg 路径仍用 overlay 滤镜）
   let compositeCamera = false;
   let cameraSource: CameraFrameSource | null = null;
-  let displaySource: DisplayFrameSource | null = screenBlob ? await createDisplayFrameSource(screenBlob) : null;
+  if (screenBlob) setPhase('initializing_decoder');
+  let displaySource: DisplayFrameSource | null = screenBlob
+    ? await createDisplayFrameSource(screenBlob, { signal: opts.signal })
+    : null;
+  if (displaySource) diagnostics.setDecoderPath('screen', displaySource.decoderPath);
+  const createCursorTracking = (): CursorFocusExportAnalyzer | null => {
+    if (!opts.alwaysKeepZoomedIn || !screenBlob || !displaySource) return null;
+    const signature = cursorFocusSourceSignature(
+      screenBlob,
+      metadata.durationMs,
+      displaySource.width,
+      displaySource.height,
+    );
+    if (cursorFocusTrack?.sourceSignature === signature) return null;
+    cursorFocusTrack = undefined;
+    return createCursorFocusExportAnalyzer({
+      recordingId: opts.recordingId,
+      screenBlob,
+      durationMs: metadata.durationMs,
+      sourceWidth: displaySource.width,
+      sourceHeight: displaySource.height,
+    });
+  };
+  let cursorAnalyzer: CursorFocusExportAnalyzer | null = createCursorTracking();
+  releaseExportResources = () => {
+    try { cameraSource?.close(); } catch { /* best effort */ }
+    try { cursorAnalyzer?.close(); } catch { /* best effort */ }
+    cursorAnalyzer = null;
+    try { displaySource?.close(); } catch { /* best effort */ }
+    displaySource = null;
+    displayBlurWorker?.close();
+    disposeShells(decodedShells);
+  };
+  abortListener = () => releaseExportResources();
+  opts.signal?.addEventListener('abort', abortListener, { once: true });
+  setPhase('rendering_frames');
   // 摄像头气泡有效边界（shell-aware，与 ffmpeg 路径同一套换算）
   const camBounds: CameraBounds = (() => {
     if (useShell && decodedShells.length > 0) {
@@ -777,31 +992,40 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       return lastFinalCanvas;
     }
     const { t, snap, shellAtTframe } = inp;
-    const target = document.createElement('canvas');
-    target.width = outputW;
-    target.height = outputH;
-    const targetCtx = target.getContext('2d')!;
+    const target = frameTarget;
+    const targetCtx = resetLayer(target);
+    const backgroundStarted = performance.now();
     await paintVideoBackground(targetCtx, target.width, target.height, opts.videoBackground);
-    const content = createContentLayer(target.width, target.height);
-    const contentCtx = content.getContext('2d')!;
+    diagnostics.addBreakdown('background_paint', performance.now() - backgroundStarted);
+    const content = frameContent;
+    const contentCtx = resetLayer(content);
     // foreground 是固定的“录制窗口”内容；背景与窗口外框始终不参与 AutoZoom。
-    const foreground = createContentLayer(target.width, target.height);
-    const foregroundCtx = foreground.getContext('2d')!;
+    const foreground = frameForeground;
+    const foregroundCtx = resetLayer(foreground);
 
     const finalizeForeground = async (zoomBounds: CanvasRect, useRecordingWindow = true) => {
+      const zoomStarted = performance.now();
       drawZoomedContentLayer(foregroundCtx, content, autoZoomAt(opts.autoZooms, t), zoomBounds);
+      diagnostics.addBreakdown('autozoom_composition', performance.now() - zoomStarted);
 
       if (opts.withWatermark) {
+        const watermarkStarted = performance.now();
         drawFrostedWatermark(foregroundCtx, foreground.width, foreground.height, watermarkPos);
+        diagnostics.addBreakdown('watermark_composition', performance.now() - watermarkStarted);
       }
       if (cues.length > 0) {
+        const subtitleStarted = performance.now();
         drawSubtitle(foregroundCtx, foreground.width, foreground.height, cues, t, {
           reservedRightFraction: effectiveCameraBlob ? 0.3 : 0,
         });
+        diagnostics.addBreakdown('subtitle_composition', performance.now() - subtitleStarted);
       }
       if (compositeCamera && cameraSource) {
+        const cameraDecodeStarted = performance.now();
         const frame = await cameraSource.getFrameAt(t);
+        diagnostics.addBreakdown('camera_decoding', performance.now() - cameraDecodeStarted);
         if (frame) {
+          const cameraComposeStarted = performance.now();
           const pos = cameraPositionAt(cameraEvents, t);
           if (!pos) {
             const size = Math.max(16, Math.round(camBounds.h * 0.22));
@@ -809,26 +1033,51 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
             const y = Math.round(camBounds.offY + camBounds.h - size - camBounds.h * 0.04);
             drawCameraBubble(foregroundCtx, frame, x, y, size, metadata.setup?.camera.shape ?? 'circle');
           } else if (!pos.hidden) {
-            const shortSide = Math.min(camBounds.w, camBounds.h);
-            const size = Math.max(16, Math.min(Math.round(pos.rs * shortSide), Math.round(shortSide)));
-            const x = Math.round(camBounds.offX + Math.max(0, Math.min(pos.rx * camBounds.w, camBounds.w - size)));
-            const y = Math.round(camBounds.offY + Math.max(0, Math.min(pos.ry * camBounds.h, camBounds.h - size)));
+            const projected = projectCameraPlacement(cameraPlacementFromEvent(pos), {
+              x: camBounds.offX, y: camBounds.offY, width: camBounds.w, height: camBounds.h,
+            });
+            const size = Math.max(16, Math.round(projected.size));
+            const x = Math.round(projected.x);
+            const y = Math.round(projected.y);
             drawCameraBubble(foregroundCtx, frame, x, y, size, metadata.setup?.camera.shape ?? 'circle');
           }
+          diagnostics.addBreakdown('camera_composition', performance.now() - cameraComposeStarted);
         }
       }
 
+      const foregroundStarted = performance.now();
       if (useRecordingWindow) drawRecordingWindow(targetCtx, foreground, opts.videoBackground);
       else targetCtx.drawImage(foreground, 0, 0);
+      diagnostics.addBreakdown('foreground_composition', performance.now() - foregroundStarted);
     };
 
     if (displaySource) {
+      const displayDecodeStarted = performance.now();
       const displayFrame = await displaySource.getFrameAt(t);
+      diagnostics.addBreakdown('source_decoding', performance.now() - displayDecodeStarted);
       if (!displayFrame) return target;
+      const gpuBlur = opts.croppingMode === 'fit_all_content' && !hasSelectedVideoBackground(opts.videoBackground)
+        ? displayBlurWorker?.blur(displayFrame) ?? Promise.resolve(null)
+        : Promise.resolve(null);
       const manualFocus = autoZoomAt(opts.autoZooms, t);
+      const cursorStarted = performance.now();
+      const trackedFocus = !manualFocus && cursorAnalyzer
+        ? await cursorAnalyzer.analyzeFrame(displayFrame, t)
+        : focusPointAt(cursorFocusTrack, t);
+      diagnostics.addBreakdown('cursor_analysis', performance.now() - cursorStarted);
       if (opts.croppingMode === 'fit_all_content' && !hasSelectedVideoBackground(opts.videoBackground)) {
-        paintDisplaySourceFallback(targetCtx, displayFrame, target.width, target.height);
+        const blurStarted = performance.now();
+        const gpuBackground = await gpuBlur;
+        if (gpuBackground) {
+          targetCtx.drawImage(gpuBackground, 0, 0, target.width, target.height);
+          gpuBackground.close();
+          diagnostics.addBreakdown('background_blur_gpu', performance.now() - blurStarted);
+        } else {
+          paintDisplaySourceFallback(targetCtx, displayFrame, target.width, target.height, frameBlurScratch);
+          diagnostics.addBreakdown('background_blur_cpu', performance.now() - blurStarted);
+        }
       }
+      const displayComposeStarted = performance.now();
       drawDisplayFrame(
         contentCtx,
         displayFrame,
@@ -837,14 +1086,17 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         opts.croppingMode,
         target.width,
         target.height,
-        hasSelectedVideoBackground(opts.videoBackground) && opts.croppingMode === 'fit_all_content' ? 0.88 : 1,
+        1,
         opts.alwaysKeepZoomedIn
           ? (manualFocus
               ? { x: manualFocus.cx ?? 0.5, y: manualFocus.cy ?? 0.5 }
-              : focusPointAt(cursorFocusTrack, t))
+              : trackedFocus)
           : undefined,
       );
-      await finalizeForeground({ x: 0, y: 0, width: content.width, height: content.height }, false);
+      diagnostics.addBreakdown('display_composition', performance.now() - displayComposeStarted);
+      // Autozoom changes only the texture inside the recording frame. The frame
+      // geometry and the selected background stay fixed for the whole export.
+      await finalizeForeground({ x: 0, y: 0, width: content.width, height: content.height });
       return target;
     }
 
@@ -968,15 +1220,21 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // `in globalThis` is not sufficient here: test environments and partially implemented
   // browsers can expose the keys with an undefined value. Treat those as unsupported so
   // the proven ffmpeg fallback is selected rather than failing after export has started.
-  if (format !== 'gif' && typeof VideoEncoder !== 'undefined' && typeof AudioEncoder !== 'undefined') {
+  if (format !== 'gif' && typeof VideoEncoder !== 'undefined') {
     try {
+      diagnostics.setEncoderPath(format === 'webm' ? 'webcodecs-vp9' : 'webcodecs-h264');
+      emitDetails(true);
       if (effectiveCameraBlob) {
         cameraSource = await createCameraFrameSource(effectiveCameraBlob); // 失败抛错 → 回退 ffmpeg
+        diagnostics.setDecoderPath('camera', cameraSource.decoderPath);
         compositeCamera = true;
       }
       const { encodeWebCodecsMp4 } = await import('./webCodecsExport');
-      const blob = await encodeWebCodecsMp4({
+      setPhase('hardware_pipeline');
+      const hardwareStarted = performance.now();
+      const encoded = await encodeWebCodecsMp4({
         format,
+        quality,
         bitrateMultiplier: bitrateMul[quality],
         totalFrames,
         fps,
@@ -984,20 +1242,60 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         height: outputH,
         audioBlob: effectiveAudioBlob ?? null,
         audioSegments: trimmed ? kept : undefined,
-        renderFrame: async (i) => composeFrame(frameInputs(i)),
-        onProgress: (p) => opts.onProgress?.(0.08 + p * 0.9),
+        signal: opts.signal,
+        renderFrame: async (i) => {
+          checkCancelled();
+          const started = performance.now();
+          const canvas = await composeFrame(frameInputs(i));
+          diagnostics.addBreakdown('decode_and_compose', performance.now() - started);
+          diagnostics.setProcessedFrames(i + 1);
+          diagnostics.setDecodedSourceFrames(displaySource?.getDecodedFrameCount?.() ?? 0);
+          emitDetails();
+          return canvas;
+        },
+        onProgress: (p) => setProgress(0.08 + p * 0.9),
       });
+      diagnostics.addBreakdown('hardware_composition_and_encoding', performance.now() - hardwareStarted);
+      let blob = encoded.blob;
+      if (effectiveAudioBlob && !encoded.audioEncoded) {
+        setPhase('muxing_audio');
+        setProgress(0.98);
+        const muxStarted = performance.now();
+        blob = await remuxEncodedVideoWithAudio(
+          blob,
+          effectiveAudioBlob,
+          format,
+          trimmed ? kept : undefined,
+          opts.onLog,
+        );
+        diagnostics.addBreakdown('audio_muxing', performance.now() - muxStarted);
+      }
       cameraSource?.close();
+      if (cursorAnalyzer) {
+        cursorFocusTrack = await cursorAnalyzer.save();
+        cursorAnalyzer.close();
+        cursorAnalyzer = null;
+      }
       displaySource?.close();
       displaySource = null;
-      opts.onPhase?.('done');
-      opts.onProgress?.(1);
+      releaseExportResources();
+      setPhase('done');
+      setProgress(1);
+      completeDiagnostics();
+      if (abortListener) opts.signal?.removeEventListener('abort', abortListener);
       return blob;
     } catch (err) {
+      if (opts.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
+      if (err instanceof DOMException && err.name === 'AbortError') throw err;
+      setPhase('fallback_encoding');
       // 回退前清理摄像头解码资源 + 复位标志（ffmpeg 路径用 overlay 自己处理摄像头）
       try { cameraSource?.close(); } catch { /* */ }
+      cursorAnalyzer?.close();
+      cursorAnalyzer = null;
       try { displaySource?.close(); } catch { /* */ }
       displaySource = screenBlob ? await createDisplayFrameSource(screenBlob) : null;
+      if (displaySource) diagnostics.setDecoderPath('screen', displaySource.decoderPath);
+      cursorAnalyzer = createCursorTracking();
       cameraSource = null;
       compositeCamera = false;
       // 基帧缓存可能已含半帧状态，复位以免污染 ffmpeg 路径
@@ -1013,64 +1311,121 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   }
 
   // —— ffmpeg 兜底路径（JPEG 中间帧）——
-  // 裁剪场景下摄像头改走画布内合成（getFrameAt(源时间)），避免多段把连续摄像头流
-  // 用 overlay 重映射的复杂度；不裁时仍走下方 ffmpeg overlay 滤镜。
-  if (trimmed && effectiveCameraBlob && !compositeCamera) {
+  diagnostics.setEncoderPath(format === 'gif' ? 'ffmpeg-gif' : format === 'webm' ? 'ffmpeg-vp9' : 'ffmpeg-h264');
+  emitDetails(true);
+  // 优先在画布中合成摄像头，允许软件路径按短片段编码并及时释放 JPEG。
+  // VideoDecoder 不可用时才保留旧的 ffmpeg overlay 兼容方式。
+  if (effectiveCameraBlob && !compositeCamera) {
     try {
       cameraSource = await createCameraFrameSource(effectiveCameraBlob);
+      diagnostics.setDecoderPath('camera', cameraSource.decoderPath);
       compositeCamera = true;
       dedupEnabled = false; // 逐帧含摄像头视频，关掉整帧去重
     } catch (err) {
       cameraSource = null;
       compositeCamera = false;
       // eslint-disable-next-line no-console
-      console.warn('[export] ffmpeg trim path: camera decode unavailable, dropping bubble:', err);
+      console.warn('[export] camera decode unavailable; using ffmpeg overlay compatibility path:', err);
     }
   }
 
   const ffmpeg = await getFfmpeg(opts.onLog);
+  const softwareVideoCodec = format === 'webm'
+    ? ['-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', String(crfFor[quality]), '-pix_fmt', 'yuv420p', '-row-mt', '1']
+    : ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(crfFor[quality]), '-pix_fmt', 'yuv420p'];
+  const useSegmentedFrames = format !== 'gif' && (!effectiveCameraBlob || compositeCamera);
+  const frameBatches = planExportFrameBatches(totalFrames, fps);
+  const frameBatchEnds = new Set(frameBatches.map((batch) => batch.endExclusive));
+  const encodedSegments: string[] = [];
+  let batchStart = 0;
+
+  const flushFrameBatch = async (endExclusive: number) => {
+    if (!useSegmentedFrames || endExclusive <= batchStart) return;
+    checkCancelled();
+    const segmentName = `segment_${String(encodedSegments.length).padStart(4, '0')}.${format === 'webm' ? 'webm' : 'mp4'}`;
+    const encodeStarted = performance.now();
+    setPhase('software_encoding_segments');
+    await ffmpeg.exec([
+      '-framerate', String(fps),
+      '-start_number', String(batchStart),
+      '-i', 'f_%06d.jpg',
+      '-frames:v', String(endExclusive - batchStart),
+      ...softwareVideoCodec,
+      '-an',
+      segmentName,
+    ]);
+    diagnostics.addBreakdown('software_segment_encoding', performance.now() - encodeStarted);
+    encodedSegments.push(segmentName);
+    for (let frame = batchStart; frame < endExclusive; frame += 1) {
+      try { await ffmpeg.deleteFile(`f_${String(frame).padStart(6, '0')}.jpg`); } catch { /* ignore */ }
+    }
+    batchStart = endExclusive;
+    setPhase('rendering_frames');
+  };
+
   for (let i = 0; i < totalFrames; i++) {
     const inp = frameInputs(i);
     const name = `f_${String(i).padStart(6, '0')}.jpg`;
     if (dedupEnabled && inp.sig === lastSig && lastBuf) {
       // 传副本：writeFile 以 transfer 方式会 detach 传入 buffer，slice() 保留 lastBuf。
       await ffmpeg.writeFile(name, lastBuf.slice());
-      opts.onProgress?.(0.08 + ((i + 1) / totalFrames) * 0.64);
+      diagnostics.setProcessedFrames(i + 1);
+      setProgress(0.08 + ((i + 1) / totalFrames) * 0.64);
+      if (frameBatchEnds.has(i + 1)) await flushFrameBatch(i + 1);
       continue;
     }
+    checkCancelled();
+    const composeStarted = performance.now();
     const target = await composeFrame(inp);
+    diagnostics.addBreakdown('decode_and_compose', performance.now() - composeStarted);
+    const jpegStarted = performance.now();
     const blob: Blob = await new Promise<Blob>((resolve, reject) => {
       target.toBlob((b) => b ? resolve(b) : reject(new Error('toBlob_failed')), 'image/jpeg', 0.92);
     });
     const buf = new Uint8Array(await blob.arrayBuffer());
     await ffmpeg.writeFile(name, buf.slice());
+    diagnostics.addBreakdown('jpeg_and_virtual_fs', performance.now() - jpegStarted);
     lastBuf = buf;
     lastSig = inp.sig;
-    opts.onProgress?.(0.08 + ((i + 1) / totalFrames) * 0.64);
+    diagnostics.setProcessedFrames(i + 1);
+    diagnostics.setDecodedSourceFrames(displaySource?.getDecodedFrameCount?.() ?? 0);
+    setProgress(0.08 + ((i + 1) / totalFrames) * 0.64);
+    if (frameBatchEnds.has(i + 1)) await flushFrameBatch(i + 1);
+  }
+
+  let frameSequenceFile: string | null = null;
+  if (useSegmentedFrames) {
+    frameSequenceFile = 'segments.txt';
+    const concatList = encodedSegments.map((name) => `file '${name}'`).join('\n');
+    await ffmpeg.writeFile(frameSequenceFile, new TextEncoder().encode(concatList));
   }
 
   let audioFile: string | null = null;
   if (effectiveAudioBlob && format !== 'gif') { // GIF 无音轨
     audioFile = 'audio.webm';
+    const audioWriteStarted = performance.now();
     await ffmpeg.writeFile(audioFile, new Uint8Array(await effectiveAudioBlob.arrayBuffer()));
+    diagnostics.addBreakdown('audio_virtual_fs', performance.now() - audioWriteStarted);
   }
 
   let cameraFile: string | null = null;
   // 裁剪时摄像头改走画布内合成（见上），不再作为 ffmpeg overlay 输入；不裁时用 overlay 滤镜。
-  if (effectiveCameraBlob && !trimmed) {
+  if (effectiveCameraBlob && !compositeCamera && !trimmed) {
     cameraFile = 'camera.webm';
     await ffmpeg.writeFile(cameraFile, new Uint8Array(await effectiveCameraBlob.arrayBuffer()));
   }
 
-  opts.onPhase?.('encoding');
-  opts.onProgress?.(0.72);
+  setPhase('encoding');
+  setProgress(0.72);
   ffmpeg.on('progress', ({ progress }) => {
-    opts.onProgress?.(0.72 + Math.min(1, Math.max(0, progress)) * 0.28);
+    setProgress(0.72 + Math.min(1, Math.max(0, progress)) * 0.28);
   });
 
   // 输入顺序：[0] 帧序列 [1] 音频?  [2] 摄像头?(仅不裁时)
   // 注意：水印和字幕已在帧画布层画进 PNG，这里不再有水印 input
-  const inputs: string[] = ['-framerate', String(fps), '-i', 'f_%06d.jpg'];
+  const inputs: string[] = useSegmentedFrames
+    ? ['-f', 'concat', '-safe', '0', '-i', frameSequenceFile!]
+    : ['-framerate', String(fps), '-i', 'f_%06d.jpg'];
   let nextIdx = 1;
   let audioIdx: number | null = null;
   let cameraIdx: number | null = null;
@@ -1192,39 +1547,63 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     outName = 'output.gif';
     outMime = 'image/gif';
   } else if (format === 'webm') {
-    codec = ['-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', String(crfFor[quality]), '-pix_fmt', 'yuv420p', '-row-mt', '1'];
+    codec = useSegmentedFrames ? ['-c:v', 'copy'] : softwareVideoCodec;
     audioCodec = audioFile ? ['-c:a', 'libopus', '-shortest'] : [];
     outName = 'output.webm';
     outMime = 'video/webm';
   } else {
-    // veryfast + crf：相比 ultrafast 体积显著更小、清晰度更好，编码耗时相近（单线程核）。
-    codec = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', String(crfFor[quality]), '-pix_fmt', 'yuv420p'];
+    // 分段已按最终质量编码，最终仅拼接视频流，避免二次有损编码。
+    codec = useSegmentedFrames ? ['-c:v', 'copy'] : softwareVideoCodec;
     audioCodec = audioFile ? ['-c:a', 'aac', '-shortest'] : [];
     outName = 'output.mp4';
     outMime = 'video/mp4';
   }
 
+  const finalEncodeStarted = performance.now();
   await ffmpeg.exec([...inputs, ...filter, ...codec, ...audioCodec, outName]);
+  diagnostics.addBreakdown(useSegmentedFrames ? 'software_concat_and_mux' : 'software_final_encoding', performance.now() - finalEncodeStarted);
 
   const data = await ffmpeg.readFile(outName);
   const arr = data instanceof Uint8Array ? data : new TextEncoder().encode(String(data));
 
-  for (let i = 0; i < totalFrames; i++) {
-    try { await ffmpeg.deleteFile(`f_${String(i).padStart(6, '0')}.jpg`); } catch { /* ignore */ }
+  if (!useSegmentedFrames) {
+    for (let i = 0; i < totalFrames; i++) {
+      try { await ffmpeg.deleteFile(`f_${String(i).padStart(6, '0')}.jpg`); } catch { /* ignore */ }
+    }
+  } else {
+    for (const segmentName of encodedSegments) {
+      try { await ffmpeg.deleteFile(segmentName); } catch { /* ignore */ }
+    }
+    if (frameSequenceFile) { try { await ffmpeg.deleteFile(frameSequenceFile); } catch { /* ignore */ } }
   }
   try { await ffmpeg.deleteFile(outName); } catch { /* ignore */ }
   if (audioFile) { try { await ffmpeg.deleteFile(audioFile); } catch { /* ignore */ } }
   if (cameraFile) { try { await ffmpeg.deleteFile(cameraFile); } catch { /* ignore */ } }
   try { cameraSource?.close(); } catch { /* */ } // 裁剪时画布内合成用过的摄像头解码器
+  if (cursorAnalyzer) {
+    await cursorAnalyzer.save().catch(() => undefined);
+    cursorAnalyzer.close();
+    cursorAnalyzer = null;
+  }
   try { displaySource?.close(); } catch { /* */ }
+  displayBlurWorker?.close();
   disposeShells(decodedShells);
 
-  opts.onProgress?.(1);
-  opts.onPhase?.('done');
+  setProgress(1);
+  setPhase('done');
+  completeDiagnostics();
+  if (abortListener) opts.signal?.removeEventListener('abort', abortListener);
 
   const buffer = new ArrayBuffer(arr.byteLength);
   new Uint8Array(buffer).set(arr);
   return new Blob([buffer], { type: outMime });
+  } catch (error) {
+    releaseExportResources();
+    if (abortListener) opts.signal?.removeEventListener('abort', abortListener);
+    diagnostics.setPhase(opts.signal?.aborted ? 'cancelled' : 'failed');
+    completeDiagnostics();
+    throw error;
+  }
 }
 
 /**
@@ -1236,30 +1615,40 @@ export async function renderPreviewFrame(
   timeMs: number,
   config: ExportConfig,
   target: HTMLCanvasElement,
+  metadataOverride?: RecordingMetadata,
+  renderSize?: { width: number; height: number },
+  signal?: AbortSignal,
 ): Promise<void> {
+  const checkAborted = () => {
+    if (signal?.aborted) throw new DOMException('Preview render superseded', 'AbortError');
+  };
+  checkAborted();
   const { exportToCanvas } = await import('@excalidraw/excalidraw');
   const { metadata, snapshots, binaryFiles, cameraBlob, screenBlob, laserEvents } = await loadFullRecording(recordingId);
+  checkAborted();
   const cursorFocusTrack = config.alwaysKeepZoomedIn ? await getCursorFocusTrack(recordingId) : undefined;
   const localizedTrack = config.localizedTrackId ? await getLocalizedTrack(config.localizedTrackId) : undefined;
   const useLocalizedTrack = !!localizedTrack && config.muteOriginalAudio !== false;
   const effectiveCameraBlob = useLocalizedTrack && localizedTrack.cameraBlob ? localizedTrack.cameraBlob : cameraBlob;
-  const effectiveSubtitleSrt = useLocalizedTrack ? localizedTrack.translatedSrt : metadata.subtitleSrt;
+  const effectiveSubtitleSrt = useLocalizedTrack
+    ? localizedTrack.translatedSrt
+    : (metadataOverride?.subtitleSrt ?? metadata.subtitleSrt);
   const preset = resolveExportOutputSize(config);
 
   // 预览也要走 shell-aware 路径
-  const rawShells = await getWorkspaceShells(recordingId);
-  const useShell = rawShells.length > 0 && (config.includeWorkspaceShell ?? true);
-  const decodedShells = useShell ? await decodeShells(rawShells) : [];
+  const decodedShells = (config.includeWorkspaceShell ?? true) ? await getPreviewShells(recordingId) : [];
+  const useShell = decodedShells.length > 0;
 
   // 输出尺寸：Custom 用 customOutput（取偶），否则 picker 比例；shell 按 cover 缩放后绘制
   const evenize = (n: number) => Math.max(2, Math.round(n / 2) * 2);
-  const outputW = evenize(preset.width);
-  const outputH = evenize(preset.height);
+  const outputW = evenize(renderSize?.width ?? preset.width);
+  const outputH = evenize(renderSize?.height ?? preset.height);
 
   target.width = outputW;
   target.height = outputH;
   const ctx = target.getContext('2d')!;
   await paintVideoBackground(ctx, target.width, target.height, config.videoBackground);
+  checkAborted();
   const content = createContentLayer(target.width, target.height);
   const contentCtx = content.getContext('2d')!;
   const foreground = createContentLayer(target.width, target.height);
@@ -1286,32 +1675,29 @@ export async function renderPreviewFrame(
 
   if (screenBlob) {
     const display = await getPreviewDisplaySource(recordingId, screenBlob, timeMs);
-    try {
-      const displayFrame = await display.getFrameAt(timeMs);
-      if (!displayFrame) return;
-      const manualFocus = autoZoomAt(config.autoZooms, timeMs);
-      if (config.croppingMode === 'fit_all_content' && !hasSelectedVideoBackground(config.videoBackground)) {
-        paintDisplaySourceFallback(ctx, displayFrame, target.width, target.height);
-      }
-      drawDisplayFrame(
-        contentCtx,
-        displayFrame,
-        metadata.source?.kind ?? 'desktop',
-        metadata.source?.sourceCropWindow,
-        config.croppingMode,
-        target.width,
-        target.height,
-        hasSelectedVideoBackground(config.videoBackground) && config.croppingMode === 'fit_all_content' ? 0.88 : 1,
-        config.alwaysKeepZoomedIn
-          ? (manualFocus
-              ? { x: manualFocus.cx ?? 0.5, y: manualFocus.cy ?? 0.5 }
-              : focusPointAt(cursorFocusTrack, timeMs))
-          : undefined,
-      );
-      finalizePreviewForeground({ x: 0, y: 0, width: content.width, height: content.height }, false);
-    } finally {
-      disposeShells(decodedShells);
+    const displayFrame = await display.getFrameAt(timeMs);
+    checkAborted();
+    if (!displayFrame) return;
+    const manualFocus = autoZoomAt(config.autoZooms, timeMs);
+    if (config.croppingMode === 'fit_all_content' && !hasSelectedVideoBackground(config.videoBackground)) {
+      paintDisplaySourceFallback(ctx, displayFrame, target.width, target.height);
     }
+    drawDisplayFrame(
+      contentCtx,
+      displayFrame,
+      metadata.source?.kind ?? 'desktop',
+      metadata.source?.sourceCropWindow,
+      config.croppingMode,
+      target.width,
+      target.height,
+      1,
+      config.alwaysKeepZoomedIn
+        ? (manualFocus
+            ? { x: manualFocus.cx ?? 0.5, y: manualFocus.cy ?? 0.5 }
+            : focusPointAt(cursorFocusTrack, timeMs))
+        : undefined,
+    );
+    finalizePreviewForeground({ x: 0, y: 0, width: content.width, height: content.height });
     return;
   }
 
@@ -1335,7 +1721,6 @@ export async function renderPreviewFrame(
   const snap = snapshotAt(snapshots, timeMs);
   if (!snap || (snap.elements as unknown[]).length === 0) {
     finalizePreviewForeground(frameShellLayout?.canvasRect ?? { x: 0, y: 0, width: content.width, height: content.height });
-    disposeShells(decodedShells);
     return;
   }
 
@@ -1421,10 +1806,10 @@ export async function renderPreviewFrame(
     });
   }
 
-  disposeShells(decodedShells);
-
   finalizePreviewForeground(dest);
 }
+
+export const DOWNLOAD_URL_REVOKE_DELAY_MS = 60_000;
 
 export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -1434,5 +1819,7 @@ export function downloadBlob(blob: Blob, filename: string): void {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  // Chrome acquires large Blob URLs asynchronously. Revoking in the same event loop
+  // makes multi-ratio exports fail with NotReadableError after the download begins.
+  setTimeout(() => URL.revokeObjectURL(url), DOWNLOAD_URL_REVOKE_DELAY_MS);
 }

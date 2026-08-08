@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useTranslations } from 'next-intl';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX } from 'react';
 import { I } from '@/components/icons';
 import { AutoEditControl } from '@/components/editor/AutoEditControl';
-import type { AutoEditMode, AutoEditResult } from '@/services/autoEditAnalyzer';
-import type { AutoZoomSegment, TimeSegment } from '@/types/recording';
+import type { AutoEditMode, AutoEditProgress, AutoEditResult } from '@/services/autoEditAnalyzer';
+import type { AutoZoomSegment, SubtitleCue, TimeSegment } from '@/types/recording';
 import { keptDuration, splitSegments, removeSegmentAt, trimSegmentEdge } from '@/utils/segments';
 
 interface Props {
@@ -29,8 +30,10 @@ interface Props {
     phase: 'idle' | 'analyzing' | 'applied' | 'failed';
     result: AutoEditResult | null;
     error: string | null;
+    progress: AutoEditProgress | null;
     onRun: (preset: AutoEditMode) => void;
     onUndo: () => void;
+    onCancel: () => void;
     labels: {
       autoEdit: string; chatCut: string; lecture: string; walkthrough: string; shorts: string; timing: string;
       gentle: string; standard: string; tight: string; analyzing: string; noAudio: string;
@@ -39,6 +42,8 @@ interface Props {
   };
   hasAudio: boolean;
   hasCaptions: boolean;
+  audioPeaks?: number[];
+  captionCues?: SubtitleCue[];
   labels: {
     edit: string; reset: string; kept: string; mic: string; captions: string;
     split: string; deleteClip: string; hint: string;
@@ -51,6 +56,8 @@ function fmt(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+const TIMELINE_ZOOM_STEPS = [1, 2, 4, 8, 16, 32] as const;
+
 /**
  * 时间轴（主流剪辑交互，对标 Clipchamp / NLE）：
  * - 拖播放头 / 拖片段边缘 / 点轨道 → 实时预览对应帧。
@@ -62,16 +69,29 @@ export function Timeline({
   durationMs, clips, playheadMs, onScrub, onChange, onReset,
   autoZooms = [], onAutoZoomChange, selectedAutoZoomId, onAutoZoomSelect,
   autoEdit,
-  hasAudio, hasCaptions, labels,
+  hasAudio, hasCaptions, audioPeaks = [], captionCues = [], labels,
 }: Props): JSX.Element {
-  const laneRef = useRef<HTMLDivElement>(null);
+  const zoomLabels = useTranslations('timelineZoom');
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const interactionRef = useRef(false);
+  const userScrollRef = useRef(false);
+  const scrollIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zoomAnchorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingZoomAnchorRef = useRef<{ timeMs: number; viewportX: number } | null>(null);
+  const playheadMsRef = useRef(playheadMs);
+  playheadMsRef.current = playheadMs;
   const dur = Math.max(1, durationMs);
   const trimmed = !(clips.length === 1 && clips[0].start <= 0 && clips[0].end >= durationMs);
   const kept = keptDuration(clips);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [editingZoomId, setEditingZoomId] = useState<string | null>(null);
-
-  const pct = (ms: number) => (ms / dur) * 100;
+  const [timelineZoom, setTimelineZoom] = useState<number>(1);
+  const [viewportWidth, setViewportWidth] = useState(1);
+  const [viewportScrollLeft, setViewportScrollLeft] = useState(0);
+  const contentWidth = Math.max(1, viewportWidth * timelineZoom);
+  const px = useCallback((ms: number) => (Math.max(0, Math.min(dur, ms)) / dur) * contentWidth, [contentWidth, dur]);
+  const visibleStartMs = Math.max(0, Math.min(dur, (viewportScrollLeft / contentWidth) * dur));
+  const visibleEndMs = Math.max(visibleStartMs, Math.min(dur, ((viewportScrollLeft + viewportWidth) / contentWidth) * dur));
 
   // 被删段 = clips 在 [0,dur] 的补集
   const gaps: TimeSegment[] = (() => {
@@ -86,19 +106,29 @@ export function Timeline({
   })();
 
   const srcAtClientX = (clientX: number): number => {
-    const el = laneRef.current;
+    const el = viewportRef.current;
     if (!el) return 0;
     const r = el.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    const measuredWidth = Math.max(1, el.scrollWidth);
+    const ratio = Math.max(0, Math.min(1, (clientX - r.left + el.scrollLeft) / measuredWidth));
     return Math.round(ratio * durationMs);
+  };
+
+  const finishPointerInteraction = () => {
+    interactionRef.current = false;
   };
 
   // 在标尺/空白处按下：移动播放头并持续 scrub（拖动 = 刮擦预览）
   const startScrub = (e: React.MouseEvent) => {
     e.preventDefault();
+    interactionRef.current = true;
     onScrub(srcAtClientX(e.clientX));
     const move = (ev: MouseEvent) => onScrub(srcAtClientX(ev.clientX));
-    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    const up = () => {
+      finishPointerInteraction();
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
   };
@@ -107,6 +137,7 @@ export function Timeline({
   const startEdgeDrag = (i: number, side: 'start' | 'end') => (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    interactionRef.current = true;
     setSelectedIdx(i);
     const base = clips.map((s) => ({ ...s }));
     const move = (ev: MouseEvent) => {
@@ -114,7 +145,11 @@ export function Timeline({
       onChange(trimSegmentEdge(base, i, side, t));
       onScrub(t);
     };
-    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    const up = () => {
+      finishPointerInteraction();
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
   };
@@ -157,6 +192,7 @@ export function Timeline({
   const startZoomDrag = (id: string, mode: 'move' | 'start' | 'end') => (event: React.MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
+    interactionRef.current = true;
     const base = autoZooms.find((zoom) => zoom.id === id);
     if (!base) return;
     onAutoZoomSelect?.(id);
@@ -174,7 +210,11 @@ export function Timeline({
       }
       onScrub(Math.max(0, Math.min(durationMs, base.start + delta)));
     };
-    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    const up = () => {
+      finishPointerInteraction();
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
   };
@@ -191,6 +231,109 @@ export function Timeline({
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clips, playheadMs, selectedIdx]);
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const measure = () => setViewportWidth(Math.max(1, viewport.clientWidth));
+    measure();
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    observer?.observe(viewport);
+    return () => observer?.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const anchor = pendingZoomAnchorRef.current;
+    if (!viewport || !anchor) return;
+    const measuredWidth = Math.max(1, viewport.scrollWidth);
+    const nextScrollLeft = (anchor.timeMs / dur) * measuredWidth - anchor.viewportX;
+    userScrollRef.current = true;
+    viewport.scrollLeft = Math.max(0, Math.min(contentWidth - viewport.clientWidth, nextScrollLeft));
+    setViewportScrollLeft(viewport.scrollLeft);
+    pendingZoomAnchorRef.current = null;
+    if (zoomAnchorTimerRef.current) clearTimeout(zoomAnchorTimerRef.current);
+    zoomAnchorTimerRef.current = setTimeout(() => {
+      userScrollRef.current = false;
+    }, 180);
+  }, [contentWidth, dur]);
+
+  useEffect(() => () => {
+    if (scrollIdleTimerRef.current) clearTimeout(scrollIdleTimerRef.current);
+    if (zoomAnchorTimerRef.current) clearTimeout(zoomAnchorTimerRef.current);
+  }, []);
+
+  const ensurePlayheadVisible = useCallback((timeMs = playheadMsRef.current) => {
+    const viewport = viewportRef.current;
+    if (!viewport || interactionRef.current || userScrollRef.current) return;
+    const playheadX = px(timeMs);
+    const left = viewport.scrollLeft;
+    const right = left + viewport.clientWidth;
+    const gutter = Math.min(28, viewport.clientWidth * 0.08);
+    if (playheadX < left + gutter) {
+      viewport.scrollLeft = Math.max(0, playheadX - gutter);
+    } else if (playheadX > right - gutter) {
+      viewport.scrollLeft = Math.min(contentWidth - viewport.clientWidth, playheadX - viewport.clientWidth + gutter);
+    }
+    setViewportScrollLeft(viewport.scrollLeft);
+  }, [contentWidth, px]);
+
+  useEffect(() => {
+    ensurePlayheadVisible(playheadMs);
+  }, [ensurePlayheadVisible, playheadMs]);
+
+  const applyTimelineZoom = (nextZoom: number, timeMs: number, viewportX: number) => {
+    const next = Math.max(1, Math.min(32, nextZoom));
+    if (next === timelineZoom) return;
+    pendingZoomAnchorRef.current = { timeMs, viewportX };
+    setTimelineZoom(next);
+  };
+
+  const zoomFromPlayhead = (direction: -1 | 1) => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const index = TIMELINE_ZOOM_STEPS.indexOf(timelineZoom as (typeof TIMELINE_ZOOM_STEPS)[number]);
+    const nextIndex = Math.max(0, Math.min(TIMELINE_ZOOM_STEPS.length - 1, index + direction));
+    const currentX = px(playheadMs) - viewport.scrollLeft;
+    const anchorX = currentX >= 0 && currentX <= viewport.clientWidth ? currentX : viewport.clientWidth / 2;
+    applyTimelineZoom(TIMELINE_ZOOM_STEPS[nextIndex], playheadMs, anchorX);
+  };
+
+  const fitTimeline = () => {
+    const viewport = viewportRef.current;
+    pendingZoomAnchorRef.current = { timeMs: 0, viewportX: 0 };
+    setTimelineZoom(1);
+    if (viewport) {
+      viewport.scrollLeft = 0;
+      setViewportScrollLeft(0);
+    }
+  };
+
+  const handleTimelineWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const bounds = viewport.getBoundingClientRect();
+    const anchorX = Math.max(0, Math.min(viewport.clientWidth, event.clientX - bounds.left));
+    const anchorTime = srcAtClientX(event.clientX);
+    const index = TIMELINE_ZOOM_STEPS.indexOf(timelineZoom as (typeof TIMELINE_ZOOM_STEPS)[number]);
+    const direction = event.deltaY < 0 ? 1 : -1;
+    const nextIndex = Math.max(0, Math.min(TIMELINE_ZOOM_STEPS.length - 1, index + direction));
+    applyTimelineZoom(TIMELINE_ZOOM_STEPS[nextIndex], anchorTime, anchorX);
+  };
+
+  const handleTimelineScroll = () => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    setViewportScrollLeft(viewport.scrollLeft);
+    userScrollRef.current = true;
+    if (scrollIdleTimerRef.current) clearTimeout(scrollIdleTimerRef.current);
+    scrollIdleTimerRef.current = setTimeout(() => {
+      userScrollRef.current = false;
+      ensurePlayheadVisible();
+    }, 180);
+  };
 
   const canDelete = selectedIdx != null && clips.length > 1;
 
@@ -231,8 +374,10 @@ export function Timeline({
               phase={autoEdit.phase}
               result={autoEdit.result}
               error={autoEdit.error}
+              progress={autoEdit.progress}
               onRun={autoEdit.onRun}
               onUndo={autoEdit.onUndo}
+              onCancel={autoEdit.onCancel}
               labels={autoEdit.labels}
             />
           )}
@@ -242,17 +387,66 @@ export function Timeline({
             </button>
           )}
         </div>
-        <span className="timeline-craft-kept label-mono">{labels.kept} · {fmt(kept)} / {fmt(durationMs)}</span>
+        <div className="timeline-craft-toolbar-end">
+          <div className="timeline-craft-zoom-controls" role="group" aria-label={zoomLabels('group')}>
+            <button
+              type="button"
+              className="timeline-craft-zoom-button"
+              aria-label={zoomLabels('zoomOut')}
+              title={zoomLabels('zoomOut')}
+              disabled={timelineZoom === 1}
+              onClick={() => zoomFromPlayhead(-1)}
+            >
+              <span aria-hidden="true">−</span>
+            </button>
+            <span data-testid="timeline-zoom-value" className="timeline-craft-zoom-value label-mono" aria-live="polite">
+              {timelineZoom === 1 ? zoomLabels('fit') : `${timelineZoom}x`}
+            </span>
+            <button
+              type="button"
+              className="timeline-craft-zoom-button"
+              aria-label={zoomLabels('zoomIn')}
+              title={zoomLabels('zoomIn')}
+              disabled={timelineZoom === 32}
+              onClick={() => zoomFromPlayhead(1)}
+            >
+              <I.Plus size={13} />
+            </button>
+            <button
+              type="button"
+              className="timeline-craft-zoom-button"
+              aria-label={zoomLabels('fitTimeline')}
+              title={zoomLabels('fitTimeline')}
+              disabled={timelineZoom === 1}
+              onClick={fitTimeline}
+            >
+              <I.Ratio16x9 size={13} />
+            </button>
+          </div>
+          <span className="timeline-craft-kept label-mono">{labels.kept} · {fmt(kept)} / {fmt(durationMs)}</span>
+        </div>
       </div>
 
-      <div ref={laneRef} className="timeline-craft-lane" style={{ position: 'relative', userSelect: 'none' }}>
+      <div
+        ref={viewportRef}
+        data-testid="timeline-viewport"
+        className="timeline-craft-lane timeline-craft-viewport"
+        onWheel={handleTimelineWheel}
+        onScroll={handleTimelineScroll}
+        style={{ position: 'relative', userSelect: 'none' }}
+      >
+        <div
+          data-testid="timeline-content"
+          className="timeline-craft-content"
+          style={{ position: 'relative', width: contentWidth, minWidth: '100%' }}
+        >
         {/* 标尺：拖动刮擦预览 */}
         <div className="timeline-craft-ruler" onMouseDown={startScrub} style={{ height: 14, cursor: 'ew-resize' }} />
 
         {/* 片段轨：整轨可拖刮擦（空白/gap 处）；clips=block 可点选 + 边缘 Trim；gap 变暗 */}
         <div data-testid="timeline-video-track" className="timeline-craft-track" onMouseDown={startScrub} style={{ position: 'relative', height: 30, overflow: 'hidden', cursor: 'ew-resize' }}>
           {gaps.map((g, i) => (
-            <div key={`g${i}`} className="timeline-craft-gap" style={{ position: 'absolute', top: 0, bottom: 0, left: `${pct(g.start)}%`, width: `${pct(g.end - g.start)}%` }} />
+            <div key={`g${i}`} className="timeline-craft-gap" style={{ position: 'absolute', top: 0, bottom: 0, left: px(g.start), width: px(g.end - g.start) }} />
           ))}
           {clips.map((c, i) => {
             const sel = selectedIdx === i;
@@ -262,7 +456,7 @@ export function Timeline({
                 className={`timeline-craft-clip${sel ? ' is-selected' : ''}`}
                 onMouseDown={(e) => { e.stopPropagation(); setSelectedIdx(i); startScrub(e); }}
                 style={{
-                  position: 'absolute', top: 2, bottom: 2, left: `${pct(c.start)}%`, width: `${pct(c.end - c.start)}%`,
+                  position: 'absolute', top: 2, bottom: 2, left: px(c.start), width: px(c.end - c.start),
                   cursor: 'ew-resize', overflow: 'hidden',
                 }}
               >
@@ -275,8 +469,28 @@ export function Timeline({
         </div>
 
         {/* 麦克风轨始终占位：无音频时仍保留与视频轨相同高度，便于后续对齐配音。 */}
-        <AudioLane clips={clips} pct={pct} hasAudio={hasAudio} label={labels.mic} />
-        {hasCaptions && <MirrorBar clips={clips} pct={pct} fill="var(--pro)" icon={<I.Subtitles size={10} />} label={labels.captions} />}
+        <AudioLane
+          clips={clips}
+          px={px}
+          hasAudio={hasAudio}
+          peaks={audioPeaks}
+          durationMs={durationMs}
+          label={labels.mic}
+          viewportScrollLeft={viewportScrollLeft}
+          viewportWidth={viewportWidth}
+          contentWidth={contentWidth}
+          visibleStartMs={visibleStartMs}
+          visibleEndMs={visibleEndMs}
+        />
+        {hasCaptions && (
+          <CaptionLane
+            cues={captionCues}
+            px={px}
+            label={labels.captions}
+            visibleStartMs={visibleStartMs}
+            visibleEndMs={visibleEndMs}
+          />
+        )}
 
         {onAutoZoomChange && (
           <div
@@ -310,7 +524,7 @@ export function Timeline({
                     onAutoZoomChange(autoZooms.filter((item) => item.id !== zoom.id));
                     if (selected) onAutoZoomSelect?.(null);
                   }}
-                  style={{ position: 'absolute', top: 5, bottom: 5, left: `${pct(zoom.start)}%`, width: `${Math.max(1.2, pct(zoom.end - zoom.start))}%` }}
+                  style={{ position: 'absolute', top: 5, bottom: 5, left: px(zoom.start), width: Math.max(12, px(zoom.end - zoom.start)) }}
                   title={`${labels.autoZoom} · ${fmt(zoom.start)}–${fmt(zoom.end)}`}
                 >
                   <i className="timeline-craft-autozoom-edge" onMouseDown={startZoomDrag(zoom.id, 'start')} />
@@ -358,25 +572,39 @@ export function Timeline({
         )}
 
         {/* 播放头：竖线贯穿 + 标尺上的三角手柄 */}
-        <div className="timeline-craft-playhead" style={{ position: 'absolute', top: 0, bottom: 0, left: `calc(${pct(playheadMs)}% - 1px)`, pointerEvents: 'none', zIndex: 5 }} />
+        <div className="timeline-craft-playhead" style={{ position: 'absolute', top: 0, bottom: 0, left: px(playheadMs) - 1, pointerEvents: 'none', zIndex: 5 }} />
         <div
           onMouseDown={startScrub}
           className="timeline-craft-grip tl-grip"
-          style={{ position: 'absolute', top: -4, left: `calc(${pct(playheadMs)}% - 6px)`, width: 12, height: 12, cursor: 'ew-resize', zIndex: 6 }}
+          style={{ position: 'absolute', top: -4, left: px(playheadMs) - 6, width: 12, height: 12, cursor: 'ew-resize', zIndex: 6 }}
           aria-label="playhead"
         />
+        </div>
       </div>
 
       <div className="timeline-craft-hint mt-1.5 flex items-center justify-between">
         <span>{labels.hint}</span>
-        <span>{fmt(playheadMs)}</span>
+        <span data-testid="timeline-current-time" data-playhead-ms={Math.round(playheadMs)}>{fmt(playheadMs)}</span>
       </div>
     </div>
   );
 }
 
-function AudioLane({ clips, pct, hasAudio, label }: {
-  clips: TimeSegment[]; pct: (ms: number) => number; hasAudio: boolean; label: string;
+function AudioLane({
+  clips, px, hasAudio, peaks, durationMs, label,
+  viewportScrollLeft, viewportWidth, contentWidth, visibleStartMs, visibleEndMs,
+}: {
+  clips: TimeSegment[];
+  px: (ms: number) => number;
+  hasAudio: boolean;
+  peaks: number[];
+  durationMs: number;
+  label: string;
+  viewportScrollLeft: number;
+  viewportWidth: number;
+  contentWidth: number;
+  visibleStartMs: number;
+  visibleEndMs: number;
 }): JSX.Element {
   return (
     <div
@@ -388,26 +616,111 @@ function AudioLane({ clips, pct, hasAudio, label }: {
       <div className="flex items-center gap-1 timeline-craft-label" style={{ position: 'absolute', left: 5, top: 0, bottom: 0, zIndex: 2, fontSize: 9, pointerEvents: 'none', opacity: hasAudio ? 0.72 : 0.58 }}>
         <I.Mic size={11} />
       </div>
-      {hasAudio && clips.map((clip, index) => (
-        <div key={index} style={{ position: 'absolute', top: 5, bottom: 5, left: `${pct(clip.start)}%`, width: `${pct(clip.end - clip.start)}%`, background: 'var(--hi-soft)', opacity: 0.78 }} />
+      {hasAudio && peaks.length > 0 && (
+        <WaveformCanvas
+          peaks={peaks}
+          clips={clips}
+          durationMs={durationMs}
+          viewportScrollLeft={viewportScrollLeft}
+          viewportWidth={viewportWidth}
+          contentWidth={contentWidth}
+          visibleStartMs={visibleStartMs}
+          visibleEndMs={visibleEndMs}
+        />
+      )}
+      {hasAudio && peaks.length === 0 && clips.map((clip, index) => (
+        <div key={index} style={{ position: 'absolute', top: 5, bottom: 5, left: px(clip.start), width: px(clip.end - clip.start), background: 'var(--hi-soft)', opacity: 0.78 }} />
       ))}
     </div>
   );
 }
 
-function MirrorBar({ clips, pct, fill, icon, label }: {
-  clips: TimeSegment[]; pct: (ms: number) => number; fill: string; icon: React.ReactNode; label: string;
+function WaveformCanvas({
+  peaks, clips, durationMs, viewportScrollLeft, viewportWidth, contentWidth, visibleStartMs, visibleEndMs,
+}: {
+  peaks: number[];
+  clips: TimeSegment[];
+  durationMs: number;
+  viewportScrollLeft: number;
+  viewportWidth: number;
+  contentWidth: number;
+  visibleStartMs: number;
+  visibleEndMs: number;
 }): JSX.Element {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const draw = () => {
+      const width = Math.max(1, canvas.clientWidth);
+      const height = Math.max(1, canvas.clientHeight);
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, width, height);
+      ctx.strokeStyle = 'rgba(22, 112, 72, .78)';
+      ctx.lineWidth = 1;
+      const middle = height / 2;
+      for (let x = 0; x < width; x += 2) {
+        const sourceTime = visibleStartMs + (x / width) * (visibleEndMs - visibleStartMs);
+        if (!clips.some((clip) => sourceTime >= clip.start && sourceTime <= clip.end)) continue;
+        const peak = peaks[Math.min(peaks.length - 1, Math.floor((sourceTime / durationMs) * peaks.length))] ?? 0;
+        const amplitude = Math.max(1, peak * (height / 2 - 2));
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, middle - amplitude);
+        ctx.lineTo(x + 0.5, middle + amplitude);
+        ctx.stroke();
+      }
+    };
+    draw();
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(draw) : null;
+    observer?.observe(canvas);
+    return () => observer?.disconnect();
+  }, [clips, durationMs, peaks, visibleEndMs, visibleStartMs]);
+  const left = Math.min(contentWidth, viewportScrollLeft + 22);
+  const width = Math.max(1, Math.min(Math.max(1, viewportWidth - 22), contentWidth - left));
   return (
-    <div className="timeline-craft-mirror" style={{ position: 'relative', height: 12, marginTop: 3 }}>
-      <div className="flex items-center gap-1 timeline-craft-label" style={{ position: 'absolute', left: 3, top: 0, bottom: 0, zIndex: 2, fontSize: 8, pointerEvents: 'none' }}>
-        {icon}
-      </div>
-      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
-        {clips.map((c, i) => (
-          <div key={i} style={{ position: 'absolute', top: 1, bottom: 1, left: `${pct(c.start)}%`, width: `${pct(c.end - c.start)}%`, background: fill, opacity: 0.7 }} title={label} />
-        ))}
-      </div>
+    <canvas
+      data-testid="timeline-audio-waveform"
+      data-visible-start={Math.round(visibleStartMs)}
+      data-visible-end={Math.round(visibleEndMs)}
+      ref={ref}
+      style={{ position: 'absolute', left, top: 2, width, height: 'calc(100% - 4px)' }}
+    />
+  );
+}
+
+function CaptionLane({
+  cues, px, label, visibleStartMs, visibleEndMs,
+}: {
+  cues: SubtitleCue[];
+  px: (ms: number) => number;
+  label: string;
+  visibleStartMs: number;
+  visibleEndMs: number;
+}): JSX.Element {
+  const buffer = Math.max(500, (visibleEndMs - visibleStartMs) * 0.15);
+  const visibleCues = cues.filter((cue) => cue.endMs >= visibleStartMs - buffer && cue.startMs <= visibleEndMs + buffer);
+  return (
+    <div data-testid="timeline-caption-track" className="timeline-craft-mirror" style={{ position: 'relative', height: 18, marginTop: 3, overflow: 'hidden' }}>
+      <span className="timeline-craft-label" style={{ position: 'absolute', left: 3, top: 2, zIndex: 2 }}><I.Subtitles size={10} /></span>
+      {visibleCues.map((cue) => (
+        <div
+          key={`${cue.index}-${cue.startMs}`}
+          data-testid="timeline-caption-cue"
+          data-cue-start={cue.startMs}
+          style={{
+            position: 'absolute', top: 2, bottom: 2,
+            left: px(cue.startMs),
+            width: Math.max(4, px(cue.endMs - cue.startMs)),
+            borderRadius: 4, background: 'var(--pro)', opacity: 0.78,
+          }}
+          title={`${label}: ${cue.text}`}
+        />
+      ))}
     </div>
   );
 }

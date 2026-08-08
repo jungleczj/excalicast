@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, type CSSProperties, type JSX, type ReactNode } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef, type CSSProperties, type JSX, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import { useLocale } from 'next-intl';
 import { ExportRatioPicker } from '@/components/ExportRatioPicker';
@@ -15,7 +15,8 @@ import { DubbingPanel } from '@/components/DubbingPanel';
 import { ProUpgradeModal } from '@/components/ProUpgradeModal';
 import { Timeline } from '@/components/editor/Timeline';
 import { I, LogoMark } from '@/components/icons';
-import { analyzeRecordingForAutoEdit, AutoEditError, type AutoEditMode, type AutoEditResult } from '@/services/autoEditAnalyzer';
+import { analyzeRecordingForAutoEdit, AutoEditError, type AutoEditMode, type AutoEditProgress, type AutoEditResult } from '@/services/autoEditAnalyzer';
+import { indexedDbAutoEditCache } from '@/services/autoEditCacheStore';
 import { TierBadge } from '@/components/TierBadge';
 import { ShareButton } from '@/components/ShareButton';
 import { useSubscription } from '@/hooks/useSubscription';
@@ -24,6 +25,8 @@ import { getCurrentOwnerKey } from '@/lib/ownerKey';
 import { projectRecordingSetupToExport } from '@/services/recordingSetupProjection';
 import type { AutoZoomSegment, ExportConfig, LocalizedTrack, RecordingMetadata, TimeSegment } from '@/types/recording';
 import { normalizeSegments, isTrimmed } from '@/utils/segments';
+import { parseSrt } from '@/utils/srtParser';
+import { loadOrCreateAudioPeakTrack } from '@/services/audioPeakTrack';
 import { Link, useRouter } from '@/i18n/navigation';
 
 const DEFAULT_CONFIG: ExportConfig = {
@@ -62,8 +65,34 @@ export default function EditorRecordingPage(): JSX.Element {
   const [autoEditPhase, setAutoEditPhase] = useState<'idle' | 'analyzing' | 'applied' | 'failed'>('idle');
   const [autoEditResult, setAutoEditResult] = useState<AutoEditResult | null>(null);
   const [autoEditError, setAutoEditError] = useState<string | null>(null);
+  const [autoEditProgress, setAutoEditProgress] = useState<AutoEditProgress | null>(null);
   const [autoEditPreviousSegments, setAutoEditPreviousSegments] = useState<TimeSegment[] | null>(null);
+  const autoEditControllerRef = useRef<AbortController | null>(null);
   const [playheadMs, setPlayheadMs] = useState(0);
+  const [audioPeaks, setAudioPeaks] = useState<number[]>([]);
+  const captionCues = useMemo(() => parseSrt(meta?.subtitleSrt ?? ''), [meta?.subtitleSrt]);
+  const handleSubtitleSaved = useCallback((subtitleSrt: string) => {
+    setMeta((current) => current ? { ...current, subtitleSrt } : current);
+    setConfig((current) => ({ ...current }));
+  }, []);
+  const handleSubtitleRemoved = useCallback(() => {
+    setMeta((current) => current ? { ...current, subtitleSrt: undefined } : current);
+    setConfig((current) => ({ ...current }));
+  }, []);
+
+  useEffect(() => {
+    if (!id || !meta?.hasAudio) {
+      setAudioPeaks([]);
+      return;
+    }
+    let cancelled = false;
+    void loadOrCreateAudioPeakTrack(id, 4).then((track) => {
+      if (!cancelled) setAudioPeaks(track?.peaks ?? []);
+    }).catch(() => {
+      if (!cancelled) setAudioPeaks([]);
+    });
+    return () => { cancelled = true; };
+  }, [id, meta?.hasAudio]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -122,7 +151,7 @@ export default function EditorRecordingPage(): JSX.Element {
           setLoadError(en ? 'Recording failed while saving.' : '录制保存失败。');
           return;
         }
-        if (m.status !== 'done') {
+        if (m.status !== 'done' && m.status !== 'interrupted') {
           setMeta(null);
           setFinalizing(true);
           retryTimer = setTimeout(load, 250);
@@ -175,37 +204,84 @@ export default function EditorRecordingPage(): JSX.Element {
   }, [id, title]);
 
   const clearAutoEditUndo = useCallback(() => {
+    autoEditControllerRef.current?.abort();
+    autoEditControllerRef.current = null;
     setAutoEditPhase('idle');
     setAutoEditResult(null);
     setAutoEditError(null);
+    setAutoEditProgress(null);
     setAutoEditPreviousSegments(null);
   }, []);
 
   const handleAutoEdit = useCallback(async (preset: AutoEditMode) => {
     if (!meta || !meta.hasAudio) return;
+    autoEditControllerRef.current?.abort();
+    const controller = new AbortController();
+    autoEditControllerRef.current = controller;
+    const originalSegments = segments.map((segment) => ({ ...segment }));
+    let partialResult: AutoEditResult | null = null;
     setAutoEditPhase('analyzing');
     setAutoEditResult(null);
     setAutoEditError(null);
+    setAutoEditProgress({ stage: 'reading', progress: 0, etaMs: null });
+    setAutoEditPreviousSegments(originalSegments);
     try {
       const result = await analyzeRecordingForAutoEdit({
         recordingId: id,
         durationMs: meta.durationMs,
-        currentSegments: segments,
+        currentSegments: originalSegments,
         subtitleSrt: meta.subtitleSrt,
         preset,
+        mediaSignature: `${meta.startedAt}:${meta.durationMs}:${Number(meta.hasAudio)}:${Number(meta.hasCamera)}`,
+        cache: indexedDbAutoEditCache,
+        signal: controller.signal,
+        onProgress: (stage, progress, etaMs) => {
+          if (autoEditControllerRef.current === controller) {
+            setAutoEditProgress({ stage, progress, etaMs });
+          }
+        },
+        onStageResult: (_stage, stageResult) => {
+          if (autoEditControllerRef.current !== controller) return;
+          partialResult = stageResult;
+          setSegments(stageResult.segments);
+          setAutoEditResult(stageResult);
+        },
       });
-      setAutoEditPreviousSegments(segments);
+      if (autoEditControllerRef.current !== controller) return;
       setSegments(result.segments);
       setAutoEditResult(result);
+      setAutoEditProgress({ stage: 'complete', progress: 1, etaMs: 0 });
       setAutoEditPhase('applied');
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        if (partialResult) {
+          setAutoEditResult(partialResult);
+          setAutoEditPhase('applied');
+        } else {
+          setAutoEditPreviousSegments(null);
+          setAutoEditPhase('idle');
+        }
+        setAutoEditProgress(null);
+        return;
+      }
       const code = error instanceof AutoEditError ? error.code : 'audio_decode_failed';
       setAutoEditError(en
         ? ({ no_audio: 'This recording has no audio to analyze.', audio_decode_failed: 'Could not read this local audio track.', browser_unsupported: 'This browser cannot analyze local audio.' }[code])
         : ({ no_audio: '这条录制没有可分析的音频。', audio_decode_failed: '无法读取这条录制的本地音轨。', browser_unsupported: '当前浏览器无法分析本地音频。' }[code]));
       setAutoEditPhase('failed');
+      setAutoEditProgress(null);
+    } finally {
+      if (autoEditControllerRef.current === controller) autoEditControllerRef.current = null;
     }
   }, [en, id, meta, segments]);
+
+  const handleCancelAutoEdit = useCallback(() => {
+    autoEditControllerRef.current?.abort();
+  }, []);
+
+  useEffect(() => () => {
+    autoEditControllerRef.current?.abort();
+  }, [id]);
 
   const handleUndoAutoEdit = useCallback(() => {
     if (autoEditPreviousSegments) setSegments(autoEditPreviousSegments);
@@ -321,7 +397,14 @@ export default function EditorRecordingPage(): JSX.Element {
   );
 
   const tabContent = (() => {
-    if (tab === 'captions') return isPro ? <SubtitlePanel open recordingId={id} /> : lockBlock('pro', en ? 'Captions are a Pro feature' : '字幕是 Pro 功能', en ? 'Generate accurate subtitles from your audio.' : '从音频生成精准字幕。');
+    if (tab === 'captions') return isPro ? (
+      <SubtitlePanel
+        open
+        recordingId={id}
+        onSaved={handleSubtitleSaved}
+        onRemoved={handleSubtitleRemoved}
+      />
+    ) : lockBlock('pro', en ? 'Captions are a Pro feature' : '字幕是 Pro 功能', en ? 'Generate accurate subtitles from your audio.' : '从音频生成精准字幕。');
     if (tab === 'dubbing') return isMax ? (
       <DubbingPanel
         recordingId={id}
@@ -411,6 +494,8 @@ export default function EditorRecordingPage(): JSX.Element {
               }}
               hasAudio={meta.hasAudio}
               hasCaptions={!!meta.subtitleSrt}
+              audioPeaks={audioPeaks}
+              captionCues={captionCues}
               autoZooms={autoZooms}
               onAutoZoomChange={setAutoZooms}
               selectedAutoZoomId={selectedAutoZoomId}
@@ -419,8 +504,10 @@ export default function EditorRecordingPage(): JSX.Element {
                 phase: autoEditPhase,
                 result: autoEditResult,
                 error: autoEditError,
+                progress: autoEditProgress,
                 onRun: handleAutoEdit,
                 onUndo: handleUndoAutoEdit,
+                onCancel: handleCancelAutoEdit,
                 labels: {
                   autoEdit: en ? 'Apply ChatCut' : '套用 ChatCut',
                   chatCut: en ? 'ChatCut scenes' : 'ChatCut 场景',

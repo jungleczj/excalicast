@@ -673,12 +673,20 @@
       "keepZoomedHint": "铺满所选比例，并持续把当前焦点保持在画面内"
     }
   },
+  "timelineZoom": {
+    "group": "时间轴缩放",
+    "zoomOut": "缩小时间轴",
+    "zoomIn": "放大时间轴",
+    "fitTimeline": "适合窗口",
+    "fit": "适合"
+  },
   "subtitlePanel": {
     "closeAria": "关闭",
     "title": "语音字幕",
     "subtitle": "自动识别中英文。完成后字幕会与本录制绑定，导出 MP4 自动嵌入，播放页同步显示。",
     "start": "开始生成字幕",
     "regenerate": "重新生成字幕",
+    "reading": "正在读取本地音频…",
     "uploading": "正在上传音频…",
     "pending": "已提交转写任务，等待开始…",
     "running": "正在转写中（按音频时长 30-60 秒）…",
@@ -736,16 +744,27 @@
     "generating": "正在生成视频",
     "phase": {
       "loading": "加载录制数据",
+      "loading_media": "加载源媒体",
+      "loading_manifest": "读取媒体清单",
+      "loading_renderer": "加载渲染器",
+      "assembling_media": "准备源媒体",
+      "initializing_decoder": "初始化视频解码器",
+      "hardware_pipeline": "合成并进行硬件编码",
+      "muxing_audio": "封装音频",
+      "fallback_encoding": "切换兼容编码器",
+      "software_encoding_segments": "分段进行本地软件编码",
       "tracking_cursor": "正在识别光标",
       "rendering_frames": "逐帧渲染",
       "encoding": "视频编码",
+      "failed": "导出失败",
+      "cancelled": "导出已取消",
       "done": "完成",
       "preparing": "准备"
     }
   },
   "exportPanel": {
     "title": "导出 MP4",
-    "lede": "全部本地渲染（ffmpeg.wasm），录制数据从不离开浏览器。",
+    "lede": "全部在浏览器本地渲染，优先使用硬件加速，并保留软件兼容路径。",
     "withWatermarkTitle": "含水印导出",
     "withWatermarkMeta": "免费 · 任何人",
     "withWatermarkHint": "右下角 Excalicast 品牌水印",
@@ -763,6 +782,10 @@
     "wmWithLabel": "含水印",
     "wmCleanLabel": "无水印",
     "doneStatus": "导出完成，已开始下载。",
+    "cancelExport": "取消导出",
+    "cancelledStatus": "导出已取消。",
+    "diagnosticsTitle": "导出诊断",
+    "downloadDiagnostics": "下载诊断 JSON",
     "errorPrefix": "错误：{message}",
     "unlockedPaidNote": "本录制已解锁，无水印导出不再额外付费",
     "unlockedProNote": "已解锁，所有录制都可无水印导出",

@@ -1,6 +1,7 @@
 'use client';
 
 import { getClientDb } from '@/lib/db-client';
+import { ChunkWriteBatcher } from '@/services/mediaRecorderHealth';
 import { stopMediaRecorderSafely } from '@/services/mediaRecorderStop';
 import type { RecordingSourceConfig, RecordingSourceKind, SourceCropWindow } from '@/types/recording';
 
@@ -142,19 +143,17 @@ export async function getDisplayStreamPixelSize(stream: MediaStream): Promise<{ 
   video.muted = true;
   video.playsInline = true;
   video.srcObject = stream;
-  await video.play();
-  await new Promise<void>((resolve) => {
-    if (video.videoWidth > 0 && video.videoHeight > 0) resolve();
-    else video.onloadedmetadata = () => resolve();
-  });
-  const size = {
-    width: even(video.videoWidth || 1920),
-    height: even(video.videoHeight || 1080),
-    frameRate: settings.frameRate ? Math.round(settings.frameRate) : undefined,
-  };
-  video.pause();
-  video.srcObject = null;
-  return size;
+  try {
+    const dimensions = await waitForVideoDimensions(video, sourcePixelSize(stream));
+    return {
+      width: even(dimensions.width),
+      height: even(dimensions.height),
+      frameRate: settings.frameRate ? Math.round(settings.frameRate) : undefined,
+    };
+  } finally {
+    video.pause();
+    video.srcObject = null;
+  }
 }
 
 function cropRect(
@@ -257,10 +256,20 @@ export async function startDisplayCaptureRecorder(
     videoBitsPerSecond: bitrateFor(recordedStream, source.kind),
   });
   let chunkIndex = 0;
-  const pendingWrites: Promise<unknown>[] = [];
+  const chunkWriter = new ChunkWriteBatcher<{ recordingId: string; index: number; blob: Blob }>({
+    writeBatch: (items) => db.screenChunks.bulkAdd(items),
+    sizeOf: (item) => item.blob.size,
+  });
+  let stopping = false;
+  let endedUnexpectedly = false;
+  for (const track of sourceStream.getVideoTracks()) {
+    track.addEventListener('ended', () => {
+      if (!stopping) endedUnexpectedly = true;
+    });
+  }
   recorder.ondataavailable = (event) => {
     if (event.data.size > 0) {
-      pendingWrites.push(db.screenChunks.add({ recordingId, index: chunkIndex++, blob: event.data }).catch(() => undefined));
+      chunkWriter.enqueue({ recordingId, index: chunkIndex++, blob: event.data });
     }
   };
   recorder.start(RECORDER_TIMESLICE_MS);
@@ -271,10 +280,13 @@ export async function startDisplayCaptureRecorder(
     pause: () => { if (recorder.state === 'recording') recorder.pause(); },
     resume: () => { if (recorder.state === 'paused') recorder.resume(); },
     stop: async () => {
+      stopping = true;
       await stopMediaRecorderSafely(recorder);
-      await Promise.allSettled(pendingWrites);
       selectedArea?.cleanup();
       sourceStream.getTracks().forEach((track) => track.stop());
+      try { await chunkWriter.flush(); }
+      catch { throw new Error('screen_chunk_write_failed'); }
+      if (endedUnexpectedly) throw new Error('screen_track_ended');
     },
   };
 }

@@ -2,6 +2,9 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getActiveConfig } from '@/lib/paymentConfig';
 import { createCreemCheckout } from '@/services/creemServer';
+import { createPaddleTransaction } from '@/services/paddleServer';
+import { buildPaddleTransactionRequest } from '@/lib/paymentDomain';
+import { completeCheckoutAttempt, failCheckoutAttempt, insertCheckoutAttempt } from '@/lib/db';
 import { defaultLocale, LOCALE_COOKIE, locales } from '@/i18n/config';
 
 export const runtime = 'nodejs';
@@ -63,6 +66,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { status: 500 },
       );
     }
+    const attempt = await insertCheckoutAttempt({
+      provider: 'creem',
+      mode: cfg.mode,
+      kind: 'subscription',
+      tier,
+      billing,
+      recordingId: null,
+      userId: user.id,
+      productId,
+      rawRequest: JSON.stringify({ tier, billing, returnTo: safeReturnTo }),
+    });
     try {
       const result = await createCreemCheckout({
         creds: { apiKey: cfg.apiKey, apiBase: cfg.apiBase },
@@ -78,12 +92,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         },
         requestId: `${tier}_${billing}_${user.id}_${Date.now()}`,
       });
+      await completeCheckoutAttempt({
+        id: attempt.id,
+        providerTransactionId: result.id,
+        rawResponse: JSON.stringify(result),
+      });
       return NextResponse.json({
         provider: 'creem',
+        attemptId: attempt.id,
         redirectUrl: result.checkoutUrl,
         checkoutId: result.id,
       });
     } catch (err) {
+      await failCheckoutAttempt({
+        id: attempt.id,
+        rawResponse: err instanceof Error ? err.message : 'unknown',
+      });
       return NextResponse.json(
         { error: 'creem_checkout_failed', message: err instanceof Error ? err.message : 'unknown' },
         { status: 502 },
@@ -91,15 +115,56 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  if (!productId) {
-    return NextResponse.json({ error: 'paddle_price_id_missing', tier, billing }, { status: 500 });
+  if (!productId || !cfg.apiKey) {
+    return NextResponse.json({ error: 'paddle_creds_missing', mode: cfg.mode, tier, billing }, { status: 500 });
   }
-  return NextResponse.json({
-    provider: 'paddle',
+  const request = buildPaddleTransactionRequest({
     priceId: productId,
-    userId: user.id,
-    email: user.email ?? null,
+    customData: {
+      kind: 'subscription',
+      userId: user.id,
+      tier,
+      billing,
+    },
+  });
+  const attempt = await insertCheckoutAttempt({
+    provider: 'paddle',
+    mode: cfg.mode,
+    kind: 'subscription',
     tier,
     billing,
+    recordingId: null,
+    userId: user.id,
+    productId,
+    rawRequest: JSON.stringify(request),
   });
+  try {
+    const tx = await createPaddleTransaction({
+      mode: cfg.mode,
+      apiKey: cfg.apiKey,
+      apiBase: cfg.apiBase,
+      request,
+    });
+    await completeCheckoutAttempt({
+      id: attempt.id,
+      providerTransactionId: tx.transactionId,
+      rawResponse: tx.rawResponse,
+    });
+    return NextResponse.json({
+      provider: 'paddle',
+      attemptId: attempt.id,
+      transactionId: tx.transactionId,
+      tier,
+      billing,
+    });
+  } catch (err) {
+    await failCheckoutAttempt({
+      id: attempt.id,
+      rawResponse: err instanceof Error ? err.message : 'unknown',
+    });
+    return NextResponse.json(
+      { error: 'paddle_transaction_failed', message: err instanceof Error ? err.message : 'unknown' },
+      { status: 502 },
+    );
+  }
 }

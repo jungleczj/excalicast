@@ -7626,7 +7626,7 @@ body {
 
 .admin-craft-card {
   border: var(--craft-hairline) !important;
-  border-radius: 30px !important;
+  border-radius: 6px !important;
   background: rgba(255, 253, 248, 0.86) !important;
   box-shadow: var(--craft-shadow) !important;
 }
@@ -8528,6 +8528,102 @@ body {
 
 .editor-craft-keep-zoomed-switch[aria-checked="true"] .editor-craft-keep-zoomed-thumb {
   transform: translateX(18px);
+}
+
+/* Timeline horizontal zoom */
+.timeline-craft-toolbar-end {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.timeline-craft-zoom-controls {
+  display: inline-flex;
+  height: 26px;
+  flex: 0 0 auto;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(24, 25, 26, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 253, 248, 0.9);
+}
+
+.editor-craft-main .timeline-craft-zoom-button {
+  display: inline-flex !important;
+  width: 28px !important;
+  min-width: 28px !important;
+  height: 24px !important;
+  min-height: 24px !important;
+  padding: 0 !important;
+  align-items: center;
+  justify-content: center;
+  border: 0 !important;
+  border-left: 1px solid rgba(24, 25, 26, 0.1) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--ink) !important;
+  cursor: pointer;
+}
+
+.editor-craft-main .timeline-craft-zoom-button:first-child {
+  border-left: 0 !important;
+}
+
+.editor-craft-main .timeline-craft-zoom-button:hover:not(:disabled) {
+  background: var(--hi-soft) !important;
+}
+
+.editor-craft-main .timeline-craft-zoom-button:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--craft-blue);
+  outline-offset: -2px;
+}
+
+.editor-craft-main .timeline-craft-zoom-button:disabled {
+  cursor: default;
+  opacity: 0.34;
+}
+
+.timeline-craft-zoom-value {
+  min-width: 38px;
+  padding: 0 5px;
+  color: var(--muted);
+  font-size: 9px;
+  text-align: center;
+}
+
+.timeline-craft-viewport {
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(31, 34, 37, 0.28) transparent;
+}
+
+.timeline-craft-viewport::-webkit-scrollbar {
+  height: 7px;
+}
+
+.timeline-craft-viewport::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 7px;
+  background: rgba(31, 34, 37, 0.28);
+  background-clip: padding-box;
+}
+
+.timeline-craft-content {
+  box-sizing: border-box;
+  padding-top: 4px;
+}
+
+@media (max-width: 760px) {
+  .timeline-craft-toolbar-end {
+    margin-left: auto;
+  }
 }
 
 .display-source-framing-tools button {

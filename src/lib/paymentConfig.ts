@@ -7,7 +7,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 // payment_config — 多行单表 + is_active 切换
 //
 // 4 行（每个 (provider, mode) 组合 1 行）：
-//   id | is_active | provider | mode | currency | prices | api_key | webhook_secret | api_base | one_time_product_id | pro_product_id
+//   id | is_active | provider | mode | currency | prices | api_key | client_token | webhook_secret | api_base | product ids
 //
 // 当前生效的那行 (is_active=true) 唯一。Unique partial index 保底。
 // /api/admin/payment-config 按 (provider, mode) upsert；/activate 端点事务切换 is_active。
@@ -30,6 +30,7 @@ export interface PaymentConfigRow {
   proYearlyPriceCents: number;
   maxYearlyPriceCents: number;
   apiKey: string | null;
+  clientToken: string | null;
   webhookSecret: string | null;
   apiBase: string | null;
   oneTimeProductId: string | null;
@@ -52,6 +53,8 @@ export interface PublicPaymentConfig {
   maxYearlyPriceCents: number;
   /** true 时前端显示年付切换：两个年付 product id 都已配置（可真实结账）。 */
   yearlyAvailable: boolean;
+  /** Paddle client-side token for the active Paddle row only. */
+  paddleClientToken?: string;
 }
 
 export function toPublic(cfg: PaymentConfigRow): PublicPaymentConfig {
@@ -66,6 +69,7 @@ export function toPublic(cfg: PaymentConfigRow): PublicPaymentConfig {
     maxYearlyPriceCents: cfg.maxYearlyPriceCents,
     // product id 不暴露；只暴露「是否可用年付」布尔。
     yearlyAvailable: !!(cfg.proYearlyProductId && cfg.maxYearlyProductId),
+    paddleClientToken: cfg.provider === 'paddle' && cfg.clientToken ? cfg.clientToken : undefined,
   };
 }
 
@@ -88,8 +92,9 @@ function sb(): SupabaseClient {
 }
 
 const isServerless = process.env.VERCEL === '1' || process.env.AWS_LAMBDA_FUNCTION_NAME;
-const DB_DIR = isServerless ? '/tmp' : path.join(process.cwd(), 'data');
-const DB_PATH = path.join(DB_DIR, 'excalicast.db');
+const DB_PATH = process.env.EXCALICAST_DB_PATH
+  ?? path.join(isServerless ? '/tmp' : path.join(process.cwd(), 'data'), 'excalicast.db');
+const DB_DIR = path.dirname(DB_PATH);
 
 let _db: Database.Database | null = null;
 function getDb(): Database.Database {
@@ -110,6 +115,7 @@ function getDb(): Database.Database {
       pro_yearly_price_cents INTEGER NOT NULL DEFAULT 9590 CHECK (pro_yearly_price_cents >= 0),
       max_yearly_price_cents INTEGER NOT NULL DEFAULT 15350 CHECK (max_yearly_price_cents >= 0),
       api_key TEXT,
+      client_token TEXT,
       webhook_secret TEXT,
       api_base TEXT,
       one_time_product_id TEXT,
@@ -122,11 +128,25 @@ function getDb(): Database.Database {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS one_active_config
       ON payment_config (is_active) WHERE is_active = 1;
+
+    CREATE TABLE IF NOT EXISTS payment_config_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      actor TEXT NOT NULL,
+      action TEXT NOT NULL,
+      provider TEXT NOT NULL CHECK (provider IN ('creem','paddle')),
+      mode TEXT NOT NULL CHECK (mode IN ('live','test')),
+      created_at INTEGER NOT NULL,
+      before_row TEXT,
+      after_row TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_payment_config_audit_created
+      ON payment_config_audit(created_at);
   `);
   // 兼容旧的本地库：补加 Max 字段（SQLite 无 ADD COLUMN IF NOT EXISTS）
   for (const ddl of [
     'ALTER TABLE payment_config ADD COLUMN max_monthly_price_cents INTEGER NOT NULL DEFAULT 1599',
     'ALTER TABLE payment_config ADD COLUMN max_product_id TEXT',
+    'ALTER TABLE payment_config ADD COLUMN client_token TEXT',
     'ALTER TABLE payment_config ADD COLUMN pro_yearly_price_cents INTEGER NOT NULL DEFAULT 9590',
     'ALTER TABLE payment_config ADD COLUMN max_yearly_price_cents INTEGER NOT NULL DEFAULT 15350',
     'ALTER TABLE payment_config ADD COLUMN pro_yearly_product_id TEXT',
@@ -174,6 +194,7 @@ interface SqliteRow {
   pro_yearly_price_cents: number;
   max_yearly_price_cents: number;
   api_key: string | null;
+  client_token: string | null;
   webhook_secret: string | null;
   api_base: string | null;
   one_time_product_id: string | null;
@@ -202,6 +223,7 @@ function fromSqliteRow(r: SqliteRow): PaymentConfigRow {
     proYearlyPriceCents: r.pro_yearly_price_cents,
     maxYearlyPriceCents: r.max_yearly_price_cents,
     apiKey: r.api_key,
+    clientToken: r.client_token,
     webhookSecret: r.webhook_secret,
     apiBase: r.api_base,
     oneTimeProductId: r.one_time_product_id,
@@ -226,6 +248,7 @@ function fromSupabaseRow(r: SupabaseRow): PaymentConfigRow {
     proYearlyPriceCents: r.pro_yearly_price_cents,
     maxYearlyPriceCents: r.max_yearly_price_cents,
     apiKey: r.api_key,
+    clientToken: r.client_token,
     webhookSecret: r.webhook_secret,
     apiBase: r.api_base,
     oneTimeProductId: r.one_time_product_id,
@@ -270,16 +293,38 @@ function applyEnvFallback(row: PaymentConfigRow): PaymentConfigRow {
   // paddle: 价格 ID 走 env 兜底
   return {
     ...row,
+    apiKey: row.apiKey
+      ?? (row.mode === 'test' ? (process.env.PADDLE_API_KEY_TEST ?? process.env.PADDLE_API_KEY ?? null) : (process.env.PADDLE_API_KEY ?? null)),
+    clientToken: row.clientToken
+      ?? (row.mode === 'test'
+        ? (process.env.NEXT_PUBLIC_PADDLE_CLIENT_TOKEN_TEST ?? process.env.NEXT_PUBLIC_PADDLE_CLIENT_TOKEN ?? null)
+        : (process.env.NEXT_PUBLIC_PADDLE_CLIENT_TOKEN ?? null)),
+    webhookSecret: row.webhookSecret
+      ?? (row.mode === 'test'
+        ? (process.env.PADDLE_WEBHOOK_SECRET_TEST ?? process.env.PADDLE_WEBHOOK_SECRET ?? null)
+        : (process.env.PADDLE_WEBHOOK_SECRET ?? null)),
+    apiBase: row.apiBase
+      ?? (row.mode === 'test' ? 'https://sandbox-api.paddle.com' : 'https://api.paddle.com'),
     oneTimeProductId: row.oneTimeProductId
-      ?? (row.mode === 'live' ? (process.env.NEXT_PUBLIC_PADDLE_PRICE_ID ?? null) : null),
+      ?? (row.mode === 'test'
+        ? (process.env.NEXT_PUBLIC_PADDLE_PRICE_ID_TEST ?? process.env.NEXT_PUBLIC_PADDLE_PRICE_ID ?? null)
+        : (process.env.NEXT_PUBLIC_PADDLE_PRICE_ID ?? null)),
     proProductId: row.proProductId
-      ?? (row.mode === 'live' ? (process.env.NEXT_PUBLIC_PADDLE_PRO_PRICE_ID ?? null) : null),
+      ?? (row.mode === 'test'
+        ? (process.env.NEXT_PUBLIC_PADDLE_PRO_PRICE_ID_TEST ?? process.env.NEXT_PUBLIC_PADDLE_PRO_PRICE_ID ?? null)
+        : (process.env.NEXT_PUBLIC_PADDLE_PRO_PRICE_ID ?? null)),
     maxProductId: row.maxProductId
-      ?? (row.mode === 'live' ? (process.env.NEXT_PUBLIC_PADDLE_MAX_PRICE_ID ?? null) : null),
+      ?? (row.mode === 'test'
+        ? (process.env.NEXT_PUBLIC_PADDLE_MAX_PRICE_ID_TEST ?? process.env.NEXT_PUBLIC_PADDLE_MAX_PRICE_ID ?? null)
+        : (process.env.NEXT_PUBLIC_PADDLE_MAX_PRICE_ID ?? null)),
     proYearlyProductId: row.proYearlyProductId
-      ?? (row.mode === 'live' ? (process.env.NEXT_PUBLIC_PADDLE_PRO_YEARLY_PRICE_ID ?? null) : null),
+      ?? (row.mode === 'test'
+        ? (process.env.NEXT_PUBLIC_PADDLE_PRO_YEARLY_PRICE_ID_TEST ?? process.env.NEXT_PUBLIC_PADDLE_PRO_YEARLY_PRICE_ID ?? null)
+        : (process.env.NEXT_PUBLIC_PADDLE_PRO_YEARLY_PRICE_ID ?? null)),
     maxYearlyProductId: row.maxYearlyProductId
-      ?? (row.mode === 'live' ? (process.env.NEXT_PUBLIC_PADDLE_MAX_YEARLY_PRICE_ID ?? null) : null),
+      ?? (row.mode === 'test'
+        ? (process.env.NEXT_PUBLIC_PADDLE_MAX_YEARLY_PRICE_ID_TEST ?? process.env.NEXT_PUBLIC_PADDLE_MAX_YEARLY_PRICE_ID ?? null)
+        : (process.env.NEXT_PUBLIC_PADDLE_MAX_YEARLY_PRICE_ID ?? null)),
   };
 }
 
@@ -370,6 +415,20 @@ export async function getAllCreemWebhookSecrets(): Promise<string[]> {
   return Array.from(secrets);
 }
 
+export async function getAllPaddleWebhookSecrets(): Promise<string[]> {
+  const all = await listAllConfigs();
+  const secrets = new Set<string>();
+  for (const row of all) {
+    if (row.provider === 'paddle' && row.webhookSecret) {
+      secrets.add(row.webhookSecret);
+    }
+  }
+  for (const e of [process.env.PADDLE_WEBHOOK_SECRET, process.env.PADDLE_WEBHOOK_SECRET_TEST]) {
+    if (e) secrets.add(e);
+  }
+  return Array.from(secrets);
+}
+
 // ---------------------------------------------------------------------------
 // Mutation API
 // ---------------------------------------------------------------------------
@@ -384,6 +443,7 @@ export interface PaymentConfigPatch {
   proYearlyPriceCents?: number;
   maxYearlyPriceCents?: number;
   apiKey?: string | null;
+  clientToken?: string | null;
   webhookSecret?: string | null;
   apiBase?: string | null;
   oneTimeProductId?: string | null;
@@ -417,6 +477,7 @@ export async function upsertConfigRow(patch: PaymentConfigPatch): Promise<Paymen
     proYearlyPriceCents: merge(patch.proYearlyPriceCents, existing?.proYearlyPriceCents ?? 9590),
     maxYearlyPriceCents: merge(patch.maxYearlyPriceCents, existing?.maxYearlyPriceCents ?? 15350),
     apiKey: merge(patch.apiKey, existing?.apiKey ?? null),
+    clientToken: merge(patch.clientToken, existing?.clientToken ?? null),
     webhookSecret: merge(patch.webhookSecret, existing?.webhookSecret ?? null),
     apiBase: merge(patch.apiBase, existing?.apiBase ?? null),
     oneTimeProductId: merge(patch.oneTimeProductId, existing?.oneTimeProductId ?? null),
@@ -440,6 +501,7 @@ export async function upsertConfigRow(patch: PaymentConfigPatch): Promise<Paymen
           pro_yearly_price_cents: next.proYearlyPriceCents,
           max_yearly_price_cents: next.maxYearlyPriceCents,
           api_key: next.apiKey,
+          client_token: next.clientToken,
           webhook_secret: next.webhookSecret,
           api_base: next.apiBase,
           one_time_product_id: next.oneTimeProductId,
@@ -461,11 +523,11 @@ export async function upsertConfigRow(patch: PaymentConfigPatch): Promise<Paymen
       `INSERT INTO payment_config
          (is_active, provider, mode, currency, one_time_price_cents, pro_monthly_price_cents, max_monthly_price_cents,
           pro_yearly_price_cents, max_yearly_price_cents,
-          api_key, webhook_secret, api_base, one_time_product_id, pro_product_id, max_product_id,
+          api_key, client_token, webhook_secret, api_base, one_time_product_id, pro_product_id, max_product_id,
           pro_yearly_product_id, max_yearly_product_id, updated_at)
        VALUES (0, @provider, @mode, @currency, @oneTime, @proMonthly, @maxMonthly,
                @proYearly, @maxYearly,
-               @apiKey, @webhookSecret, @apiBase, @oneTimeProductId, @proProductId, @maxProductId,
+               @apiKey, @clientToken, @webhookSecret, @apiBase, @oneTimeProductId, @proProductId, @maxProductId,
                @proYearlyProductId, @maxYearlyProductId, @updatedAt)
        ON CONFLICT (provider, mode) DO UPDATE SET
          currency = excluded.currency,
@@ -475,6 +537,7 @@ export async function upsertConfigRow(patch: PaymentConfigPatch): Promise<Paymen
          pro_yearly_price_cents = excluded.pro_yearly_price_cents,
          max_yearly_price_cents = excluded.max_yearly_price_cents,
          api_key = excluded.api_key,
+         client_token = excluded.client_token,
          webhook_secret = excluded.webhook_secret,
          api_base = excluded.api_base,
          one_time_product_id = excluded.one_time_product_id,
@@ -494,6 +557,7 @@ export async function upsertConfigRow(patch: PaymentConfigPatch): Promise<Paymen
       proYearly: next.proYearlyPriceCents,
       maxYearly: next.maxYearlyPriceCents,
       apiKey: next.apiKey,
+      clientToken: next.clientToken,
       webhookSecret: next.webhookSecret,
       apiBase: next.apiBase,
       oneTimeProductId: next.oneTimeProductId,
@@ -520,40 +584,96 @@ export async function upsertConfigRow(patch: PaymentConfigPatch): Promise<Paymen
 export async function activateConfig(
   provider: PaymentProvider,
   mode: PaymentMode,
+  actor = 'admin',
 ): Promise<PaymentConfigRow> {
   if (isSupabase()) {
-    // No client-side transaction support → two updates back-to-back.
-    // The unique partial index on is_active=true is the integrity backstop;
-    // if a race produces two TRUEs the second write fails and we surface it.
-    const { error: e1 } = await sb()
-      .from('payment_config')
-      .update({ is_active: false })
-      .eq('is_active', true);
-    if (e1) throw new Error(`activateConfig (clear): ${e1.message}`);
-
-    const { data, error: e2 } = await sb()
-      .from('payment_config')
-      .update({ is_active: true })
-      .eq('provider', provider)
-      .eq('mode', mode)
-      .select()
-      .single();
-    if (e2) throw new Error(`activateConfig (set): ${e2.message}`);
-    if (!data) throw new Error(`activateConfig: no row for ${provider}/${mode}`);
-    return applyEnvFallback(fromSupabaseRow(data as SupabaseRow));
+    const { data, error } = await sb().rpc('activate_payment_config', {
+      p_provider: provider,
+      p_mode: mode,
+      p_actor: actor,
+    });
+    if (error) throw new Error(`activateConfig: ${error.message}`);
+    const rows = Array.isArray(data) ? data : data ? [data] : [];
+    if (rows.length === 0) throw new Error(`activateConfig: no row for ${provider}/${mode}`);
+    return applyEnvFallback(fromSupabaseRow(rows[0] as SupabaseRow));
   }
 
   const db = getDb();
+  let row: SqliteRow;
   const tx = db.transaction(() => {
+    const before = db.prepare('SELECT * FROM payment_config WHERE is_active = 1 LIMIT 1').get() as SqliteRow | undefined;
     db.prepare('UPDATE payment_config SET is_active = 0 WHERE is_active = 1').run();
     const r = db.prepare('UPDATE payment_config SET is_active = 1 WHERE provider = ? AND mode = ?')
       .run(provider, mode);
     if (r.changes === 0) throw new Error(`activateConfig: no row for ${provider}/${mode}`);
+    row = db.prepare('SELECT * FROM payment_config WHERE is_active = 1').get() as SqliteRow;
+    db.prepare(
+      `INSERT INTO payment_config_audit (actor, action, provider, mode, created_at, before_row, after_row)
+       VALUES (?, 'activate', ?, ?, ?, ?, ?)`,
+    ).run(actor, provider, mode, Date.now(), before ? JSON.stringify(before) : null, JSON.stringify(row));
   });
   tx();
 
-  const row = db.prepare('SELECT * FROM payment_config WHERE is_active = 1').get() as SqliteRow;
-  return applyEnvFallback(fromSqliteRow(row));
+  return applyEnvFallback(fromSqliteRow(row!));
+}
+
+export interface PaymentConfigAuditRow {
+  id: number;
+  actor: string;
+  action: string;
+  provider: PaymentProvider;
+  mode: PaymentMode;
+  createdAt: number;
+  beforeRow: string | null;
+  afterRow: string | null;
+}
+
+export async function listPaymentConfigAudit(): Promise<PaymentConfigAuditRow[]> {
+  if (isSupabase()) {
+    const { data, error } = await sb()
+      .from('payment_config_audit')
+      .select('*')
+      .order('created_at', { ascending: true });
+    if (error) throw new Error(`listPaymentConfigAudit: ${error.message}`);
+    return (data as Array<{
+      id: number;
+      actor: string;
+      action: string;
+      provider: PaymentProvider;
+      mode: PaymentMode;
+      created_at: string;
+      before_row: unknown;
+      after_row: unknown;
+    }>).map((row) => ({
+      id: row.id,
+      actor: row.actor,
+      action: row.action,
+      provider: row.provider,
+      mode: row.mode,
+      createdAt: new Date(row.created_at).getTime(),
+      beforeRow: row.before_row == null ? null : JSON.stringify(row.before_row),
+      afterRow: row.after_row == null ? null : JSON.stringify(row.after_row),
+    }));
+  }
+  return (getDb().prepare('SELECT * FROM payment_config_audit ORDER BY created_at ASC, id ASC').all() as Array<{
+    id: number;
+    actor: string;
+    action: string;
+    provider: PaymentProvider;
+    mode: PaymentMode;
+    created_at: number;
+    before_row: string | null;
+    after_row: string | null;
+  }>).map((row) => ({
+    id: row.id,
+    actor: row.actor,
+    action: row.action,
+    provider: row.provider,
+    mode: row.mode,
+    createdAt: row.created_at,
+    beforeRow: row.before_row,
+    afterRow: row.after_row,
+  }));
 }
 
 // formatPrice lives in @/lib/formatPrice so it can be bundled into the client.

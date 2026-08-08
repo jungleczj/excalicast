@@ -1,6 +1,9 @@
 // 关键用户事件白名单 —— 单一事件名来源（客户端 trackEvent + 服务端校验 + Dashboard 漏斗共用）。
 
 export const KNOWN_EVENTS = [
+  // 页面旅程（仅聚合路径与停留时长，不采集页面内容或个人信息）
+  'page_view',
+  'journey_leave',
   // 转化 / CTA
   'cta_start_recording',
   'pricing_cta_click',

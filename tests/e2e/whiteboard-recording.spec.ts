@@ -21,6 +21,45 @@ test.beforeEach(async ({ context, page }) => {
   });
 });
 
+test('stop navigates to the finalizing editor before delayed media recorders finish', async ({ page }) => {
+  await page.addInitScript(() => {
+    class DelayedMediaRecorder extends EventTarget {
+      static isTypeSupported() { return true; }
+      state: RecordingState = 'inactive';
+      mimeType = 'audio/webm;codecs=opus';
+      ondataavailable: ((event: BlobEvent) => void) | null = null;
+      start() { this.state = 'recording'; }
+      requestData() {}
+      pause() { this.state = 'paused'; }
+      resume() { this.state = 'recording'; }
+      stop() {
+        window.setTimeout(() => {
+          this.state = 'inactive';
+          this.dispatchEvent(new Event('stop'));
+        }, 2_500);
+      }
+    }
+    Object.defineProperty(window, 'MediaRecorder', { configurable: true, value: DelayedMediaRecorder });
+  });
+
+  // Keep dev-server route compilation outside the timing assertion. Production
+  // builds already contain this chunk; this test is about stop/navigation order.
+  await page.request.get('/zh/export/e2e-route-warmup');
+  await page.goto('/app');
+  await page.locator('.excalidraw').waitFor();
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
+  await page.getByRole('button', { name: /下一步：取景/ }).click();
+  await page.getByRole('button', { name: /^开始倒计时$/ }).click();
+  await expect(page.getByText('暂停', { exact: true })).toBeVisible({ timeout: 9_000 });
+
+  const recordingBar = page.getByTestId('in-page-recording-bar');
+  await recordingBar.hover();
+  await page.getByRole('button', { name: /停止|Stop recording/ }).evaluate((button: HTMLButtonElement) => button.click());
+
+  await expect(page).toHaveURL(/\/zh\/export\//, { timeout: 2_000 });
+  await expect(page.getByText('正在完成录制…')).toBeVisible({ timeout: 2_000 });
+});
+
 test('starting a whiteboard recording immediately stores the existing drawing', async ({ page }) => {
   await page.goto('/app');
   await page.locator('.excalidraw').waitFor();
@@ -71,8 +110,9 @@ test('starting a whiteboard recording immediately stores the existing drawing', 
   await expect(recordingBar).toHaveAttribute('data-docked', 'true', { timeout: 4_000 });
   const dockBox = await page.getByTestId('recording-bar-side-dock').boundingBox();
   const viewport = page.viewportSize();
+  const layoutViewportWidth = await page.evaluate(() => document.documentElement.clientWidth);
   if (!dockBox || !viewport) throw new Error('recording bar dock has no box');
-  expect(Math.round(dockBox.x + dockBox.width)).toBeGreaterThanOrEqual(viewport.width - 2);
+  expect(Math.round(dockBox.x + dockBox.width)).toBeGreaterThanOrEqual(layoutViewportWidth - 2);
   expect(dockBox.y + dockBox.height).toBeGreaterThanOrEqual(viewport.height - 120);
   await recordingBar.hover();
   await expect(recordingBar).toHaveAttribute('data-docked', 'false');

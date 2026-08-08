@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { SubtitleOverlay } from '@/components/SubtitleOverlay';
 import { I } from '@/components/icons';
 import { cameraPositionAt } from '@/services/exportPipeline';
+import { cameraPlacementFromEvent, projectCameraPlacement } from '@/services/cameraPlacement';
 import { drawLaserOverlay } from '@/utils/laserRender';
 import type { CameraPositionEvent, LaserEvent, WhiteboardSnapshot } from '@/types/recording';
 
@@ -515,14 +516,15 @@ function SharedCameraBubble({
   const styleAndHidden = useMemo<{ style: React.CSSProperties; hidden: boolean }>(() => {
     const pos = cameraPositionAt(cameraEvents, timeMs);
     if (pos) {
+      const projected = projectCameraPlacement(cameraPlacementFromEvent(pos), { x: 0, y: 0, width: 1, height: 1 });
       return {
         style: {
-          left: `${pos.rx * 100}%`,
-          top: `${pos.ry * 100}%`,
-          width: `${pos.rs * 100}%`,
+          left: `${projected.x * 100}%`,
+          top: `${projected.y * 100}%`,
+          width: `${projected.size * 100}%`,
           aspectRatio: '1 / 1',
         },
-        hidden: pos.hidden,
+        hidden: Boolean(pos.hidden),
       };
     }
     return {

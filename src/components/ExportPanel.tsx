@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { trackEvent } from '@/lib/analytics/track';
-import { exportRecording, downloadBlob } from '@/services/exportPipeline';
+import { cancelActiveExport, downloadBlob } from '@/services/exportPipeline';
 import { isPaid } from '@/services/paymentClient';
 import { I } from '@/components/icons';
 import { PaywallModal } from '@/components/PaywallModal';
@@ -12,10 +12,24 @@ import { useSubscription } from '@/hooks/useSubscription';
 import { formatPrice, usePaymentConfig } from '@/hooks/usePaymentConfig';
 import { ProBadge } from '@/components/ProBadge';
 import type { CroppingMode, ExportConfig } from '@/types/recording';
+import type { ExportDiagnosticReport, ExportProgressDetails } from '@/types/exportDiagnostics';
+import { useMediaTasks } from '@/components/providers/MediaTaskProvider';
 
-export interface ExportProgressState {
-  phase: string;
-  ratio: number;
+export type ExportProgressState = ExportProgressDetails;
+
+function initialProgress(phase = 'preparing', ratio = 0): ExportProgressState {
+  return {
+    phase,
+    ratio,
+    encoderPath: 'unknown',
+    decoderPaths: {},
+    processedFrames: 0,
+    totalFrames: 0,
+    decodedSourceFrames: 0,
+    throughputFps: 0,
+    elapsedMs: 0,
+    estimatedRemainingMs: null,
+  };
 }
 
 interface Props {
@@ -36,6 +50,7 @@ export function ExportPanel({
   onProgress,
 }: Props): JSX.Element {
   const t = useTranslations('exportPanel');
+  const { tasks, startExport, cancelTask } = useMediaTasks();
   const subscription = useSubscription();
   const { config: paymentCfg } = usePaymentConfig();
   const [paid, setPaid] = useState<boolean>(false);
@@ -47,6 +62,19 @@ export function ExportPanel({
   const [upgradeTier, setUpgradeTier] = useState<'pro' | 'max'>('pro');
   const [pendingExport, setPendingExport] = useState<boolean>(false);
   const [bgPolling, setBgPolling] = useState<boolean>(false);
+  const [diagnostics, setDiagnostics] = useState<ExportDiagnosticReport | null>(null);
+  const currentTask = tasks.find((task) => task.kind === 'export' && task.recordingId === recordingId);
+
+  useEffect(() => {
+    if (!currentTask) return;
+    if (currentTask.status === 'running') setBusy(true);
+    if (currentTask.details) onProgress?.(currentTask.details);
+    if (currentTask.diagnostics) setDiagnostics(currentTask.diagnostics);
+    if (currentTask.status === 'completed' || currentTask.status === 'failed' || currentTask.status === 'cancelled') {
+      setBusy(false);
+      onProgress?.(null);
+    }
+  }, [currentTask, onProgress]);
 
   const openUpgrade = useCallback((tier: 'pro' | 'max') => {
     setUpgradeTier(tier);
@@ -84,15 +112,13 @@ export function ExportPanel({
     }
     setBusy(true);
     setError(null);
-
+    setDiagnostics(null);
     // 多选导出：逐个比例生成并依次下载（分辨率/格式/画质统一套用）。
     const ratios = (config.exportRatios && config.exportRatios.length > 0) ? config.exportRatios : [config.aspectRatio];
     const wmTag = config.withWatermark ? 'wm' : 'clean';
     const ext = config.format ?? 'mp4'; // mp4 / webm / gif
 
-    let lastPhase = 'preparing';
-    let lastRatio = 0;
-    onProgress?.({ phase: lastPhase, ratio: 0 });
+    onProgress?.(initialProgress('preparing', 0));
 
     try {
       for (let i = 0; i < ratios.length; i++) {
@@ -108,8 +134,7 @@ export function ExportPanel({
         setStatusMsg(ratios.length > 1
           ? t('exportingStatus', { ratio: `${ar} (${i + 1}/${ratios.length})`, wm: config.withWatermark ? t('wmWithLabel') : t('wmCleanLabel') })
           : t('exportingStatus', { ratio: ar, wm: config.withWatermark ? t('wmWithLabel') : t('wmCleanLabel') }));
-        lastPhase = 'preparing'; lastRatio = 0;
-        const blob = await exportRecording({
+        const exportConfig: ExportConfig = {
           ...config,
           aspectRatio: ar,
           croppingMode: ratioFraming?.alwaysKeepZoomedIn
@@ -118,22 +143,42 @@ export function ExportPanel({
           alwaysKeepZoomedIn: ratioFraming?.alwaysKeepZoomedIn ?? false,
           cropWindow: ratioFraming?.cropWindow,
           customOutput: ratioFraming?.customOutput,
-          recordingId,
-          onPhase: (p) => { lastPhase = p; onProgress?.({ phase: p, ratio: lastRatio }); },
-          onProgress: (r) => { lastRatio = Math.min(1, Math.max(0, r)); onProgress?.({ phase: lastPhase, ratio: lastRatio }); },
-          onLog: (m) => { if (process.env.NODE_ENV !== 'production') console.debug('[ffmpeg]', m); },
-        });
+        };
+        const task = await startExport({ recordingId, configSnapshot: exportConfig });
+        if (task.status === 'cancelled') throw new DOMException('Export cancelled', 'AbortError');
+        if (!task.resultBlob) throw new Error('export_result_missing');
+        if (task.diagnostics) setDiagnostics(task.diagnostics);
+        const blob = task.resultBlob;
         downloadBlob(blob, `excalicast_${recordingId.slice(0, 8)}_${ar.replace(':', 'x')}_${wmTag}.${ext}`);
         trackEvent('export_success', { ratio: ar, watermark: config.withWatermark });
       }
       setStatusMsg(t('doneStatus'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'export_failed');
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setError(null);
+        setStatusMsg(t('cancelledStatus'));
+      } else {
+        setError(err instanceof Error ? err.message : 'export_failed');
+      }
     } finally {
       setBusy(false);
       onProgress?.(null);
     }
-  }, [config, recordingId, effectivelyUnlocked, fallbackCroppingMode, onProgress, t]);
+  }, [config, recordingId, effectivelyUnlocked, fallbackCroppingMode, onProgress, startExport, t]);
+
+  const cancelExport = useCallback(() => {
+    if (currentTask?.status === 'running') cancelTask(currentTask.id);
+    cancelActiveExport();
+    setStatusMsg(t('cancelledStatus'));
+  }, [cancelTask, currentTask, t]);
+
+  const downloadDiagnostics = useCallback(() => {
+    if (!diagnostics) return;
+    downloadBlob(
+      new Blob([JSON.stringify(diagnostics, null, 2)], { type: 'application/json' }),
+      `excalicast_export_diagnostics_${recordingId.slice(0, 8)}.json`,
+    );
+  }, [diagnostics, recordingId]);
 
   useEffect(() => {
     if (effectivelyUnlocked && pendingExport) {
@@ -244,6 +289,57 @@ export function ExportPanel({
             </>
           )}
         </button>
+
+        {busy && (
+          <button
+            type="button"
+            data-testid="cancel-export"
+            onClick={cancelExport}
+            className="mt-2 flex w-full items-center justify-center gap-2"
+            style={{
+              height: 38,
+              border: '1.4px solid var(--ink)',
+              borderRadius: 4,
+              background: 'var(--paper)',
+              color: 'var(--ink)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            <I.Close size={13} />
+            {t('cancelExport')}
+          </button>
+        )}
+
+        {diagnostics && !busy && (
+          <div
+            data-testid="export-diagnostics-summary"
+            className="mt-3 p-3"
+            style={{ border: '1.2px solid var(--ink)', borderRadius: 4, background: 'var(--paper-2)' }}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--ink)' }}>
+                  {t('diagnosticsTitle')}
+                </div>
+                <div className="mt-1" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--ink-3)' }}>
+                  {diagnostics.encoderPath} · {diagnostics.throughputFps.toFixed(1)} fps · {(diagnostics.elapsedMs / 1000).toFixed(1)}s
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={downloadDiagnostics}
+                aria-label={t('downloadDiagnostics')}
+                title={t('downloadDiagnostics')}
+                style={{ width: 30, height: 30, display: 'grid', placeItems: 'center', border: '1.2px solid var(--ink)', borderRadius: 4, background: 'var(--paper)', cursor: 'pointer' }}
+              >
+                <I.Download size={13} />
+              </button>
+            </div>
+          </div>
+        )}
 
         {(paid || proUnlocked) && (
           <p

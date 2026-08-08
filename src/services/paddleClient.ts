@@ -2,16 +2,9 @@
 
 import type { Paddle } from '@paddle/paddle-js';
 
-function getPaddleLocale(): 'zh' | 'en' {
-  if (typeof document === 'undefined') return 'en';
-  const cookie = document.cookie.split('; ').find((c) => c.startsWith('NEXT_LOCALE='));
-  const value = cookie?.split('=')[1];
-  return value === 'zh' ? 'zh' : 'en';
-}
-
 export interface OpenCheckoutOptions {
   paddle: Paddle;
-  recordingId: string;
+  transactionId: string;
 }
 
 /**
@@ -19,19 +12,9 @@ export interface OpenCheckoutOptions {
  * The caller subscribes to checkout.completed via usePaddle().subscribe
  * before calling this — that's how it learns when to start polling /api/is-paid.
  */
-export function openCheckout({ paddle, recordingId }: OpenCheckoutOptions): void {
-  const priceId = process.env.NEXT_PUBLIC_PADDLE_PRICE_ID;
-  if (!priceId) {
-    throw new Error('NEXT_PUBLIC_PADDLE_PRICE_ID is not set');
-  }
+export function openCheckout({ paddle, transactionId }: OpenCheckoutOptions): void {
   paddle.Checkout.open({
-    items: [{ priceId, quantity: 1 }],
-    customData: { recordingId },
-    settings: {
-      displayMode: 'overlay',
-      theme: 'light',
-      locale: getPaddleLocale(),
-    },
+    transactionId,
   });
 }
 
@@ -45,9 +28,7 @@ export function closeCheckout(paddle: Paddle): void {
 
 export interface OpenProSubscriptionOptions {
   paddle: Paddle;
-  userId: string;
-  email?: string;
-  tier?: 'pro' | 'max';
+  transactionId: string;
 }
 
 /**
@@ -60,24 +41,8 @@ export interface OpenProSubscriptionOptions {
  * Important: userId is forwarded as customData.userId so the webhook can
  * identify which app user owns the subscription; tier tells it which plan.
  */
-export function openProSubscriptionCheckout({ paddle, userId, email, tier = 'pro' }: OpenProSubscriptionOptions): void {
-  const priceId = tier === 'max'
-    ? process.env.NEXT_PUBLIC_PADDLE_MAX_PRICE_ID
-    : process.env.NEXT_PUBLIC_PADDLE_PRO_PRICE_ID;
-  if (!priceId) {
-    const envName = tier === 'max' ? 'NEXT_PUBLIC_PADDLE_MAX_PRICE_ID' : 'NEXT_PUBLIC_PADDLE_PRO_PRICE_ID';
-    throw new Error(
-      `${envName} is not set. Create the ${tier} recurring product in Paddle dashboard and put its priceId in .env.local`,
-    );
-  }
+export function openProSubscriptionCheckout({ paddle, transactionId }: OpenProSubscriptionOptions): void {
   paddle.Checkout.open({
-    items: [{ priceId, quantity: 1 }],
-    customData: { userId, tier },
-    customer: email ? { email } : undefined,
-    settings: {
-      displayMode: 'overlay',
-      theme: 'light',
-      locale: getPaddleLocale(),
-    },
+    transactionId,
   });
 }

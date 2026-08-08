@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
 import { downloadSrt, pollSubtitleJob, submitSubtitleJob } from '@/services/subtitleClient';
-import { clearSubtitleSrt, getRecording, loadFullRecording, saveSubtitleSrt } from '@/lib/db-client';
+import { clearSubtitleSrt, getLatestMediaTask, getRecording, loadRecordingMediaTracks, saveMediaTask, saveSubtitleSrt } from '@/lib/db-client';
 import { trackEvent } from '@/lib/analytics/track';
 
 /**
@@ -53,14 +53,15 @@ interface Props {
   /** 旧调用方兼容（现已内联进「字幕」Tab，无关闭按钮）。 */
   onClose?: () => void;
   onSaved?: (srt: string) => void;
+  onRemoved?: () => void;
 }
 
-type Phase = 'idle' | 'uploading' | 'pending' | 'running' | 'done' | 'failed';
+type Phase = 'idle' | 'reading' | 'uploading' | 'pending' | 'running' | 'done' | 'failed';
 
 const POLL_INTERVAL_MS = 2500;
 const POLL_MAX = 240;
 
-export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Element | null {
+export function SubtitlePanel({ open, recordingId, onSaved, onRemoved }: Props): JSX.Element | null {
   const t = useTranslations('subtitlePanel');
   const [phase, setPhase] = useState<Phase>('idle');
   const [srt, setSrt] = useState<string>('');
@@ -68,7 +69,9 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
   const [jobId, setJobId] = useState<string | null>(null);
   const [mockReason, setMockReason] = useState<string | null>(null);
   const [existingSrt, setExistingSrt] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const requestAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -82,25 +85,55 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
         clearInterval(pollRef.current);
         pollRef.current = null;
       }
+      requestAbortRef.current?.abort();
+      requestAbortRef.current = null;
       return;
     }
     // 打开时检查是否已有字幕
-    void getRecording(recordingId).then((r) => {
+    let cancelled = false;
+    void Promise.all([getRecording(recordingId), getLatestMediaTask(recordingId, 'asr')]).then(([r, task]) => {
+      if (cancelled) return;
       const existing = r?.subtitleSrt ?? null;
       if (existing) {
         setExistingSrt(existing);
         setSrt(existing);
         setPhase('done');
+        return;
+      }
+      const remoteJobId = typeof task?.checkpoint?.remoteJobId === 'string'
+        ? task.checkpoint.remoteJobId
+        : null;
+      if (remoteJobId && (task?.status === 'queued' || task?.status === 'running' || task?.status === 'paused')) {
+        pollCount.current = 0;
+        setJobId(remoteJobId);
+        setPhase('pending');
+        void pollOnce(remoteJobId);
+        pollRef.current = setInterval(() => void pollOnce(remoteJobId), POLL_INTERVAL_MS);
       }
     });
+    return () => {
+      cancelled = true;
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = null;
+      requestAbortRef.current?.abort();
+      requestAbortRef.current = null;
+    };
   }, [open, recordingId]);
 
   const startJob = async () => {
+    requestAbortRef.current?.abort();
+    const controller = new AbortController();
+    requestAbortRef.current = controller;
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = null;
+    pollCount.current = 0;
     setError(null);
-    setPhase('uploading');
+    setPhase('reading');
+    setUploadProgress(0);
     // 客户端预检：避免给 DashScope 扔肯定识别不了的样本
+    let preparedAudio: Blob | undefined;
     try {
-      const full = await loadFullRecording(recordingId);
+      const full = await loadRecordingMediaTracks(recordingId, ['audio']);
       if (!full.audioBlob) {
         setPhase('failed');
         setError('no_audio_track');
@@ -116,13 +149,32 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
         setError('no_speech_detected');
         return;
       }
+      preparedAudio = full.audioBlob;
     } catch {
       // 预检本身出错就不阻塞，继续走线上识别
     }
 
     try {
-      const r = await submitSubtitleJob(recordingId);
+      setPhase('uploading');
+      const r = await submitSubtitleJob(recordingId, {
+        audioBlob: preparedAudio,
+        signal: controller.signal,
+        onUploadProgress: (uploaded, total) => {
+          setUploadProgress(total > 0 ? Math.min(1, uploaded / total) : 0);
+        },
+      });
       setJobId(r.jobId);
+      const now = Date.now();
+      await saveMediaTask({
+        id: `asr:${r.jobId}`,
+        recordingId,
+        kind: 'asr',
+        status: 'running',
+        progress: 0,
+        checkpoint: { remoteJobId: r.jobId },
+        createdAt: now,
+        updatedAt: now,
+      });
       if (r.mock) {
         setMockReason(r.reason ?? t('mockReason'));
       }
@@ -130,6 +182,7 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
       void pollOnce(r.jobId);
       pollRef.current = setInterval(() => void pollOnce(r.jobId), POLL_INTERVAL_MS);
     } catch (err) {
+      if (controller.signal.aborted) return;
       setPhase('failed');
       setError(err instanceof Error ? err.message : 'submit_failed');
     }
@@ -148,6 +201,7 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
     try {
       const r = await pollSubtitleJob(id);
       if (r.status === 'done') {
+        const existingTask = await getLatestMediaTask(recordingId, 'asr');
         const finalSrt = r.srt ?? '';
         setSrt(finalSrt);
         setPhase('done');
@@ -162,13 +216,46 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
           // best-effort：未登录/未上云返回 401/404，忽略即可。
           void syncSubtitleToCloud(recordingId, finalSrt);
         }
+        await saveMediaTask({
+          id: `asr:${id}`,
+          recordingId,
+          kind: 'asr',
+          status: 'completed',
+          progress: 1,
+          checkpoint: { remoteJobId: id },
+          createdAt: existingTask?.createdAt ?? Date.now(),
+          updatedAt: Date.now(),
+        });
       } else if (r.status === 'failed') {
+        const existingTask = await getLatestMediaTask(recordingId, 'asr');
         setPhase('failed');
         setError(r.error ?? 'unknown');
         if (pollRef.current) clearInterval(pollRef.current);
         pollRef.current = null;
+        await saveMediaTask({
+          id: `asr:${id}`,
+          recordingId,
+          kind: 'asr',
+          status: 'failed',
+          progress: 0,
+          checkpoint: { remoteJobId: id },
+          error: r.error ?? 'unknown',
+          createdAt: existingTask?.createdAt ?? Date.now(),
+          updatedAt: Date.now(),
+        });
       } else {
         setPhase(r.status);
+        const existingTask = await getLatestMediaTask(recordingId, 'asr');
+        await saveMediaTask({
+          id: `asr:${id}`,
+          recordingId,
+          kind: 'asr',
+          status: 'running',
+          progress: r.status === 'running' ? 0.65 : 0.25,
+          checkpoint: { remoteJobId: id },
+          createdAt: existingTask?.createdAt ?? Date.now(),
+          updatedAt: Date.now(),
+        });
       }
     } catch {
       // transient — keep polling
@@ -180,6 +267,7 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
     setExistingSrt(null);
     setSrt('');
     setPhase('idle');
+    onRemoved?.();
     void syncSubtitleToCloud(recordingId, null); // 一并清掉云端字幕
   };
 
@@ -216,7 +304,7 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
           </button>
         )}
 
-        {(phase === 'uploading' || phase === 'pending' || phase === 'running') && (
+        {(phase === 'reading' || phase === 'uploading' || phase === 'pending' || phase === 'running') && (
           <div
             className="subtitle-craft-status fade-in mt-2 flex items-center gap-3 p-3"
             style={{ border: '1.4px solid var(--ink)', background: 'var(--paper-2)', borderRadius: 3 }}
@@ -227,7 +315,8 @@ export function SubtitlePanel({ open, recordingId, onSaved }: Props): JSX.Elemen
               aria-hidden
             />
             <span style={{ fontSize: 12, color: 'var(--ink)' }}>
-              {phase === 'uploading' && t('uploading')}
+              {phase === 'reading' && t('reading')}
+              {phase === 'uploading' && `${t('uploading')} ${Math.round(uploadProgress * 100)}%`}
               {phase === 'pending' && t('pending')}
               {phase === 'running' && t('running')}
             </span>

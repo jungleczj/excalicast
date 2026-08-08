@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { KNOWN_EVENT_SET } from '@/lib/analytics/events';
+import { sanitizeAnalyticsProps } from '@/lib/analytics/admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,13 +22,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const event = typeof body.event === 'string' ? body.event : '';
   if (!KNOWN_EVENT_SET.has(event)) return ok();
 
-  // props：限字段数 + 字符串长度，只收原始标量
-  const props: Record<string, string | number | boolean> = {};
+  // props：限字段数 + 字符串长度，只收原始标量；敏感文本/媒体字段在入库前丢弃。
+  let props: Record<string, string | number | boolean> = {};
   if (body.props && typeof body.props === 'object' && !Array.isArray(body.props)) {
-    for (const [k, v] of Object.entries(body.props as Record<string, unknown>).slice(0, 24)) {
-      if (typeof v === 'string') props[k] = v.slice(0, 200);
-      else if (typeof v === 'number' || typeof v === 'boolean') props[k] = v;
-    }
+    props = sanitizeAnalyticsProps(body.props as Record<string, unknown>);
   }
 
   // 登录用户 id（匿名为 null，靠 guest_id 关联）

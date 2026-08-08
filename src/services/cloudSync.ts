@@ -4,12 +4,15 @@ import { createClient } from '@/lib/supabase/client';
 import {
   getClientDb,
   loadFullRecording,
+  loadRecordingThumbnailDataUrl,
   saveSubtitleSrt,
+  thumbnailDataUrlToBlob,
 } from '@/lib/db-client';
 import type {
   AudioChunk,
   BinaryFileEntry,
   CameraChunk,
+  CameraPlacementV2,
   CameraPositionEvent,
   RecordingMetadata,
   WhiteboardSnapshot,
@@ -107,10 +110,14 @@ export async function uploadRecording(
   const userId = await ensureUserId();
   const { metadata, snapshots, audioBlob, cameraBlob, cameraEvents, binaryFiles } =
     await loadFullRecording(recordingId);
+  const thumbnail = await loadRecordingThumbnailDataUrl(recordingId)
+    ?? metadata.lastFrameThumbnail
+    ?? null;
 
   let bytesUploaded = 0;
   const bytesTotal =
     JSON.stringify(metadata).length +
+    (thumbnail?.length ?? 0) +
     JSON.stringify(snapshots).length +
     (audioBlob?.size ?? 0) +
     (cameraBlob?.size ?? 0);
@@ -119,6 +126,7 @@ export async function uploadRecording(
   onProgress?.({ step: 'metadata', bytesUploaded, bytesTotal });
   const metaPayload = JSON.stringify({
     ...metadata,
+    lastFrameThumbnail: thumbnail ?? undefined,
     binaryFileIds: binaryFiles.map((b) => b.fileId),
     schemaVersion: 1,
   });
@@ -196,7 +204,7 @@ export async function uploadRecording(
       hasAudio: metadata.hasAudio,
       hasCamera: metadata.hasCamera,
       subtitleSrt: metadata.subtitleSrt ?? null,
-      thumbnail: metadata.lastFrameThumbnail ?? null,
+      thumbnail,
       bytesStored: bytesUploaded,
     }),
   });
@@ -328,13 +336,13 @@ export async function importCloudRecording(
   // cameraPositions.json.gz —— 缺失时按空数组（老的云端录制没有这个文件）
   // schemaVersion 1: 无 hidden 字段；schemaVersion 2: 有 hidden（软静音）。
   onProgress?.({ step: 'cameraPositions', bytesUploaded: 0, bytesTotal: 0 });
-  let cameraEvents: Array<{ timestamp: number; rx: number; ry: number; rs: number; hidden?: boolean }> = [];
+  let cameraEvents: Array<{ timestamp: number; rx: number; ry: number; rs: number; hidden?: boolean; placement?: CameraPlacementV2 }> = [];
   const camPosBlob = await fetchObj('cameraPositions.json.gz');
   if (camPosBlob) {
     try {
       const camPosText = await gunzipToString(camPosBlob);
       const parsed = JSON.parse(camPosText) as {
-        events?: Array<{ timestamp: number; rx: number; ry: number; rs: number; hidden?: boolean }>;
+        events?: Array<{ timestamp: number; rx: number; ry: number; rs: number; hidden?: boolean; placement?: CameraPlacementV2 }>;
       };
       cameraEvents = parsed.events ?? [];
     } catch {
@@ -345,7 +353,7 @@ export async function importCloudRecording(
 
   await db.transaction(
     'rw',
-    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.cameraPositions, db.binaryFiles],
+    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.cameraPositions, db.binaryFiles, db.recordingThumbnails],
     async () => {
       // Clear any old local row with the same id so we start clean
       await db.recordings.delete(recordingId);
@@ -354,6 +362,7 @@ export async function importCloudRecording(
       await db.cameraChunks.where('recordingId').equals(recordingId).delete();
       await db.cameraPositions.where('recordingId').equals(recordingId).delete();
       await db.binaryFiles.where('recordingId').equals(recordingId).delete();
+      await db.recordingThumbnails.delete(recordingId);
 
       const metaRow: RecordingMetadata = {
         id: metaJson.id ?? recordingId,
@@ -362,11 +371,16 @@ export async function importCloudRecording(
         hasAudio: !!metaJson.hasAudio,
         hasCamera: !!metaJson.hasCamera,
         status: 'done',
-        lastFrameThumbnail: metaJson.lastFrameThumbnail,
         title: metaJson.title,
         subtitleSrt: metaJson.subtitleSrt,
       };
       await db.recordings.put(metaRow);
+      const thumbnailBlob = typeof metaJson.lastFrameThumbnail === 'string'
+        ? thumbnailDataUrlToBlob(metaJson.lastFrameThumbnail)
+        : null;
+      if (thumbnailBlob) {
+        await db.recordingThumbnails.put({ recordingId, blob: thumbnailBlob, updatedAt: Date.now() });
+      }
 
       // Snapshots
       const snapRows = snapsObj.snapshots.map((s) => ({
@@ -405,6 +419,7 @@ export async function importCloudRecording(
           rx: e.rx,
           ry: e.ry,
           rs: e.rs,
+          ...(e.placement ? { placement: e.placement } : {}),
           ...(e.hidden ? { hidden: true } : {}),
         }));
         await db.cameraPositions.bulkAdd(posRows);

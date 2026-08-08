@@ -16,8 +16,9 @@
 
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 import { Muxer as WebmMuxer, ArrayBufferTarget as WebmTarget } from 'webm-muxer';
+import { createMp4TimestampMapper, MonotonicTimestampNormalizer } from '@/services/mediaTimestamps';
 import { createCameraFrameSource } from './webmCameraFrames';
-import type { TimeSegment } from '@/types/recording';
+import type { ExportQuality, TimeSegment } from '@/types/recording';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -31,10 +32,50 @@ interface EncodeParams {
   format?: 'mp4' | 'webm';
   /** 码率倍率（质量档），乘到 estimateBitrate 上。缺省 1。 */
   bitrateMultiplier?: number;
+  /** 质量优先的编码策略；Auto 优先恒定质量，旧调用仍可用 bitrateMultiplier。 */
+  quality?: ExportQuality;
   /** 源时间保留段（ms）；提供则导出前把音频按段拼接，与裁剪后的帧时间轴对齐。 */
   audioSegments?: TimeSegment[];
   renderFrame: (i: number) => Promise<HTMLCanvasElement>;
   onProgress?: (p: number) => void; // 0..1
+  signal?: AbortSignal;
+}
+
+export type WebCodecsAudioMode = 'none' | 'direct' | 'remux';
+
+export function resolveWebCodecsAudioMode(input: {
+  hasAudio: boolean;
+  audioEncoderAvailable: boolean;
+  audioConfigSupported: boolean;
+}): WebCodecsAudioMode {
+  if (!input.hasAudio) return 'none';
+  return input.audioEncoderAvailable && input.audioConfigSupported ? 'direct' : 'remux';
+}
+
+export interface WebCodecsEncodeResult {
+  blob: Blob;
+  audioEncoded: boolean;
+}
+
+export async function drainEncoderBackpressure(
+  encoder: { encodeQueueSize: number; flush: () => Promise<void> },
+  maxQueueSize = 8,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
+  if (encoder.encodeQueueSize <= maxQueueSize) return;
+  // flush() is driven by the codec implementation. Unlike setTimeout polling it
+  // is not clamped when the page is hidden, and rejects immediately if Chrome
+  // has reclaimed the codec.
+  if (!signal) {
+    await encoder.flush();
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException('Export cancelled', 'AbortError'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    encoder.flush().then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
 }
 
 /** 按保留段（源 ms）把 AudioBuffer 拼接成连续音轨（用于时间轴裁剪）。 */
@@ -77,24 +118,53 @@ function vp9CodecString(width: number, height: number): string {
   return `vp09.00.${level}.08`;
 }
 
-function estimateBitrate(width: number, height: number, fps: number): number {
-  return Math.min(12_000_000, Math.max(1_500_000, Math.round(width * height * fps * 0.1)));
+export type VideoRateControl =
+  | { bitrateMode: 'quantizer'; quantizer: number }
+  | { bitrateMode: 'variable'; bitrate: number };
+
+export function resolveVideoRateControl(input: {
+  width: number;
+  height: number;
+  fps: number;
+  quality: ExportQuality;
+  quantizerSupported: boolean;
+}): VideoRateControl {
+  const quantizer: Record<ExportQuality, number> = { auto: 23, high: 18, medium: 27, low: 31 };
+  if (input.quantizerSupported) {
+    return { bitrateMode: 'quantizer', quantizer: quantizer[input.quality] };
+  }
+  // VBR 是不支持 per-frame quantizer 时的兼容路径。按内容质量留出峰值空间，
+  // 不再把 Auto 锁成接近 CBR 的 width*height*fps*0.1。
+  const bitsPerPixel: Record<ExportQuality, number> = { auto: 0.065, high: 0.12, medium: 0.052, low: 0.038 };
+  const bitrate = Math.round(input.width * input.height * input.fps * bitsPerPixel[input.quality]);
+  return {
+    bitrateMode: 'variable',
+    bitrate: Math.min(14_000_000, Math.max(1_000_000, bitrate)),
+  };
 }
 
-export async function encodeWebCodecsMp4(params: EncodeParams): Promise<Blob> {
-  const { totalFrames, fps, width, height, audioBlob, audioSegments, renderFrame, onProgress } = params;
+export async function encodeWebCodecsMp4(params: EncodeParams): Promise<WebCodecsEncodeResult> {
+  const { totalFrames, fps, width, height, audioBlob, audioSegments, renderFrame, onProgress, signal } = params;
   const format = params.format ?? 'mp4';
   const bitrateMul = params.bitrateMultiplier ?? 1;
+  const quality = params.quality ?? 'auto';
   const isWebm = format === 'webm';
   const VideoEncoderCtor = G.VideoEncoder;
   const AudioEncoderCtor = G.AudioEncoder;
   const VideoFrameCtor = G.VideoFrame;
   const AudioDataCtor = G.AudioData;
   if (!VideoEncoderCtor || !VideoFrameCtor) throw new Error('webcodecs_unavailable');
+  const checkAborted = () => {
+    if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
+  };
+  checkAborted();
 
-  // 1) 先解码音频（拿到声道/采样率以配置 muxer）
+  // 1) 仅在浏览器具备直接音频编码能力时解码音频。若缺少 AAC/Opus
+  // AudioEncoder，视频仍走硬件编码，调用方随后只用 ffmpeg remux 音频。
   let audio: { buffer: AudioBuffer; channels: number; sampleRate: number } | null = null;
-  if (audioBlob) {
+  let audioConfigSupported = false;
+  const audioEncoderAvailable = !!AudioEncoderCtor && !!AudioDataCtor;
+  if (audioBlob && audioEncoderAvailable) {
     try {
       const AC = G.AudioContext || G.webkitAudioContext;
       const ctx = new AC();
@@ -103,16 +173,37 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<Blob> {
       if (audioSegments && audioSegments.length > 0) decoded = spliceAudioBuffer(ctx, decoded, audioSegments);
       audio = { buffer: decoded, channels: Math.min(2, decoded.numberOfChannels), sampleRate: decoded.sampleRate };
       await ctx.close();
+      const audioConfig = {
+        codec: isWebm ? 'opus' : 'mp4a.40.2',
+        sampleRate: audio.sampleRate,
+        numberOfChannels: audio.channels,
+        bitrate: 128_000,
+      };
+      const audioSupport = await AudioEncoderCtor.isConfigSupported(audioConfig);
+      audioConfigSupported = !!audioSupport?.supported;
     } catch {
-      audio = null; // 音频解码失败 → 导出无声视频
+      audio = null;
+      audioConfigSupported = false;
     }
   }
 
   // 2) 校验视频编码器配置（先试硬件，不支持再试默认）。mp4→H.264(avc1)；webm→VP9(vp09)。
-  const bitrate = Math.round(estimateBitrate(width, height, fps) * bitrateMul);
-  const baseCfg: any = isWebm
-    ? { codec: vp9CodecString(width, height), width, height, bitrate, framerate: fps }
-    : { codec: avcCodecString(width, height), width, height, bitrate, framerate: fps, avc: { format: 'avc' } };
+  const codecConfig: any = isWebm
+    ? { codec: vp9CodecString(width, height), width, height, framerate: fps }
+    : { codec: avcCodecString(width, height), width, height, framerate: fps, avc: { format: 'avc' } };
+  const quantizerCandidate: any = {
+    ...codecConfig,
+    bitrateMode: 'quantizer',
+    hardwareAcceleration: 'prefer-hardware',
+  };
+  let quantizerSupported = false;
+  try {
+    quantizerSupported = !!(await VideoEncoderCtor.isConfigSupported(quantizerCandidate))?.supported;
+  } catch { /* older browsers reject the bitrateMode member */ }
+  const rateControl = resolveVideoRateControl({ width, height, fps, quality, quantizerSupported });
+  const baseCfg: any = rateControl.bitrateMode === 'quantizer'
+    ? { ...codecConfig, bitrateMode: 'quantizer' }
+    : { ...codecConfig, bitrateMode: 'variable', bitrate: Math.round(rateControl.bitrate * bitrateMul) };
   let videoCfg: any = { ...baseCfg, hardwareAcceleration: 'prefer-hardware' };
   let support = await VideoEncoderCtor.isConfigSupported(videoCfg);
   if (!support?.supported) {
@@ -121,7 +212,12 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<Blob> {
     if (!support?.supported) throw new Error('video_encoder_config_unsupported');
   }
 
-  const canAudio = !!audio && !!AudioEncoderCtor && !!AudioDataCtor;
+  const audioMode = resolveWebCodecsAudioMode({
+    hasAudio: !!audioBlob,
+    audioEncoderAvailable,
+    audioConfigSupported,
+  });
+  const canAudio = audioMode === 'direct' && !!audio;
 
   // 3) muxer（mp4-muxer / webm-muxer），音频 mp4→AAC，webm→Opus
   const muxer: any = isWebm
@@ -139,8 +235,21 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<Blob> {
 
   // 4) 视频编码
   let encErr: unknown = null;
+  const mapMp4Timestamp = createMp4TimestampMapper(fps);
   const videoEncoder = new VideoEncoderCtor({
-    output: (chunk: any, meta: any) => muxer.addVideoChunk(chunk, meta),
+    output: (chunk: any, meta: any) => {
+      if (isWebm) {
+        muxer.addVideoChunk(chunk, meta);
+        return;
+      }
+      const timestamp = mapMp4Timestamp(chunk.timestamp as number);
+      muxer.addVideoChunk(
+        chunk,
+        meta,
+        timestamp.presentationTimestampUs,
+        timestamp.compositionTimeOffsetUs,
+      );
+    },
     error: (e: unknown) => { encErr = e; },
   });
   videoEncoder.configure(videoCfg);
@@ -148,35 +257,48 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<Blob> {
   const frameDurUs = Math.round(1_000_000 / fps);
   const keyInterval = Math.max(1, fps * 2);
   const videoShare = canAudio ? 0.85 : 1;
-  for (let i = 0; i < totalFrames; i++) {
-    if (encErr) throw encErr;
-    const canvas = await renderFrame(i);
-    const frame = new VideoFrameCtor(canvas, {
-      timestamp: Math.round((i * 1_000_000) / fps),
-      duration: frameDurUs,
-    });
-    videoEncoder.encode(frame, { keyFrame: i % keyInterval === 0 });
-    frame.close();
-    // 背压：编码队列过长时让出主线程，避免内存堆积
-    while (videoEncoder.encodeQueueSize > 8) {
-      await new Promise((r) => setTimeout(r, 0));
+  try {
+    for (let i = 0; i < totalFrames; i++) {
+      checkAborted();
       if (encErr) throw encErr;
+      const canvas = await renderFrame(i);
+      checkAborted();
+      const frame = new VideoFrameCtor(canvas, {
+        timestamp: Math.round((i * 1_000_000) / fps),
+        duration: frameDurUs,
+      });
+      try {
+        const encodeOptions: any = { keyFrame: i % keyInterval === 0 };
+        if (rateControl.bitrateMode === 'quantizer') {
+          if (isWebm) encodeOptions.vp9 = { quantizer: rateControl.quantizer };
+          else encodeOptions.avc = { quantizer: rateControl.quantizer };
+        }
+        videoEncoder.encode(frame, encodeOptions);
+      } finally {
+        frame.close();
+      }
+      await drainEncoderBackpressure(videoEncoder, 8, signal);
+      if (encErr) throw encErr;
+      onProgress?.(((i + 1) / totalFrames) * videoShare);
     }
-    onProgress?.(((i + 1) / totalFrames) * videoShare);
+    await drainEncoderBackpressure({ encodeQueueSize: 9, flush: () => videoEncoder.flush() }, 8, signal);
+  } finally {
+    try { videoEncoder.close(); } catch { /* codec may already be reclaimed */ }
   }
-  await videoEncoder.flush();
-  videoEncoder.close();
   if (encErr) throw encErr;
 
   // 5) 音频编码（mp4→AAC mp4a.40.2；webm→Opus）
   if (canAudio) {
     await encodeAudioTrack(audio!.buffer, audio!.channels, isWebm ? 'opus' : 'mp4a.40.2', AudioEncoderCtor, AudioDataCtor, muxer,
-      (p) => onProgress?.(0.85 + p * 0.15));
+      (p) => onProgress?.(0.85 + p * 0.15), signal);
   }
 
   muxer.finalize();
   const { buffer } = muxer.target as { buffer: ArrayBuffer };
-  return new Blob([buffer], { type: isWebm ? 'video/webm' : 'video/mp4' });
+  return {
+    blob: new Blob([buffer], { type: isWebm ? 'video/webm' : 'video/mp4' }),
+    audioEncoded: canAudio,
+  };
 }
 
 /**
@@ -220,17 +342,27 @@ export async function transcodeCameraForUpload(blob: Blob): Promise<Blob> {
     let lastKeptUs = -Infinity;
     let lastKeyUs = -Infinity;
     let n = 0;
+    const timestampNormalizer = new MonotonicTimestampNormalizer(minGapUs);
     for await (const frame of source.frames()) {
       if (encErr) throw encErr;
-      const ts = frame.timestamp as number;
+      const sourceTimestamp = frame.timestamp as number;
+      const ts = timestampNormalizer.push(sourceTimestamp);
       // 抽帧到 ~15fps
       if (ts - lastKeptUs < minGapUs) { continue; }
       lastKeptUs = ts;
       const keyFrame = n === 0 || ts - lastKeyUs >= 2_000_000;
       if (keyFrame) lastKeyUs = ts;
-      encoder.encode(frame, { keyFrame });
+      const normalizedFrame = ts === sourceTimestamp
+        ? frame
+        : new VideoFrameCtor(frame, { timestamp: ts, duration: minGapUs });
+      try {
+        encoder.encode(normalizedFrame, { keyFrame });
+      } finally {
+        if (normalizedFrame !== frame) normalizedFrame.close();
+      }
       n++;
-      while (encoder.encodeQueueSize > 8) { await new Promise((r) => setTimeout(r, 0)); if (encErr) throw encErr; }
+      await drainEncoderBackpressure(encoder, 8);
+      if (encErr) throw encErr;
     }
     await encoder.flush();
     encoder.close();
@@ -252,6 +384,7 @@ async function encodeAudioTrack(
   AudioDataCtor: any,
   muxer: any,
   onProgress?: (p: number) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const sampleRate = buffer.sampleRate;
   let err: unknown = null;
@@ -266,9 +399,11 @@ async function encodeAudioTrack(
   const chData: Float32Array[] = [];
   for (let c = 0; c < channels; c++) chData.push(buffer.getChannelData(c));
 
-  for (let off = 0; off < total; off += block) {
-    if (err) throw err;
-    const n = Math.min(block, total - off);
+  try {
+    for (let off = 0; off < total; off += block) {
+      if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
+      if (err) throw err;
+      const n = Math.min(block, total - off);
     // f32-planar：各声道顺序排布
     const planar = new Float32Array(n * channels);
     for (let c = 0; c < channels; c++) planar.set(chData[c].subarray(off, off + n), c * n);
@@ -280,12 +415,16 @@ async function encodeAudioTrack(
       timestamp: Math.round((off / sampleRate) * 1_000_000),
       data: planar,
     });
-    audioEncoder.encode(ad);
-    ad.close();
-    if ((off / block) % 64 === 0) onProgress?.(off / total);
+      audioEncoder.encode(ad);
+      ad.close();
+      await drainEncoderBackpressure(audioEncoder, 16, signal);
+      if (err) throw err;
+      if ((off / block) % 64 === 0) onProgress?.(off / total);
+    }
+    await drainEncoderBackpressure({ encodeQueueSize: 17, flush: () => audioEncoder.flush() }, 16, signal);
+  } finally {
+    try { audioEncoder.close(); } catch { /* codec may already be reclaimed */ }
   }
-  await audioEncoder.flush();
-  audioEncoder.close();
   if (err) throw err;
   onProgress?.(1);
 }

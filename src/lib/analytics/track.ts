@@ -1,6 +1,7 @@
 'use client';
 
 import { track } from '@vercel/analytics';
+import { recordingLifecycle } from '@/services/recordingLifecycleSingleton';
 import { getOrCreateGuestId } from '@/lib/ownerKey';
 import type { KnownEvent } from './events';
 
@@ -77,8 +78,6 @@ export function trackEvent(event: KnownEvent, props?: Props): void {
   const mergedProps = typeof window === 'undefined'
     ? (props ?? {})
     : { ...sessionAttribution(), ...(props ?? {}) };
-  try { track(event, mergedProps); } catch { /* ignore */ }
-
   try {
     if (typeof window === 'undefined') return;
     const body = JSON.stringify({
@@ -89,6 +88,20 @@ export function trackEvent(event: KnownEvent, props?: Props): void {
       sessionId: sessionId(),
       guestId: safeGuestId(),
     });
+    if (recordingLifecycle.activeSession()) {
+      deferredEvents.push({ event, props: mergedProps, body });
+      return;
+    }
+    flushDeferredEvents();
+    try { track(event, mergedProps); } catch { /* ignore */ }
+    sendAnalyticsBody(body);
+  } catch { /* never block UI */ }
+}
+
+const deferredEvents: Array<{ event: KnownEvent; props: Props; body: string }> = [];
+
+function sendAnalyticsBody(body: string): void {
+  try {
     if (navigator.sendBeacon) {
       navigator.sendBeacon('/api/analytics', new Blob([body], { type: 'application/json' }));
     } else {
@@ -100,4 +113,12 @@ export function trackEvent(event: KnownEvent, props?: Props): void {
       });
     }
   } catch { /* never block UI */ }
+}
+
+function flushDeferredEvents(): void {
+  if (recordingLifecycle.activeSession()) return;
+  for (const queued of deferredEvents.splice(0)) {
+    try { track(queued.event, queued.props); } catch { /* ignore */ }
+    sendAnalyticsBody(queued.body);
+  }
 }

@@ -46,7 +46,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   try {
-    const row = await activateConfig(body.provider, body.mode);
+    const actor = process.env.ADMIN_AUDIT_ACTOR || 'admin';
+    const row = await activateConfig(body.provider, body.mode, actor);
     await broadcastActive();
     revalidatePath('/', 'layout'); // 价格页走 ISR，切换 mode 后立即再生
     return NextResponse.json({ ok: true, active: row });

@@ -61,7 +61,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
           if (r.ok) {
             const j = await r.json();
             if (isMax ? j.tier === 'max' : (j.tier === 'pro' || j.tier === 'max')) {
-              trackEvent('purchase_success', { kind: 'subscription', tier });
+              trackEvent('purchase_success', { kind: 'subscription', tier, payment_provider: provider });
               setStatusMsg(t('synced'));
               await refreshTier();
               onUpgraded?.();
@@ -99,7 +99,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
         if (!r.ok) return;
         const j = await r.json();
         if (isMax ? j.tier === 'max' : (j.tier === 'pro' || j.tier === 'max')) {
-          trackEvent('purchase_success', { kind: 'subscription', tier });
+          trackEvent('purchase_success', { kind: 'subscription', tier, payment_provider: provider });
           setStatusMsg(t('synced'));
           await refreshTier();
           onUpgraded?.();
@@ -117,14 +117,14 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
     };
   }, [open, isMax]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const openPaddleCheckout = (u: { id: string; email: string }) => {
+  const openPaddleCheckout = (transactionId: string) => {
     if (!paddle) {
       setError(t('errorPaddleNotInit'));
       return;
     }
     setBusy(true);
     try {
-      openProSubscriptionCheckout({ paddle, userId: u.id, email: u.email, tier });
+      openProSubscriptionCheckout({ paddle, transactionId });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'unknown');
       setBusy(false);
@@ -135,7 +135,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
     setBusy(true);
     // 关键：在用户点击的同步阶段先开好标签页，避免 await fetch 之后再 window.open 被弹窗拦截（→ 付款页唤不起）。
     const payWin = window.open('about:blank', '_blank');
-    trackEvent('checkout_start', { kind: 'subscription', tier, billing: effectiveBilling });
+    trackEvent('checkout_start', { kind: 'subscription', tier, billing: effectiveBilling, payment_provider: provider });
     try {
       const res = await fetch('/api/checkout/pro', {
         method: 'POST',
@@ -145,7 +145,7 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
       });
       const j = (await res.json().catch(() => ({}))) as {
         provider?: 'paddle' | 'creem';
-        priceId?: string;
+        transactionId?: string;
         redirectUrl?: string;
         error?: string;
         message?: string;
@@ -164,7 +164,8 @@ export function ProUpgradeModal({ open, onClose, onUpgraded, tier = 'pro' }: Pro
         setBusy(false);
         return;
       }
-      openPaddleCheckout(user);
+      if (!j.transactionId) throw new Error('paddle_transaction_missing');
+      openPaddleCheckout(j.transactionId);
     } catch (err) {
       payWin?.close();
       setError(err instanceof Error ? err.message : 'unknown');

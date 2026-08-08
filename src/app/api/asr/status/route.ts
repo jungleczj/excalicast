@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getSubtitleJob, updateSubtitleJob } from '@/lib/db';
-import { deleteAudio } from '@/lib/asrStore';
 import {
   fetchTranscriptionResult,
   pollTranscriptionTaskOnce,
@@ -16,6 +15,14 @@ interface StatusResponse {
   status: 'pending' | 'running' | 'done' | 'failed';
   srt?: string;
   error?: string;
+}
+
+async function removeSourceAsset(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  path: string | null,
+): Promise<void> {
+  if (!path) return;
+  await supabase.storage.from('recordings').remove([path]).catch(() => undefined);
 }
 
 export async function GET(req: Request): Promise<NextResponse<StatusResponse>> {
@@ -41,16 +48,18 @@ export async function GET(req: Request): Promise<NextResponse<StatusResponse>> {
   // Drive the DashScope state machine forward by one step
   try {
     if (job.status === 'pending') {
-      // Submit the task on the first /status call
-      const audioToken = job.audio_token!;
-      const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '');
-      if (!appUrl) {
-        await updateSubtitleJob(jobId, { status: 'failed', error: 'NEXT_PUBLIC_APP_URL not set' });
-        return NextResponse.json({ status: 'failed', error: 'NEXT_PUBLIC_APP_URL not set' });
+      let fileUrl: string;
+      if (job.asset_path) {
+        const { data, error } = await supabase.storage.from('recordings').createSignedUrl(job.asset_path, 3600);
+        if (error || !data?.signedUrl) throw new Error(`audio_sign_failed: ${error?.message ?? 'missing_url'}`);
+        fileUrl = data.signedUrl;
+      } else if (job.audio_token) {
+        const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '');
+        if (!appUrl) throw new Error('NEXT_PUBLIC_APP_URL not set');
+        fileUrl = `${appUrl}/api/asr/audio/${job.audio_token}.webm`;
+      } else {
+        throw new Error('missing_audio_asset');
       }
-      // DashScope requires the URL to end with a recognized audio file extension.
-      // Recordings are captured via MediaRecorder as audio/webm (Opus codec).
-      const fileUrl = `${appUrl}/api/asr/audio/${audioToken}.webm`;
       const submit = await submitTranscriptionTask({ fileUrl });
       await updateSubtitleJob(jobId, { status: 'running', task_id: submit.taskId });
       return NextResponse.json({ status: 'running' });
@@ -66,7 +75,7 @@ export async function GET(req: Request): Promise<NextResponse<StatusResponse>> {
       const sentences = await fetchTranscriptionResult(poll.transcriptionUrl);
       const srt = sentencesToSrt(sentences);
       await updateSubtitleJob(jobId, { status: 'done', srt });
-      if (job.audio_token) await deleteAudio(job.audio_token);
+      await removeSourceAsset(supabase, job.asset_path);
       return NextResponse.json({ status: 'done', srt });
     }
     if (poll.status === 'NO_SPEECH') {
@@ -74,7 +83,7 @@ export async function GET(req: Request): Promise<NextResponse<StatusResponse>> {
       // 让客户端 i18n 决定如何呈现给用户。
       console.warn(`[asr] no_speech_detected jobId=${jobId} recordingId=${job.recording_id}`);
       await updateSubtitleJob(jobId, { status: 'failed', error: 'no_speech_detected' });
-      if (job.audio_token) await deleteAudio(job.audio_token);
+      await removeSourceAsset(supabase, job.asset_path);
       return NextResponse.json({ status: 'failed', error: 'no_speech_detected' });
     }
     if (poll.status === 'FAILED' || poll.status === 'CANCELED') {
@@ -82,7 +91,7 @@ export async function GET(req: Request): Promise<NextResponse<StatusResponse>> {
       const rawErr = poll.errorMessage ?? poll.status;
       const err = rawErr.replace(/^字幕生成失败[：:]\s*/, '').trim() || rawErr;
       await updateSubtitleJob(jobId, { status: 'failed', error: err });
-      if (job.audio_token) await deleteAudio(job.audio_token);
+      await removeSourceAsset(supabase, job.asset_path);
       return NextResponse.json({ status: 'failed', error: err });
     }
     // Still in progress
@@ -90,6 +99,7 @@ export async function GET(req: Request): Promise<NextResponse<StatusResponse>> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'unknown';
     await updateSubtitleJob(jobId, { status: 'failed', error: msg });
+    await removeSourceAsset(supabase, job.asset_path);
     return NextResponse.json({ status: 'failed', error: msg });
   }
 }

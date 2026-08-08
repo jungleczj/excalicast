@@ -1,9 +1,11 @@
 # PRD：白板录制工具
-**版本**：v0.8.8
+**版本**：v0.9.0
 **状态**：开发中
 **作者**：—
-**最后更新**：2026-07-22
-**变更**：v0.8.8 - 顶层录制条 Document PiP 改为点击触发的自适应收起/展开并显式处理浏览器最小窗口限制；导出页新增 Max「Dubbing/翻译配音」Tab，录后生成英文 SRT/配音/可选口型人像并作为本地非破坏性资产参与预览与导出。详见「## 十一」最新一条。
+**最后更新**：2026-08-05
+**变更**：v0.9.0 - Admin Analytics Dashboard 升级为完整商业化漏斗后台：支持曝光/CTR、首次 CTA→录制→完成→导出→checkout→付费漏斗、每步转化/流失/停留时长，以及日期/语言/入口页/内容类型/录制源/支付提供商筛选；埋点入库增加敏感 props 过滤，Supabase 迁移补筛选索引。详见「## 十一」最新一条。
+**历史变更**：v0.8.9 - Paddle 主支付接入改为服务端 Transaction：`payment_config.is_active` 仍是唯一支付路由来源；Paddle/Creem 并存但不自动故障切换；新增 checkout attempt、provider-neutral subscriptions、webhook 幂等/occurred_at 时序、Price ID 权益推导与 admin 原子切换审计。详见「## 十一」最新一条。
+**历史变更**：v0.8.8 - 顶层录制条 Document PiP 改为点击触发的自适应收起/展开并显式处理浏览器最小窗口限制；导出页新增 Max「Dubbing/翻译配音」Tab，录后生成英文 SRT/配音/可选口型人像并作为本地非破坏性资产参与预览与导出。详见「## 十一」最新一条。
 **历史变更**：v0.8.7 - 落地页 UI 基准切换为严格对标 Craft.do：浮动胶囊导航、满屏纸感 Hero、居中衬线叙事、五能力入口、人物跑马灯、大叙事卡片、价格/FAQ/页脚节奏；Hero 产品图固定使用用户指定资产，人物资产包仅用于跑马灯。详见「## 十一」最新一条。
 **历史变更**：v0.8.6 - UI 统一(P0+P1)：字幕面板/档位徽标调色并入手绘纸-墨令牌（去蓝色渐变与 Tailwind 语义色）；抽共享 `Modal` 壳（`--overlay` 令牌）统一 5 个弹窗的遮罩/阴影/圆角/关闭钮。详见「## 十一」最新一条。
 **历史变更**：v0.8.5 - 导出页信息架构整理：字幕做成内联（进「字幕」Tab、不再弹窗）、删右侧高级功能卡片（功能归各自 Tab）、分享按钮移到顶栏会员标左侧、会员标统一为单一来源 `TierBadge`（修各页文案/样式不一致）。详见「## 十一」最新一条。  
@@ -735,6 +737,8 @@ Pro/Max 导出（订阅状态验证）：
 | 分享链接点击率 | > 30% | 分享链接被访问说明内容有传播价值 |
 | Whisper 成本 / Pro 收入 | < 10% | 字幕成本占比控制目标 |
 
+商业化漏斗由 Admin Analytics Dashboard 统一观察：曝光/CTA CTR、首次 CTA 点击、开始录制、完成录制、导出、checkout、最终付费逐步计算独立匿名主体数、转化率、流失人数与步骤间停留时长，并可按日期、语言、入口页、内容类型、录制源、支付提供商切片。
+
 ---
 
 ## 八、风险与依赖
@@ -1038,8 +1042,11 @@ Excalicast 落地页以 Craft.do 当前官网首页为硬参考进行重构，�
 
 **定价与会员（四档：free / one_time / pro / max）**
 - 价格唯一来源 = `payment_config`（多行表，creem/paddle × live/test，`is_active` 切换）。当前价：one-time **$4.99 (499)** / Pro **$9.99 (999)/mo** / Max **$15.99 (1599)/mo**。
-- 价格全站单一来源：服务端页面 `getActiveConfig()`、客户端 `usePaymentConfig()`（`/api/payment/provider`，`force-dynamic + no-store` + Supabase Realtime 广播即时刷新）。落地页/条款页 `force-dynamic`，改库即更新。月费后缀统一：en `/mo`、zh `/月`。
-- **Max 可购买（两渠道）**：`payment_config` 含 `max_monthly_price_cents` / `max_product_id`；`/api/checkout/pro` 按 `{tier:'pro'|'max'}` 选品；Paddle 客户端与 Creem metadata 透传 tier；Creem/Paddle webhook 按 metadata/custom_data 解析真实 tier 入 `user_subscriptions`。
+- 价格全站单一来源：服务端页面 `getActiveConfig()`、客户端 `usePaymentConfig()`（`/api/payment/provider`，`force-dynamic + no-store` + Supabase Realtime 广播即时刷新）。Paddle.js runtime token 也从 active Paddle 行的 `client_token` 读取；`api_key` / `webhook_secret` / product id 不暴露给浏览器。月费后缀统一：en `/mo`、zh `/月`。
+- **支付路由唯一来源**：Creem 与 Paddle 代码并存，但 `/api/checkout/*` 只按 `payment_config.is_active` 选择 provider，不做自动故障切换；Paddle 路径由服务端先创建 Billing Transaction，再把 `transactionId` 交给 Paddle Overlay Checkout。
+- **Max 可购买（两渠道）**：`payment_config` 含 `max_monthly_price_cents` / `max_product_id`；`/api/checkout/pro` 按 `{tier:'pro'|'max', billing:'monthly'|'yearly'}` 选品；checkout 创建写 `checkout_attempts` 便于追踪；Paddle webhook 按实际 paid Price ID 推导 one-time/pro/max/monthly/yearly 权益，不信任 `custom_data.tier`；Creem webhook 继续按 metadata 解析。
+- 订阅表为 provider-neutral：`user_subscriptions` 存 `provider` / `provider_subscription_id` / `provider_customer_id`，同一用户可同时保留 Creem/Paddle 记录，`/api/me/tier` 取当前仍有效的最高权益；webhook 事件写 `payment_webhook_events` 做 provider+event_id 幂等，并用 `occurred_at` 防旧事件覆盖新状态。
+- Admin 切换 active provider/mode 使用原子函数并写 `payment_config_audit`，成功后仍广播 `payment-config-broadcast` 并 `revalidatePath('/', 'layout')`。
 - 升级弹窗 `ProUpgradeModal` 参数化 `tier`（Pro/Max 品牌、价格、文案、轮询）；落地页定价区四档卡片。
 - 权限门控 `TIER_PERMISSIONS`；服务端 `requireTier()` 守卫 `/api/share/*`、`/api/handout/*`（Max）。
 
@@ -1058,8 +1065,15 @@ Excalicast 落地页以 Craft.do 当前官网首页为硬参考进行重构，�
 
 **品牌**：浏览器 favicon + apple touch icon。
 
+**Admin / Analytics**
+- `/[locale]/admin/analytics` 为 ADMIN_SECRET 保护的内部后台；前端只存本地 sessionStorage secret，数据经 `/api/admin/analytics` 服务端鉴权 + Supabase service-role 聚合返回。
+- Dashboard 显示曝光、CTA 点击、CTR、事件趋势、事件排行、最近匿名事件、入口页/内容类型/语言/录制源/支付提供商分组，以及 `content_cta_click → recording_start → recording_complete → export_success → checkout_start → purchase_success` 漏斗的每步用户数、步骤转化率、总转化率、流失人数、步骤间中位停留时长。
+- 隐私边界：`/api/analytics` 只接受事件白名单和有限标量 props；搜索词、query、媒体 URL/内容、字幕文本、transcript、token/secret、recordingId 等敏感 props 入库前丢弃；Dashboard 只展示匿名/用户标识的聚合与截断 ID。
+
 ### 11.2 变更记录（按时间倒序）
 
+- **2026-08-05｜Admin Analytics Dashboard 完整商业化漏斗 + 隐私过滤**：① **服务端聚合服务**：新增 `src/lib/analytics/admin.ts`，按匿名主体/session 归并事件，计算曝光/CTA CTR、`content_cta_click → recording_start → recording_complete → export_success → checkout_start → purchase_success` 漏斗、每步转化率/总转化率/流失人数/中位停留时长，并生成日期、语言、入口页、内容类型、录制源、支付提供商维度选项与 acquisition 分组。② **Admin API**：`/api/admin/analytics` 保持 `x-admin-secret` 鉴权和 Supabase service-role 读取，支持 `range/dateFrom/dateTo/from/to/locale/entryPath/contentType/sourceKind/paymentProvider` 筛选。③ **后台 UI**：`/[locale]/admin/analytics` 加日期/维度筛选、KPI、漏斗、趋势、事件排行、最近事件与分组表，使用现有 admin/craft 视觉规范。④ **隐私**：`/api/analytics` 入库前调用 sanitizer，丢弃搜索词、媒体内容/URL、transcript、token/secret、recordingId 等敏感 props；支付弹窗埋点补 `payment_provider` 标量用于聚合。⑤ **数据库**：新增 `supabase/migrations/20260805120000_admin_analytics_dashboard_indexes.sql`，只为现有 `analytics_events` 的时间、session、locale、props 维度补索引，不新增原始个人/媒体数据表。涉及 `src/app/api/{analytics,admin/analytics}/route.ts`、`src/app/[locale]/admin/analytics/page.tsx`、`src/lib/analytics/admin.ts`、`src/components/{PaywallModal,ProUpgradeModal}.tsx`、`src/app/globals.css`、`tests/e2e/admin-analytics-domain.spec.ts`。
+- **2026-08-01｜Paddle 主支付接入：服务端 Transaction + provider-neutral 支付存储 + admin 审计**：① **Paddle checkout 改服务端 Transaction**：`/api/checkout/one-time`、`/api/checkout/pro` 仍只读 active `payment_config` 行，Paddle 分支由服务端用 `api_key` 创建 Billing Transaction，客户端只拿 `transactionId` 打开 Overlay；Paddle.js runtime token 从 `/api/payment/provider` 的 active Paddle `client_token` 初始化。② **checkout attempt**：新增 `checkout_attempts` 记录 provider/mode/kind/tier/billing/product/recording/user 与 provider transaction id，便于排查下单链路。③ **Webhook 加固**：新增 `payment_webhook_events` 按 provider+event_id 幂等；Paddle webhook 使用 DB/Env 中 webhook secret 验签，按实际 line item Price ID 推导 one-time/pro/max/monthly/yearly 权益，不信任 `custom_data.tier`；订阅事件用 `occurred_at` 防旧事件覆盖新状态。④ **订阅 provider-neutral**：`user_subscriptions` 加 `provider` / `provider_subscription_id` / `provider_customer_id` / `last_event_occurred_at`，同一用户可保留 Creem/Paddle 多条记录，`/api/me/tier` 取当前最高有效权益；不做自动故障切换。⑤ **Admin 原子切换与审计**：新增 `payment_config_audit` 与 Supabase RPC `activate_payment_config`，activate 在事务内切唯一 active 行并记录 actor/before/after。涉及 `src/lib/{paymentConfig,paymentDomain,paddle,db}.ts`、`src/services/{paddleServer,paddleClient}.ts`、`src/app/api/{checkout/*,paddle-webhook,creem-webhook,payment/provider,admin/payment-config/*}`、`src/components/providers/PaddleProvider.tsx`、`src/components/{PaywallModal,ProUpgradeModal}.tsx`、`supabase/migrations/20260801120000_paddle_transactions_and_payment_switch_audit.sql`、`tests/e2e/payment-*.spec.ts`、`tests/e2e/paddle-*.spec.ts`。
 - **2026-05-31｜code-review 修复（8 项）**：
   - 本地隔离加固：`RecordingsList` 等 `useAuth.loading` settle 后才列表/认领（避免用 guestId 误认领 legacy）；`listRecordings` 改用 ownerKey 索引查询、不再回退返回 legacy。
   - by-id 越权：`getRecording/loadFullRecording/deleteRecording` 加可选 `ownerKey` 校验；`/export/[id]`、`/play/[id]`、`RecordingsList` 删除均传当前 ownerKey（他号经 id 无法查看/删除）。

@@ -1,5 +1,7 @@
 'use client';
 
+import { ALL_FORMATS, BlobSource, Input, VideoSampleSink, type VideoSample } from 'mediabunny';
+
 /**
  * 极简 WebM(Matroska) 解复用 + WebCodecs VideoDecoder 流式出帧。
  *
@@ -232,17 +234,19 @@ function parseWebm(bytes: ArrayBuffer): WebmParsed {
 export interface CameraFrameSource {
   width: number;
   height: number;
+  decoderPath: 'mediabunny-stream' | 'legacy-array-buffer';
   /** 返回 ≤ tMs 的最近一帧（VideoFrame），调用方用完不要 close（由 source 管理）。 */
   getFrameAt(tMs: number): Promise<any | null>;
   /** 顺序遍历所有解码帧（项5 转码用），yield 后该帧会被关闭。 */
   frames(): AsyncGenerator<any>;
+  getDecodedFrameCount(): number;
   close(): void;
 }
 
 /**
  * 创建摄像头帧源（解复用 + VideoDecoder 流式解码）。不支持/失败抛错。
  */
-export async function createCameraFrameSource(blob: Blob): Promise<CameraFrameSource> {
+async function createLegacyCameraFrameSource(blob: Blob): Promise<CameraFrameSource> {
   const VideoDecoderCtor = G.VideoDecoder;
   const EncodedVideoChunkCtor = G.EncodedVideoChunk;
   if (!VideoDecoderCtor || !EncodedVideoChunkCtor) throw new Error('videodecoder_unavailable');
@@ -253,9 +257,13 @@ export async function createCameraFrameSource(blob: Blob): Promise<CameraFrameSo
   if (!support?.supported) throw new Error(`videodecoder_config_unsupported_${parsed.codec}`);
 
   const queue: any[] = []; // 已解码、按时间递增的 VideoFrame
+  let decodedFrameCount = 0;
   let decodeErr: unknown = null;
   const decoder = new VideoDecoderCtor({
-    output: (frame: any) => queue.push(frame),
+    output: (frame: any) => {
+      decodedFrameCount += 1;
+      queue.push(frame);
+    },
     error: (e: unknown) => { decodeErr = e; },
   });
   decoder.configure(cfg);
@@ -285,14 +293,17 @@ export async function createCameraFrameSource(blob: Blob): Promise<CameraFrameSo
         if (current) { try { current.close(); } catch { /* */ } }
         current = queue.shift();
       }
+      // MediaRecorder may timestamp its first encoded frame a few milliseconds
+      // after zero. Previewing t=0 should still show that first frame.
+      if (!current && queue.length > 0) current = queue.shift();
       if (queue.length > 0) return; // 已有 > tUs 的帧，current 即 ≤ tUs 最近帧
       if (fed >= parsed.frames.length) { await decoder.flush().catch(() => {});
         while (queue.length > 0 && queue[0].timestamp <= tUs) { if (current) { try { current.close(); } catch {} } current = queue.shift(); }
         return;
       }
       // 控制 decode 队列深度，喂一批
-      let budget = 8;
-      while (budget-- > 0 && decoder.decodeQueueSize < 16 && feedNext()) { /* feed */ }
+      let budget = 4;
+      while (budget-- > 0 && decoder.decodeQueueSize < 4 && feedNext()) { /* feed */ }
       await yieldTick();
     }
     if (decodeErr) throw decodeErr;
@@ -301,6 +312,7 @@ export async function createCameraFrameSource(blob: Blob): Promise<CameraFrameSo
   return {
     width: parsed.width,
     height: parsed.height,
+    decoderPath: 'legacy-array-buffer',
     async getFrameAt(tMs: number) {
       await advanceTo(Math.round(tMs * 1000));
       if (decodeErr) throw decodeErr;
@@ -316,7 +328,8 @@ export async function createCameraFrameSource(blob: Blob): Promise<CameraFrameSo
           continue;
         }
         if (fed < parsed.frames.length) {
-          while (decoder.decodeQueueSize < 16 && feedNext()) { /* feed */ }
+          let budget = 4;
+          while (budget-- > 0 && decoder.decodeQueueSize < 4 && feedNext()) { /* feed */ }
           await yieldTick();
           continue;
         }
@@ -325,6 +338,7 @@ export async function createCameraFrameSource(blob: Blob): Promise<CameraFrameSo
       }
       if (decodeErr) throw decodeErr;
     },
+    getDecodedFrameCount() { return decodedFrameCount; },
     close() {
       try { if (current) current.close(); } catch { /* */ }
       for (const f of queue) { try { f.close(); } catch { /* */ } }
@@ -332,4 +346,103 @@ export async function createCameraFrameSource(blob: Blob): Promise<CameraFrameSo
       try { decoder.close(); } catch { /* */ }
     },
   };
+}
+
+async function createMediabunnyFrameSource(blob: Blob): Promise<CameraFrameSource> {
+  const input = new Input({
+    source: new BlobSource(blob, {
+      maxCacheSize: 8 * 1024 * 1024,
+      useStreamReader: true,
+    }),
+    formats: ALL_FORMATS,
+  });
+  const track = await input.getPrimaryVideoTrack();
+  if (!track) {
+    input.dispose();
+    throw new Error('webm_no_video_track');
+  }
+
+  const [width, height] = await Promise.all([
+    track.getDisplayWidth(),
+    track.getDisplayHeight(),
+  ]);
+  const sink = new VideoSampleSink(track);
+  let iterator: AsyncIterator<VideoSample> | null = null;
+  let pendingSample: VideoSample | null = null;
+  let current: VideoFrame | null = null;
+  let ended = false;
+  let closed = false;
+  let mode: 'timed' | 'iterate' | null = null;
+  let decodedFrameCount = 0;
+
+  const advanceTo = async (tMs: number) => {
+    if (mode === 'iterate') throw new Error('frame_source_mode_conflict');
+    mode = 'timed';
+    iterator ??= sink.samples()[Symbol.asyncIterator]();
+    while (!closed && !ended) {
+      if (!pendingSample) {
+        const next = await iterator.next();
+        if (next.done) {
+          ended = true;
+          return;
+        }
+        pendingSample = next.value;
+      }
+      if (pendingSample.timestamp * 1000 > tMs && current) return;
+      const nextFrame = pendingSample.toVideoFrame();
+      pendingSample.close();
+      pendingSample = null;
+      current?.close();
+      current = nextFrame;
+      decodedFrameCount += 1;
+    }
+  };
+
+  return {
+    width,
+    height,
+    decoderPath: 'mediabunny-stream',
+    async getFrameAt(tMs: number) {
+      await advanceTo(tMs);
+      return current;
+    },
+    async *frames() {
+      if (mode === 'timed') throw new Error('frame_source_mode_conflict');
+      mode = 'iterate';
+      for await (const sample of sink.samples()) {
+        if (closed) break;
+        const frame = sample.toVideoFrame();
+        sample.close();
+        decodedFrameCount += 1;
+        try {
+          yield frame;
+        } finally {
+          frame.close();
+        }
+      }
+    },
+    getDecodedFrameCount() { return decodedFrameCount; },
+    close() {
+      if (closed) return;
+      closed = true;
+      current?.close();
+      current = null;
+      pendingSample?.close();
+      pendingSample = null;
+      void iterator?.return?.();
+      input.dispose();
+    },
+  };
+}
+
+/**
+ * Lazy Blob-backed demux/decode is the primary path. The legacy parser remains
+ * as a compatibility fallback for unusual MediaRecorder WebM variants.
+ */
+export async function createCameraFrameSource(blob: Blob): Promise<CameraFrameSource> {
+  try {
+    return await createMediabunnyFrameSource(blob);
+  } catch {
+    return createLegacyCameraFrameSource(blob);
+  }
 }

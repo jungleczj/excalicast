@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { I } from '@/components/icons';
-import { listLocalizedTracks, saveLocalizedTrack, setActiveLocalizedTrack } from '@/lib/db-client';
-import { createEnglishDubbingTrack } from '@/services/dubbingClient';
+import { getLatestMediaTask, listLocalizedTracks, saveLocalizedTrack, setActiveLocalizedTrack } from '@/lib/db-client';
+import { createEnglishDubbingTrack, resumeEnglishDubbingTrack } from '@/services/dubbingClient';
 import type { LocalizedTrack, RecordingMetadata } from '@/types/recording';
 
 interface Props {
@@ -52,11 +52,29 @@ export function DubbingPanel({
 
   useEffect(() => {
     let cancelled = false;
-    listLocalizedTracks(recordingId)
-      .then((rows) => { if (!cancelled) setTracks(rows); })
+    Promise.all([listLocalizedTracks(recordingId), getLatestMediaTask(recordingId, 'dubbing')])
+      .then(async ([rows, task]) => {
+        if (cancelled) return;
+        setTracks(rows);
+        const jobId = typeof task?.checkpoint?.remoteJobId === 'string' ? task.checkpoint.remoteJobId : null;
+        const sourceAudioHash = typeof task?.checkpoint?.sourceAudioHash === 'string' ? task.checkpoint.sourceAudioHash : null;
+        if (!jobId || !sourceAudioHash || !['queued', 'running', 'paused'].includes(task?.status ?? '')) return;
+        setBusy(true);
+        try {
+          const track = await resumeEnglishDubbingTrack({ recordingId, jobId, sourceAudioHash });
+          if (cancelled) return;
+          await saveLocalizedTrack(track, true);
+          await refreshTracks();
+          onTrackReady(track);
+        } catch (resumeError) {
+          if (!cancelled) setError(resumeError instanceof Error ? resumeError.message : 'dubbing_failed');
+        } finally {
+          if (!cancelled) setBusy(false);
+        }
+      })
       .catch(() => { if (!cancelled) setTracks([]); });
     return () => { cancelled = true; };
-  }, [recordingId]);
+  }, [onTrackReady, recordingId, refreshTracks]);
 
   const generate = useCallback(async () => {
     if (!metadata.hasAudio) return;

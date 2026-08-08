@@ -9,7 +9,7 @@ export const revalidate = 0;
 /**
  * 公开只读：返回当前激活的支付提供商 + 价格 + mode。
  *
- * 严格白名单：仅 provider / mode / currency / 价格。
+ * 严格白名单：provider / mode / currency / 价格 + Paddle client token。
  * api_key / webhook_secret / product_id 永远不暴露。
  */
 export async function GET(): Promise<NextResponse<PublicPaymentConfig | { error: string }>> {
