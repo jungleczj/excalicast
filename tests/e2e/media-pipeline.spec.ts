@@ -17,7 +17,11 @@ import { resolveFrameTransform } from '@/services/frameTransform';
 import { resolvePrivateUploadMode } from '@/services/privateMediaUpload';
 import { DOWNLOAD_URL_REVOKE_DELAY_MS } from '@/services/exportPipeline';
 import { MonotonicTimestampNormalizer, createMp4TimestampMapper } from '@/services/mediaTimestamps';
-import { waitForDisplaySourceStage } from '@/services/displayFrameSource';
+import {
+  createSeekableDisplayFrameSource,
+  waitForDisplaySourceStage,
+  type DisplayFrameSource,
+} from '@/services/displayFrameSource';
 import { ChunkWriteBatcher } from '@/services/mediaRecorderHealth';
 import { dataUrlToBlob } from '@/services/workspaceShellCapture';
 
@@ -62,6 +66,56 @@ test('display source startup responds to cancellation', async () => {
   });
   controller.abort();
   await expect(waiting).rejects.toMatchObject({ name: 'AbortError' });
+});
+
+test('preview falls back to local decoding when an HTML video seek never completes', async () => {
+  let currentTime = 0;
+  const video = {
+    muted: false,
+    playsInline: false,
+    preload: '',
+    src: '',
+    paused: true,
+    readyState: 4,
+    videoWidth: 1280,
+    videoHeight: 720,
+    duration: Number.POSITIVE_INFINITY,
+    get currentTime() { return currentTime; },
+    set currentTime(value: number) { currentTime = value; },
+    onloadedmetadata: null,
+    onloadeddata: null,
+    onerror: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    pause: () => undefined,
+    play: async () => undefined,
+    removeAttribute: () => undefined,
+    load: () => undefined,
+  } as unknown as HTMLVideoElement;
+  const fallbackFrame = { width: 1280, height: 720 } as unknown as CanvasImageSource;
+  let fallbackCalls = 0;
+  const fallback: DisplayFrameSource = {
+    width: 1280,
+    height: 720,
+    decoderPath: 'mediabunny-stream',
+    getFrameAt: async () => { fallbackCalls += 1; return fallbackFrame; },
+    close: () => undefined,
+  };
+  const source = createSeekableDisplayFrameSource(new Blob(['non-seekable-webm']), {
+    metadataTimeoutMs: 50,
+    seekTimeoutMs: 5,
+    videoFactory: () => video,
+    objectUrlFactory: () => 'blob:test-display-source',
+    revokeObjectUrl: () => undefined,
+    fallbackFactory: async () => fallback,
+  });
+  video.onloadeddata?.(new Event('loadeddata'));
+
+  await expect(source.setPlayback?.(true, 1_000)).resolves.toBeUndefined();
+  await expect(source.getFrameAt(1_000)).resolves.toBe(fallbackFrame);
+  expect(source.decoderPath).toBe('mediabunny-stream');
+  expect(fallbackCalls).toBe(1);
+  source.close();
 });
 
 test('recorder chunks are persisted in bounded batches with throughput metrics', async () => {

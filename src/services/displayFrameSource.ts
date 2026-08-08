@@ -73,19 +73,43 @@ export function waitForDisplaySourceStage<T>(
   });
 }
 
-interface DisplayFrameSourceOptions {
+export interface DisplayFrameSourceOptions {
   signal?: AbortSignal;
   decoderTimeoutMs?: number;
   metadataTimeoutMs?: number;
   seekTimeoutMs?: number;
+  videoFactory?: () => HTMLVideoElement;
+  objectUrlFactory?: (blob: Blob) => string;
+  revokeObjectUrl?: (url: string) => void;
+  fallbackFactory?: (blob: Blob, options: DisplayFrameSourceOptions) => Promise<DisplayFrameSource>;
+}
+
+async function createSequentialDisplayFallback(
+  blob: Blob,
+  options: DisplayFrameSourceOptions,
+): Promise<DisplayFrameSource> {
+  const decoded = await waitForDisplaySourceStage('decoder_init', createCameraFrameSource(blob), {
+    timeoutMs: options.decoderTimeoutMs ?? 12_000,
+    signal: options.signal,
+  });
+  return {
+    width: decoded.width,
+    height: decoded.height,
+    decoderPath: decoded.decoderPath,
+    getFrameAt: async (timeMs: number) => (await decoded.getFrameAt(timeMs)) as FrameImage | null,
+    getDecodedFrameCount: () => decoded.getDecodedFrameCount(),
+    close: () => decoded.close(),
+  };
 }
 
 export function createSeekableDisplayFrameSource(
   blob: Blob,
   options: DisplayFrameSourceOptions = {},
 ): DisplayFrameSource {
-  const url = URL.createObjectURL(blob);
-  const video = document.createElement('video');
+  const createObjectUrl = options.objectUrlFactory ?? ((value: Blob) => URL.createObjectURL(value));
+  const revokeObjectUrl = options.revokeObjectUrl ?? ((value: string) => URL.revokeObjectURL(value));
+  const url = createObjectUrl(blob);
+  const video = options.videoFactory?.() ?? document.createElement('video');
   video.muted = true;
   video.playsInline = true;
   video.preload = 'auto';
@@ -94,6 +118,28 @@ export function createSeekableDisplayFrameSource(
   let loadedHeight = 0;
   let decodedFrameCount = 0;
   let closed = false;
+  let fallbackActive = false;
+  let fallbackSource: DisplayFrameSource | null = null;
+  let fallbackPromise: Promise<DisplayFrameSource> | null = null;
+  const ensureFallback = async (): Promise<DisplayFrameSource> => {
+    if (fallbackSource) return fallbackSource;
+    fallbackPromise ??= (options.fallbackFactory ?? createSequentialDisplayFallback)(blob, options)
+      .then((source) => {
+        if (closed) {
+          source.close();
+          throw new DOMException('Display source closed', 'AbortError');
+        }
+        fallbackSource = source;
+        fallbackActive = true;
+        video.pause();
+        return source;
+      })
+      .catch((error) => {
+        fallbackPromise = null;
+        throw error;
+      });
+    return fallbackPromise;
+  };
   const metadataReady = new Promise<void>((resolve, reject) => {
     video.onloadedmetadata = () => {
       loadedWidth = video.videoWidth;
@@ -114,43 +160,65 @@ export function createSeekableDisplayFrameSource(
   const seekTo = async (sec: number) => {
     if (closed) throw new DOMException('Display source closed', 'AbortError');
     if (Math.abs(video.currentTime - sec) < 0.035) return;
+    let done: (() => void) | null = null;
+    let failed: (() => void) | null = null;
     const seeked = new Promise<void>((resolve, reject) => {
-      const done = () => requestAnimationFrame(() => resolve());
-      const failed = () => reject(new Error('display_video_seek_failed'));
+      done = () => {
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
+        else resolve();
+      };
+      failed = () => reject(new Error('display_video_seek_failed'));
       video.addEventListener('seeked', done, { once: true });
       video.addEventListener('error', failed, { once: true });
       video.currentTime = sec;
     });
-    await waitForDisplaySourceStage('seek', seeked, {
-      timeoutMs: options.seekTimeoutMs,
-      signal: options.signal,
-    });
+    try {
+      await waitForDisplaySourceStage('seek', seeked, {
+        timeoutMs: options.seekTimeoutMs,
+        signal: options.signal,
+      });
+    } finally {
+      if (done) video.removeEventListener('seeked', done);
+      if (failed) video.removeEventListener('error', failed);
+    }
     decodedFrameCount += 1;
   };
 
   return {
-    get width() { return loadedWidth || video.videoWidth || 1920; },
-    get height() { return loadedHeight || video.videoHeight || 1080; },
-    decoderPath: 'html-video',
+    get width() { return fallbackSource?.width || loadedWidth || video.videoWidth || 1920; },
+    get height() { return fallbackSource?.height || loadedHeight || video.videoHeight || 1080; },
+    get decoderPath() { return fallbackSource?.decoderPath ?? 'html-video'; },
     setPlayback: async (playing, timeMs) => {
       await ready;
       if (!playing) {
         video.pause();
         return;
       }
-      await seekTo(Math.max(0, timeMs / 1000));
-      await waitForDisplaySourceStage('playback', video.play(), {
-        timeoutMs: options.seekTimeoutMs,
-        signal: options.signal,
-      });
+      if (fallbackActive) return;
+      try {
+        await seekTo(Math.max(0, timeMs / 1000));
+        await waitForDisplaySourceStage('playback', video.play(), {
+          timeoutMs: options.seekTimeoutMs,
+          signal: options.signal,
+        });
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') throw error;
+        await ensureFallback();
+      }
     },
     getFrameAt: async (timeMs: number) => {
       await ready;
       const sec = Math.max(0, timeMs / 1000);
+      if (fallbackActive) return (await ensureFallback()).getFrameAt(timeMs);
       // 连续播放由媒体时钟推进，不做逐帧 seek。只有暂停 scrub、跨裁剪段或
       // 时钟漂移明显时才重新定位。
-      if (video.paused || Math.abs(video.currentTime - sec) > 0.35) await seekTo(sec);
-      return video as FrameImage;
+      try {
+        if (video.paused || Math.abs(video.currentTime - sec) > 0.35) await seekTo(sec);
+        return video as FrameImage;
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') throw error;
+        return (await ensureFallback()).getFrameAt(timeMs);
+      }
     },
     getDecodedFrameCount: () => decodedFrameCount,
     close: () => {
@@ -162,7 +230,13 @@ export function createSeekableDisplayFrameSource(
       video.onerror = null;
       video.removeAttribute('src');
       video.load();
-      URL.revokeObjectURL(url);
+      const activeFallback = fallbackSource;
+      const pendingFallback = fallbackPromise;
+      fallbackSource = null;
+      fallbackPromise = null;
+      if (activeFallback) activeFallback.close();
+      else void pendingFallback?.then((source) => source.close()).catch(() => undefined);
+      revokeObjectUrl(url);
     },
   };
 }
