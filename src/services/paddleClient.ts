@@ -2,6 +2,52 @@
 
 import type { Paddle } from '@paddle/paddle-js';
 
+export interface NormalizedPaddleCheckoutEvent {
+  name: string;
+  data?: unknown;
+  diagnostic?: { transactionId?: string };
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : null;
+}
+
+function safeCheckoutName(value: unknown): string | null {
+  return typeof value === 'string' && /^checkout\.[a-z_.]+$/.test(value) ? value : null;
+}
+
+export function normalizePaddleCheckoutEvent(event: unknown): NormalizedPaddleCheckoutEvent | null {
+  const root = record(event);
+  if (!root) return null;
+  const name = safeCheckoutName(root.name) ?? safeCheckoutName(root.type);
+  if (!name) return null;
+
+  if (name === 'checkout.warning' || name === 'checkout.error' || name === 'checkout.payment.error') {
+    const errors = Array.isArray(root.errors) ? root.errors : [];
+    const fields = errors
+      .map((item) => record(item)?.field)
+      .filter((field): field is string => typeof field === 'string' && field.startsWith('/'));
+    return {
+      name,
+      data: {
+        code: typeof root.code === 'string' ? root.code : 'unknown',
+        documentationUrl: typeof root.documentation_url === 'string' ? root.documentation_url : null,
+        fields,
+      },
+    };
+  }
+
+  const data = root.data;
+  const transactionId = record(data)?.transaction_id;
+  return {
+    name,
+    ...(data !== undefined ? { data } : {}),
+    ...(typeof transactionId === 'string' && transactionId.startsWith('txn_')
+      ? { diagnostic: { transactionId } }
+      : {}),
+  };
+}
+
 export interface OpenCheckoutOptions {
   paddle: Paddle;
   transactionId: string;

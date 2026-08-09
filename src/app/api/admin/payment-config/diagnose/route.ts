@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server';
 import { getActiveConfig, listAllConfigs } from '@/lib/paymentConfig';
 import { diagnoseCreemCreds } from '@/services/creemServer';
+import { diagnosePaddleConfiguration } from '@/services/paddleServer';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * Admin-only：诊断当前 active 行的 Creem 凭证配对情况。
+ * Admin-only：诊断当前 active 支付配置。
  *
- * 用途：当客户端报 "Creem 鉴权失败 (401): Invalid API Key" 时，操作者用这个
- * 接口快速判断是 apiKey 与 apiBase 的 mode 错配，还是 key 已在 Creem 后台旋转。
+ * Creem 检查凭证与 API mode；Paddle 检查 Price ID、实际币种、计费周期，并用
+ * 中国地址 preview 单次 Price 是否返回 wechat_pay。
  *
  * 鉴权：HTTP header `x-admin-secret: ${ADMIN_SECRET}` 必须匹配。
  *
@@ -40,10 +41,32 @@ export async function GET(req: Request): Promise<NextResponse> {
     });
   }
 
-  if (active.provider !== 'creem') {
+  if (active.provider === 'paddle') {
+    if (!active.apiKey) {
+      return NextResponse.json({
+        active: { provider: active.provider, mode: active.mode },
+        error: 'paddle_api_key_missing',
+      }, { status: 503 });
+    }
+    const paddle = await diagnosePaddleConfiguration({
+      mode: active.mode,
+      apiKey: active.apiKey,
+      apiBase: active.apiBase,
+      configuredCurrency: active.currency,
+      prices: {
+        oneTime: active.oneTimeProductId,
+        proMonthly: active.proProductId,
+        maxMonthly: active.maxProductId,
+        proYearly: active.proYearlyProductId,
+        maxYearly: active.maxYearlyProductId,
+      },
+    });
     return NextResponse.json({
       active: { provider: active.provider, mode: active.mode },
-      message: 'active row is not Creem; diagnose only meaningful for Creem rows',
+      paddle,
+      guidance: paddle.wechatPay.available
+        ? 'wechat_pay is eligible for the configured one-time Paddle Price in CN desktop checkout'
+        : 'wechat_pay is not eligible for this one-time Paddle Price; inspect slot issues, availablePaymentMethods, and requestId',
     });
   }
 

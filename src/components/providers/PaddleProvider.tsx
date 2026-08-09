@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { initializePaddle, type Paddle, type CheckoutEventNames } from '@paddle/paddle-js';
 import type { PublicPaymentConfig } from '@/lib/paymentConfig';
 import { recordingLifecycle } from '@/services/recordingLifecycleSingleton';
+import { normalizePaddleCheckoutEvent } from '@/services/paddleClient';
 
 type PaddleEvent = { name: CheckoutEventNames; data?: unknown };
 
@@ -48,7 +49,15 @@ export function PaddleProvider({ children }: { children: ReactNode }): JSX.Eleme
           },
         },
         eventCallback: (event) => {
-          listenersRef.current.forEach((cb) => cb({ name: event.name as CheckoutEventNames, data: event.data }));
+          const normalized = normalizePaddleCheckoutEvent(event);
+          if (!normalized) return;
+          if (normalized.name === 'checkout.warning' || normalized.name === 'checkout.error') {
+            console.warn('[PaddleCheckout]', normalized.name, normalized.data);
+          }
+          listenersRef.current.forEach((cb) => cb({
+            name: normalized.name as CheckoutEventNames,
+            data: normalized.data,
+          }));
         },
       }).then((instance) => {
         if (!cancelled) setPaddle(instance ?? null);
