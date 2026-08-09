@@ -1,10 +1,18 @@
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { getUserSubscription, createSubtitleJob, updateSubtitleJob } from '@/lib/db';
+import { getUserSubscription, createSubtitleJob, getSubtitleJob, updateSubtitleJob } from '@/lib/db';
 import { TIER_PERMISSIONS } from '@/types/user';
 import { mockSrt } from '@/services/qwenAsr';
 import { isOwnedPrivateMediaPath, parseMediaSubmitPayload } from '@/lib/privateMedia';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { verifyPrivateMediaAsset } from '@/lib/privateMediaStorage';
+import {
+  executeMediaJobSubmission,
+  mediaJobFailurePayload,
+  mediaJobFailureStatus,
+  reportMediaJobFailure,
+} from '@/lib/mediaJobDiagnostics';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,7 +27,14 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!userId) {
     return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
   }
-  const sub = await getUserSubscription(userId);
+  let sub;
+  try {
+    sub = await getUserSubscription(userId);
+  } catch (error) {
+    const failure = mediaJobFailurePayload(error, 'database');
+    reportMediaJobFailure('asr.submit.entitlement', failure);
+    return NextResponse.json(failure, { status: mediaJobFailureStatus(failure) });
+  }
   const tier = sub?.tier ?? 'free';
   const status = sub?.status ?? 'inactive';
   const entitled =
@@ -48,7 +63,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       assetPath = parsed.assetPath;
       assetBytes = parsed.bytes;
       mimeType = parsed.mimeType;
-      if (!isOwnedPrivateMediaPath(userId, assetPath)) throw new Error('forbidden_asset_path');
+      if (!isOwnedPrivateMediaPath(userId, assetPath, recordingId, 'asr')) throw new Error('forbidden_asset_path');
       if (assetBytes > MAX_AUDIO_BYTES) {
         return NextResponse.json({ error: 'audio_too_large' }, { status: 413 });
       }
@@ -60,24 +75,41 @@ export async function POST(req: Request): Promise<NextResponse> {
     );
   }
 
-  // 3) Persist only the private object path. Audio bytes never cross this function.
   const jobId = randomUUID();
-  await createSubtitleJob({ id: jobId, userId, recordingId, assetPath, assetBytes, mimeType });
-
-  // 4) Dev / no-API-key fallback：直接给 mock SRT，方便本地 E2E
-  if (!hasApiKey || isLocalhost) {
-    const reason = !hasApiKey
-      ? '(语音服务未配置，使用示例字幕)'
-      : '(本地环境无法被语音服务回调，使用示例字幕；部署到公网后自动启用)';
-    await updateSubtitleJob(jobId, {
-      status: 'done',
-      srt: `# ${reason}\n${mockSrt()}`,
+  let admin: ReturnType<typeof createSupabaseAdminClient> | undefined;
+  try {
+    const result = await executeMediaJobSubmission({
+      verifyStorage: async () => {
+        if (!assetPath || !assetBytes) return;
+        admin = createSupabaseAdminClient();
+        await verifyPrivateMediaAsset(admin, assetPath, assetBytes);
+      },
+      createJob: async () => {
+        await createSubtitleJob({ id: jobId, userId, recordingId, assetPath, assetBytes, mimeType });
+        return { jobId, mock: false as const };
+      },
+      afterCreate: async () => {
+        if (!hasApiKey || isLocalhost) {
+          const reason = !hasApiKey
+            ? '(语音服务未配置，使用示例字幕)'
+            : '(本地环境无法被语音服务回调，使用示例字幕；部署到公网后自动启用)';
+          await updateSubtitleJob(jobId, userId, {
+            status: 'done',
+            srt: `# ${reason}\n${mockSrt()}`,
+          });
+          return { jobId, mock: true, reason };
+        }
+        return { jobId, mock: false };
+      },
+      confirmJobCreated: async () => !!(await getSubtitleJob(jobId, userId)),
+      cleanupAssets: async () => {
+        if (admin && assetPath) await admin.storage.from('recordings').remove([assetPath]);
+      },
     });
-    return NextResponse.json({ jobId, mock: true, reason });
+    return NextResponse.json(result);
+  } catch (error) {
+    const failure = mediaJobFailurePayload(error, 'database');
+    reportMediaJobFailure('asr.submit', failure);
+    return NextResponse.json(failure, { status: mediaJobFailureStatus(failure) });
   }
-
-  // 5) Real path：异步提交 DashScope（client polls /api/asr/status）
-  // 这里只标记为 running，提交动作放在 status 路由的第一次轮询时做（避免 submit 路由被长任务阻塞）
-  await updateSubtitleJob(jobId, { status: 'pending' });
-  return NextResponse.json({ jobId, mock: false });
 }

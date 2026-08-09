@@ -127,6 +127,10 @@ function toRow(job: DubbingJob): StoredRow {
   };
 }
 
+function dubbingStoreError(prefix: string, error: { code?: string; message: string }): Error {
+  return Object.assign(new Error(`${prefix}: ${error.message}`), { code: error.code });
+}
+
 export async function createDubbingJob(job: DubbingJob): Promise<void> {
   const row = toRow(job);
   if (useSupabase()) {
@@ -135,7 +139,7 @@ export async function createDubbingJob(job: DubbingJob): Promise<void> {
       created_at: new Date(job.createdAt).toISOString(),
       updated_at: new Date(job.updatedAt).toISOString(),
     });
-    if (error) throw new Error(`create_dubbing_job: ${error.message}`);
+    if (error) throw dubbingStoreError('create_dubbing_job', error);
     return;
   }
   const keys = Object.keys(row);
@@ -143,17 +147,22 @@ export async function createDubbingJob(job: DubbingJob): Promise<void> {
     .run(...keys.map((key) => row[key as keyof StoredRow]));
 }
 
-export async function getDubbingJob(id: string): Promise<DubbingJob | undefined> {
+export async function getDubbingJob(id: string, userId: string): Promise<DubbingJob | undefined> {
   if (useSupabase()) {
-    const { data, error } = await supabaseAdmin().from('dubbing_jobs').select('*').eq('id', id).maybeSingle();
-    if (error) throw new Error(`get_dubbing_job: ${error.message}`);
+    const { data, error } = await supabaseAdmin()
+      .from('dubbing_jobs')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) throw dubbingStoreError('get_dubbing_job', error);
     return fromRow(data as StoredRow | null);
   }
-  return fromRow(localDb().prepare('SELECT * FROM dubbing_jobs WHERE id = ?').get(id) as StoredRow | undefined);
+  return fromRow(localDb().prepare('SELECT * FROM dubbing_jobs WHERE id = ? AND user_id = ?').get(id, userId) as StoredRow | undefined);
 }
 
-export async function updateDubbingJob(id: string, patch: Partial<Omit<DubbingJob, 'id'>>): Promise<DubbingJob | undefined> {
-  const current = await getDubbingJob(id);
+export async function updateDubbingJob(id: string, userId: string, patch: Partial<Omit<DubbingJob, 'id' | 'userId'>>): Promise<DubbingJob | undefined> {
+  const current = await getDubbingJob(id, userId);
   if (!current) return undefined;
   const next = { ...current, ...patch, id, updatedAt: Date.now() };
   const row = toRow(next);
@@ -162,11 +171,11 @@ export async function updateDubbingJob(id: string, patch: Partial<Omit<DubbingJo
     const body = Object.fromEntries(mutable);
     body.updated_at = new Date(next.updatedAt).toISOString();
     body.created_at = new Date(next.createdAt).toISOString();
-    const { error } = await supabaseAdmin().from('dubbing_jobs').update(body).eq('id', id);
-    if (error) throw new Error(`update_dubbing_job: ${error.message}`);
+    const { error } = await supabaseAdmin().from('dubbing_jobs').update(body).eq('id', id).eq('user_id', userId);
+    if (error) throw dubbingStoreError('update_dubbing_job', error);
   } else {
-    localDb().prepare(`UPDATE dubbing_jobs SET ${mutable.map(([key]) => `${key} = ?`).join(',')} WHERE id = ?`)
-      .run(...mutable.map(([, value]) => value), id);
+    localDb().prepare(`UPDATE dubbing_jobs SET ${mutable.map(([key]) => `${key} = ?`).join(',')} WHERE id = ? AND user_id = ?`)
+      .run(...mutable.map(([, value]) => value), id, userId);
   }
   return next;
 }

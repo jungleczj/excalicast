@@ -887,6 +887,10 @@ function jobFromSupabase(row: SupabaseSubtitleJobRaw | null): SubtitleJobRow | u
   };
 }
 
+function subtitleJobError(prefix: string, error: { code?: string; message: string }): Error {
+  return Object.assign(new Error(`${prefix}: ${error.message}`), { code: error.code });
+}
+
 export async function createSubtitleJob(params: {
   id: string;
   userId: string;
@@ -910,8 +914,8 @@ export async function createSubtitleJob(params: {
         asset_bytes: params.assetBytes ?? null,
         mime_type: params.mimeType ?? null,
       });
-    if (error) throw new Error(`createSubtitleJob: ${error.message}`);
-    const job = await getSubtitleJob(params.id);
+    if (error) throw subtitleJobError('createSubtitleJob', error);
+    const job = await getSubtitleJob(params.id, params.userId);
     if (!job) throw new Error('createSubtitleJob: row not visible after insert');
     return job;
   }
@@ -922,25 +926,26 @@ export async function createSubtitleJob(params: {
        VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
     )
     .run(params.id, params.userId, params.recordingId, params.audioToken ?? null, params.assetPath ?? null, params.assetBytes ?? null, params.mimeType ?? null, now, now);
-  const got = await getSubtitleJob(params.id);
+  const got = await getSubtitleJob(params.id, params.userId);
   if (!got) throw new Error('createSubtitleJob: sqlite row not visible after insert');
   return got;
 }
 
-export async function getSubtitleJob(id: string): Promise<SubtitleJobRow | undefined> {
+export async function getSubtitleJob(id: string, userId: string): Promise<SubtitleJobRow | undefined> {
   logBackendOnce();
   if (isSupabase()) {
     const { data, error } = await sb()
       .from('subtitle_jobs')
       .select('*')
       .eq('id', id)
+      .eq('user_id', userId)
       .maybeSingle();
-    if (error) throw new Error(`getSubtitleJob: ${error.message}`);
+    if (error) throw subtitleJobError('getSubtitleJob', error);
     return jobFromSupabase(data as SupabaseSubtitleJobRaw | null);
   }
   return getDb()
-    .prepare('SELECT * FROM subtitle_jobs WHERE id = ?')
-    .get(id) as SubtitleJobRow | undefined;
+    .prepare('SELECT * FROM subtitle_jobs WHERE id = ? AND user_id = ?')
+    .get(id, userId) as SubtitleJobRow | undefined;
 }
 
 export async function getSubtitleJobByAudioToken(audioToken: string): Promise<SubtitleJobRow | undefined> {
@@ -951,7 +956,7 @@ export async function getSubtitleJobByAudioToken(audioToken: string): Promise<Su
       .select('*')
       .eq('audio_token', audioToken)
       .maybeSingle();
-    if (error) throw new Error(`getSubtitleJobByAudioToken: ${error.message}`);
+    if (error) throw subtitleJobError('getSubtitleJobByAudioToken', error);
     return jobFromSupabase(data as SupabaseSubtitleJobRaw | null);
   }
   return getDb()
@@ -961,6 +966,7 @@ export async function getSubtitleJobByAudioToken(audioToken: string): Promise<Su
 
 export async function updateSubtitleJob(
   id: string,
+  userId: string,
   patch: Partial<Pick<SubtitleJobRow, 'status' | 'task_id' | 'srt' | 'error'>>,
 ): Promise<void> {
   logBackendOnce();
@@ -969,8 +975,9 @@ export async function updateSubtitleJob(
     const { error } = await sb()
       .from('subtitle_jobs')
       .update(patch)
-      .eq('id', id);
-    if (error) throw new Error(`updateSubtitleJob: ${error.message}`);
+      .eq('id', id)
+      .eq('user_id', userId);
+    if (error) throw subtitleJobError('updateSubtitleJob', error);
     return;
   }
   const fields: string[] = [];
@@ -983,8 +990,8 @@ export async function updateSubtitleJob(
   values.push(Date.now());
   values.push(id);
   getDb()
-    .prepare(`UPDATE subtitle_jobs SET ${fields.join(', ')} WHERE id = ?`)
-    .run(...values);
+    .prepare(`UPDATE subtitle_jobs SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`)
+    .run(...values, userId);
 }
 
 // ============================================================================

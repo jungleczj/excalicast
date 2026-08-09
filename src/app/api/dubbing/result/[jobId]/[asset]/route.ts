@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getDubbingJob, readLocalDubbingAsset } from '@/lib/dubbingStore';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,9 +18,8 @@ export async function GET(_req: Request, { params }: Params): Promise<NextRespon
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user?.id) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 });
-  const job = await getDubbingJob(params.jobId);
+  const job = await getDubbingJob(params.jobId, user.id);
   if (!job) return NextResponse.json({ error: 'job_not_found' }, { status: 404 });
-  if (job.userId !== user.id) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   if (job.status !== 'done') return NextResponse.json({ error: 'job_not_done' }, { status: 409 });
   if (params.asset === 'subtitles.srt') {
     return new NextResponse(job.translatedSrt ?? '', {
@@ -33,7 +33,7 @@ export async function GET(_req: Request, { params }: Params): Promise<NextRespon
   if (!assetPath) return NextResponse.json({ error: 'asset_not_found' }, { status: 404 });
   let blob: Blob | null = null;
   if (assetPath.startsWith(`${user.id}/`)) {
-    const { data, error } = await supabase.storage.from('recordings').download(assetPath);
+    const { data, error } = await createSupabaseAdminClient().storage.from('recordings').download(assetPath);
     if (error || !data) return NextResponse.json({ error: 'asset_not_found' }, { status: 404 });
     blob = data;
   } else {

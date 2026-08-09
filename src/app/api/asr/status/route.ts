@@ -7,6 +7,14 @@ import {
   sentencesToSrt,
   submitTranscriptionTask,
 } from '@/services/qwenAsr';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import {
+  type MediaJobStage,
+  mediaJobFailurePayload,
+  mediaJobFailureStatus,
+  reportMediaJobFailure,
+} from '@/lib/mediaJobDiagnostics';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,17 +23,20 @@ interface StatusResponse {
   status: 'pending' | 'running' | 'done' | 'failed';
   srt?: string;
   error?: string;
+  code?: string;
+  stage?: MediaJobStage;
+  cause?: string;
 }
 
 async function removeSourceAsset(
-  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  supabase: SupabaseClient,
   path: string | null,
 ): Promise<void> {
   if (!path) return;
   await supabase.storage.from('recordings').remove([path]).catch(() => undefined);
 }
 
-export async function GET(req: Request): Promise<NextResponse<StatusResponse>> {
+export async function GET(req: Request): Promise<NextResponse> {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   const userId = user?.id;
@@ -35,22 +46,28 @@ export async function GET(req: Request): Promise<NextResponse<StatusResponse>> {
   const jobId = url.searchParams.get('jobId');
   if (!jobId) return NextResponse.json({ status: 'failed', error: 'missing_job_id' }, { status: 400 });
 
-  const job = await getSubtitleJob(jobId);
-  if (!job) return NextResponse.json({ status: 'failed', error: 'job_not_found' }, { status: 404 });
-  if (job.user_id !== userId) {
-    return NextResponse.json({ status: 'failed', error: 'forbidden' }, { status: 403 });
+  let job;
+  try {
+    job = await getSubtitleJob(jobId, userId);
+  } catch (error) {
+    const failure = mediaJobFailurePayload(error, 'database');
+    reportMediaJobFailure('asr.status.read', failure);
+    return NextResponse.json(failure, { status: mediaJobFailureStatus(failure) });
   }
+  if (!job) return NextResponse.json({ status: 'failed', error: 'job_not_found' }, { status: 404 });
 
   // Already terminal
   if (job.status === 'done') return NextResponse.json({ status: 'done', srt: job.srt ?? '' });
   if (job.status === 'failed') return NextResponse.json({ status: 'failed', error: job.error ?? 'unknown' });
 
-  // Drive the DashScope state machine forward by one step
+  let stage: MediaJobStage = 'storage';
+  let admin: SupabaseClient | undefined;
   try {
+    admin = createSupabaseAdminClient();
     if (job.status === 'pending') {
       let fileUrl: string;
       if (job.asset_path) {
-        const { data, error } = await supabase.storage.from('recordings').createSignedUrl(job.asset_path, 3600);
+        const { data, error } = await admin.storage.from('recordings').createSignedUrl(job.asset_path, 3600);
         if (error || !data?.signedUrl) throw new Error(`audio_sign_failed: ${error?.message ?? 'missing_url'}`);
         fileUrl = data.signedUrl;
       } else if (job.audio_token) {
@@ -60,46 +77,53 @@ export async function GET(req: Request): Promise<NextResponse<StatusResponse>> {
       } else {
         throw new Error('missing_audio_asset');
       }
+      stage = 'external_service';
       const submit = await submitTranscriptionTask({ fileUrl });
-      await updateSubtitleJob(jobId, { status: 'running', task_id: submit.taskId });
+      stage = 'database';
+      await updateSubtitleJob(jobId, userId, { status: 'running', task_id: submit.taskId });
       return NextResponse.json({ status: 'running' });
     }
 
     // running → poll once
     if (!job.task_id) {
-      await updateSubtitleJob(jobId, { status: 'failed', error: 'missing_task_id' });
+      await updateSubtitleJob(jobId, userId, { status: 'failed', error: 'missing_task_id' });
       return NextResponse.json({ status: 'failed', error: 'missing_task_id' });
     }
+    stage = 'external_service';
     const poll = await pollTranscriptionTaskOnce(job.task_id);
     if (poll.status === 'SUCCEEDED' && poll.transcriptionUrl) {
       const sentences = await fetchTranscriptionResult(poll.transcriptionUrl);
       const srt = sentencesToSrt(sentences);
-      await updateSubtitleJob(jobId, { status: 'done', srt });
-      await removeSourceAsset(supabase, job.asset_path);
+      stage = 'database';
+      await updateSubtitleJob(jobId, userId, { status: 'done', srt });
+      await removeSourceAsset(admin, job.asset_path);
       return NextResponse.json({ status: 'done', srt });
     }
     if (poll.status === 'NO_SPEECH') {
       // DashScope 已经明确"任务完成 + 无语音"。用稳定业务码代替中文，
       // 让客户端 i18n 决定如何呈现给用户。
       console.warn(`[asr] no_speech_detected jobId=${jobId} recordingId=${job.recording_id}`);
-      await updateSubtitleJob(jobId, { status: 'failed', error: 'no_speech_detected' });
-      await removeSourceAsset(supabase, job.asset_path);
+      await updateSubtitleJob(jobId, userId, { status: 'failed', error: 'no_speech_detected' });
+      await removeSourceAsset(admin, job.asset_path);
       return NextResponse.json({ status: 'failed', error: 'no_speech_detected' });
     }
     if (poll.status === 'FAILED' || poll.status === 'CANCELED') {
       // 剥掉上游可能自带的 "字幕生成失败：" 前缀，避免与客户端 i18n 标题双重前缀
-      const rawErr = poll.errorMessage ?? poll.status;
-      const err = rawErr.replace(/^字幕生成失败[：:]\s*/, '').trim() || rawErr;
-      await updateSubtitleJob(jobId, { status: 'failed', error: err });
-      await removeSourceAsset(supabase, job.asset_path);
-      return NextResponse.json({ status: 'failed', error: err });
+      throw new Error(`DashScope poll failed 502: ${poll.errorMessage ?? poll.status}`);
     }
     // Still in progress
     return NextResponse.json({ status: 'running' });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'unknown';
-    await updateSubtitleJob(jobId, { status: 'failed', error: msg });
-    await removeSourceAsset(supabase, job.asset_path);
-    return NextResponse.json({ status: 'failed', error: msg });
+    const failure = mediaJobFailurePayload(err, stage);
+    reportMediaJobFailure('asr.status', failure);
+    await updateSubtitleJob(jobId, userId, { status: 'failed', error: failure.cause }).catch(() => undefined);
+    if (admin) await removeSourceAsset(admin, job.asset_path);
+    return NextResponse.json({
+      status: 'failed',
+      error: failure.cause,
+      code: failure.code,
+      stage: failure.stage,
+      cause: failure.cause,
+    } satisfies StatusResponse);
   }
 }

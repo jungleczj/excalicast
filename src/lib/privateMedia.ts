@@ -27,9 +27,16 @@ export function buildPrivateMediaPath(
   return `${segment(userId)}/${segment(recordingId)}/jobs/${kind}/${segment(filename)}`;
 }
 
-export function isOwnedPrivateMediaPath(userId: string, path: string): boolean {
+export function isOwnedPrivateMediaPath(
+  userId: string,
+  path: string,
+  recordingId?: string,
+  kind?: PrivateMediaJobKind,
+): boolean {
   try {
-    const prefix = `${segment(userId)}/`;
+    const prefix = recordingId && kind
+      ? `${segment(userId)}/${segment(recordingId)}/jobs/${kind}/`
+      : `${segment(userId)}/`;
     return path.startsWith(prefix) && !path.split('/').some((part) => part === '..' || part === '.');
   } catch {
     return false;

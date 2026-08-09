@@ -7,6 +7,13 @@ import {
 } from '@/lib/dubbingStore';
 import { generateDubbingAssets } from '@/services/dubbingProviders';
 import { buildPrivateMediaPath } from '@/lib/privateMedia';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import {
+  type MediaJobStage,
+  mediaJobFailurePayload,
+  mediaJobFailureStatus,
+  reportMediaJobFailure,
+} from '@/lib/mediaJobDiagnostics';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,15 +39,21 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return buffer;
 }
 
-export async function GET(req: Request): Promise<NextResponse<DubbingStatusResponse>> {
+export async function GET(req: Request): Promise<NextResponse> {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user?.id) return NextResponse.json({ status: 'failed', error: 'unauthenticated' }, { status: 401 });
   const jobId = new URL(req.url).searchParams.get('jobId');
   if (!jobId) return NextResponse.json({ status: 'failed', error: 'missing_job_id' }, { status: 400 });
-  const job = await getDubbingJob(jobId);
+  let job;
+  try {
+    job = await getDubbingJob(jobId, user.id);
+  } catch (error) {
+    const failure = mediaJobFailurePayload(error, 'database');
+    reportMediaJobFailure('dubbing.status.read', failure);
+    return NextResponse.json(failure, { status: mediaJobFailureStatus(failure) });
+  }
   if (!job) return NextResponse.json({ status: 'failed', error: 'job_not_found' }, { status: 404 });
-  if (job.userId !== user.id) return NextResponse.json({ status: 'failed', error: 'forbidden' }, { status: 403 });
   if (job.status === 'done') {
     return NextResponse.json({
       status: 'done',
@@ -58,15 +71,20 @@ export async function GET(req: Request): Promise<NextResponse<DubbingStatusRespo
     return NextResponse.json({ status: 'running' });
   }
 
-  await updateDubbingJob(jobId, { status: 'running' });
+  let stage: MediaJobStage = 'database';
+  let admin: ReturnType<typeof createSupabaseAdminClient> | undefined;
   const removeSources = async () => {
     const paths = [job.audioAssetPath, job.cameraAssetPath].filter((value): value is string => !!value);
-    if (paths.length > 0) await supabase.storage.from('recordings').remove(paths).catch(() => undefined);
+    if (admin && paths.length > 0) await admin.storage.from('recordings').remove(paths).catch(() => undefined);
   };
   try {
+    await updateDubbingJob(jobId, user.id, { status: 'running' });
+    if (job.audioAssetPath || job.cameraAssetPath) admin = createSupabaseAdminClient();
+    stage = 'storage';
     let sourceAudioFileUrl: string | undefined;
     if (job.audioAssetPath) {
-      const { data, error } = await supabase.storage.from('recordings').createSignedUrl(job.audioAssetPath, 3600);
+      if (!admin) throw Object.assign(new Error('Supabase service role is not configured'), { code: 'SUPABASE_ADMIN_NOT_CONFIGURED' });
+      const { data, error } = await admin.storage.from('recordings').createSignedUrl(job.audioAssetPath, 3600);
       if (error || !data?.signedUrl) throw new Error(`dubbing_audio_sign_failed: ${error?.message ?? 'missing_url'}`);
       sourceAudioFileUrl = data.signedUrl;
     }
@@ -74,10 +92,12 @@ export async function GET(req: Request): Promise<NextResponse<DubbingStatusRespo
     // Camera is an optional second-stage input. Do not materialize it in the
     // normal audio/subtitle path; current lip-sync is only enabled explicitly.
     if (job.cameraAssetPath && process.env.DUBBING_MOCK_LIPSYNC === '1') {
-      const { data, error } = await supabase.storage.from('recordings').download(job.cameraAssetPath);
+      if (!admin) throw Object.assign(new Error('Supabase service role is not configured'), { code: 'SUPABASE_ADMIN_NOT_CONFIGURED' });
+      const { data, error } = await admin.storage.from('recordings').download(job.cameraAssetPath);
       if (error || !data) throw new Error(`dubbing_camera_download_failed: ${error?.message ?? 'missing_blob'}`);
       cameraBytes = new Uint8Array(await data.arrayBuffer());
     }
+    stage = 'external_service';
     const result = await generateDubbingAssets({
       sourceSrt: job.sourceSrt,
       sourceAudioFileUrl,
@@ -87,8 +107,10 @@ export async function GET(req: Request): Promise<NextResponse<DubbingStatusRespo
     let dubbedAudioPath: string;
     let lipSyncCameraPath: string | undefined;
     if (job.audioAssetPath) {
+      if (!admin) throw Object.assign(new Error('Supabase service role is not configured'), { code: 'SUPABASE_ADMIN_NOT_CONFIGURED' });
+      stage = 'storage';
       dubbedAudioPath = buildPrivateMediaPath(user.id, job.recordingId, 'dubbing', `${jobId}-audio.wav`);
-      const audioUpload = await supabase.storage.from('recordings').upload(
+      const audioUpload = await admin.storage.from('recordings').upload(
         dubbedAudioPath,
         new Blob([toArrayBuffer(result.audioBytes)], { type: result.audioType }),
         { contentType: result.audioType, upsert: true },
@@ -96,7 +118,7 @@ export async function GET(req: Request): Promise<NextResponse<DubbingStatusRespo
       if (audioUpload.error) throw new Error(`dubbing_audio_store_failed: ${audioUpload.error.message}`);
       if (result.lipSyncCamera) {
         lipSyncCameraPath = buildPrivateMediaPath(user.id, job.recordingId, 'dubbing', `${jobId}-camera.webm`);
-        const cameraUpload = await supabase.storage.from('recordings').upload(
+        const cameraUpload = await admin.storage.from('recordings').upload(
           lipSyncCameraPath,
           new Blob([toArrayBuffer(result.lipSyncCamera)], { type: result.lipSyncCameraType ?? 'video/webm' }),
           { contentType: result.lipSyncCameraType ?? 'video/webm', upsert: true },
@@ -109,7 +131,8 @@ export async function GET(req: Request): Promise<NextResponse<DubbingStatusRespo
         lipSyncCameraPath = await saveLocalDubbingAsset(jobId, 'camera.webm', result.lipSyncCamera);
       }
     }
-    const done = await updateDubbingJob(jobId, {
+    stage = 'database';
+    const done = await updateDubbingJob(jobId, user.id, {
       status: 'done',
       translatedSrt: result.translatedSrt,
       dubbedAudioPath,
@@ -129,9 +152,16 @@ export async function GET(req: Request): Promise<NextResponse<DubbingStatusRespo
       provider: done?.provider,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'dubbing_failed';
-    await updateDubbingJob(jobId, { status: 'failed', error: message });
+    const failure = mediaJobFailurePayload(error, stage);
+    reportMediaJobFailure('dubbing.status', failure);
+    await updateDubbingJob(jobId, user.id, { status: 'failed', error: failure.cause }).catch(() => undefined);
     await removeSources();
-    return NextResponse.json({ status: 'failed', error: message });
+    return NextResponse.json({
+      status: 'failed',
+      error: failure.cause,
+      code: failure.code,
+      stage: failure.stage,
+      cause: failure.cause,
+    });
   }
 }

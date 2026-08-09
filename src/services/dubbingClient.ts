@@ -8,6 +8,7 @@ import {
 } from '@/lib/db-client';
 import type { LocalizedTrack } from '@/types/recording';
 import { removePrivateJobAssets, uploadPrivateJobAsset } from '@/services/privateMediaUpload';
+import { parseMediaJobResponse } from '@/services/mediaJobClient';
 
 interface SubmitResponse {
   jobId: string;
@@ -40,18 +41,6 @@ async function audioFingerprint(blob: Blob): Promise<string> {
   return `${blob.size}-${blob.type || 'audio'}-${sample.byteLength}`;
 }
 
-async function parseJson<T>(res: Response): Promise<T> {
-  const json = await res.json().catch(() => null) as T | null;
-  if (!res.ok) {
-    const message = json && typeof json === 'object' && 'error' in json
-      ? String((json as { error?: unknown }).error)
-      : `request_failed_${res.status}`;
-    throw new Error(message);
-  }
-  if (!json) throw new Error('invalid_response');
-  return json;
-}
-
 async function persistDubbingTask(params: {
   recordingId: string;
   jobId: string;
@@ -82,7 +71,7 @@ async function pollDubbingJob(
   const started = Date.now();
   while (Date.now() - started < POLL_TIMEOUT_MS) {
     const res = await fetch(`/api/dubbing/status?jobId=${encodeURIComponent(jobId)}`, { cache: 'no-store' });
-    const status = await parseJson<StatusResponse>(res);
+    const status = await parseMediaJobResponse<StatusResponse>(res);
     if (status.status === 'done') return status;
     if (status.status === 'failed') {
       await persistDubbingTask({
@@ -225,13 +214,7 @@ export async function createEnglishDubbingTrack(params: {
       } : {}),
     }),
   });
-  let jobId: string;
-  try {
-    ({ jobId } = await parseJson<SubmitResponse>(submit));
-  } catch (error) {
-    await removePrivateJobAssets([audioAsset?.path, cameraAsset?.path]);
-    throw error;
-  }
+  const { jobId } = await parseMediaJobResponse<SubmitResponse>(submit);
   await persistDubbingTask({
     recordingId: params.recordingId,
     jobId,

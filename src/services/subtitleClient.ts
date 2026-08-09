@@ -1,7 +1,8 @@
 'use client';
 
 import { loadRecordingMediaTracks } from '@/lib/db-client';
-import { removePrivateJobAssets, uploadPrivateJobAsset } from '@/services/privateMediaUpload';
+import { uploadPrivateJobAsset } from '@/services/privateMediaUpload';
+import { parseMediaJobResponse } from '@/services/mediaJobClient';
 
 export interface SubmitResult {
   jobId: string;
@@ -31,12 +32,7 @@ export async function submitSubtitleJob(
     body: JSON.stringify(asset ? { recordingId, assetPath: asset.path, bytes: asset.bytes, mimeType: asset.mimeType } : { recordingId, localMock: true }),
     signal: options?.signal,
   });
-  if (!res.ok) {
-    if (asset) await removePrivateJobAssets([asset.path]);
-    const j = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
-    throw new Error(j.message ?? j.error ?? `submit failed: ${res.status}`);
-  }
-  return (await res.json()) as SubmitResult;
+  return parseMediaJobResponse<SubmitResult>(res);
 }
 
 export interface PollResult {
@@ -47,8 +43,7 @@ export interface PollResult {
 
 export async function pollSubtitleJob(jobId: string): Promise<PollResult> {
   const res = await fetch(`/api/asr/status?jobId=${encodeURIComponent(jobId)}`, { cache: 'no-store' });
-  const j = (await res.json()) as PollResult;
-  return j;
+  return parseMediaJobResponse<PollResult>(res);
 }
 
 export function downloadSrt(srt: string, filename: string): void {

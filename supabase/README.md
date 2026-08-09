@@ -11,6 +11,7 @@ application logic.
 | `public.paid_recordings`   | `/api/paddle-webhook` (one-time purchase) | `20260510120000_init_paid_recordings.sql` |
 | `public.user_subscriptions`| `/api/paddle-webhook` (Pro/Max subscriptions) | `20260510120100_pro_subscriptions_and_subtitle_jobs.sql` |
 | `public.subtitle_jobs`     | `/api/asr/*` (Qwen ASR tracking) | `20260510120100_pro_subscriptions_and_subtitle_jobs.sql` |
+| `public.dubbing_jobs`      | `/api/dubbing/*` (English dubbing tracking) | `20260801121000_dubbing_jobs.sql` |
 
 NextAuth's `users` / `auth_sessions` SQLite tables are intentionally **not**
 migrated — JWT-only sessions don't need DB rows, and password registration
@@ -24,35 +25,70 @@ is unused in production.
 
 ## Access model
 
-All routes hit Supabase with the **service role key** (bypasses RLS):
+Database writes and server-side Storage operations use the **service role key** (bypasses RLS):
 
 ```
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=<service-role-key, server-only, never NEXT_PUBLIC_>
 ```
 
-RLS is enabled on every table. The only policies grant `authenticated`
-read access to *their own* `user_subscriptions` and `subtitle_jobs` rows
-(matched on `auth.jwt() ->> 'sub' = user_id`), as a defensive measure if
-you ever query directly from the browser. Today the browser does not.
+RLS is enabled on every table. Media-job tables explicitly grant only
+`SELECT` to `authenticated`, constrained by an ownership policy, and
+`SELECT`/`INSERT`/`UPDATE` to `service_role`. The service-role key is never
+stored in a `NEXT_PUBLIC_*` variable or imported into browser code.
 
 ## Running the migrations
 
-### Option 1 — Supabase CLI (recommended)
+### Production deployment (recommended)
 
 ```bash
 # from repo root
 supabase link --project-ref <your-project-ref>
-supabase db push
+supabase migration list --linked
+supabase db push --linked --dry-run
+supabase db push --linked
+supabase migration list --linked
 ```
 
-### Option 2 — paste into the Supabase SQL Editor
+Only one operator should run `db push`. Do not use `migration repair` unless
+the migration history is known to disagree with the actual schema; that
+command changes history only and does not create a missing table.
 
-Open the SQL Editor in the Supabase dashboard, run the two `.sql` files
-in `supabase/migrations/` in filename order:
+`20260808122144_repair_media_job_schema.sql` is a forward-only, idempotent
+repair. It covers both missing media-job migrations and an already-recorded
+migration whose table/columns are absent. It also restores RLS, explicit Data
+API grants, and sends `NOTIFY pgrst, 'reload schema'`.
 
-1. `20260510120000_init_paid_recordings.sql`
-2. `20260510120100_pro_subscriptions_and_subtitle_jobs.sql`
+After deployment, verify in the SQL Editor (read-only query):
+
+```sql
+select
+  to_regclass('public.subtitle_jobs') as subtitle_jobs,
+  to_regclass('public.dubbing_jobs') as dubbing_jobs;
+
+select table_name, column_name
+from information_schema.columns
+where table_schema = 'public'
+  and table_name in ('subtitle_jobs', 'dubbing_jobs')
+  and column_name in ('asset_path', 'asset_bytes', 'mime_type')
+order by table_name, column_name;
+
+select c.relname, c.relrowsecurity
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public'
+  and c.relname in ('subtitle_jobs', 'dubbing_jobs');
+
+select table_name, grantee, privilege_type
+from information_schema.role_table_grants
+where table_schema = 'public'
+  and table_name in ('subtitle_jobs', 'dubbing_jobs')
+order by table_name, grantee, privilege_type;
+```
+
+In Dashboard -> Integrations -> Data API, confirm the Data API is enabled and
+`public` remains an exposed schema. Table grants and RLS are separate controls;
+the migration configures both for these tables.
 
 ## Switching the app from SQLite to Supabase
 
