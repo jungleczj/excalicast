@@ -171,6 +171,8 @@ function RecordingThumbnail({
 
 type BusyKind = 'upload' | 'download' | null;
 type LibraryLoadState = 'loading' | 'ready' | 'partial' | 'error';
+const LOCAL_LIST_TIMEOUT_MS = 3_000;
+const CLOUD_LIST_TIMEOUT_MS = 5_000;
 
 function mergeItems(local: RecordingLibrarySummary[], cloud: CloudRecording[]): MergedItem[] {
   const map = new Map<string, MergedItem>();
@@ -185,13 +187,21 @@ function mergeItems(local: RecordingLibrarySummary[], cloud: CloudRecording[]): 
   );
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  errorCode: string,
+  onTimeout?: () => void,
+): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<T>((_resolve, reject) => {
-        timeout = setTimeout(() => reject(new Error('cloud_list_timeout')), timeoutMs);
+        timeout = setTimeout(() => {
+          onTimeout?.();
+          reject(new Error(errorCode));
+        }, timeoutMs);
       }),
     ]);
   } finally {
@@ -207,7 +217,7 @@ export function RecordingsList({ refreshKey = 0, query = '', onStatsChange }: Pr
   const [view, setView] = useState<ViewKind>('grid');
   const router = useRouter();
   const subscription = useSubscription();
-  const { user, loading: authLoading } = useAuth();
+  const { user } = useAuth();
   const canCloud = subscription.permissions.cloudBackup && subscription.loggedIn;
 
   const [items, setItems] = useState<MergedItem[]>([]);
@@ -227,14 +237,14 @@ export function RecordingsList({ refreshKey = 0, query = '', onStatsChange }: Pr
   const editInputRef = useRef<HTMLInputElement | null>(null);
   const tagsInputRef = useRef<HTMLInputElement | null>(null);
   const refreshRequestRef = useRef(0);
+  const cloudRequestRef = useRef<AbortController | null>(null);
+  const localRequestRef = useRef<AbortController | null>(null);
+  const migratedOwnerRef = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
-    // 等 auth settle 再列表/认领：避免在登录态解析前用 guestId 误认领 legacy 录制。
-    if (authLoading) {
-      setLoadState('loading');
-      return;
-    }
     const requestId = ++refreshRequestRef.current;
+    cloudRequestRef.current?.abort();
+    localRequestRef.current?.abort();
     setLoadState('loading');
     setErrorMsg(null);
     setPendingCloudItems([]);
@@ -243,18 +253,47 @@ export function RecordingsList({ refreshKey = 0, query = '', onStatsChange }: Pr
     // 登录后把匿名期间录制并入账户（幂等：迁移后 guest 行清零）。
     let settled = false;
     try {
-      if (user?.id) {
-        try { await migrateRecordingsOwner(getOrCreateGuestId(), user.id); } catch { /* ignore */ }
-      }
+      const localController = new AbortController();
+      localRequestRef.current = localController;
+      const cloudController = canCloud ? new AbortController() : null;
+      cloudRequestRef.current = cloudController;
       const cloudPromise = canCloud
-        ? withTimeout(listCloudRecordings(), 5_000)
+        ? withTimeout(
+          listCloudRecordings(cloudController!.signal),
+          CLOUD_LIST_TIMEOUT_MS,
+          'cloud_list_timeout',
+          () => cloudController!.abort(),
+        )
         : Promise.resolve<CloudRecording[]>([]);
-      const localPage = await listRecordingSummaries(ownerKey);
+      const localPage = await withTimeout(
+        listRecordingSummaries(ownerKey, {
+          // Cached auth state is not trusted for ownership. useAuth only exposes a
+          // user after getUser verifies it with the Auth server.
+          claimLegacy: Boolean(user?.id),
+          signal: localController.signal,
+        }),
+        LOCAL_LIST_TIMEOUT_MS,
+        'local_list_timeout',
+        () => localController.abort(),
+      );
       if (refreshRequestRef.current !== requestId) return;
       onStatsChange?.({ count: localPage.totalCount, totalMs: localPage.totalMs });
       setItems(mergeItems(localPage.items, []));
       setNextCursor(localPage.nextCursor);
       setLoadState(canCloud ? 'partial' : 'ready');
+
+      // Owner migration is useful after sign-in, but must never delay the local
+      // library's first render. Refresh once it finishes to include guest rows.
+      if (user?.id && migratedOwnerRef.current !== user.id) {
+        migratedOwnerRef.current = user.id;
+        void withTimeout(
+          migrateRecordingsOwner(getOrCreateGuestId(), user.id),
+          5_000,
+          'owner_migration_timeout',
+        ).then(() => {
+          if (refreshRequestRef.current === requestId) void refresh();
+        }).catch(() => undefined);
+      }
 
       if (!canCloud) {
         settled = true;
@@ -284,17 +323,24 @@ export function RecordingsList({ refreshKey = 0, query = '', onStatsChange }: Pr
       setLoadState('error');
       settled = true;
     } finally {
+      if (refreshRequestRef.current === requestId) {
+        cloudRequestRef.current = null;
+        localRequestRef.current = null;
+      }
       if (refreshRequestRef.current === requestId && !settled) setLoadState('error');
     }
-  }, [canCloud, user?.id, authLoading, onStatsChange]);
+  }, [canCloud, user?.id, onStatsChange]);
 
   const loadMore = useCallback(async () => {
-    if ((!nextCursor && pendingCloudItems.length === 0) || loadingMore || authLoading) return;
+    if ((!nextCursor && pendingCloudItems.length === 0) || loadingMore) return;
     setLoadingMore(true);
     try {
       const ownerKey = user?.id ?? getOrCreateGuestId();
       const page = nextCursor
-        ? await listRecordingSummaries(ownerKey, { cursor: nextCursor })
+        ? await listRecordingSummaries(ownerKey, {
+          cursor: nextCursor,
+          claimLegacy: Boolean(user?.id),
+        })
         : { items: [], nextCursor: null };
       const nextCloud = pendingCloudItems.slice(0, 30);
       setItems((current) => {
@@ -314,9 +360,18 @@ export function RecordingsList({ refreshKey = 0, query = '', onStatsChange }: Pr
     } finally {
       setLoadingMore(false);
     }
-  }, [authLoading, items.length, loadingMore, nextCursor, pendingCloudItems, user?.id]);
+  }, [items.length, loadingMore, nextCursor, pendingCloudItems, user?.id]);
 
-  useEffect(() => { void refresh(); }, [refresh, refreshKey]);
+  useEffect(() => {
+    void refresh();
+    return () => {
+      refreshRequestRef.current += 1;
+      cloudRequestRef.current?.abort();
+      cloudRequestRef.current = null;
+      localRequestRef.current?.abort();
+      localRequestRef.current = null;
+    };
+  }, [refresh, refreshKey]);
 
   useEffect(() => {
     if (editingId && editInputRef.current) {

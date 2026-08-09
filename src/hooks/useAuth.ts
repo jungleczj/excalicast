@@ -3,6 +3,24 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
+const AUTH_INITIALIZATION_TIMEOUT_MS = 3_000;
+
+async function settleWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<null>((resolve) => {
+        timeout = setTimeout(() => resolve(null), timeoutMs);
+      }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 export interface AuthUser {
   id: string; // Supabase auth.users.id (UUID)
   email: string;
@@ -27,22 +45,44 @@ export function useAuth(): UseAuth {
   useEffect(() => {
     const supabase = createClient();
     let cancelled = false;
+    let verificationRequest = 0;
+    const verificationTimers = new Set<ReturnType<typeof setTimeout>>();
 
-    (async () => {
-      const { data } = await supabase.auth.getUser();
-      if (cancelled) return;
-      setUser(data.user ? toAuthUser(data.user) : null);
+    const verifyCurrentUser = async (): Promise<void> => {
+      const requestId = ++verificationRequest;
+      const result = await settleWithin(
+        supabase.auth.getUser(),
+        AUTH_INITIALIZATION_TIMEOUT_MS,
+      );
+      if (cancelled || requestId !== verificationRequest) return;
+      const verifiedUser = result && !result.error ? result.data.user : null;
+      setUser(verifiedUser ? toAuthUser(verifiedUser) : null);
       setLoading(false);
-    })();
+    };
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    void verifyCurrentUser();
+
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (cancelled) return;
-      setUser(session?.user ? toAuthUser(session.user) : null);
-      setLoading(false);
+      if (event === 'INITIAL_SESSION') return;
+      verificationRequest += 1;
+      setUser(null);
+      if (event === 'SIGNED_OUT') {
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      const timer = setTimeout(() => {
+        verificationTimers.delete(timer);
+        if (!cancelled) void verifyCurrentUser();
+      }, 0);
+      verificationTimers.add(timer);
     });
 
     return () => {
       cancelled = true;
+      verificationRequest += 1;
+      for (const timer of verificationTimers) clearTimeout(timer);
       sub.subscription.unsubscribe();
     };
   }, []);

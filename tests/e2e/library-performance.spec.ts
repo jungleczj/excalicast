@@ -1,9 +1,51 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const OWNER_KEY = 'library-performance-owner';
+const STALE_USER_ID = '00000000-0000-4000-8000-000000000099';
+const TEST_AUTH_COOKIE = 'sb-example-auth-token';
 
-async function seedRecordings(page: Page, count: number): Promise<void> {
-  await page.route('https://example.supabase.co/**', async (route) => {
+async function cacheRevokedSession(page: Page): Promise<void> {
+  const expiresAt = Math.floor(Date.now() / 1000) + 3_600;
+  const payload = Buffer.from(JSON.stringify({
+    aud: 'authenticated', exp: expiresAt, role: 'authenticated', sub: STALE_USER_ID,
+  })).toString('base64url');
+  const session = {
+    access_token: `e30.${payload}.test-signature`,
+    expires_at: expiresAt,
+    refresh_token: 'stale-refresh-token',
+    user: { id: STALE_USER_ID, email: 'stale@example.com', user_metadata: {} },
+  };
+  const cookieValue = `base64-${Buffer.from(JSON.stringify(session)).toString('base64url')}`;
+  await page.addInitScript(({ cookieName, value }) => {
+    if (localStorage.getItem('inject-stale-auth-session') === 'yes') {
+      document.cookie = `${cookieName}=${value}; Path=/; SameSite=Lax`;
+    }
+  }, { cookieName: TEST_AUTH_COOKIE, value: cookieValue });
+  await page.evaluate(() => localStorage.setItem('inject-stale-auth-session', 'yes'));
+}
+
+async function recordingOwners(page: Page): Promise<Record<string, string | null>> {
+  return page.evaluate(async () => {
+    const request = indexedDB.open('excalicast');
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transaction = db.transaction('recordings', 'readonly');
+    const store = transaction.objectStore('recordings');
+    const ids = ['library-recording-000', 'legacy-owner-recording'];
+    const entries = await Promise.all(ids.map((id) => new Promise<[string, string | null]>((resolve, reject) => {
+      const get = store.get(id);
+      get.onsuccess = () => resolve([id, get.result?.ownerKey ?? null]);
+      get.onerror = () => reject(get.error);
+    })));
+    db.close();
+    return Object.fromEntries(entries);
+  });
+}
+
+async function seedRecordings(page: Page, count: number, includeLegacy = false): Promise<void> {
+  await page.route('**/auth/v1/**', async (route) => {
     await route.fulfill({ status: 401, contentType: 'application/json', body: '{"message":"anonymous"}' });
   });
   await page.goto('/en');
@@ -11,11 +53,21 @@ async function seedRecordings(page: Page, count: number): Promise<void> {
   await page.goto('/en/library');
   await page.waitForFunction(async () => {
     const databases = await indexedDB.databases();
-    return databases.some((database) => database.name === 'excalicast');
+    if (!databases.some((database) => database.name === 'excalicast')) return false;
+    const request = indexedDB.open('excalicast');
+    const db = await new Promise<IDBDatabase | null>((resolve) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => resolve(null);
+      request.onblocked = () => resolve(null);
+    });
+    if (!db) return false;
+    const ready = db.objectStoreNames.contains('recordings');
+    db.close();
+    return ready;
   });
 
-  await page.evaluate(async ({ ownerKey, recordingCount }) => {
-    const request = indexedDB.open('excalicast');
+  await page.evaluate(async ({ ownerKey, recordingCount, withLegacy }) => {
+    const request = indexedDB.open('excalicast', 140);
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
@@ -37,15 +89,28 @@ async function seedRecordings(page: Page, count: number): Promise<void> {
           status: 'done',
         });
       }
+      if (withLegacy) {
+        store.put({
+          id: 'legacy-owner-recording',
+          title: 'Legacy owner recording',
+          startedAt: 20_000,
+          durationMs: 30_000,
+          hasAudio: false,
+          hasCamera: false,
+          status: 'done',
+        });
+      }
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () => reject(transaction.error);
     });
     db.close();
-  }, { ownerKey: OWNER_KEY, recordingCount: count });
+  }, { ownerKey: OWNER_KEY, recordingCount: count, withLegacy: includeLegacy });
 
-  await page.goto('/en/library');
-  await expect(page.getByText('Library recording 0')).toBeVisible();
+  if (!includeLegacy) {
+    await page.goto('/en/library');
+    await expect(page.getByText('Library recording 0')).toBeVisible();
+  }
 }
 
 test('paginates local recording summaries without duplicate cursor rows', async ({ page }) => {
@@ -80,11 +145,85 @@ test('leaves loading and exposes an error state when the local database fails', 
       return originalGetAll.apply(this, args);
     };
   });
-  await page.route('https://example.supabase.co/**', async (route) => {
+  await page.route('**/auth/v1/**', async (route) => {
     await route.fulfill({ status: 401, contentType: 'application/json', body: '{"message":"anonymous"}' });
   });
   await page.goto('/en/library');
   await expect(page.getByTestId('library-load-error')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Loading…')).toBeHidden();
+});
+
+test('loads the anonymous local library when auth initialization never settles', async ({ page }) => {
+  await page.addInitScript(() => {
+    const originalFetch = window.fetch;
+    window.fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof Request ? input.url : input.toString();
+      if (localStorage.getItem('block-auth') === 'yes' && url.includes('/auth/v1/user')) {
+        return new Promise<Response>(() => undefined);
+      }
+      return originalFetch(input, init);
+    };
+  });
+  await seedRecordings(page, 1);
+  await page.evaluate(() => localStorage.setItem('block-auth', 'yes'));
+  await page.reload();
+  await expect(page.getByText('Library recording 0')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Loading…')).toBeHidden();
+});
+
+test('does not reassign guest or legacy rows for a revoked cached session', async ({ page }) => {
+  await seedRecordings(page, 1, true);
+  await page.unroute('**/auth/v1/**');
+
+  let getUserRequests = 0;
+  await page.route('**/auth/v1/**', async (route) => {
+    if (route.request().url().includes('/auth/v1/user')) {
+      getUserRequests += 1;
+      await route.fulfill({ status: 401, contentType: 'application/json', body: '{"message":"revoked"}' });
+      return;
+    }
+    await route.fulfill({ status: 401, contentType: 'application/json', body: '{"message":"unauthorized"}' });
+  });
+  await cacheRevokedSession(page);
+
+  await page.reload();
+  await expect.poll(() => getUserRequests, { timeout: 10_000 }).toBeGreaterThan(0);
+  await expect(page.getByText('Library recording 0')).toBeVisible({ timeout: 10_000 });
+  expect(await recordingOwners(page)).toEqual({
+    'library-recording-000': OWNER_KEY,
+    'legacy-owner-recording': null,
+  });
+});
+
+test('leaves loading when a local IndexedDB query never settles', async ({ page }) => {
+  await page.addInitScript(() => {
+    const originalOpenCursor = IDBIndex.prototype.openCursor;
+    IDBIndex.prototype.openCursor = function (...args) {
+      if (this.name === '[ownerKey+startedAt]') return {} as IDBRequest<IDBCursorWithValue | null>;
+      return originalOpenCursor.apply(this, args);
+    };
+  });
+  await page.route('**/auth/v1/**', async (route) => {
+    await route.fulfill({ status: 401, contentType: 'application/json', body: '{"message":"anonymous"}' });
+  });
+  await page.goto('/en/library');
+  await expect(page.getByTestId('library-load-error')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Loading…')).toBeHidden();
+});
+
+test('keeps local results visible when the cloud list rejects', async ({ page }) => {
+  await seedRecordings(page, 1);
+  await page.route('/api/me/tier', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ tier: 'pro', status: 'active', currentPeriodEnd: null, loggedIn: true }),
+    });
+  });
+  await page.route('/api/recordings/list', async (route) => {
+    await route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"unavailable"}' });
+  });
+  await page.goto('/en/library');
+  await expect(page.getByText('Library recording 0')).toBeVisible();
   await expect(page.getByText('Loading…')).toBeHidden();
 });
 

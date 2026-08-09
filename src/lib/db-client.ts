@@ -377,7 +377,9 @@ export async function recoverUnfinishedRecordings(): Promise<number> {
 /**
  * 列出当前 ownerKey 的录制（按用户隔离）。
  * legacy（v9 前无 ownerKey 的旧录制）首次被列出时认领给当前 ownerKey。
- * **调用方必须在 auth 已 settle（useAuth.loading=false）后才调**，否则会用 guestId 误认领。
+ * Callers that render before auth settles can opt out of legacy claiming until the
+ * owner is known. That keeps the guest library responsive without assigning legacy
+ * recordings to the wrong owner.
  */
 const legacyClaimedOwners = new Set<string>();
 
@@ -463,17 +465,30 @@ export interface RecordingSummaryPage {
  */
 export async function listRecordingSummaries(
   ownerKey: string,
-  options: { cursor?: string; limit?: number } = {},
+  options: { cursor?: string; limit?: number; claimLegacy?: boolean; signal?: AbortSignal } = {},
 ): Promise<RecordingSummaryPage> {
-  await claimLegacyRecordingsOnce(ownerKey);
+  const { signal } = options;
+  if (signal?.aborted) throw new DOMException('Local library query cancelled', 'AbortError');
+  if (options.claimLegacy !== false) await claimLegacyRecordingsOnce(ownerKey);
   const db = getClientDb();
   const limit = Math.max(1, Math.min(100, Math.floor(options.limit ?? 30)));
   const cursor = decodeRecordingSummaryCursor(options.cursor);
-  const rows = await db.recordings
-    .where('[ownerKey+startedAt]')
-    .between([ownerKey, Dexie.minKey], [ownerKey, Dexie.maxKey], true, true)
-    .reverse()
-    .toArray();
+  const rows = await db.transaction('r', db.recordings, async () => {
+    const transaction = Dexie.currentTransaction;
+    const abort = () => transaction.abort();
+    signal?.addEventListener('abort', abort, { once: true });
+    try {
+      const rows: RecordingMetadata[] = [];
+      await db.recordings
+        .where('[ownerKey+startedAt]')
+        .between([ownerKey, Dexie.minKey], [ownerKey, Dexie.maxKey], true, true)
+        .reverse()
+        .each((row) => { rows.push(row); });
+      return rows;
+    } finally {
+      signal?.removeEventListener('abort', abort);
+    }
+  });
   const all = rows.map(toLibrarySummary).sort(compareLibrarySummary);
   const eligible = cursor
     ? all.filter((item) => compareLibrarySummary(item, cursor) > 0)

@@ -258,8 +258,8 @@ export async function uploadMany(
   return state;
 }
 
-export async function listCloudRecordings(): Promise<CloudRecording[]> {
-  const res = await fetch('/api/recordings/list', { cache: 'no-store' });
+export async function listCloudRecordings(signal?: AbortSignal): Promise<CloudRecording[]> {
+  const res = await fetch('/api/recordings/list', { cache: 'no-store', signal });
   if (!res.ok) throw new Error(`list_failed: ${res.status}`);
   const { recordings } = (await res.json()) as { recordings: CloudRecording[] };
   return recordings ?? [];
