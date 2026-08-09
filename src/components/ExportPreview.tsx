@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { autoZoomAt, cameraPositionAt, getRecordingWindowRect, releasePreviewResources, renderPreviewFrame, setPreviewPlayback } from '@/services/exportPipeline';
 import { cameraPlacementFromEvent, projectCameraPlacement } from '@/services/cameraPlacement';
 import { getLocalizedTrack, getWorkspaceShells, loadFullRecording, releaseRecordingMediaCache } from '@/lib/db-client';
+import { isUsableLocalizedTrack } from '@/lib/localizedTrack';
 import type { AutoZoomSegment, CameraPositionEvent, ExportConfig, LocalizedTrack, RecordingMetadata, ShellCanvasRect, ShellSize, TimeSegment } from '@/types/recording';
 import { resolveExportOutputSize } from '@/types/recording';
 import { keptDuration, normalizeSegments, outputToSource, sourceToOutput } from '@/utils/segments';
@@ -266,7 +267,7 @@ export function ExportPreview({
     getLocalizedTrack(config.localizedTrackId)
       .then((track) => {
         if (cancelled) return;
-        if (!track) {
+        if (!isUsableLocalizedTrack(track)) {
           setLocalizedTrack(null);
           setLocalizedAudioUrl(null);
           setLocalizedCameraUrl(null);

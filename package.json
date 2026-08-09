@@ -32,6 +32,7 @@
     "better-sqlite3": "^11.3.0",
     "dexie": "^4.4.2",
     "html-to-image": "^1.11.13",
+    "kokoro-js": "^1.2.1",
     "marked": "^14.1.4",
     "mediabunny": "^1.52.2",
     "mp4-muxer": "^5.2.2",

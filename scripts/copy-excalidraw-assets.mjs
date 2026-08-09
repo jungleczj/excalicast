@@ -1,6 +1,6 @@
 // 把 @excalidraw/excalidraw 的字体/资源复制到 public/，供同源加载（避免回退 unpkg CDN）。
 // dev / build 前自动执行（package.json 的 predev / prebuild）。幂等、跨平台。
-import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,4 +24,28 @@ for (const d of dirs) {
   }
   cpSync(src, join(publicDir, d), { recursive: true });
   console.log('[copy-excalidraw-assets] 已复制', d, '→ public/');
+}
+
+const onnxDistDir = join(root, 'node_modules', 'onnxruntime-web', 'dist');
+const onnxPublicDir = join(publicDir, 'onnxruntime');
+const onnxAssets = [
+  'ort-wasm-simd-threaded.mjs',
+  'ort-wasm-simd-threaded.wasm',
+  'ort-wasm-simd-threaded.jsep.mjs',
+  'ort-wasm-simd-threaded.jsep.wasm',
+];
+
+if (!existsSync(onnxDistDir)) {
+  console.warn('[copy-excalidraw-assets] onnxruntime-web dist 不存在，跳过：', onnxDistDir);
+} else {
+  mkdirSync(onnxPublicDir, { recursive: true });
+  for (const asset of onnxAssets) {
+    const src = join(onnxDistDir, asset);
+    if (!existsSync(src)) {
+      console.warn('[copy-excalidraw-assets] ONNX 资源缺失，跳过：', src);
+      continue;
+    }
+    copyFileSync(src, join(onnxPublicDir, asset));
+  }
+  console.log('[copy-excalidraw-assets] 已复制 ONNX Web Runtime → public/onnxruntime/');
 }

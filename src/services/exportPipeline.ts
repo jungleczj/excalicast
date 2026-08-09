@@ -2,6 +2,7 @@
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { getCursorFocusTrack, getLocalizedTrack, getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
+import { isUsableLocalizedTrack } from '@/lib/localizedTrack';
 import {
   cropRectForAspect,
   cropRectForSnapshot,
@@ -779,7 +780,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   opts.onLog?.(`media manifest: audio=${manifest.audio.chunks} chunks/${manifest.audio.bytes} bytes, camera=${manifest.camera.chunks} chunks/${manifest.camera.bytes} bytes, screen=${manifest.screen.chunks} chunks/${manifest.screen.bytes} bytes`);
   opts.onLog?.(`media ready in ${Math.round(performance.now() - phaseStartedAt)}ms`);
   const localizedTrack = opts.localizedTrackId ? await getLocalizedTrack(opts.localizedTrackId) : undefined;
-  const useLocalizedTrack = !!localizedTrack && opts.muteOriginalAudio !== false;
+  const useLocalizedTrack = isUsableLocalizedTrack(localizedTrack) && opts.muteOriginalAudio !== false;
   const effectiveAudioBlob = useLocalizedTrack ? localizedTrack.audioBlob : audioBlob;
   const effectiveCameraBlob = useLocalizedTrack && localizedTrack.cameraBlob ? localizedTrack.cameraBlob : cameraBlob;
   const effectiveSubtitleSrt = useLocalizedTrack ? localizedTrack.translatedSrt : metadata.subtitleSrt;
@@ -1612,7 +1613,7 @@ export async function renderPreviewFrame(
   checkAborted();
   const cursorFocusTrack = config.alwaysKeepZoomedIn ? await getCursorFocusTrack(recordingId) : undefined;
   const localizedTrack = config.localizedTrackId ? await getLocalizedTrack(config.localizedTrackId) : undefined;
-  const useLocalizedTrack = !!localizedTrack && config.muteOriginalAudio !== false;
+  const useLocalizedTrack = isUsableLocalizedTrack(localizedTrack) && config.muteOriginalAudio !== false;
   const effectiveCameraBlob = useLocalizedTrack && localizedTrack.cameraBlob ? localizedTrack.cameraBlob : cameraBlob;
   const effectiveSubtitleSrt = useLocalizedTrack
     ? localizedTrack.translatedSrt

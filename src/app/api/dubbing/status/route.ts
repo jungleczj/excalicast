@@ -2,11 +2,9 @@ import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import {
   getDubbingJob,
-  saveLocalDubbingAsset,
   updateDubbingJob,
 } from '@/lib/dubbingStore';
-import { generateDubbingAssets } from '@/services/dubbingProviders';
-import { buildPrivateMediaPath } from '@/lib/privateMedia';
+import { generateDubbingTranslation } from '@/services/dubbingProviders';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import {
   type MediaJobStage,
@@ -22,8 +20,6 @@ export const maxDuration = 300;
 interface DubbingStatusResponse {
   status: 'pending' | 'running' | 'done' | 'failed';
   srtUrl?: string;
-  audioUrl?: string;
-  cameraUrl?: string;
   lipSync?: 'done' | 'skipped' | 'failed';
   provider?: string;
   error?: string;
@@ -31,12 +27,6 @@ interface DubbingStatusResponse {
 
 function resultUrl(req: Request, jobId: string, asset: string): string {
   return new URL(`/api/dubbing/result/${jobId}/${asset}`, req.url).pathname;
-}
-
-function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const buffer = new ArrayBuffer(bytes.byteLength);
-  new Uint8Array(buffer).set(bytes);
-  return buffer;
 }
 
 export async function GET(req: Request): Promise<NextResponse> {
@@ -58,8 +48,6 @@ export async function GET(req: Request): Promise<NextResponse> {
     return NextResponse.json({
       status: 'done',
       srtUrl: resultUrl(req, jobId, 'subtitles.srt'),
-      audioUrl: resultUrl(req, jobId, 'audio.wav'),
-      cameraUrl: job.lipSyncCameraPath ? resultUrl(req, jobId, 'camera.webm') : undefined,
       lipSync: job.lipSync ?? 'skipped',
       provider: job.provider,
     });
@@ -80,74 +68,19 @@ export async function GET(req: Request): Promise<NextResponse> {
   try {
     await updateDubbingJob(jobId, user.id, { status: 'running' });
     if (job.audioAssetPath || job.cameraAssetPath) admin = createSupabaseAdminClient();
-    stage = 'storage';
-    let sourceAudioFileUrl: string | undefined;
-    if (job.audioAssetPath) {
-      if (!admin) throw Object.assign(new Error('Supabase service role is not configured'), { code: 'SUPABASE_ADMIN_NOT_CONFIGURED' });
-      const { data, error } = await admin.storage.from('recordings').createSignedUrl(job.audioAssetPath, 3600);
-      if (error || !data?.signedUrl) throw new Error(`dubbing_audio_sign_failed: ${error?.message ?? 'missing_url'}`);
-      sourceAudioFileUrl = data.signedUrl;
-    }
-    let cameraBytes: Uint8Array | undefined;
-    // Camera is an optional second-stage input. Do not materialize it in the
-    // normal audio/subtitle path; current lip-sync is only enabled explicitly.
-    if (job.cameraAssetPath && process.env.DUBBING_MOCK_LIPSYNC === '1') {
-      if (!admin) throw Object.assign(new Error('Supabase service role is not configured'), { code: 'SUPABASE_ADMIN_NOT_CONFIGURED' });
-      const { data, error } = await admin.storage.from('recordings').download(job.cameraAssetPath);
-      if (error || !data) throw new Error(`dubbing_camera_download_failed: ${error?.message ?? 'missing_blob'}`);
-      cameraBytes = new Uint8Array(await data.arrayBuffer());
-    }
     stage = 'external_service';
-    const result = await generateDubbingAssets({
-      sourceSrt: job.sourceSrt,
-      sourceAudioFileUrl,
-      cameraBytes,
-    });
-
-    let dubbedAudioPath: string;
-    let lipSyncCameraPath: string | undefined;
-    if (job.audioAssetPath) {
-      if (!admin) throw Object.assign(new Error('Supabase service role is not configured'), { code: 'SUPABASE_ADMIN_NOT_CONFIGURED' });
-      stage = 'storage';
-      dubbedAudioPath = buildPrivateMediaPath(user.id, job.recordingId, 'dubbing', `${jobId}-audio.wav`);
-      const audioUpload = await admin.storage.from('recordings').upload(
-        dubbedAudioPath,
-        new Blob([toArrayBuffer(result.audioBytes)], { type: result.audioType }),
-        { contentType: result.audioType, upsert: true },
-      );
-      if (audioUpload.error) throw new Error(`dubbing_audio_store_failed: ${audioUpload.error.message}`);
-      if (result.lipSyncCamera) {
-        lipSyncCameraPath = buildPrivateMediaPath(user.id, job.recordingId, 'dubbing', `${jobId}-camera.webm`);
-        const cameraUpload = await admin.storage.from('recordings').upload(
-          lipSyncCameraPath,
-          new Blob([toArrayBuffer(result.lipSyncCamera)], { type: result.lipSyncCameraType ?? 'video/webm' }),
-          { contentType: result.lipSyncCameraType ?? 'video/webm', upsert: true },
-        );
-        if (cameraUpload.error) throw new Error(`dubbing_camera_store_failed: ${cameraUpload.error.message}`);
-      }
-    } else {
-      dubbedAudioPath = await saveLocalDubbingAsset(jobId, 'audio.wav', result.audioBytes);
-      if (result.lipSyncCamera) {
-        lipSyncCameraPath = await saveLocalDubbingAsset(jobId, 'camera.webm', result.lipSyncCamera);
-      }
-    }
+    const result = await generateDubbingTranslation(job.sourceSrt ?? '');
     stage = 'database';
     const done = await updateDubbingJob(jobId, user.id, {
       status: 'done',
       translatedSrt: result.translatedSrt,
-      dubbedAudioPath,
-      dubbedAudioType: result.audioType,
-      lipSyncCameraPath,
-      lipSyncCameraType: result.lipSyncCameraType,
-      lipSync: result.lipSync,
+      lipSync: 'skipped',
       provider: result.provider,
     });
     await removeSources();
     return NextResponse.json({
       status: 'done',
       srtUrl: resultUrl(req, jobId, 'subtitles.srt'),
-      audioUrl: resultUrl(req, jobId, 'audio.wav'),
-      cameraUrl: done?.lipSyncCameraPath ? resultUrl(req, jobId, 'camera.webm') : undefined,
       lipSync: done?.lipSync ?? 'skipped',
       provider: done?.provider,
     });

@@ -2,18 +2,18 @@ import 'server-only';
 
 /**
  * Deepseek 服务端 client。OpenAI-compatible /v1/chat/completions。
- * 模型默认走 `deepseek-chat`。response_format = json_object 强制返回纯 JSON。
+ * 默认模型可由 DEEPSEEK_TRANSLATION_MODEL 覆盖。response_format = json_object 强制返回纯 JSON。
  *
  * env: DEEPSEEK_API_KEY（必填）。
  */
 
 const DEFAULT_BASE = 'https://api.deepseek.com/v1';
-const DEFAULT_MODEL = 'deepseek-chat';
+const DEFAULT_MODEL = 'deepseek-v4-flash';
 
 export interface DeepseekChatOptions {
   prompt: string;
   systemPrompt?: string;
-  /** 默认 deepseek-chat */
+  /** 默认 deepseek-v4-flash */
   model?: string;
   /** 默认 60_000ms */
   timeoutMs?: number;

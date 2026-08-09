@@ -49,7 +49,9 @@ export async function POST(req: Request): Promise<NextResponse> {
       mimeType: 'audio/webm',
       cameraAssetPath: undefined,
     } : parseMediaSubmitPayload(body);
+    const sourceSrt = typeof body.sourceSrt === 'string' ? body.sourceSrt.trim() : '';
     if (!parsed.recordingId) throw new Error('missing_recording_id');
+    if (!sourceSrt) throw new Error('dubbing_subtitles_required');
     if (body.targetLang !== 'en') throw new Error('unsupported_target_language');
     if (typeof body.sourceAudioHash !== 'string' || !body.sourceAudioHash) throw new Error('missing_source_audio_hash');
     const sourceAudioHash = body.sourceAudioHash;
@@ -71,7 +73,7 @@ export async function POST(req: Request): Promise<NextResponse> {
         createJob: async () => {
           await createDubbingJob({
             id: jobId, userId: user.id, recordingId: parsed.recordingId, targetLang: 'en',
-            sourceAudioHash, sourceSrt: typeof body.sourceSrt === 'string' ? body.sourceSrt : undefined,
+            sourceAudioHash, sourceSrt,
             status: 'pending', createdAt: now, updatedAt: now,
             audioAssetPath: parsed.assetPath || undefined,
             audioType: parsed.mimeType,

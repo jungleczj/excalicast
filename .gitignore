@@ -20,6 +20,7 @@ playwright/.cache/
 # 自托管的 Excalidraw 资源（由 scripts/copy-excalidraw-assets.mjs 生成）
 public/excalidraw-assets/
 public/excalidraw-assets-dev/
+public/onnxruntime/
 
 # Landing Craft pass: keep generated leftovers out of commits.
 # The page intentionally references Hero vector art, one HD recording mock, and six original persona PNGs.

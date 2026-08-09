@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { I } from '@/components/icons';
-import { getLatestMediaTask, listLocalizedTracks, saveLocalizedTrack, setActiveLocalizedTrack } from '@/lib/db-client';
-import { createEnglishDubbingTrack, resumeEnglishDubbingTrack } from '@/services/dubbingClient';
+import { getLatestMediaTask, listLocalizedTracks, setActiveLocalizedTrack } from '@/lib/db-client';
+import { isUsableLocalizedTrack } from '@/lib/localizedTrack';
+import { createEnglishDubbingTrack, resumeEnglishDubbingTrack, type DubbingProgress } from '@/services/dubbingClient';
 import type { LocalizedTrack, RecordingMetadata } from '@/types/recording';
 
 interface Props {
@@ -39,6 +40,9 @@ export function DubbingPanel({
   const [tracks, setTracks] = useState<LocalizedTrack[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<DubbingProgress | null>(null);
+  const [legacyTrackCount, setLegacyTrackCount] = useState(0);
+  const taskAbortRef = useRef<AbortController | null>(null);
 
   const activeTrack = useMemo(
     () => tracks.find((track) => track.id === activeTrackId) ?? null,
@@ -47,53 +51,102 @@ export function DubbingPanel({
 
   const refreshTracks = useCallback(async () => {
     const rows = await listLocalizedTracks(recordingId);
-    setTracks(rows);
+    const usable = rows.filter(isUsableLocalizedTrack);
+    setTracks(usable);
+    setLegacyTrackCount(rows.length - usable.length);
   }, [recordingId]);
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
+    taskAbortRef.current = controller;
     Promise.all([listLocalizedTracks(recordingId), getLatestMediaTask(recordingId, 'dubbing')])
       .then(async ([rows, task]) => {
         if (cancelled) return;
-        setTracks(rows);
+        const usable = rows.filter(isUsableLocalizedTrack);
+        setTracks(usable);
+        setLegacyTrackCount(rows.length - usable.length);
+        if (activeTrackId && !usable.some((track) => track.id === activeTrackId)) {
+          await setActiveLocalizedTrack(recordingId, undefined);
+          onTrackSelect(null);
+        }
         const jobId = typeof task?.checkpoint?.remoteJobId === 'string' ? task.checkpoint.remoteJobId : null;
         const sourceAudioHash = typeof task?.checkpoint?.sourceAudioHash === 'string' ? task.checkpoint.sourceAudioHash : null;
         if (!jobId || !sourceAudioHash || !['queued', 'running', 'paused'].includes(task?.status ?? '')) return;
         setBusy(true);
         try {
-          const track = await resumeEnglishDubbingTrack({ recordingId, jobId, sourceAudioHash });
+          const track = await resumeEnglishDubbingTrack({
+            recordingId,
+            jobId,
+            sourceAudioHash,
+            signal: controller.signal,
+            onProgress: setProgress,
+          });
           if (cancelled) return;
-          await saveLocalizedTrack(track, true);
           await refreshTracks();
           onTrackReady(track);
         } catch (resumeError) {
-          if (!cancelled) setError(resumeError instanceof Error ? resumeError.message : 'dubbing_failed');
+          if (!cancelled && !(resumeError instanceof DOMException && resumeError.name === 'AbortError')) {
+            setError(resumeError instanceof Error ? resumeError.message : 'dubbing_failed');
+          }
         } finally {
-          if (!cancelled) setBusy(false);
+          if (!cancelled) {
+            setBusy(false);
+            setProgress(null);
+          }
         }
       })
       .catch(() => { if (!cancelled) setTracks([]); });
-    return () => { cancelled = true; };
-  }, [onTrackReady, recordingId, refreshTracks]);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (taskAbortRef.current === controller) taskAbortRef.current = null;
+    };
+  }, [activeTrackId, onTrackReady, onTrackSelect, recordingId, refreshTracks]);
 
   const generate = useCallback(async () => {
     if (!metadata.hasAudio) return;
     setBusy(true);
     setError(null);
+    setProgress({ stage: 'translating', progress: 0 });
+    taskAbortRef.current?.abort();
+    const controller = new AbortController();
+    taskAbortRef.current = controller;
     try {
       const track = await createEnglishDubbingTrack({
         recordingId,
         sourceSrt: metadata.subtitleSrt,
+        signal: controller.signal,
+        onProgress: setProgress,
       });
-      await saveLocalizedTrack(track, true);
       await refreshTracks();
       onTrackReady(track);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'dubbing_failed');
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        setError(err instanceof Error ? err.message : 'dubbing_failed');
+      }
     } finally {
+      if (taskAbortRef.current === controller) taskAbortRef.current = null;
       setBusy(false);
+      setProgress(null);
     }
   }, [metadata.hasAudio, metadata.subtitleSrt, onTrackReady, recordingId, refreshTracks]);
+
+  const progressLabel = useMemo(() => {
+    if (!progress) return null;
+    if (progress.stage === 'translating') return en ? 'Translating subtitles…' : '正在翻译字幕…';
+    if (progress.stage === 'model') return en ? 'Loading local voice model…' : '正在加载本地语音模型…';
+    if (progress.stage === 'synthesis') {
+      const count = progress.totalChunks ? ` ${progress.completedChunks ?? 0}/${progress.totalChunks}` : '';
+      return en ? `Generating English speech…${count}` : `正在生成英文语音…${count}`;
+    }
+    if (progress.stage === 'assembling') return en ? 'Aligning the audio timeline…' : '正在对齐音频时间轴…';
+    return en ? 'Saving English version…' : '正在保存英文版本…';
+  }, [en, progress]);
+
+  const cancelGeneration = useCallback(() => {
+    taskAbortRef.current?.abort();
+  }, []);
 
   const selectTrack = useCallback(async (track: LocalizedTrack | null) => {
     await setActiveLocalizedTrack(recordingId, track?.id);
@@ -129,18 +182,19 @@ export function DubbingPanel({
           </span>
         </div>
 
-        {!metadata.hasAudio ? (
+        {!metadata.hasAudio || !metadata.subtitleSrt?.trim() ? (
           <div
             className="mt-4 rounded-[18px] px-4 py-3"
             style={{ background: 'var(--paper-2)', color: 'var(--ink-3)', fontSize: 12, lineHeight: 1.5 }}
           >
-            {en ? 'Record microphone audio to create an English dubbed version.' : '录制麦克风音频后，才可以生成英文配音版本。'}
+            {!metadata.hasAudio
+              ? (en ? 'Record microphone audio to create an English dubbed version.' : '录制麦克风音频后，才可以生成英文配音版本。')
+              : (en ? 'Generate subtitles first, then create the local English voice track.' : '请先生成字幕，再创建本地英文配音。')}
           </div>
         ) : (
           <button
             type="button"
-            onClick={generate}
-            disabled={busy}
+            onClick={busy ? cancelGeneration : generate}
             className="mt-5 flex w-full items-center justify-center gap-2 transition"
             style={{
               minHeight: 48,
@@ -152,14 +206,14 @@ export function DubbingPanel({
               fontFamily: 'var(--font-sans)',
               fontSize: 14,
               fontWeight: 720,
-              cursor: busy ? 'not-allowed' : 'pointer',
-              opacity: busy ? 0.58 : 1,
+              cursor: 'pointer',
+              opacity: 1,
             }}
           >
             {busy ? (
               <>
-                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full" style={{ border: '2px solid rgba(255,255,255,.24)', borderTopColor: 'var(--paper)' }} />
-                {en ? 'Generating English version…' : '正在生成英文版本…'}
+                <I.Close size={15} />
+                {en ? 'Cancel generation' : '取消生成'}
               </>
             ) : (
               <>
@@ -168,6 +222,26 @@ export function DubbingPanel({
               </>
             )}
           </button>
+        )}
+
+        {busy && progress && progressLabel && (
+          <div className="mt-3" aria-live="polite">
+            <div className="mb-1.5 flex items-center justify-between gap-3" style={{ color: 'var(--ink-3)', fontSize: 11 }}>
+              <span>{progressLabel}</span>
+              <span>{Math.round(progress.progress * 100)}%</span>
+            </div>
+            <div style={{ height: 4, overflow: 'hidden', borderRadius: 4, background: 'rgba(24,25,26,.09)' }}>
+              <div style={{ width: `${Math.max(2, progress.progress * 100)}%`, height: '100%', background: 'var(--craft-blue)', transition: 'width 160ms ease' }} />
+            </div>
+          </div>
+        )}
+
+        {legacyTrackCount > 0 && (
+          <p className="mt-3" style={{ color: 'var(--ink-3)', fontSize: 11.5, lineHeight: 1.5 }}>
+            {en
+              ? 'An older placeholder version was disabled. Generate it again to get real English speech.'
+              : '旧的占位配音版本已停用，请重新生成真实英文语音。'}
+          </p>
         )}
 
         {error && (
