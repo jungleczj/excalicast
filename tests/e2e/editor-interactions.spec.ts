@@ -1178,14 +1178,23 @@ test('portrait Fit All reveals one continuous wallpaper around a landscape displ
       );
     }
 
-    // The sample is inside the fixed recording window, but above the contained
-    // 16:9 source. It must reveal the same wallpaper already painted underneath.
-    const x = Math.round(actual.width * 0.5);
-    const y = Math.round(actual.height * 0.12);
-    const actualPixel = actualContext.getImageData(x, y, 1, 1).data;
-    const expectedPixel = expectedContext.getImageData(x, y, 1, 1).data;
-    return [0, 1, 2].every((channel) => Math.abs(actualPixel[channel] - expectedPixel[channel]) <= 4)
-      && actualPixel[3] === 255;
+    const frameWidth = Math.round(actual.width * 0.84);
+    const frameHeight = Math.round(actual.height * 0.84);
+    const frameY = Math.round((actual.height - frameHeight) / 2);
+    const centerX = Math.round(actual.width * 0.5);
+    const samples = [
+      [centerX, Math.max(0, frameY - 2)],
+      [centerX, frameY],
+      [centerX, frameY + 4],
+      [centerX, frameY + frameHeight - 1],
+      [centerX, Math.min(actual.height - 1, frameY + frameHeight + 4)],
+    ];
+    return samples.every(([x, y]) => {
+      const actualPixel = actualContext.getImageData(x, y, 1, 1).data;
+      const expectedPixel = expectedContext.getImageData(x, y, 1, 1).data;
+      return [0, 1, 2].every((channel) => Math.abs(actualPixel[channel] - expectedPixel[channel]) <= 4)
+        && actualPixel[3] === 255;
+    });
   }), { timeout: 15_000 }).toBe(true);
 });
 

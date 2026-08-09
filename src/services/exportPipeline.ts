@@ -494,30 +494,6 @@ function roundedRectPath(ctx: CanvasRenderingContext2D, rect: CanvasRect, radius
   appendRoundedRectPath(ctx, rect, radius);
 }
 
-function drawRecordingWindowShadow(
-  target: CanvasRenderingContext2D,
-  frame: RecordingWindowRect,
-  color: string,
-  blur: number,
-  offsetY: number,
-): void {
-  target.save();
-  // Restrict the fill to the exterior of the window. The rounded rectangle is
-  // only a shadow caster; its center stays transparent so the wallpaper remains
-  // continuous through letterboxed areas inside the fixed recording frame.
-  target.beginPath();
-  target.rect(0, 0, target.canvas.width, target.canvas.height);
-  appendRoundedRectPath(target, frame, frame.radius);
-  target.clip('evenodd');
-  target.shadowColor = color;
-  target.shadowBlur = blur;
-  target.shadowOffsetY = offsetY;
-  target.fillStyle = '#000000';
-  roundedRectPath(target, frame, frame.radius);
-  target.fill();
-  target.restore();
-}
-
 function drawRecordingWindow(
   target: CanvasRenderingContext2D,
   foreground: HTMLCanvasElement,
@@ -529,36 +505,12 @@ function drawRecordingWindow(
     return;
   }
 
-  // Draw decoration outside the window without placing an opaque card below
-  // the source. Transparent contain margins therefore reveal the same wallpaper.
-  drawRecordingWindowShadow(
-    target,
-    frame,
-    'rgba(22, 27, 32, 0.25)',
-    Math.max(28, Math.round(frame.width * 0.027)),
-    Math.max(14, Math.round(frame.height * 0.025)),
-  );
-  drawRecordingWindowShadow(
-    target,
-    frame,
-    'rgba(22, 27, 32, 0.13)',
-    Math.max(8, Math.round(frame.width * 0.008)),
-    Math.max(3, Math.round(frame.height * 0.005)),
-  );
-
   target.save();
   roundedRectPath(target, frame, frame.radius);
   target.clip();
   target.imageSmoothingEnabled = true;
   target.imageSmoothingQuality = 'high';
   target.drawImage(foreground, 0, 0, foreground.width, foreground.height, frame.x, frame.y, frame.width, frame.height);
-  target.restore();
-
-  target.save();
-  target.strokeStyle = 'rgba(31, 34, 37, 0.12)';
-  target.lineWidth = Math.max(1, Math.round(Math.min(target.canvas.width, target.canvas.height) / 1200));
-  roundedRectPath(target, frame, frame.radius);
-  target.stroke();
   target.restore();
 }
 
