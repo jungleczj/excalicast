@@ -6101,9 +6101,9 @@ body {
 .export-preview-craft-stage {
   border-color: var(--craft-line) !important;
   border-radius: 30px !important;
-  background:
+  background: var(--preview-stage-background,
     radial-gradient(circle at 22% 0%, rgba(255, 255, 255, 0.82) 0 20%, transparent 48%),
-    linear-gradient(180deg, rgba(255, 253, 248, 0.86), rgba(248, 242, 234, 0.92)) !important;
+    linear-gradient(180deg, rgba(255, 253, 248, 0.86), rgba(248, 242, 234, 0.92))) !important;
 }
 
 .export-preview-craft-error {
@@ -6517,7 +6517,12 @@ body {
   background: rgba(219, 238, 255, 0.95) !important;
 }
 
-.export-preview-craft-stage,
+.export-preview-craft-stage {
+  background: var(--preview-stage-background,
+    radial-gradient(circle at 24% 0%, rgba(255, 255, 255, 0.8) 0 18%, transparent 44%),
+    linear-gradient(180deg, rgba(255, 253, 248, 0.94), rgba(249, 243, 234, 0.9))) !important;
+}
+
 .player-craft-stage {
   background:
     radial-gradient(circle at 24% 0%, rgba(255, 255, 255, 0.8) 0 18%, transparent 44%),

@@ -479,15 +479,43 @@ export function getRecordingWindowRect(
   };
 }
 
-function roundedRectPath(ctx: CanvasRenderingContext2D, rect: CanvasRect, radius: number): void {
+function appendRoundedRectPath(ctx: CanvasRenderingContext2D, rect: CanvasRect, radius: number): void {
   const r = Math.min(radius, rect.width / 2, rect.height / 2);
-  ctx.beginPath();
   ctx.moveTo(rect.x + r, rect.y);
   ctx.arcTo(rect.x + rect.width, rect.y, rect.x + rect.width, rect.y + rect.height, r);
   ctx.arcTo(rect.x + rect.width, rect.y + rect.height, rect.x, rect.y + rect.height, r);
   ctx.arcTo(rect.x, rect.y + rect.height, rect.x, rect.y, r);
   ctx.arcTo(rect.x, rect.y, rect.x + rect.width, rect.y, r);
   ctx.closePath();
+}
+
+function roundedRectPath(ctx: CanvasRenderingContext2D, rect: CanvasRect, radius: number): void {
+  ctx.beginPath();
+  appendRoundedRectPath(ctx, rect, radius);
+}
+
+function drawRecordingWindowShadow(
+  target: CanvasRenderingContext2D,
+  frame: RecordingWindowRect,
+  color: string,
+  blur: number,
+  offsetY: number,
+): void {
+  target.save();
+  // Restrict the fill to the exterior of the window. The rounded rectangle is
+  // only a shadow caster; its center stays transparent so the wallpaper remains
+  // continuous through letterboxed areas inside the fixed recording frame.
+  target.beginPath();
+  target.rect(0, 0, target.canvas.width, target.canvas.height);
+  appendRoundedRectPath(target, frame, frame.radius);
+  target.clip('evenodd');
+  target.shadowColor = color;
+  target.shadowBlur = blur;
+  target.shadowOffsetY = offsetY;
+  target.fillStyle = '#000000';
+  roundedRectPath(target, frame, frame.radius);
+  target.fill();
+  target.restore();
 }
 
 function drawRecordingWindow(
@@ -501,28 +529,26 @@ function drawRecordingWindow(
     return;
   }
 
-  // 阴影和卡片外轮廓在背景之上，但不属于会被镜头缩放的前景内容。
-  // 两层阴影分别给出柔和环境投影和近距离接触阴影，让录制窗口明确浮在壁纸上。
-  target.save();
-  target.shadowColor = 'rgba(22, 27, 32, 0.25)';
-  target.shadowBlur = Math.max(28, Math.round(frame.width * 0.027));
-  target.shadowOffsetY = Math.max(14, Math.round(frame.height * 0.025));
-  target.fillStyle = '#fffdf9';
-  roundedRectPath(target, frame, frame.radius);
-  target.fill();
-  target.shadowColor = 'rgba(22, 27, 32, 0.13)';
-  target.shadowBlur = Math.max(8, Math.round(frame.width * 0.008));
-  target.shadowOffsetY = Math.max(3, Math.round(frame.height * 0.005));
-  roundedRectPath(target, frame, frame.radius);
-  target.fill();
-  target.restore();
+  // Draw decoration outside the window without placing an opaque card below
+  // the source. Transparent contain margins therefore reveal the same wallpaper.
+  drawRecordingWindowShadow(
+    target,
+    frame,
+    'rgba(22, 27, 32, 0.25)',
+    Math.max(28, Math.round(frame.width * 0.027)),
+    Math.max(14, Math.round(frame.height * 0.025)),
+  );
+  drawRecordingWindowShadow(
+    target,
+    frame,
+    'rgba(22, 27, 32, 0.13)',
+    Math.max(8, Math.round(frame.width * 0.008)),
+    Math.max(3, Math.round(frame.height * 0.005)),
+  );
 
   target.save();
   roundedRectPath(target, frame, frame.radius);
   target.clip();
-  // 透明白板也应有稳定的窗口底色，避免缩放时把背景从内容下方露出来。
-  target.fillStyle = '#fffdf9';
-  target.fillRect(frame.x, frame.y, frame.width, frame.height);
   target.imageSmoothingEnabled = true;
   target.imageSmoothingQuality = 'high';
   target.drawImage(foreground, 0, 0, foreground.width, foreground.height, frame.x, frame.y, frame.width, frame.height);
@@ -995,7 +1021,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     const target = frameTarget;
     const targetCtx = resetLayer(target);
     const backgroundStarted = performance.now();
-    await paintVideoBackground(targetCtx, target.width, target.height, opts.videoBackground);
+    await paintVideoBackground(targetCtx, target.width, target.height, opts.videoBackground, { signal: opts.signal });
     diagnostics.addBreakdown('background_paint', performance.now() - backgroundStarted);
     const content = frameContent;
     const contentCtx = resetLayer(content);
@@ -1127,6 +1153,12 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         if (useShell && shellAtT && frameShellLayout) return frameShellLayout.canvasRect;
         return { x: 0, y: 0, width: target.width, height: target.height };
       })();
+
+      if (snap) {
+        const boardColor = (snap.appState as { viewBackgroundColor?: string }).viewBackgroundColor ?? '#fbfbfa';
+        contentCtx.fillStyle = boardColor;
+        contentCtx.fillRect(dest.x, dest.y, dest.width, dest.height);
+      }
 
       const sceneSourceRect: SceneRect = (() => {
         if (useShell && shellAtT) {
@@ -1647,7 +1679,7 @@ export async function renderPreviewFrame(
   target.width = outputW;
   target.height = outputH;
   const ctx = target.getContext('2d')!;
-  await paintVideoBackground(ctx, target.width, target.height, config.videoBackground);
+  await paintVideoBackground(ctx, target.width, target.height, config.videoBackground, { signal });
   checkAborted();
   const content = createContentLayer(target.width, target.height);
   const contentCtx = content.getContext('2d')!;
@@ -1719,6 +1751,14 @@ export async function renderPreviewFrame(
   }
 
   const snap = snapshotAt(snapshots, timeMs);
+  const dest = (useShell && shellAtT && frameShellLayout)
+    ? frameShellLayout.canvasRect
+    : { x: 0, y: 0, width: target.width, height: target.height };
+  if (snap) {
+    const boardColor = (snap.appState as { viewBackgroundColor?: string }).viewBackgroundColor ?? '#fbfbfa';
+    contentCtx.fillStyle = boardColor;
+    contentCtx.fillRect(dest.x, dest.y, dest.width, dest.height);
+  }
   if (!snap || (snap.elements as unknown[]).length === 0) {
     finalizePreviewForeground(frameShellLayout?.canvasRect ?? { x: 0, y: 0, width: content.width, height: content.height });
     return;
@@ -1745,10 +1785,6 @@ export async function renderPreviewFrame(
       cropWindow: config.cropWindow,
     });
   })();
-
-  const dest = (useShell && shellAtT && frameShellLayout)
-    ? frameShellLayout.canvasRect
-    : { x: 0, y: 0, width: target.width, height: target.height };
 
   const ghost = buildGhostRect(sceneSourceRect);
   const elementsForRender = [ghost, ...(snap.elements as unknown[])];

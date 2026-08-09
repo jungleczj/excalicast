@@ -937,6 +937,16 @@ test('autozoom keeps the video background at its original scale in the export pr
     const y = Math.round(canvas.height * 0.08) + 12;
     return Array.from(ctx.getImageData(x, y, 1, 1).data);
   });
+  const unzoomedBackgroundPixels = await previewCanvas.evaluate((node) => {
+    const canvas = node as HTMLCanvasElement;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('preview context unavailable');
+    return [
+      [4, 4],
+      [canvas.width - 5, 4],
+      [4, canvas.height - 5],
+    ].map(([x, y]) => Array.from(ctx.getImageData(x, y, 1, 1).data));
+  });
 
   await page.evaluate(async (id) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -961,36 +971,17 @@ test('autozoom keeps the video background at its original scale in the export pr
   await page.reload();
   await expect(previewCanvas).toBeVisible();
 
-  // 用同一 cover 算法把 wallpaper 单独绘制出来。AutoZoom 若错误作用于整张 target，
-  // 这些角落像素会来自图片中心，而不是与原始背景逐像素一致。
-  await expect.poll(() => previewCanvas.evaluate(async (node) => {
+  // AutoZoom 前后比较真实合成结果，不依赖任何旧的背景放大算法。
+  await expect.poll(() => previewCanvas.evaluate((node) => {
     const canvas = node as HTMLCanvasElement;
-    if (canvas.width === 0 || canvas.height === 0) return false;
-    const expected = document.createElement('canvas');
-    expected.width = canvas.width;
-    expected.height = canvas.height;
-    const image = new Image();
-    image.src = '/video-backgrounds/curated/bg-01-cyanotype-garden.png';
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => resolve();
-      image.onerror = () => reject(new Error('fixture wallpaper did not load'));
-    });
-    const scale = Math.max(canvas.width / image.naturalWidth, canvas.height / image.naturalHeight);
-    const drawWidth = image.naturalWidth * scale;
-    const drawHeight = image.naturalHeight * scale;
-    expected.getContext('2d')?.drawImage(image, (canvas.width - drawWidth) / 2, (canvas.height - drawHeight) / 2, drawWidth, drawHeight);
-
-    const actualPixels = canvas.getContext('2d')?.getImageData(0, 0, canvas.width, canvas.height).data;
-    const expectedPixels = expected.getContext('2d')?.getImageData(0, 0, expected.width, expected.height).data;
-    if (!actualPixels || !expectedPixels) return false;
-    const samples = [[24, 24], [canvas.width - 24, 24], [24, canvas.height - 24]];
-    return samples.every(([x, y]) => {
-      const i = (Math.round(y) * canvas.width + Math.round(x)) * 4;
-      return Math.abs(actualPixels[i] - expectedPixels[i]) <= 3
-        && Math.abs(actualPixels[i + 1] - expectedPixels[i + 1]) <= 3
-        && Math.abs(actualPixels[i + 2] - expectedPixels[i + 2]) <= 3;
-    });
-  }), { timeout: 15_000 }).toBe(true);
+    const ctx = canvas.getContext('2d');
+    if (!ctx || canvas.width === 0 || canvas.height === 0) return [];
+    return [
+      [4, 4],
+      [canvas.width - 5, 4],
+      [4, canvas.height - 5],
+    ].map(([x, y]) => Array.from(ctx.getImageData(x, y, 1, 1).data));
+  }), { timeout: 15_000 }).toEqual(unzoomedBackgroundPixels);
 
   await expect.poll(async () => previewCanvas.evaluate((node) => {
     const canvas = node as HTMLCanvasElement;
@@ -1077,6 +1068,124 @@ test('display-source Autozoom stays clipped inside the fixed recording frame', a
       return pixel[3] > 0 && !(pixel[0] > 210 && pixel[1] < 90 && pixel[2] < 100)
         && !(pixel[2] > 120 && pixel[0] < 80);
     });
+  }), { timeout: 15_000 }).toBe(true);
+});
+
+test('portrait Fit All reveals one continuous wallpaper around a landscape display source', async ({ page }) => {
+  await page.evaluate(async (id) => {
+    const scene = document.createElement('canvas');
+    scene.width = 320;
+    scene.height = 180;
+    const context = scene.getContext('2d');
+    if (!context) throw new Error('display fixture canvas unavailable');
+    context.fillStyle = '#ef3340';
+    context.fillRect(0, 0, scene.width, scene.height);
+    const stream = scene.captureStream(12);
+    const screenBlob = await new Promise<Blob>((resolve, reject) => {
+      const chunks: BlobPart[] = [];
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onerror = () => reject(new Error('display fixture recorder failed'));
+      recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
+      recorder.start();
+      window.setTimeout(() => recorder.stop(), 350);
+    });
+    stream.getTracks().forEach((track) => track.stop());
+
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(['recordings', 'screenChunks'], 'readwrite');
+      const recordings = tx.objectStore('recordings');
+      const getRecording = recordings.get(id);
+      getRecording.onsuccess = () => {
+        const recording = getRecording.result;
+        const source = { kind: 'desktop', sourceSize: { width: 320, height: 180 } };
+        recordings.put({
+          ...recording,
+          durationMs: 350,
+          source,
+          setup: {
+            ...recording.setup,
+            framing: '9:16',
+            croppingMode: 'fit_all_content',
+            source,
+            videoBackground: { kind: 'preset', presetId: 'cyanotype-garden' },
+          },
+          autoZooms: [],
+        });
+      };
+      tx.objectStore('screenChunks').add({ recordingId: id, index: 0, blob: screenBlob });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, recordingId);
+
+  await page.reload();
+  const stage = page.getByTestId('export-preview-stage');
+  await expect(stage).toHaveCSS('background-image', /bg-01-cyanotype-garden\.png/);
+  const canvas = stage.locator('canvas');
+  await expect(canvas).toBeVisible();
+
+  await expect.poll(() => canvas.evaluate(async (node) => {
+    const actual = node as HTMLCanvasElement;
+    if (actual.width === 0 || actual.height === 0) return false;
+    const actualContext = actual.getContext('2d');
+    if (!actualContext) return false;
+
+    const wallpaper = new Image();
+    wallpaper.src = '/video-backgrounds/curated/bg-01-cyanotype-garden.png';
+    await new Promise<void>((resolve, reject) => {
+      wallpaper.onload = () => resolve();
+      wallpaper.onerror = () => reject(new Error('fixture wallpaper did not load'));
+    });
+    const expected = document.createElement('canvas');
+    expected.width = actual.width;
+    expected.height = actual.height;
+    const expectedContext = expected.getContext('2d');
+    if (!expectedContext) return false;
+    const sourceAspect = wallpaper.naturalWidth / wallpaper.naturalHeight;
+    const targetAspect = actual.width / actual.height;
+    if (sourceAspect > targetAspect) {
+      const sourceWidth = wallpaper.naturalHeight * targetAspect;
+      expectedContext.drawImage(
+        wallpaper,
+        (wallpaper.naturalWidth - sourceWidth) / 2,
+        0,
+        sourceWidth,
+        wallpaper.naturalHeight,
+        0,
+        0,
+        actual.width,
+        actual.height,
+      );
+    } else {
+      const sourceHeight = wallpaper.naturalWidth / targetAspect;
+      expectedContext.drawImage(
+        wallpaper,
+        0,
+        (wallpaper.naturalHeight - sourceHeight) / 2,
+        wallpaper.naturalWidth,
+        sourceHeight,
+        0,
+        0,
+        actual.width,
+        actual.height,
+      );
+    }
+
+    // The sample is inside the fixed recording window, but above the contained
+    // 16:9 source. It must reveal the same wallpaper already painted underneath.
+    const x = Math.round(actual.width * 0.5);
+    const y = Math.round(actual.height * 0.12);
+    const actualPixel = actualContext.getImageData(x, y, 1, 1).data;
+    const expectedPixel = expectedContext.getImageData(x, y, 1, 1).data;
+    return [0, 1, 2].every((channel) => Math.abs(actualPixel[channel] - expectedPixel[channel]) <= 4)
+      && actualPixel[3] === 255;
   }), { timeout: 15_000 }).toBe(true);
 });
 

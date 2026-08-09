@@ -13,6 +13,7 @@ import type { ExportProgressState } from '@/components/ExportPanel';
 import { analyzeCursorFocusTrack } from '@/services/cursorFocusTracker';
 import { LatestTaskRunner } from '@/lib/latestTaskRunner';
 import { resolvePreviewRenderSize } from '@/services/previewRenderPolicy';
+import { getVideoBackgroundPreset, resolveVideoBackground } from '@/config/videoBackgrounds';
 
 interface Props {
   recordingId: string;
@@ -78,6 +79,15 @@ export function ExportPreview({
   const [localizedAudioUrl, setLocalizedAudioUrl] = useState<string | null>(null);
   const [localizedCameraUrl, setLocalizedCameraUrl] = useState<string | null>(null);
   const [cameraEvents, setCameraEvents] = useState<CameraPositionEvent[]>([]);
+  const previewStageBackground = useMemo(() => {
+    const background = resolveVideoBackground(config.videoBackground);
+    if (background.kind === 'color') return background.color ?? '#fffdf8';
+    if (background.kind === 'preset') {
+      const preset = getVideoBackgroundPreset(background.presetId);
+      if (preset) return `url(${JSON.stringify(preset.asset)}) center / cover no-repeat #202426`;
+    }
+    return '#202426';
+  }, [config.videoBackground]);
   const [firstShell, setFirstShell] = useState<{ shellSize: ShellSize; canvasRect: ShellCanvasRect } | null>(null);
   const [playing, setPlaying] = useState(false);
   const [selectionOverlaysHidden, setSelectionOverlaysHidden] = useState(false);
@@ -677,10 +687,10 @@ export function ExportPreview({
           width: previewBox.w,
           height: previewBox.h,
           flex: '0 0 auto',
-          background: 'var(--paper)',
+          '--preview-stage-background': previewStageBackground,
           border: '1.5px solid var(--ink)',
           borderRadius: 3,
-        }}
+        } as React.CSSProperties}
       >
         <canvas
           ref={canvasRef}
