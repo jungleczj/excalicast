@@ -1,8 +1,16 @@
 import { expect, test, type Page } from '@playwright/test';
+import { loadEnvConfig } from '@next/env';
+
+loadEnvConfig(process.cwd());
 
 const OWNER_KEY = 'library-performance-owner';
 const STALE_USER_ID = '00000000-0000-4000-8000-000000000099';
-const TEST_AUTH_COOKIE = 'sb-example-auth-token';
+
+function authCookieName(): string {
+  const configured = process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://example.supabase.co';
+  const projectRef = new URL(configured).hostname.split('.')[0] || 'example';
+  return `sb-${projectRef}-auth-token`;
+}
 
 async function cacheRevokedSession(page: Page): Promise<void> {
   const expiresAt = Math.floor(Date.now() / 1000) + 3_600;
@@ -20,7 +28,7 @@ async function cacheRevokedSession(page: Page): Promise<void> {
     if (localStorage.getItem('inject-stale-auth-session') === 'yes') {
       document.cookie = `${cookieName}=${value}; Path=/; SameSite=Lax`;
     }
-  }, { cookieName: TEST_AUTH_COOKIE, value: cookieValue });
+  }, { cookieName: authCookieName(), value: cookieValue });
   await page.evaluate(() => localStorage.setItem('inject-stale-auth-session', 'yes'));
 }
 
