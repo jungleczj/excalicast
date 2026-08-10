@@ -24,6 +24,153 @@ import {
 } from '@/services/displayFrameSource';
 import { ChunkWriteBatcher } from '@/services/mediaRecorderHealth';
 import { dataUrlToBlob } from '@/services/workspaceShellCapture';
+import { resolveHighlightFrameState } from '@/services/highlightEffects';
+import { buildLocalKeyPointMotions, resolveKeyPointMotionState } from '@/services/keyPointMotion';
+import { parseKeyPointMotionResponse } from '@/services/keyPointMotionSchema';
+import { resolveEnhancedAudioSelection } from '@/services/audioEnhancement';
+import { projectHighlightAperture } from '@/services/editorEffectsRenderer';
+import { assembleTimedPcm16Wav, hasAudiblePcm16Audio, parsePcm16Wav } from '@/lib/dubbingAudio';
+import type { EnhancedAudioTrack, HighlightEffectSegment, KeyPointMotionSegment } from '@/types/recording';
+
+function createFloat32Wav(samples: Float32Array, sampleRate = 24_000): Uint8Array {
+  const bytes = new Uint8Array(44 + samples.byteLength);
+  const view = new DataView(bytes.buffer);
+  const writeAscii = (offset: number, value: string) => {
+    for (let index = 0; index < value.length; index += 1) view.setUint8(offset + index, value.charCodeAt(index));
+  };
+  writeAscii(0, 'RIFF');
+  view.setUint32(4, 36 + samples.byteLength, true);
+  writeAscii(8, 'WAVE');
+  writeAscii(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 3, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 4, true);
+  view.setUint16(32, 4, true);
+  view.setUint16(34, 32, true);
+  writeAscii(36, 'data');
+  view.setUint32(40, samples.byteLength, true);
+  for (let index = 0; index < samples.length; index += 1) view.setFloat32(44 + index * 4, samples[index], true);
+  return bytes;
+}
+
+test('Kokoro float32 WAV chunks are normalized into audible PCM16 dubbing audio', () => {
+  const floatSamples = Float32Array.from({ length: 2_400 }, (_, index) => Math.sin(index / 24_000 * Math.PI * 2 * 440) * 0.35);
+  const assembled = assembleTimedPcm16Wav([{ startMs: 250, wav: createFloat32Wav(floatSamples) }], 500);
+  const parsed = parsePcm16Wav(assembled);
+
+  expect(parsed.sampleRate).toBe(24_000);
+  expect(parsed.channels).toBe(1);
+  expect(parsed.durationMs).toBeCloseTo(500, 0);
+  expect(hasAudiblePcm16Audio(assembled)).toBe(true);
+});
+
+test('highlight surround animation closes from the full frame toward the selected region', () => {
+  const segment: HighlightEffectSegment = {
+    id: 'hi-1',
+    start: 1_000,
+    end: 3_200,
+    region: { x: 0.25, y: 0.2, width: 0.4, height: 0.3 },
+    enabled: { spotlight: true, focusFrame: true, cursorHalo: true, textCallout: true },
+    spotlightOpacity: 0.52,
+    calloutText: 'One clear idea',
+    transition: { enterMs: 600, exitMs: 420, easing: 'easeInOutCubic', preset: 'surround' },
+    schemaVersion: 1,
+  };
+
+  const start = resolveHighlightFrameState(segment, 1_000);
+  const middle = resolveHighlightFrameState(segment, 1_300);
+  const hold = resolveHighlightFrameState(segment, 1_800);
+  const exit = resolveHighlightFrameState(segment, 3_000);
+
+  expect(start.aperture).toEqual({ x: 0, y: 0, width: 1, height: 1 });
+  expect(start.maskOpacity).toBe(0);
+  expect(middle.aperture.x).toBeGreaterThan(0);
+  expect(middle.aperture.x).toBeLessThan(segment.region.x);
+  expect(hold.aperture).toEqual(segment.region);
+  expect(hold.calloutOpacity).toBe(1);
+  expect(exit.aperture.width).toBeGreaterThan(segment.region.width);
+  expect(exit.maskOpacity).toBeLessThan(segment.spotlightOpacity);
+});
+
+test('highlight region follows the same content transform as Autozoom without changing the frame', () => {
+  const bounds = { x: 100, y: 50, width: 800, height: 450 };
+  const projected = projectHighlightAperture(
+    bounds,
+    { x: 0.4, y: 0.35, width: 0.2, height: 0.2 },
+    { scale: 2, cx: 0.5, cy: 0.5 },
+  );
+
+  expect(projected).toEqual({ x: 340, y: 140, width: 320, height: 180 });
+  expect(bounds).toEqual({ x: 100, y: 50, width: 800, height: 450 });
+});
+
+test('local key point fallback creates editable timed motions and deterministic animation state', () => {
+  const motions = buildLocalKeyPointMotions([
+    { index: 1, startMs: 0, endMs: 2_000, text: 'First, define the problem.' },
+    { index: 2, startMs: 2_200, endMs: 5_500, text: 'Then compare the available options.' },
+    { index: 3, startMs: 8_000, endMs: 11_000, text: 'Finally, choose the simplest reliable path.' },
+  ], 12_000, 'en');
+
+  expect(motions.length).toBeGreaterThanOrEqual(2);
+  expect(motions[0]).toMatchObject({ kind: 'chapter_title', generationSource: 'local', enabled: true });
+  expect(motions.every((motion) => motion.start >= 0 && motion.end <= 12_000 && motion.end > motion.start)).toBe(true);
+
+  const segment: KeyPointMotionSegment = motions[0];
+  const before = resolveKeyPointMotionState(segment, segment.start - 1);
+  const entering = resolveKeyPointMotionState(segment, segment.start + 120);
+  const hold = resolveKeyPointMotionState(segment, (segment.start + segment.end) / 2);
+  expect(before.active).toBe(false);
+  expect(entering.opacity).toBeGreaterThan(0);
+  expect(entering.opacity).toBeLessThan(1);
+  expect(hold.opacity).toBe(1);
+});
+
+test('AI key point response is sanitized, clamped, de-duplicated, and kept editable', () => {
+  const motions = parseKeyPointMotionResponse(JSON.stringify({
+    motions: [
+      { startMs: -40, endMs: 2_400, title: '<b>Opening</b>', bullets: [' First ', '<script>x</script>'], kind: 'chapter_title', placement: 'auto', sourceCueStart: 1, sourceCueEnd: 2 },
+      { startMs: 100, endMs: 2_500, title: 'Opening', bullets: ['duplicate'], kind: 'side_card', placement: 'right', sourceCueStart: 1, sourceCueEnd: 2 },
+      { startMs: 8_800, endMs: 20_000, title: 'Decision', bullets: ['Choose the reliable path'], kind: 'side_card', placement: 'left', sourceCueStart: 4, sourceCueEnd: 5 },
+    ],
+  }), 10_000);
+
+  expect(motions).toHaveLength(2);
+  expect(motions[0]).toMatchObject({ start: 0, end: 2_400, title: 'Opening', generationSource: 'deepseek' });
+  expect(motions[0].bullets).toEqual(['First', 'x']);
+  expect(motions[1].end).toBe(10_000);
+  expect(motions.every((motion) => motion.enabled && motion.schemaVersion === 1)).toBe(true);
+});
+
+test('enhanced audio replaces the original only when the derived track is ready and matches the source', () => {
+  const original = new Blob(['original'], { type: 'audio/webm' });
+  const enhanced = new Blob(['enhanced'], { type: 'audio/wav' });
+  const track: EnhancedAudioTrack = {
+    id: 'noise-standard',
+    recordingId: 'rec-1',
+    sourceFingerprint: 'source-a',
+    mode: 'standard',
+    modelVersion: 'standard-v1',
+    status: 'ready',
+    durationMs: 4_000,
+    audioBlob: enhanced,
+    createdAt: 1,
+  };
+
+  expect(resolveEnhancedAudioSelection(original, [track], 'noise-standard', 'source-a')).toEqual({
+    blob: enhanced,
+    track,
+  });
+  expect(resolveEnhancedAudioSelection(original, [track], 'noise-standard', 'source-b')).toEqual({
+    blob: original,
+    track: undefined,
+  });
+  expect(resolveEnhancedAudioSelection(original, [{ ...track, status: 'failed' }], 'noise-standard', 'source-a')).toEqual({
+    blob: original,
+    track: undefined,
+  });
+});
 
 test('MP4 mux timestamps keep DTS monotonic while preserving reordered H.264 PTS', () => {
   const mapTimestamp = createMp4TimestampMapper(15);

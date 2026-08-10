@@ -20,13 +20,37 @@ import { indexedDbAutoEditCache } from '@/services/autoEditCacheStore';
 import { TierBadge } from '@/components/TierBadge';
 import { ShareButton } from '@/components/ShareButton';
 import { useSubscription } from '@/hooks/useSubscription';
-import { getRecording, deleteRecording, updateRecordingTitle, updateRecordingSegments, updateRecordingAutoZooms } from '@/lib/db-client';
+import {
+  deleteRecording,
+  getRecording,
+  loadRecordingMediaTracks,
+  saveEnhancedAudioTrack,
+  setActiveEnhancedAudioTrack,
+  listEnhancedAudioTracks,
+  updateRecordingAutoZooms,
+  updateRecordingHighlights,
+  updateRecordingKeyPointMotions,
+  updateRecordingSegments,
+  updateRecordingTitle,
+} from '@/lib/db-client';
 import { getCurrentOwnerKey } from '@/lib/ownerKey';
 import { projectRecordingSetupToExport } from '@/services/recordingSetupProjection';
-import type { AutoZoomSegment, ExportConfig, LocalizedTrack, RecordingMetadata, TimeSegment } from '@/types/recording';
+import type {
+  AutoZoomSegment,
+  ExportConfig,
+  HighlightEffectSegment,
+  EnhancedAudioTrack,
+  KeyPointMotionSegment,
+  LocalizedTrack,
+  NoiseReductionMode,
+  RecordingMetadata,
+  TimeSegment,
+} from '@/types/recording';
 import { normalizeSegments, isTrimmed } from '@/utils/segments';
 import { parseSrt } from '@/utils/srtParser';
-import { loadOrCreateAudioPeakTrack } from '@/services/audioPeakTrack';
+import { createAudioPeaksForBlob, loadOrCreateAudioPeakTrack } from '@/services/audioPeakTrack';
+import { buildLocalKeyPointMotions } from '@/services/keyPointMotion';
+import { audioSourceFingerprint, createEnhancedAudioTrack } from '@/services/audioEnhancement';
 import { Link, useRouter } from '@/i18n/navigation';
 
 const DEFAULT_CONFIG: ExportConfig = {
@@ -62,6 +86,16 @@ export default function EditorRecordingPage(): JSX.Element {
   const [segments, setSegments] = useState<TimeSegment[]>([]);
   const [autoZooms, setAutoZooms] = useState<AutoZoomSegment[]>([]);
   const [selectedAutoZoomId, setSelectedAutoZoomId] = useState<string | null>(null);
+  const [highlights, setHighlights] = useState<HighlightEffectSegment[]>([]);
+  const [selectedHighlightId, setSelectedHighlightId] = useState<string | null>(null);
+  const [keyPointMotions, setKeyPointMotions] = useState<KeyPointMotionSegment[]>([]);
+  const [selectedKeyPointMotionId, setSelectedKeyPointMotionId] = useState<string | null>(null);
+  const [keyPointGenerationPhase, setKeyPointGenerationPhase] = useState<'idle' | 'generating' | 'ready' | 'failed'>('idle');
+  const [audioEnhancementPhase, setAudioEnhancementPhase] = useState<'idle' | 'processing' | 'ready' | 'failed'>('idle');
+  const [audioEnhancementMode, setAudioEnhancementMode] = useState<NoiseReductionMode | 'original'>('original');
+  const [audioEnhancementProgress, setAudioEnhancementProgress] = useState(0);
+  const [audioEnhancementError, setAudioEnhancementError] = useState<string | null>(null);
+  const audioEnhancementControllerRef = useRef<AbortController | null>(null);
   const [autoEditPhase, setAutoEditPhase] = useState<'idle' | 'analyzing' | 'applied' | 'failed'>('idle');
   const [autoEditResult, setAutoEditResult] = useState<AutoEditResult | null>(null);
   const [autoEditError, setAutoEditError] = useState<string | null>(null);
@@ -114,22 +148,43 @@ export default function EditorRecordingPage(): JSX.Element {
       setFinalizing(false);
       setTitle(m.title?.trim() || (en ? `Recording ${id.slice(0, 8)}` : `录制 ${id.slice(0, 8)}`));
       const savedAutoZooms = m.autoZooms ?? [];
+      const savedHighlights = m.highlights ?? [];
+      const savedKeyPointMotions = m.keyPointMotions ?? [];
       const localizedDefaults = m.localizedTrackId
         ? { localizedTrackId: m.localizedTrackId, muteOriginalAudio: true }
         : {};
+      const audioEnhancementDefaults = m.activeEnhancedAudioTrackId
+        ? { activeEnhancedAudioTrackId: m.activeEnhancedAudioTrackId }
+        : {};
       setAutoZooms(savedAutoZooms);
       setSelectedAutoZoomId(savedAutoZooms[0]?.id ?? null);
+      setHighlights(savedHighlights);
+      setSelectedHighlightId(savedHighlights[0]?.id ?? null);
+      setKeyPointMotions(savedKeyPointMotions);
+      setSelectedKeyPointMotionId(savedKeyPointMotions[0]?.id ?? null);
       if (m.setup) {
         setConfig({
           ...projectRecordingSetupToExport(m.setup, DEFAULT_CONFIG),
           ...localizedDefaults,
+          ...audioEnhancementDefaults,
           autoZooms: savedAutoZooms.length ? savedAutoZooms : undefined,
+          highlights: savedHighlights.length ? savedHighlights : undefined,
+          keyPointMotions: savedKeyPointMotions.length ? savedKeyPointMotions : undefined,
         });
-      } else if (savedAutoZooms.length || m.localizedTrackId) {
+      } else if (
+        savedAutoZooms.length
+        || savedHighlights.length
+        || savedKeyPointMotions.length
+        || m.localizedTrackId
+        || m.activeEnhancedAudioTrackId
+      ) {
         setConfig((c) => ({
           ...c,
           ...localizedDefaults,
+          ...audioEnhancementDefaults,
           autoZooms: savedAutoZooms.length ? savedAutoZooms : undefined,
+          highlights: savedHighlights.length ? savedHighlights : undefined,
+          keyPointMotions: savedKeyPointMotions.length ? savedKeyPointMotions : undefined,
         }));
       }
       setSegments(normalizeSegments(m.segments, m.durationMs));
@@ -312,11 +367,148 @@ export default function EditorRecordingPage(): JSX.Element {
     return () => clearTimeout(tid);
   }, [autoZooms, meta, id]);
 
+  useEffect(() => {
+    if (!meta) return;
+    const next = highlights.length > 0 ? highlights : undefined;
+    setConfig((current) => (JSON.stringify(current.highlights) === JSON.stringify(next) ? current : { ...current, highlights: next }));
+    const timer = setTimeout(() => { void updateRecordingHighlights(id, highlights); }, 500);
+    return () => clearTimeout(timer);
+  }, [highlights, id, meta]);
+
+  useEffect(() => {
+    if (!meta) return;
+    const next = keyPointMotions.length > 0 ? keyPointMotions : undefined;
+    setConfig((current) => (JSON.stringify(current.keyPointMotions) === JSON.stringify(next) ? current : { ...current, keyPointMotions: next }));
+    const timer = setTimeout(() => { void updateRecordingKeyPointMotions(id, keyPointMotions); }, 500);
+    return () => clearTimeout(timer);
+  }, [id, keyPointMotions, meta]);
+
   // 预览框选直接更新时间轴同一段的中心点/倍率；随后现有去抖持久化会把这组
   // 参数写入 recording，因此最终导出与预览使用完全相同的目标区域。
   const handleAutoZoomRegionChange = useCallback((zoomId: string, patch: Partial<Pick<AutoZoomSegment, 'scale' | 'cx' | 'cy'>>) => {
     setAutoZooms((current) => current.map((zoom) => zoom.id === zoomId ? { ...zoom, ...patch } : zoom));
   }, []);
+
+  const handleHighlightRegionChange = useCallback((highlightId: string, region: HighlightEffectSegment['region']) => {
+    setHighlights((current) => current.map((item) => item.id === highlightId ? { ...item, region } : item));
+  }, []);
+
+  const handleGenerateKeyPointMotions = useCallback(async () => {
+    if (!meta?.subtitleSrt || captionCues.length === 0) return;
+    setKeyPointGenerationPhase('generating');
+    try {
+      // The local fallback is deterministic and remains available offline. The
+      // DeepSeek path plugs into the same validated model once third-party text
+      // processing has been explicitly enabled for this deployment.
+      const generated = buildLocalKeyPointMotions(captionCues, meta.durationMs, locale === 'en' ? 'en' : 'zh');
+      if (generated.length === 0) throw new Error('no_key_points');
+      if (keyPointMotions.length > 0 && !window.confirm(en
+        ? 'Replace the existing key point motion track with this new version?'
+        : '是否用新版本替换现有的内容要点动效轨道？')) {
+        setKeyPointGenerationPhase('ready');
+        return;
+      }
+      await updateRecordingKeyPointMotions(id, generated);
+      setKeyPointMotions(generated);
+      setSelectedKeyPointMotionId(generated[0]?.id ?? null);
+      setKeyPointGenerationPhase('ready');
+    } catch {
+      setKeyPointGenerationPhase('failed');
+    }
+  }, [captionCues, en, id, keyPointMotions.length, locale, meta]);
+
+  const activateEnhancedTrack = useCallback(async (track: EnhancedAudioTrack) => {
+    await setActiveEnhancedAudioTrack(id, track.id);
+    setMeta((current) => current ? { ...current, activeEnhancedAudioTrackId: track.id } : current);
+    setConfig((current) => ({ ...current, activeEnhancedAudioTrackId: track.id }));
+    setAudioEnhancementMode(track.mode);
+    setAudioEnhancementPhase('ready');
+    setAudioEnhancementProgress(1);
+    setAudioPeaks(await createAudioPeaksForBlob(track.audioBlob, track.durationMs, 4));
+  }, [id]);
+
+  const handleRunAudioEnhancement = useCallback(async (mode: NoiseReductionMode) => {
+    if (!meta?.hasAudio) return;
+    audioEnhancementControllerRef.current?.abort();
+    const controller = new AbortController();
+    audioEnhancementControllerRef.current = controller;
+    setAudioEnhancementMode(mode);
+    setAudioEnhancementPhase('processing');
+    setAudioEnhancementProgress(0);
+    setAudioEnhancementError(null);
+    let pendingTrack: EnhancedAudioTrack | null = null;
+    try {
+      const recording = await loadRecordingMediaTracks(id, ['audio']);
+      if (!recording.audioBlob) throw new Error('audio_source_missing');
+      const sourceFingerprint = audioSourceFingerprint(recording.audioBlob, meta.durationMs);
+      const cached = (await listEnhancedAudioTracks(id)).find((track) => (
+        track.mode === mode
+        && track.status === 'ready'
+        && track.sourceFingerprint === sourceFingerprint
+        && track.audioBlob.size > 0
+      ));
+      if (cached) {
+        await activateEnhancedTrack(cached);
+        return;
+      }
+      pendingTrack = {
+        id: `noise-${mode}-${Date.now().toString(36)}`,
+        recordingId: id,
+        sourceFingerprint,
+        mode,
+        modelVersion: mode === 'enhanced' ? 'rnnoise-2025.1.5' : 'speech-filter-v1',
+        status: 'processing',
+        durationMs: meta.durationMs,
+        audioBlob: new Blob([], { type: 'audio/wav' }),
+        createdAt: Date.now(),
+      };
+      await saveEnhancedAudioTrack(pendingTrack, false);
+      const generated = await createEnhancedAudioTrack({
+        recordingId: id,
+        audioBlob: recording.audioBlob,
+        durationMs: meta.durationMs,
+        mode,
+        signal: controller.signal,
+        onProgress: (_phase, progress) => setAudioEnhancementProgress(progress),
+      });
+      const readyTrack: EnhancedAudioTrack = {
+        ...generated,
+        id: pendingTrack.id,
+        status: 'ready',
+      };
+      await saveEnhancedAudioTrack(readyTrack, true);
+      await activateEnhancedTrack(readyTrack);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setAudioEnhancementPhase('idle');
+        return;
+      }
+      const message = error instanceof Error ? error.message : 'audio_enhancement_failed';
+      setAudioEnhancementError(message);
+      setAudioEnhancementPhase('failed');
+      if (pendingTrack) {
+        await saveEnhancedAudioTrack({ ...pendingTrack, status: 'failed', error: message }, false).catch(() => undefined);
+      }
+    } finally {
+      if (audioEnhancementControllerRef.current === controller) audioEnhancementControllerRef.current = null;
+    }
+  }, [activateEnhancedTrack, id, meta]);
+
+  const handleUseOriginalAudio = useCallback(() => {
+    audioEnhancementControllerRef.current?.abort();
+    setAudioEnhancementMode('original');
+    setAudioEnhancementPhase('idle');
+    setAudioEnhancementProgress(0);
+    setAudioEnhancementError(null);
+    setMeta((current) => current ? { ...current, activeEnhancedAudioTrackId: undefined } : current);
+    setConfig((current) => ({ ...current, activeEnhancedAudioTrackId: undefined }));
+    void setActiveEnhancedAudioTrack(id, undefined);
+    if (meta?.hasAudio) void loadOrCreateAudioPeakTrack(id, 4).then((track) => setAudioPeaks(track?.peaks ?? []));
+  }, [id, meta?.hasAudio]);
+
+  useEffect(() => () => {
+    audioEnhancementControllerRef.current?.abort();
+  }, [id]);
 
   const handleLocalizedTrackReady = useCallback((track: LocalizedTrack) => {
     setMeta((current) => current ? { ...current, localizedTrackId: track.id } : current);
@@ -476,6 +668,8 @@ export default function EditorRecordingPage(): JSX.Element {
                 onPlayheadChange={setPlayheadMs}
                 selectedAutoZoomId={selectedAutoZoomId}
                 onAutoZoomRegionChange={handleAutoZoomRegionChange}
+                selectedHighlightId={selectedHighlightId}
+                onHighlightRegionChange={handleHighlightRegionChange}
               />
             </div>
           </div>
@@ -500,6 +694,25 @@ export default function EditorRecordingPage(): JSX.Element {
               onAutoZoomChange={setAutoZooms}
               selectedAutoZoomId={selectedAutoZoomId}
               onAutoZoomSelect={setSelectedAutoZoomId}
+              highlights={highlights}
+              onHighlightChange={setHighlights}
+              selectedHighlightId={selectedHighlightId}
+              onHighlightSelect={setSelectedHighlightId}
+              keyPointMotions={keyPointMotions}
+              onKeyPointMotionChange={setKeyPointMotions}
+              selectedKeyPointMotionId={selectedKeyPointMotionId}
+              onKeyPointMotionSelect={setSelectedKeyPointMotionId}
+              onGenerateKeyPointMotions={handleGenerateKeyPointMotions}
+              keyPointGenerationPhase={keyPointGenerationPhase}
+              audioEnhancement={{
+                phase: audioEnhancementPhase,
+                mode: audioEnhancementMode,
+                progress: audioEnhancementProgress,
+                error: audioEnhancementError,
+                onRun: (mode) => { void handleRunAudioEnhancement(mode); },
+                onOriginal: handleUseOriginalAudio,
+                onCancel: () => audioEnhancementControllerRef.current?.abort(),
+              }}
               autoEdit={{
                 phase: autoEditPhase,
                 result: autoEditResult,
@@ -546,6 +759,20 @@ export default function EditorRecordingPage(): JSX.Element {
                   ? 'Drag onto the purple zoom lane, or click to add at the playhead'
                   : '拖入紫色放大轨道，或点击在播放头处添加',
                 editAutoZoomScale: en ? 'Edit zoom scale' : '编辑放大倍率',
+                highlight: en ? 'Highlight' : '高亮',
+                noiseReduction: en ? 'Remove background noise' : '去除背景杂音',
+                standardNoiseReduction: en ? 'Standard · fast local cleanup' : '标准 · 快速本地降噪',
+                enhancedNoiseReduction: en ? 'Enhanced · local AI' : '增强 · 本地 AI',
+                originalAudio: en ? 'Original audio' : '原声',
+                keyPointMotion: en ? 'Generate key point motion' : '生成内容要点动效',
+                keyPointNeedsCaptions: en ? 'Generate captions first' : '请先生成字幕',
+                generating: en ? 'Generating…' : '生成中…',
+                spotlight: en ? 'Spotlight' : '聚光',
+                focusFrame: en ? 'Focus frame' : '焦点框',
+                cursorHalo: en ? 'Center halo' : '中心光晕',
+                textCallout: en ? 'Text callout' : '文字标注',
+                calloutText: en ? 'Callout text' : '标注文案',
+                opacity: en ? 'Shade' : '遮罩',
               }}
             />
           </div>

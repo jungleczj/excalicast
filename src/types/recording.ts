@@ -52,6 +52,12 @@ export interface RecordingMetadata {
   segments?: TimeSegment[];
   /** 自动放大段（ms，相对录制开始）。 */
   autoZooms?: AutoZoomSegment[];
+  /** 后期高亮效果段（ms，相对录制开始）。 */
+  highlights?: HighlightEffectSegment[];
+  /** 根据字幕生成的内容要点动效段。 */
+  keyPointMotions?: KeyPointMotionSegment[];
+  /** 当前启用的非破坏性降噪派生音轨。 */
+  activeEnhancedAudioTrackId?: string;
   /** 当前用于预览/导出的本地化音轨；只引用 localizedTracks，不把大 Blob 塞进 metadata。 */
   localizedTrackId?: string;
 }
@@ -82,6 +88,63 @@ export interface AutoZoomSegment {
   scale: number;
   cx?: number;
   cy?: number;
+}
+
+export interface HighlightEffectSegment {
+  id: string;
+  start: number;
+  end: number;
+  region: { x: number; y: number; width: number; height: number };
+  enabled: {
+    spotlight: boolean;
+    focusFrame: boolean;
+    cursorHalo: boolean;
+    textCallout: boolean;
+  };
+  spotlightOpacity: number;
+  calloutText?: string;
+  transition: {
+    enterMs: number;
+    exitMs: number;
+    easing: 'easeInOutCubic';
+    preset: 'surround';
+  };
+  schemaVersion: 1;
+}
+
+export interface KeyPointMotionSegment {
+  id: string;
+  start: number;
+  end: number;
+  kind: 'chapter_title' | 'side_card' | 'lower_third';
+  title: string;
+  bullets: string[];
+  placement: 'auto' | 'left' | 'right' | 'top' | 'bottom';
+  sourceCueStart: number;
+  sourceCueEnd: number;
+  transition: {
+    enterMs: number;
+    exitMs: number;
+    easing: 'easeInOutCubic';
+  };
+  enabled: boolean;
+  generationSource: 'deepseek' | 'local';
+  schemaVersion: 1;
+}
+
+export type NoiseReductionMode = 'standard' | 'enhanced';
+
+export interface EnhancedAudioTrack {
+  id: string;
+  recordingId: string;
+  sourceFingerprint: string;
+  mode: NoiseReductionMode;
+  modelVersion: string;
+  status: 'processing' | 'ready' | 'failed';
+  durationMs: number;
+  audioBlob: Blob;
+  createdAt: number;
+  error?: string;
 }
 
 export interface AudioChunk {
@@ -280,6 +343,12 @@ export interface ExportConfig {
   segments?: TimeSegment[];
   /** 指定时间窗口内自动放大画面。 */
   autoZooms?: AutoZoomSegment[];
+  /** 指定时间窗口内的高亮效果。 */
+  highlights?: HighlightEffectSegment[];
+  /** 字幕提炼出的内容要点动效。 */
+  keyPointMotions?: KeyPointMotionSegment[];
+  /** 当前启用的非破坏性降噪派生音轨。 */
+  activeEnhancedAudioTrackId?: string;
   /** 视频背景。旧录制缺省为 none。 */
   videoBackground?: VideoBackgroundConfig;
   /** 英文配音 / 本地化音轨。缺省不启用，旧录制兼容。 */

@@ -24,6 +24,7 @@
     "@ffmpeg/ffmpeg": "^0.12.10",
     "@ffmpeg/util": "^0.12.1",
     "@paddle/paddle-js": "^1.6.4",
+    "@shiguredo/rnnoise-wasm": "^2025.1.5",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.105.4",
     "@upstash/redis": "^1.38.0",

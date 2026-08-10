@@ -1,5 +1,6 @@
 'use client';
 
+import { ALL_FORMATS, AudioSampleSink, BlobSource, Input } from 'mediabunny';
 import {
   getAudioPeakTrack,
   loadRecordingMediaTracks,
@@ -41,24 +42,51 @@ export async function loadOrCreateAudioPeakTrack(
   const cached = await getAudioPeakTrack(recordingId);
   if (cached?.sourceSignature === signature && cached.samplesPerSecond === samplesPerSecond) return cached;
 
-  const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!AudioContextCtor) return null;
-  const context = new AudioContextCtor();
+  const peaks = await createAudioPeaksForBlob(audioBlob, metadata.durationMs, samplesPerSecond);
+  const track: AudioPeakTrackRow = {
+    id: `${recordingId}:${signature}:${samplesPerSecond}`,
+    recordingId,
+    sourceSignature: signature,
+    samplesPerSecond,
+    peaks,
+    createdAt: Date.now(),
+  };
+  await saveAudioPeakTrack(track);
+  return track;
+}
+
+export async function createAudioPeaksForBlob(
+  audioBlob: Blob,
+  durationMs: number,
+  samplesPerSecond = 12,
+): Promise<number[]> {
+  const bucketCount = Math.max(1, Math.ceil((durationMs / 1000) * samplesPerSecond));
+  const peaks = new Float32Array(bucketCount);
+  const input = new Input({
+    source: new BlobSource(audioBlob, { maxCacheSize: 4 * 1024 * 1024, useStreamReader: true }),
+    formats: ALL_FORMATS,
+  });
   try {
-    const buffer = await context.decodeAudioData(await audioBlob.arrayBuffer());
-    const channels = Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index));
-    const peaks = downsampleAudioPeaks(channels, Math.max(1, Math.ceil((metadata.durationMs / 1000) * samplesPerSecond)));
-    const track: AudioPeakTrackRow = {
-      id: `${recordingId}:${signature}:${samplesPerSecond}`,
-      recordingId,
-      sourceSignature: signature,
-      samplesPerSecond,
-      peaks,
-      createdAt: Date.now(),
-    };
-    await saveAudioPeakTrack(track);
-    return track;
+    const track = await input.getPrimaryAudioTrack();
+    if (!track) return [];
+    const sink = new AudioSampleSink(track);
+    for await (const sample of sink.samples()) {
+      try {
+        for (let channel = 0; channel < sample.numberOfChannels; channel += 1) {
+          const plane = new Float32Array(sample.numberOfFrames);
+          sample.copyTo(plane, { planeIndex: channel, format: 'f32-planar' });
+          for (let frame = 0; frame < plane.length; frame += 1) {
+            const time = sample.timestamp + frame / sample.sampleRate;
+            const bucket = Math.min(bucketCount - 1, Math.max(0, Math.floor(time * samplesPerSecond)));
+            peaks[bucket] = Math.max(peaks[bucket], Math.abs(plane[frame]));
+          }
+        }
+      } finally {
+        sample.close();
+      }
+    }
+    return Array.from(peaks, (peak) => Number(Math.min(1, peak).toFixed(6)));
   } finally {
-    await context.close().catch(() => undefined);
+    input.dispose();
   }
 }

@@ -4,9 +4,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useTranslations } from 'next-intl';
 import { autoZoomAt, cameraPositionAt, getRecordingWindowRect, releasePreviewResources, renderPreviewFrame, setPreviewPlayback } from '@/services/exportPipeline';
 import { cameraPlacementFromEvent, projectCameraPlacement } from '@/services/cameraPlacement';
-import { getLocalizedTrack, getWorkspaceShells, loadFullRecording, releaseRecordingMediaCache } from '@/lib/db-client';
+import { getEnhancedAudioTrack, getLocalizedTrack, getWorkspaceShells, loadFullRecording, releaseRecordingMediaCache } from '@/lib/db-client';
 import { isUsableLocalizedTrack } from '@/lib/localizedTrack';
-import type { AutoZoomSegment, CameraPositionEvent, ExportConfig, LocalizedTrack, RecordingMetadata, ShellCanvasRect, ShellSize, TimeSegment } from '@/types/recording';
+import { audioSourceFingerprint } from '@/services/audioEnhancement';
+import type { AutoZoomSegment, CameraPositionEvent, EnhancedAudioTrack, ExportConfig, HighlightEffectSegment, LocalizedTrack, RecordingMetadata, ShellCanvasRect, ShellSize, TimeSegment } from '@/types/recording';
 import { resolveExportOutputSize } from '@/types/recording';
 import { keptDuration, normalizeSegments, outputToSource, sourceToOutput } from '@/utils/segments';
 import { I } from '@/components/icons';
@@ -29,6 +30,8 @@ interface Props {
   /** 时间轴当前选中的 Auto Zoom；在预览中以可拖动框呈现最终放大区域。 */
   selectedAutoZoomId?: string | null;
   onAutoZoomRegionChange?: (id: string, patch: Partial<Pick<AutoZoomSegment, 'scale' | 'cx' | 'cy'>>) => void;
+  selectedHighlightId?: string | null;
+  onHighlightRegionChange?: (id: string, region: HighlightEffectSegment['region']) => void;
 }
 
 const DISPLAY_REDRAW_INTERVAL_MS = 50;
@@ -61,6 +64,7 @@ const resizeButtonStyle: React.CSSProperties = {
 export function ExportPreview({
   recordingId, metadata, config, progress, segments, playheadMs, onPlayheadChange,
   selectedAutoZoomId = null, onAutoZoomRegionChange,
+  selectedHighlightId = null, onHighlightRegionChange,
 }: Props): JSX.Element {
   const t = useTranslations('exportPreview');
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -75,10 +79,13 @@ export function ExportPreview({
   const [rendering, setRendering] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [sourceAudioFingerprint, setSourceAudioFingerprint] = useState<string | null>(null);
   const [cameraUrl, setCameraUrl] = useState<string | null>(null);
   const [localizedTrack, setLocalizedTrack] = useState<LocalizedTrack | null>(null);
   const [localizedAudioUrl, setLocalizedAudioUrl] = useState<string | null>(null);
   const [localizedCameraUrl, setLocalizedCameraUrl] = useState<string | null>(null);
+  const [enhancedAudioTrack, setEnhancedAudioTrack] = useState<EnhancedAudioTrack | null>(null);
+  const [enhancedAudioUrl, setEnhancedAudioUrl] = useState<string | null>(null);
   const [cameraEvents, setCameraEvents] = useState<CameraPositionEvent[]>([]);
   const previewStageBackground = useMemo(() => {
     const background = resolveVideoBackground(config.videoBackground);
@@ -202,12 +209,16 @@ export function ExportPreview({
     let cancelled = false;
     let createdAudioUrl: string | null = null;
     let createdCameraUrl: string | null = null;
+    setAudioUrl(null);
+    setSourceAudioFingerprint(null);
+    setCameraUrl(null);
     Promise.all([loadFullRecording(recordingId), getWorkspaceShells(recordingId)])
       .then(([r, shells]) => {
         if (cancelled) return;
         if (r.audioBlob) {
           createdAudioUrl = URL.createObjectURL(r.audioBlob);
           setAudioUrl(createdAudioUrl);
+          setSourceAudioFingerprint(audioSourceFingerprint(r.audioBlob, r.metadata.durationMs));
         }
         if (r.cameraBlob) {
           createdCameraUrl = URL.createObjectURL(r.cameraBlob);
@@ -292,6 +303,38 @@ export function ExportPreview({
       if (createdCameraUrl) URL.revokeObjectURL(createdCameraUrl);
     };
   }, [config.localizedTrackId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let createdAudioUrl: string | null = null;
+    if (!config.activeEnhancedAudioTrackId || !sourceAudioFingerprint || (localizedTrack && config.muteOriginalAudio !== false)) {
+      setEnhancedAudioTrack(null);
+      setEnhancedAudioUrl(null);
+      return;
+    }
+    void getEnhancedAudioTrack(config.activeEnhancedAudioTrackId)
+      .then((track) => {
+        if (cancelled) return;
+        if (!track || track.status !== 'ready' || track.audioBlob.size === 0 || track.sourceFingerprint !== sourceAudioFingerprint) {
+          setEnhancedAudioTrack(null);
+          setEnhancedAudioUrl(null);
+          return;
+        }
+        createdAudioUrl = URL.createObjectURL(track.audioBlob);
+        setEnhancedAudioTrack(track);
+        setEnhancedAudioUrl(createdAudioUrl);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEnhancedAudioTrack(null);
+          setEnhancedAudioUrl(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+      if (createdAudioUrl) URL.revokeObjectURL(createdAudioUrl);
+    };
+  }, [config.activeEnhancedAudioTrackId, config.muteOriginalAudio, localizedTrack, sourceAudioFingerprint]);
 
   // 当前 timeMs 对应的摄像头位置（百分比）。
   // shell on 时，气泡定位用 letterboxed shell 区作为坐标系（跟导出 pipeline 一致）；
@@ -565,11 +608,17 @@ export function ExportPreview({
   // 摄像头气泡位置/尺寸由 cameraOverlayStyle 计算（events → 动态；无事件 → 右下角 18% 宽度）
   const cameraShape = metadata.setup?.camera.shape ?? 'circle';
   const previewAutoZoomScale = autoZoomAt(config.autoZooms, timeMs)?.scale ?? 1;
-  const activeAudioUrl = localizedTrack && config.muteOriginalAudio !== false ? localizedAudioUrl : audioUrl;
+  const activeAudioUrl = localizedTrack && config.muteOriginalAudio !== false
+    ? localizedAudioUrl
+    : (enhancedAudioUrl ?? audioUrl);
   const activeCameraUrl = localizedCameraUrl ?? cameraUrl;
   const selectedAutoZoom = useMemo(
     () => config.autoZooms?.find((zoom) => zoom.id === selectedAutoZoomId) ?? null,
     [config.autoZooms, selectedAutoZoomId],
+  );
+  const selectedHighlight = useMemo(
+    () => config.highlights?.find((item) => item.id === selectedHighlightId) ?? null,
+    [config.highlights, selectedHighlightId],
   );
 
   // 与 exportPipeline 的 zoomBounds / drawRecordingWindow 一致：框选目标永远位于实际
@@ -668,6 +717,58 @@ export function ExportPreview({
     window.addEventListener('pointerup', onUp, { once: true });
   }, [onAutoZoomRegionChange, selectedAutoZoom, zoomContentBounds, zoomRegionStyle]);
 
+  const highlightRegionStyle = useMemo<React.CSSProperties | null>(() => {
+    if (!selectedHighlight) return null;
+    return {
+      left: `${(zoomContentBounds.x + selectedHighlight.region.x * zoomContentBounds.width) * 100}%`,
+      top: `${(zoomContentBounds.y + selectedHighlight.region.y * zoomContentBounds.height) * 100}%`,
+      width: `${selectedHighlight.region.width * zoomContentBounds.width * 100}%`,
+      height: `${selectedHighlight.region.height * zoomContentBounds.height * 100}%`,
+    };
+  }, [selectedHighlight, zoomContentBounds]);
+
+  const startHighlightRegionDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!selectedHighlight || !onHighlightRegionChange) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const stage = event.currentTarget.closest('[data-testid="export-preview-stage"]');
+    if (!stage) return;
+    const stageRect = stage.getBoundingClientRect();
+    const content = {
+      x: zoomContentBounds.x * stageRect.width,
+      y: zoomContentBounds.y * stageRect.height,
+      width: zoomContentBounds.width * stageRect.width,
+      height: zoomContentBounds.height * stageRect.height,
+    };
+    const originX = event.clientX;
+    const originY = event.clientY;
+    const initial = { ...selectedHighlight.region };
+    const resizing = (event.target as HTMLElement).closest('[data-highlight-region-resize]') !== null;
+    const onMove = (move: PointerEvent) => {
+      const dx = (move.clientX - originX) / content.width;
+      const dy = (move.clientY - originY) / content.height;
+      if (resizing) {
+        onHighlightRegionChange(selectedHighlight.id, {
+          ...initial,
+          width: clamp(initial.width + dx, 0.02, 1 - initial.x),
+          height: clamp(initial.height + dy, 0.02, 1 - initial.y),
+        });
+        return;
+      }
+      onHighlightRegionChange(selectedHighlight.id, {
+        ...initial,
+        x: clamp(initial.x + dx, 0, 1 - initial.width),
+        y: clamp(initial.y + dy, 0, 1 - initial.height),
+      });
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp, { once: true });
+  }, [onHighlightRegionChange, selectedHighlight, zoomContentBounds]);
+
   return (
     <div className="export-preview-craft-wrap w-full">
       <div
@@ -698,7 +799,7 @@ export function ExportPreview({
           className="h-full w-full object-contain"
         />
 
-        {selectedAutoZoom && zoomRegionStyle && !exporting && (
+        {(selectedAutoZoom || selectedHighlight) && !exporting && (
           <button
             type="button"
             data-testid="toggle-preview-selection-overlays"
@@ -765,6 +866,36 @@ export function ExportPreview({
           </div>
         )}
 
+        {highlightRegionStyle && selectedHighlight && !selectionOverlaysHidden && (
+          <div
+            data-testid="highlight-region"
+            aria-label="Highlight region"
+            title="Drag to move; drag the corner to freely resize width and height"
+            onPointerDown={startHighlightRegionDrag}
+            style={{
+              ...highlightRegionStyle,
+              position: 'absolute',
+              zIndex: 26,
+              border: '2px solid rgba(255, 176, 28, .98)',
+              borderRadius: 4,
+              background: 'rgba(255, 190, 48, .08)',
+              boxShadow: '0 0 0 1px rgba(255,255,255,.8) inset',
+              cursor: 'move',
+              touchAction: 'none',
+            }}
+          >
+            <span
+              data-highlight-region-resize
+              aria-hidden="true"
+              style={{
+                position: 'absolute', right: -7, bottom: -7, width: 13, height: 13,
+                borderRadius: 3, border: '2px solid #fffdf8', background: '#ffb01c',
+                boxShadow: '0 2px 7px rgba(65,46,12,.3)', cursor: 'nwse-resize',
+              }}
+            />
+          </div>
+        )}
+
         {/* 摄像头气泡：位置/尺寸跟随 cameraEvents（无事件时回退右下角） */}
         {activeCameraUrl && (
           <div
@@ -806,6 +937,7 @@ export function ExportPreview({
           <audio
             data-testid="export-preview-audio"
             data-localized-audio={localizedTrack && config.muteOriginalAudio !== false ? 'true' : 'false'}
+            data-enhanced-audio={enhancedAudioTrack ? enhancedAudioTrack.mode : 'false'}
             ref={audioRef}
             src={activeAudioUrl}
             preload="auto"

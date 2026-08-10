@@ -8544,6 +8544,232 @@ body {
   gap: 8px;
 }
 
+/* Editor enhancement toolbar: one row when it fits, exactly two rows when it does not. */
+.editor-craft-main .timeline-craft-panel {
+  container-type: inline-size;
+}
+
+.editor-craft-main .timeline-craft-toolbar {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 12px;
+  overflow: visible;
+}
+
+.timeline-craft-toolbar-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.timeline-craft-toolbar-main .timeline-craft-autoedit {
+  flex: 0 0 auto;
+}
+
+.timeline-craft-toolbar-main::-webkit-scrollbar {
+  display: none;
+}
+
+.timeline-craft-action-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.timeline-craft-action-menu > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  list-style: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.timeline-craft-action-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.timeline-craft-action-popover {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  z-index: 40;
+  display: grid;
+  width: max-content;
+  min-width: 210px;
+  gap: 4px;
+  padding: 7px;
+  border: 1px solid rgba(24, 25, 26, 0.16);
+  border-radius: 10px;
+  background: #fffdf8;
+  box-shadow: 0 12px 28px rgba(24, 25, 26, 0.16);
+}
+
+.editor-craft-main .timeline-craft-action-popover button {
+  width: 100% !important;
+  min-height: 30px !important;
+  padding: 6px 9px !important;
+  border: 0 !important;
+  border-radius: 7px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--ink) !important;
+  font-size: 10px !important;
+  text-align: left;
+}
+
+.editor-craft-main .timeline-craft-action-popover button:hover {
+  background: var(--hi-soft) !important;
+}
+
+.editor-craft-main .timeline-craft-action-popover button[aria-pressed="true"] {
+  background: rgba(94, 230, 194, 0.2) !important;
+  font-weight: 700;
+}
+
+.timeline-craft-action-error {
+  max-width: 260px;
+  padding: 4px 8px;
+  color: #b23832;
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+
+.timeline-craft-effect-track {
+  overflow: hidden;
+  border: 1px solid rgba(24, 25, 26, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 253, 248, 0.56);
+}
+
+.timeline-craft-effect-segment {
+  position: absolute;
+  top: 5px;
+  display: flex;
+  height: 24px;
+  min-width: 12px;
+  align-items: center;
+  justify-content: space-between;
+  overflow: hidden;
+  border: 1px solid rgba(24, 25, 26, 0.28);
+  border-radius: 5px;
+  color: #17191d;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  cursor: grab;
+  user-select: none;
+}
+
+.timeline-craft-effect-segment.is-highlight {
+  background: rgba(255, 190, 48, 0.88);
+}
+
+.timeline-craft-effect-segment.is-keypoint {
+  background: rgba(94, 230, 194, 0.82);
+}
+
+.timeline-craft-effect-segment.is-selected {
+  outline: 2px solid var(--craft-blue);
+  outline-offset: 1px;
+}
+
+.timeline-craft-effect-segment > span {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-craft-keypoint-editor {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) minmax(160px, 1.5fr) 110px 90px auto auto;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid rgba(24, 25, 26, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 253, 248, 0.72);
+}
+
+.timeline-craft-highlight-editor {
+  display: grid;
+  grid-template-columns: repeat(4, max-content) minmax(130px, 1fr) minmax(140px, 1.2fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid rgba(24, 25, 26, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 253, 248, 0.72);
+  color: var(--ink);
+  font-size: 10px;
+}
+
+.timeline-craft-highlight-editor > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.timeline-craft-highlight-editor > input[type="text"],
+.timeline-craft-highlight-editor > input:not([type]) {
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgba(24, 25, 26, 0.16);
+  border-radius: 7px;
+  background: #fffdf8;
+}
+
+.timeline-craft-effect-opacity {
+  min-width: 130px;
+}
+
+.timeline-craft-effect-opacity input {
+  width: 72px;
+}
+
+.timeline-craft-keypoint-editor :where(input, select, button) {
+  min-width: 0;
+  height: 30px;
+  border: 1px solid rgba(24, 25, 26, 0.16);
+  border-radius: 7px;
+  background: #fffdf8;
+  color: var(--ink);
+  font-size: 10px;
+}
+
+.timeline-craft-keypoint-editor input {
+  padding: 0 8px;
+}
+
+@container (max-width: 980px) {
+  .editor-craft-main .timeline-craft-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+  }
+
+  .timeline-craft-toolbar-end {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .timeline-craft-keypoint-editor {
+    grid-template-columns: minmax(120px, 1fr) minmax(150px, 1.5fr) 100px 90px;
+  }
+
+  .timeline-craft-highlight-editor {
+    grid-template-columns: repeat(4, max-content) minmax(120px, 1fr);
+  }
+}
+
 .timeline-craft-zoom-controls {
   display: inline-flex;
   height: 26px;

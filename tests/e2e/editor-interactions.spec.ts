@@ -3,6 +3,24 @@ import { expect, test } from '@playwright/test';
 const baseOrigin = new URL(process.env.E2E_BASE_URL ?? 'http://localhost:3002').origin;
 const recordingId = 'e2e-editor-interactions';
 
+async function readRecordingFieldCount(page: import('@playwright/test').Page, field: 'highlights' | 'keyPointMotions') {
+  return page.evaluate(async ({ id, fieldName }) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const value = await new Promise<number>((resolve, reject) => {
+      const tx = db.transaction('recordings', 'readonly');
+      const request = tx.objectStore('recordings').get(id);
+      request.onsuccess = () => resolve(Array.isArray(request.result?.[fieldName]) ? request.result[fieldName].length : 0);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return value;
+  }, { id: recordingId, fieldName: field });
+}
+
 test.use({
   locale: 'en-US',
   extraHTTPHeaders: { 'Accept-Language': 'en-US,en;q=0.9' },
@@ -159,6 +177,161 @@ test('always keep zoomed in is off by default, remembered per ratio, and disable
 
   await fitAll.click();
   await expect(keepZoomed).toHaveAttribute('aria-checked', 'false');
+});
+
+test('Highlight creates an editable free-form region and a persisted timeline segment', async ({ page }) => {
+  await page.getByTestId('highlight-add').click();
+  await expect(page.getByTestId('highlight-segment')).toHaveCount(1);
+  await expect(page.getByTestId('highlight-editor')).toBeVisible();
+  const region = page.getByTestId('highlight-region');
+  await expect(region).toBeVisible();
+  const before = await region.boundingBox();
+  if (!before) throw new Error('highlight region was not measured');
+  const handle = region.locator('[data-highlight-region-resize]');
+  const handleBox = await handle.boundingBox();
+  if (!handleBox) throw new Error('highlight resize handle was not measured');
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handleBox.x + 46, handleBox.y + 20);
+  await page.mouse.up();
+  const after = await region.boundingBox();
+  if (!after) throw new Error('resized highlight region was not measured');
+  expect(after.width).toBeGreaterThan(before.width + 20);
+  expect(after.height).toBeGreaterThan(before.height + 5);
+  expect(after.width / after.height).not.toBeCloseTo(before.width / before.height, 1);
+  await page.getByRole('checkbox', { name: 'Center halo' }).check();
+  await page.getByRole('checkbox', { name: 'Text callout' }).check();
+  await page.getByRole('textbox', { name: 'Callout text' }).fill('Focus here');
+  await page.waitForTimeout(650);
+  await expect.poll(() => readRecordingFieldCount(page, 'highlights')).toBe(1);
+  await page.reload();
+  await expect(page.getByTestId('highlight-segment')).toHaveCount(1);
+  await expect(page.getByTestId('highlight-region')).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'Center halo' })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Text callout' })).toBeChecked();
+  await expect(page.getByRole('textbox', { name: 'Callout text' })).toHaveValue('Focus here');
+});
+
+test('key point motion requires captions and then creates an editable track', async ({ page }) => {
+  const generate = page.getByTestId('keypoint-generate');
+  await expect(generate).toBeDisabled();
+  await page.evaluate(async (id) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('recordings', 'readwrite');
+      const store = tx.objectStore('recordings');
+      const request = store.get(id);
+      request.onsuccess = () => store.put({
+        ...request.result,
+        subtitleSrt: '1\n00:00:00,000 --> 00:00:02,500\nDefine the problem clearly.\n\n2\n00:00:03,000 --> 00:00:06,000\nCompare the available options.\n\n3\n00:00:08,000 --> 00:00:11,000\nChoose the simplest reliable path.',
+      });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, recordingId);
+  await page.reload();
+  await expect(page.getByTestId('keypoint-generate')).toBeEnabled();
+  await page.getByTestId('keypoint-generate').click();
+  await expect(page.getByTestId('keypoint-motion-segment').first()).toBeVisible();
+  await page.getByTestId('keypoint-motion-segment').first().click();
+  await expect(page.getByTestId('keypoint-motion-editor')).toBeVisible();
+  const generatedCount = await page.getByTestId('keypoint-motion-segment').count();
+  await page.waitForTimeout(650);
+  await expect.poll(() => readRecordingFieldCount(page, 'keyPointMotions')).toBe(generatedCount);
+  await page.reload();
+  await expect(page.getByTestId('keypoint-motion-segment')).toHaveCount(generatedCount);
+});
+
+test('editor enhancement controls stay within one or two toolbar rows', async ({ page }) => {
+  await expect(page.locator('.timeline-craft-action-menu')).toBeVisible();
+  await page.locator('.timeline-craft-action-menu > summary').click();
+  await expect(page.getByRole('button', { name: 'Standard · fast local cleanup' })).toBeVisible();
+  for (const width of [1050, 760, 560]) {
+    await page.setViewportSize({ width, height: 900 });
+    const rowCount = await page.locator('.timeline-craft-toolbar').evaluate((toolbar) => {
+      const children = Array.from(toolbar.children) as HTMLElement[];
+      return new Set(children.map((child) => Math.round(child.getBoundingClientRect().top))).size;
+    });
+    expect(rowCount).toBeLessThanOrEqual(2);
+    const bodyScroll = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(bodyScroll).toBeLessThanOrEqual(1);
+  }
+});
+
+test('standard noise reduction creates a derived track and switches preview audio without replacing the source', async ({ page }) => {
+  await page.evaluate(async (id) => {
+    const sampleRate = 48_000;
+    const sampleCount = sampleRate;
+    const wav = new ArrayBuffer(44 + sampleCount * 2);
+    const view = new DataView(wav);
+    const write = (offset: number, value: string) => {
+      for (let index = 0; index < value.length; index += 1) view.setUint8(offset + index, value.charCodeAt(index));
+    };
+    write(0, 'RIFF');
+    view.setUint32(4, 36 + sampleCount * 2, true);
+    write(8, 'WAVE'); write(12, 'fmt ');
+    view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+    write(36, 'data'); view.setUint32(40, sampleCount * 2, true);
+    for (let index = 0; index < sampleCount; index += 1) {
+      const voice = Math.sin((index / sampleRate) * Math.PI * 2 * 220) * 0.18;
+      const hum = Math.sin((index / sampleRate) * Math.PI * 2 * 60) * 0.035;
+      view.setInt16(44 + index * 2, Math.round((voice + hum) * 32767), true);
+    }
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(['recordings', 'audioChunks'], 'readwrite');
+      const recordings = tx.objectStore('recordings');
+      const request = recordings.get(id);
+      request.onsuccess = () => recordings.put({ ...request.result, hasAudio: true, durationMs: 1_000 });
+      tx.objectStore('audioChunks').add({ recordingId: id, index: 0, blob: new Blob([wav], { type: 'audio/wav' }) });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, recordingId);
+
+  await page.reload();
+  await page.getByTestId('noise-reduction-menu').click();
+  await page.getByTestId('noise-standard').click();
+  await expect(page.getByTestId('noise-reduction-menu')).toHaveAttribute('data-phase', 'ready', { timeout: 20_000 });
+  await expect(page.getByTestId('export-preview-audio')).toHaveAttribute('data-enhanced-audio', 'standard');
+  await page.getByTestId('noise-enhanced').click();
+  await expect(page.getByTestId('noise-reduction-menu')).toHaveAttribute('data-phase', 'ready', { timeout: 30_000 });
+  await expect(page.getByTestId('noise-reduction-menu')).toHaveAttribute('data-mode', 'enhanced');
+  await expect(page.getByTestId('export-preview-audio')).toHaveAttribute('data-enhanced-audio', 'enhanced');
+  const persisted = await page.evaluate(async (id) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const recording = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      const request = db.transaction('recordings').objectStore('recordings').get(id);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const tracks = await new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+      const request = db.transaction('enhancedAudioTracks').objectStore('enhancedAudioTracks').index('recordingId').getAll(id);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return { active: recording.activeEnhancedAudioTrackId, tracks: tracks.map((track) => ({ status: track.status, mode: track.mode })) };
+  }, recordingId);
+  expect(persisted.active).toBeTruthy();
+  expect(persisted.tracks).toContainEqual({ status: 'ready', mode: 'standard' });
+  expect(persisted.tracks).toContainEqual({ status: 'ready', mode: 'enhanced' });
 });
 
 test('a display recording fills a newly selected portrait ratio without white bars', async ({ page }) => {
@@ -534,6 +707,46 @@ test('dubbing tab is gated to Max members', async ({ page }) => {
 });
 
 test('generated English dubbing becomes the preview and export audio track', async ({ page }) => {
+  await page.addInitScript(() => {
+    class DubbingWorkerMock {
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+
+      postMessage(message: { id?: string; type?: string }) {
+        if (message.type !== 'generate' || !message.id) return;
+        const sampleRate = 24_000;
+        const sampleCount = sampleRate * 3;
+        const bytes = new Uint8Array(44 + sampleCount * 2);
+        const view = new DataView(bytes.buffer);
+        const write = (offset: number, value: string) => {
+          for (let index = 0; index < value.length; index += 1) view.setUint8(offset + index, value.charCodeAt(index));
+        };
+        write(0, 'RIFF');
+        view.setUint32(4, 36 + sampleCount * 2, true);
+        write(8, 'WAVE');
+        write(12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);
+        view.setUint16(22, 1, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2, true);
+        view.setUint16(34, 16, true);
+        write(36, 'data');
+        view.setUint32(40, sampleCount * 2, true);
+        for (let index = 0; index < sampleCount; index += 1) {
+          view.setInt16(44 + index * 2, Math.round(Math.sin(index / sampleRate * Math.PI * 2 * 220) * 0.25 * 32_767), true);
+        }
+        queueMicrotask(() => this.onmessage?.(new MessageEvent('message', {
+          data: { id: message.id, type: 'result', bytes: bytes.buffer, device: 'wasm' },
+        })));
+      }
+
+      terminate() {}
+    }
+
+    Object.defineProperty(window, 'Worker', { configurable: true, value: DubbingWorkerMock });
+  });
   await page.route('**/api/me/tier', async (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -598,7 +811,11 @@ test('generated English dubbing becomes the preview and export audio track', asy
       const tx = db.transaction(['recordings', 'audioChunks'], 'readwrite');
       const recordings = tx.objectStore('recordings');
       const request = recordings.get(id);
-      request.onsuccess = () => recordings.put({ ...request.result, hasAudio: true });
+      request.onsuccess = () => recordings.put({
+        ...request.result,
+        hasAudio: true,
+        subtitleSrt: '1\n00:00:00,000 --> 00:00:03,000\n这是中文原始字幕。\n',
+      });
       tx.objectStore('audioChunks').add({ recordingId: id, index: 0, blob: new Blob([data], { type: 'audio/wav' }) });
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);

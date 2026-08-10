@@ -98,13 +98,24 @@ export function parsePcm16Wav(bytes: Uint8Array): ParsedPcm16Wav {
     }
     offset = payloadOffset + chunkLength + (chunkLength % 2);
   }
-  if (audioFormat !== 1 || bitsPerSample !== 16 || channels < 1 || sampleRate < 8_000 || dataOffset < 0) {
+  const pcm16 = audioFormat === 1 && bitsPerSample === 16;
+  const float32 = audioFormat === 3 && bitsPerSample === 32;
+  if ((!pcm16 && !float32) || channels < 1 || sampleRate < 8_000 || dataOffset < 0) {
     throw new Error('dubbing_audio_unsupported_wav');
   }
-  const sampleCount = Math.floor(dataLength / 2);
+  const bytesPerSample = bitsPerSample / 8;
+  if (dataLength % bytesPerSample !== 0) throw new Error('dubbing_audio_truncated');
+  const sampleCount = dataLength / bytesPerSample;
   const samples = new Int16Array(sampleCount);
   for (let index = 0; index < sampleCount; index += 1) {
-    samples[index] = view.getInt16(dataOffset + index * 2, true);
+    if (pcm16) {
+      samples[index] = view.getInt16(dataOffset + index * bytesPerSample, true);
+      continue;
+    }
+    const value = view.getFloat32(dataOffset + index * bytesPerSample, true);
+    if (!Number.isFinite(value)) throw new Error('dubbing_audio_invalid_samples');
+    const clamped = Math.max(-1, Math.min(1, value));
+    samples[index] = Math.round(clamped < 0 ? clamped * 32_768 : clamped * 32_767);
   }
   return {
     sampleRate,

@@ -5,7 +5,14 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX } f
 import { I } from '@/components/icons';
 import { AutoEditControl } from '@/components/editor/AutoEditControl';
 import type { AutoEditMode, AutoEditProgress, AutoEditResult } from '@/services/autoEditAnalyzer';
-import type { AutoZoomSegment, SubtitleCue, TimeSegment } from '@/types/recording';
+import type {
+  AutoZoomSegment,
+  HighlightEffectSegment,
+  KeyPointMotionSegment,
+  NoiseReductionMode,
+  SubtitleCue,
+  TimeSegment,
+} from '@/types/recording';
 import { keptDuration, splitSegments, removeSegmentAt, trimSegmentEdge } from '@/utils/segments';
 
 interface Props {
@@ -25,6 +32,25 @@ interface Props {
   onAutoZoomChange?: (next: AutoZoomSegment[]) => void;
   selectedAutoZoomId?: string | null;
   onAutoZoomSelect?: (id: string | null) => void;
+  highlights?: HighlightEffectSegment[];
+  onHighlightChange?: (next: HighlightEffectSegment[]) => void;
+  selectedHighlightId?: string | null;
+  onHighlightSelect?: (id: string | null) => void;
+  keyPointMotions?: KeyPointMotionSegment[];
+  onKeyPointMotionChange?: (next: KeyPointMotionSegment[]) => void;
+  selectedKeyPointMotionId?: string | null;
+  onKeyPointMotionSelect?: (id: string | null) => void;
+  onGenerateKeyPointMotions?: () => void;
+  keyPointGenerationPhase?: 'idle' | 'generating' | 'ready' | 'failed';
+  audioEnhancement?: {
+    phase: 'idle' | 'processing' | 'ready' | 'failed';
+    mode: NoiseReductionMode | 'original';
+    progress: number;
+    error?: string | null;
+    onRun: (mode: NoiseReductionMode) => void;
+    onOriginal: () => void;
+    onCancel: () => void;
+  };
   /** 本地静音分析；结果仍写入既有的 clips/segments，而非重编码原始媒体。 */
   autoEdit?: {
     phase: 'idle' | 'analyzing' | 'applied' | 'failed';
@@ -48,6 +74,11 @@ interface Props {
     edit: string; reset: string; kept: string; mic: string; captions: string;
     split: string; deleteClip: string; hint: string;
     autoZoom: string; autoZoomHint: string; editAutoZoomScale: string;
+    highlight: string; noiseReduction: string; standardNoiseReduction: string;
+    enhancedNoiseReduction: string; originalAudio: string;
+    keyPointMotion: string; keyPointNeedsCaptions: string; generating: string;
+    spotlight: string; focusFrame: string; cursorHalo: string; textCallout: string;
+    calloutText: string; opacity: string;
   };
 }
 
@@ -68,6 +99,9 @@ const TIMELINE_ZOOM_STEPS = [1, 2, 4, 8, 16, 32] as const;
 export function Timeline({
   durationMs, clips, playheadMs, onScrub, onChange, onReset,
   autoZooms = [], onAutoZoomChange, selectedAutoZoomId, onAutoZoomSelect,
+  highlights = [], onHighlightChange, selectedHighlightId, onHighlightSelect,
+  keyPointMotions = [], onKeyPointMotionChange, selectedKeyPointMotionId, onKeyPointMotionSelect,
+  onGenerateKeyPointMotions, keyPointGenerationPhase = 'idle', audioEnhancement,
   autoEdit,
   hasAudio, hasCaptions, audioPeaks = [], captionCues = [], labels,
 }: Props): JSX.Element {
@@ -187,6 +221,78 @@ export function Timeline({
       { id, start, end: Math.min(durationMs, start + 2200), scale: 1.6, cx: 0.5, cy: 0.5 },
     ].sort((a, b) => a.start - b.start));
     onAutoZoomSelect?.(id);
+  };
+
+  const addHighlightAt = (timeMs: number) => {
+    if (!onHighlightChange) return;
+    const start = Math.max(0, Math.min(Math.max(0, durationMs - 800), Math.round(timeMs)));
+    const id = `hl-${Date.now().toString(36)}`;
+    const next: HighlightEffectSegment = {
+      id,
+      start,
+      end: Math.min(durationMs, start + 2200),
+      region: { x: 0.25, y: 0.25, width: 0.5, height: 0.5 },
+      enabled: { spotlight: true, focusFrame: true, cursorHalo: false, textCallout: false },
+      spotlightOpacity: 0.54,
+      transition: { enterMs: 600, exitMs: 420, easing: 'easeInOutCubic', preset: 'surround' },
+      schemaVersion: 1,
+    };
+    onHighlightChange([
+      ...highlights,
+      next,
+    ].sort((a, b) => a.start - b.start));
+    onHighlightSelect?.(id);
+  };
+
+  const replaceHighlight = (id: string, patch: Partial<HighlightEffectSegment>) => {
+    if (!onHighlightChange) return;
+    onHighlightChange(highlights.map((item) => {
+      if (item.id !== id) return item;
+      const start = Math.max(0, Math.min(durationMs - 100, Math.round(patch.start ?? item.start)));
+      const end = Math.max(start + 100, Math.min(durationMs, Math.round(patch.end ?? item.end)));
+      return { ...item, ...patch, start, end };
+    }).sort((a, b) => a.start - b.start));
+  };
+
+  const replaceKeyPointMotion = (id: string, patch: Partial<KeyPointMotionSegment>) => {
+    if (!onKeyPointMotionChange) return;
+    onKeyPointMotionChange(keyPointMotions.map((item) => {
+      if (item.id !== id) return item;
+      const start = Math.max(0, Math.min(durationMs - 100, Math.round(patch.start ?? item.start)));
+      const end = Math.max(start + 100, Math.min(durationMs, Math.round(patch.end ?? item.end)));
+      return { ...item, ...patch, start, end };
+    }).sort((a, b) => a.start - b.start));
+  };
+
+  const startEffectDrag = (
+    item: { id: string; start: number; end: number },
+    mode: 'move' | 'start' | 'end',
+    replace: (id: string, patch: { start?: number; end?: number }) => void,
+    select: (id: string) => void,
+  ) => (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    interactionRef.current = true;
+    select(item.id);
+    const dragOrigin = srcAtClientX(event.clientX);
+    const move = (moveEvent: MouseEvent) => {
+      const delta = srcAtClientX(moveEvent.clientX) - dragOrigin;
+      if (mode === 'start') replace(item.id, { start: Math.max(0, Math.min(item.end - 100, item.start + delta)) });
+      else if (mode === 'end') replace(item.id, { end: Math.max(item.start + 100, Math.min(durationMs, item.end + delta)) });
+      else {
+        const length = item.end - item.start;
+        const start = Math.max(0, Math.min(durationMs - length, item.start + delta));
+        replace(item.id, { start, end: start + length });
+      }
+      onScrub(Math.max(0, Math.min(durationMs, item.start + delta)));
+    };
+    const up = () => {
+      finishPointerInteraction();
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
   };
 
   const startZoomDrag = (id: string, mode: 'move' | 'start' | 'end') => (event: React.MouseEvent) => {
@@ -339,8 +445,8 @@ export function Timeline({
 
   return (
     <div className="timeline-craft-panel">
-      <div className="timeline-craft-toolbar mb-2 flex items-center justify-between">
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+      <div className="timeline-craft-toolbar mb-2">
+        <div className="timeline-craft-toolbar-main">
           <span className="timeline-craft-label" style={{ marginRight: 4 }}>
             {labels.edit}
           </span>
@@ -368,6 +474,18 @@ export function Timeline({
               <I.Search size={11} /> {labels.autoZoom}
             </button>
           )}
+          {onHighlightChange && (
+            <button
+              data-testid="highlight-add"
+              type="button"
+              onClick={() => addHighlightAt(playheadMs)}
+              className="timeline-craft-action btn-sketch"
+              style={{ padding: '3px 9px' }}
+              title={labels.highlight}
+            >
+              <I.Highlighter size={11} /> {labels.highlight}
+            </button>
+          )}
           {autoEdit && (
             <AutoEditControl
               hasAudio={hasAudio}
@@ -380,6 +498,41 @@ export function Timeline({
               onCancel={autoEdit.onCancel}
               labels={autoEdit.labels}
             />
+          )}
+          {audioEnhancement && (
+            <details className="timeline-craft-action-menu">
+              <summary
+                data-testid="noise-reduction-menu"
+                data-phase={audioEnhancement.phase}
+                data-mode={audioEnhancement.mode}
+                className="timeline-craft-action btn-sketch"
+                title={labels.noiseReduction}
+              >
+                <I.Mic size={11} /> {audioEnhancement.phase === 'processing'
+                  ? `${labels.noiseReduction} ${Math.round(audioEnhancement.progress * 100)}%`
+                  : labels.noiseReduction}
+              </summary>
+              <div className="timeline-craft-action-popover">
+                <button data-testid="noise-standard" type="button" aria-pressed={audioEnhancement.mode === 'standard'} onClick={() => audioEnhancement.onRun('standard')}>{labels.standardNoiseReduction}</button>
+                <button data-testid="noise-enhanced" type="button" aria-pressed={audioEnhancement.mode === 'enhanced'} onClick={() => audioEnhancement.onRun('enhanced')}>{labels.enhancedNoiseReduction}</button>
+                <button data-testid="noise-original" type="button" aria-pressed={audioEnhancement.mode === 'original'} onClick={audioEnhancement.onOriginal}>{labels.originalAudio}</button>
+                {audioEnhancement.phase === 'processing' && <button data-testid="noise-cancel" type="button" onClick={audioEnhancement.onCancel}>Cancel</button>}
+                {audioEnhancement.error && <span className="timeline-craft-action-error" role="alert">{audioEnhancement.error}</span>}
+              </div>
+            </details>
+          )}
+          {onGenerateKeyPointMotions && (
+            <button
+              data-testid="keypoint-generate"
+              type="button"
+              disabled={!hasCaptions || keyPointGenerationPhase === 'generating'}
+              onClick={onGenerateKeyPointMotions}
+              className="timeline-craft-action btn-sketch"
+              style={{ padding: '3px 9px' }}
+              title={!hasCaptions ? labels.keyPointNeedsCaptions : labels.keyPointMotion}
+            >
+              <I.Sparkles size={11} /> {keyPointGenerationPhase === 'generating' ? labels.generating : labels.keyPointMotion}
+            </button>
           )}
           {trimmed && (
             <button type="button" onClick={() => { onReset(); setSelectedIdx(null); }} className="timeline-craft-action btn-sketch" style={{ padding: '3px 8px' }}>
@@ -571,6 +724,60 @@ export function Timeline({
           </div>
         )}
 
+        {onHighlightChange && (
+          <EffectLane label={labels.highlight} testId="highlight-track">
+            {highlights.map((item) => {
+              const selected = selectedHighlightId === item.id;
+              return (
+                <div
+                  key={item.id}
+                  data-testid="highlight-segment"
+                  className={`timeline-craft-effect-segment is-highlight${selected ? ' is-selected' : ''}`}
+                  onMouseDown={startEffectDrag(item, 'move', replaceHighlight, (id) => onHighlightSelect?.(id))}
+                  onDoubleClick={() => onHighlightSelect?.(item.id)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    onHighlightChange(highlights.filter((candidate) => candidate.id !== item.id));
+                    if (selected) onHighlightSelect?.(null);
+                  }}
+                  style={{ left: px(item.start), width: Math.max(12, px(item.end - item.start)) }}
+                >
+                  <i className="timeline-craft-autozoom-edge" onMouseDown={startEffectDrag(item, 'start', replaceHighlight, (id) => onHighlightSelect?.(id))} />
+                  <span>{labels.highlight}</span>
+                  <i className="timeline-craft-autozoom-edge" onMouseDown={startEffectDrag(item, 'end', replaceHighlight, (id) => onHighlightSelect?.(id))} />
+                </div>
+              );
+            })}
+          </EffectLane>
+        )}
+
+        {onKeyPointMotionChange && keyPointMotions.length > 0 && (
+          <EffectLane label={labels.keyPointMotion} testId="keypoint-motion-track">
+            {keyPointMotions.map((item) => {
+              const selected = selectedKeyPointMotionId === item.id;
+              return (
+                <div
+                  key={item.id}
+                  data-testid="keypoint-motion-segment"
+                  className={`timeline-craft-effect-segment is-keypoint${selected ? ' is-selected' : ''}`}
+                  onMouseDown={startEffectDrag(item, 'move', replaceKeyPointMotion, (id) => onKeyPointMotionSelect?.(id))}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    onKeyPointMotionChange(keyPointMotions.filter((candidate) => candidate.id !== item.id));
+                    if (selected) onKeyPointMotionSelect?.(null);
+                  }}
+                  style={{ left: px(item.start), width: Math.max(12, px(item.end - item.start)) }}
+                  title={item.title}
+                >
+                  <i className="timeline-craft-autozoom-edge" onMouseDown={startEffectDrag(item, 'start', replaceKeyPointMotion, (id) => onKeyPointMotionSelect?.(id))} />
+                  <span>{item.title}</span>
+                  <i className="timeline-craft-autozoom-edge" onMouseDown={startEffectDrag(item, 'end', replaceKeyPointMotion, (id) => onKeyPointMotionSelect?.(id))} />
+                </div>
+              );
+            })}
+          </EffectLane>
+        )}
+
         {/* 播放头：竖线贯穿 + 标尺上的三角手柄 */}
         <div className="timeline-craft-playhead" style={{ position: 'absolute', top: 0, bottom: 0, left: px(playheadMs) - 1, pointerEvents: 'none', zIndex: 5 }} />
         <div
@@ -582,10 +789,75 @@ export function Timeline({
         </div>
       </div>
 
+      {selectedHighlightId && onHighlightChange && (() => {
+        const item = highlights.find((candidate) => candidate.id === selectedHighlightId);
+        if (!item) return null;
+        const setEffect = (key: keyof HighlightEffectSegment['enabled'], enabled: boolean) => {
+          replaceHighlight(item.id, { enabled: { ...item.enabled, [key]: enabled } });
+        };
+        return (
+          <div className="timeline-craft-highlight-editor" data-testid="highlight-editor">
+            <label><input type="checkbox" checked={item.enabled.spotlight} onChange={(event) => setEffect('spotlight', event.target.checked)} /> {labels.spotlight}</label>
+            <label><input type="checkbox" checked={item.enabled.focusFrame} onChange={(event) => setEffect('focusFrame', event.target.checked)} /> {labels.focusFrame}</label>
+            <label><input type="checkbox" checked={item.enabled.cursorHalo} onChange={(event) => setEffect('cursorHalo', event.target.checked)} /> {labels.cursorHalo}</label>
+            <label><input type="checkbox" checked={item.enabled.textCallout} onChange={(event) => setEffect('textCallout', event.target.checked)} /> {labels.textCallout}</label>
+            <label className="timeline-craft-effect-opacity">
+              <span>{labels.opacity}</span>
+              <input type="range" min="0" max="0.9" step="0.05" value={item.spotlightOpacity} onChange={(event) => replaceHighlight(item.id, { spotlightOpacity: Number(event.target.value) })} />
+            </label>
+            <input
+              value={item.calloutText ?? ''}
+              maxLength={240}
+              disabled={!item.enabled.textCallout}
+              onChange={(event) => replaceHighlight(item.id, { calloutText: event.target.value })}
+              placeholder={labels.calloutText}
+              aria-label={labels.calloutText}
+            />
+            <button type="button" aria-label="Delete highlight" onClick={() => {
+              onHighlightChange(highlights.filter((candidate) => candidate.id !== item.id));
+              onHighlightSelect?.(null);
+            }}><I.Trash size={11} /></button>
+          </div>
+        );
+      })()}
+
+      {selectedKeyPointMotionId && onKeyPointMotionChange && (() => {
+        const item = keyPointMotions.find((candidate) => candidate.id === selectedKeyPointMotionId);
+        if (!item) return null;
+        return (
+          <div className="timeline-craft-keypoint-editor" data-testid="keypoint-motion-editor">
+            <input value={item.title} maxLength={120} onChange={(event) => replaceKeyPointMotion(item.id, { title: event.target.value })} aria-label="Key point title" />
+            <input value={item.bullets.join(' · ')} maxLength={360} onChange={(event) => replaceKeyPointMotion(item.id, { bullets: event.target.value.split('·').map((value) => value.trim()).filter(Boolean).slice(0, 4) })} aria-label="Key point bullets" />
+            <select value={item.kind} onChange={(event) => replaceKeyPointMotion(item.id, { kind: event.target.value as KeyPointMotionSegment['kind'] })} aria-label="Key point layout">
+              <option value="chapter_title">Chapter</option>
+              <option value="side_card">Side card</option>
+              <option value="lower_third">Lower third</option>
+            </select>
+            <select value={item.placement} onChange={(event) => replaceKeyPointMotion(item.id, { placement: event.target.value as KeyPointMotionSegment['placement'] })} aria-label="Key point placement">
+              {['auto', 'left', 'right', 'top', 'bottom'].map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+            <label><input type="checkbox" checked={item.enabled} onChange={(event) => replaceKeyPointMotion(item.id, { enabled: event.target.checked })} /> On</label>
+            <button type="button" onClick={() => {
+              onKeyPointMotionChange(keyPointMotions.filter((candidate) => candidate.id !== item.id));
+              onKeyPointMotionSelect?.(null);
+            }}><I.Trash size={11} /></button>
+          </div>
+        );
+      })()}
+
       <div className="timeline-craft-hint mt-1.5 flex items-center justify-between">
         <span>{labels.hint}</span>
         <span data-testid="timeline-current-time" data-playhead-ms={Math.round(playheadMs)}>{fmt(playheadMs)}</span>
       </div>
+    </div>
+  );
+}
+
+function EffectLane({ label, testId, children }: { label: string; testId: string; children: React.ReactNode }): JSX.Element {
+  return (
+    <div data-testid={testId} className="timeline-craft-effect-track" style={{ position: 'relative', height: 34, marginTop: 6 }} aria-label={label}>
+      <span className="timeline-craft-autozoom-label">{label}</span>
+      {children}
     </div>
   );
 }

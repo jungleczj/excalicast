@@ -9,6 +9,9 @@ import type {
   CameraChunk,
   CameraPositionEvent,
   CursorFocusTrack,
+  EnhancedAudioTrack,
+  HighlightEffectSegment,
+  KeyPointMotionSegment,
   LaserEvent,
   LocalizedTrack,
   RecordingMetadata,
@@ -47,6 +50,8 @@ interface LaserEventRow extends LaserEvent {
 }
 
 interface LocalizedTrackRow extends LocalizedTrack {}
+
+interface EnhancedAudioTrackRow extends EnhancedAudioTrack {}
 
 interface BinaryFileRow extends BinaryFileEntry {
   id?: number;
@@ -105,6 +110,7 @@ class ExcalicastDB extends Dexie {
   audioPeakTracks!: Table<AudioPeakTrackRow, string>;
   recordingThumbnails!: Table<RecordingThumbnailRow, string>;
   autoEditCaches!: Table<AutoEditCacheRow, string>;
+  enhancedAudioTracks!: Table<EnhancedAudioTrackRow, string>;
 
   constructor() {
     super('excalicast');
@@ -311,6 +317,28 @@ class ExcalicastDB extends Dexie {
           await recordings.put(row);
         }
       }
+    });
+    // v15: locally derived microphone enhancement tracks. Source audio remains
+    // immutable and the active derivative is referenced from recording metadata.
+    this.version(15).stores({
+      recordings: 'id, startedAt, status, ownerKey, [ownerKey+startedAt]',
+      snapshots: '++id, recordingId, timestamp',
+      audioChunks: '++id, recordingId, index',
+      cameraChunks: '++id, recordingId, index',
+      screenChunks: '++id, recordingId, index',
+      binaryFiles: '++id, recordingId, fileId',
+      workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
+      cameraPositions: '++id, recordingId, timestamp, [recordingId+timestamp]',
+      libraryItems: 'id, status, created',
+      laserEvents: '++id, recordingId, timestamp, [recordingId+timestamp]',
+      localizedTracks: 'id, recordingId, targetLang, status, createdAt, [recordingId+targetLang]',
+      cursorFocusTracks: 'recordingId, analyzedAt, detectorVersion',
+      mediaTasks: 'id, recordingId, kind, status, updatedAt, [recordingId+kind]',
+      exportSegments: 'id, taskId, recordingId, index, [taskId+index]',
+      audioPeakTracks: 'id, recordingId, sourceSignature, createdAt',
+      recordingThumbnails: 'recordingId, updatedAt',
+      autoEditCaches: 'id, recordingId, analyzerVersion, updatedAt, [recordingId+analyzerVersion]',
+      enhancedAudioTracks: 'id, recordingId, sourceFingerprint, mode, status, createdAt, [recordingId+sourceFingerprint]',
     });
   }
 }
@@ -574,6 +602,65 @@ export async function updateRecordingAutoZooms(recordingId: string, autoZooms: A
   invalidateRecordingMediaCache(recordingId);
 }
 
+export async function updateRecordingHighlights(recordingId: string, highlights: HighlightEffectSegment[]): Promise<void> {
+  const clean = highlights
+    .filter((item) => (
+      Number.isFinite(item.start)
+      && Number.isFinite(item.end)
+      && item.end > item.start
+      && Number.isFinite(item.region.x)
+      && Number.isFinite(item.region.y)
+      && Number.isFinite(item.region.width)
+      && Number.isFinite(item.region.height)
+    ))
+    .map((item) => {
+      const width = Math.max(0.02, Math.min(1, item.region.width));
+      const height = Math.max(0.02, Math.min(1, item.region.height));
+      return {
+        ...item,
+        start: Math.max(0, Math.round(item.start)),
+        end: Math.max(0, Math.round(item.end)),
+        region: {
+          x: Math.max(0, Math.min(1 - width, item.region.x)),
+          y: Math.max(0, Math.min(1 - height, item.region.y)),
+          width,
+          height,
+        },
+        spotlightOpacity: Math.max(0, Math.min(0.9, item.spotlightOpacity)),
+        calloutText: item.calloutText?.trim().slice(0, 240) || undefined,
+        transition: {
+          ...item.transition,
+          enterMs: Math.max(80, Math.min(2_000, Math.round(item.transition.enterMs))),
+          exitMs: Math.max(80, Math.min(2_000, Math.round(item.transition.exitMs))),
+        },
+      };
+    })
+    .sort((a, b) => a.start - b.start);
+  await getClientDb().recordings.update(recordingId, { highlights: clean.length > 0 ? clean : undefined });
+}
+
+export async function updateRecordingKeyPointMotions(recordingId: string, motions: KeyPointMotionSegment[]): Promise<void> {
+  const clean = motions
+    .filter((item) => Number.isFinite(item.start) && Number.isFinite(item.end) && item.end > item.start)
+    .map((item) => ({
+      ...item,
+      start: Math.max(0, Math.round(item.start)),
+      end: Math.max(0, Math.round(item.end)),
+      sourceCueStart: Math.max(0, Math.round(item.sourceCueStart)),
+      sourceCueEnd: Math.max(0, Math.round(item.sourceCueEnd)),
+      title: item.title.trim().slice(0, 120),
+      bullets: item.bullets.map((bullet) => bullet.trim()).filter(Boolean).slice(0, 4),
+      transition: {
+        ...item.transition,
+        enterMs: Math.max(80, Math.min(2_000, Math.round(item.transition.enterMs))),
+        exitMs: Math.max(80, Math.min(2_000, Math.round(item.transition.exitMs))),
+      },
+    }))
+    .filter((item) => item.title.length > 0)
+    .sort((a, b) => a.start - b.start);
+  await getClientDb().recordings.update(recordingId, { keyPointMotions: clean.length > 0 ? clean : undefined });
+}
+
 export async function saveSubtitleSrt(recordingId: string, srt: string): Promise<void> {
   await getClientDb().recordings.update(recordingId, { subtitleSrt: srt });
   invalidateRecordingMediaCache(recordingId);
@@ -610,6 +697,31 @@ export async function setActiveLocalizedTrack(recordingId: string, trackId: stri
   invalidateRecordingMediaCache(recordingId);
 }
 
+export async function listEnhancedAudioTracks(recordingId: string): Promise<EnhancedAudioTrack[]> {
+  return getClientDb().enhancedAudioTracks.where('recordingId').equals(recordingId).sortBy('createdAt').then((rows) => rows.reverse());
+}
+
+export async function getEnhancedAudioTrack(trackId: string | null | undefined): Promise<EnhancedAudioTrack | undefined> {
+  if (!trackId) return undefined;
+  return getClientDb().enhancedAudioTracks.get(trackId);
+}
+
+export async function saveEnhancedAudioTrack(track: EnhancedAudioTrack, activate = true): Promise<void> {
+  const db = getClientDb();
+  await db.transaction('rw', [db.enhancedAudioTracks, db.recordings], async () => {
+    await db.enhancedAudioTracks.put(track);
+    if (activate && track.status === 'ready') {
+      await db.recordings.update(track.recordingId, { activeEnhancedAudioTrackId: track.id });
+    }
+  });
+  invalidateRecordingMediaCache(track.recordingId);
+}
+
+export async function setActiveEnhancedAudioTrack(recordingId: string, trackId: string | undefined): Promise<void> {
+  await getClientDb().recordings.update(recordingId, { activeEnhancedAudioTrackId: trackId });
+  invalidateRecordingMediaCache(recordingId);
+}
+
 export async function getCursorFocusTrack(recordingId: string): Promise<CursorFocusTrack | undefined> {
   return getClientDb().cursorFocusTracks.get(recordingId);
 }
@@ -624,7 +736,7 @@ export async function deleteRecording(recordingId: string, ownerKey?: string): P
   if (ownerKey && !(await ownsRecording(recordingId, ownerKey))) return;
   await db.transaction(
     'rw',
-    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.screenChunks, db.cameraPositions, db.binaryFiles, db.workspaceShells, db.laserEvents, db.localizedTracks, db.cursorFocusTracks, db.mediaTasks, db.exportSegments, db.audioPeakTracks, db.recordingThumbnails, db.autoEditCaches],
+    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.screenChunks, db.cameraPositions, db.binaryFiles, db.workspaceShells, db.laserEvents, db.localizedTracks, db.cursorFocusTracks, db.mediaTasks, db.exportSegments, db.audioPeakTracks, db.recordingThumbnails, db.autoEditCaches, db.enhancedAudioTracks],
     async () => {
       await db.recordings.delete(recordingId);
       await db.snapshots.where('recordingId').equals(recordingId).delete();
@@ -642,6 +754,7 @@ export async function deleteRecording(recordingId: string, ownerKey?: string): P
       await db.audioPeakTracks.where('recordingId').equals(recordingId).delete();
       await db.recordingThumbnails.delete(recordingId);
       await db.autoEditCaches.where('recordingId').equals(recordingId).delete();
+      await db.enhancedAudioTracks.where('recordingId').equals(recordingId).delete();
     },
   );
   invalidateRecordingMediaCache(recordingId);

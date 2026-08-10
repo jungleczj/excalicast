@@ -1,8 +1,10 @@
 'use client';
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { getCursorFocusTrack, getLocalizedTrack, getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
+import { getCursorFocusTrack, getEnhancedAudioTrack, getLocalizedTrack, getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
 import { isUsableLocalizedTrack } from '@/lib/localizedTrack';
+import { audioSourceFingerprint, resolveEnhancedAudioSelection } from '@/services/audioEnhancement';
+import { drawHighlightEffect, drawKeyPointMotion } from '@/services/editorEffectsRenderer';
 import {
   cropRectForAspect,
   cropRectForSnapshot,
@@ -781,7 +783,16 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   opts.onLog?.(`media ready in ${Math.round(performance.now() - phaseStartedAt)}ms`);
   const localizedTrack = opts.localizedTrackId ? await getLocalizedTrack(opts.localizedTrackId) : undefined;
   const useLocalizedTrack = isUsableLocalizedTrack(localizedTrack) && opts.muteOriginalAudio !== false;
-  const effectiveAudioBlob = useLocalizedTrack ? localizedTrack.audioBlob : audioBlob;
+  const enhancedTrack = !useLocalizedTrack && opts.activeEnhancedAudioTrackId
+    ? await getEnhancedAudioTrack(opts.activeEnhancedAudioTrackId)
+    : undefined;
+  const enhancedSelection = resolveEnhancedAudioSelection(
+    audioBlob,
+    enhancedTrack ? [enhancedTrack] : [],
+    opts.activeEnhancedAudioTrackId,
+    audioSourceFingerprint(audioBlob, metadata.durationMs),
+  );
+  const effectiveAudioBlob = useLocalizedTrack ? localizedTrack.audioBlob : enhancedSelection.blob;
   const effectiveCameraBlob = useLocalizedTrack && localizedTrack.cameraBlob ? localizedTrack.cameraBlob : cameraBlob;
   const effectiveSubtitleSrt = useLocalizedTrack ? localizedTrack.translatedSrt : metadata.subtitleSrt;
   let cursorFocusTrack = opts.alwaysKeepZoomedIn ? await getCursorFocusTrack(opts.recordingId) : undefined;
@@ -859,7 +870,9 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const canReuseFinalFrame = laserEvents.length === 0
     && !screenBlob
     && !effectiveCameraBlob
-    && !(opts.autoZooms?.length);
+    && !(opts.autoZooms?.length)
+    && !(opts.highlights?.length)
+    && !(opts.keyPointMotions?.length);
   let lastFinalSig: string | null = null;
   let lastFinalCanvas: HTMLCanvasElement | null = null;
 
@@ -961,7 +974,10 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     const snap = snapshotAt(snapshots, t);
     const shellAtTframe = useShell ? (shellAt(decodedShells, t) as DecodedShell | null) : null;
     const cueAtT = cues.length > 0 ? cueAt(cues, t) : null;
-    const sig = `${snap?.timestamp ?? -1}|${shellAtTframe?.timestamp ?? -1}|${cueAtT ? `${cueAtT.startMs}-${cueAtT.endMs}#${subtitlePageAt(cueAtT, t)}` : -1}`;
+    const animatedEffectActive = !!opts.highlights?.some((item) => t >= item.start && t < item.end)
+      || !!opts.keyPointMotions?.some((item) => item.enabled && t >= item.start && t < item.end);
+    const effectSig = animatedEffectActive ? `fx@${Math.round(t)}` : 'fx-none';
+    const sig = `${snap?.timestamp ?? -1}|${shellAtTframe?.timestamp ?? -1}|${cueAtT ? `${cueAtT.startMs}-${cueAtT.endMs}#${subtitlePageAt(cueAtT, t)}` : -1}|${effectSig}`;
     return { t, snap, shellAtTframe, sig };
   };
 
@@ -984,21 +1000,14 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
 
     const finalizeForeground = async (zoomBounds: CanvasRect, useRecordingWindow = true) => {
       const zoomStarted = performance.now();
-      drawZoomedContentLayer(foregroundCtx, content, autoZoomAt(opts.autoZooms, t), zoomBounds);
+      const activeZoom = autoZoomAt(opts.autoZooms, t);
+      drawZoomedContentLayer(foregroundCtx, content, activeZoom, zoomBounds);
       diagnostics.addBreakdown('autozoom_composition', performance.now() - zoomStarted);
 
-      if (opts.withWatermark) {
-        const watermarkStarted = performance.now();
-        drawFrostedWatermark(foregroundCtx, foreground.width, foreground.height, watermarkPos);
-        diagnostics.addBreakdown('watermark_composition', performance.now() - watermarkStarted);
-      }
-      if (cues.length > 0) {
-        const subtitleStarted = performance.now();
-        drawSubtitle(foregroundCtx, foreground.width, foreground.height, cues, t, {
-          reservedRightFraction: effectiveCameraBlob ? 0.3 : 0,
-        });
-        diagnostics.addBreakdown('subtitle_composition', performance.now() - subtitleStarted);
-      }
+      const highlightStarted = performance.now();
+      drawHighlightEffect(foregroundCtx, opts.highlights, t, zoomBounds, activeZoom);
+      diagnostics.addBreakdown('highlight_composition', performance.now() - highlightStarted);
+
       if (compositeCamera && cameraSource) {
         const cameraDecodeStarted = performance.now();
         const frame = await cameraSource.getFrameAt(t);
@@ -1022,6 +1031,25 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
           }
           diagnostics.addBreakdown('camera_composition', performance.now() - cameraComposeStarted);
         }
+      }
+
+      const keyPointStarted = performance.now();
+      drawKeyPointMotion(foregroundCtx, opts.keyPointMotions, t, zoomBounds, {
+        reserveRight: !!effectiveCameraBlob,
+      });
+      diagnostics.addBreakdown('keypoint_composition', performance.now() - keyPointStarted);
+
+      if (cues.length > 0) {
+        const subtitleStarted = performance.now();
+        drawSubtitle(foregroundCtx, foreground.width, foreground.height, cues, t, {
+          reservedRightFraction: effectiveCameraBlob ? 0.3 : 0,
+        });
+        diagnostics.addBreakdown('subtitle_composition', performance.now() - subtitleStarted);
+      }
+      if (opts.withWatermark) {
+        const watermarkStarted = performance.now();
+        drawFrostedWatermark(foregroundCtx, foreground.width, foreground.height, watermarkPos);
+        diagnostics.addBreakdown('watermark_composition', performance.now() - watermarkStarted);
       }
 
       const foregroundStarted = performance.now();
@@ -1645,14 +1673,17 @@ export async function renderPreviewFrame(
     : [];
 
   const finalizePreviewForeground = (zoomBounds: CanvasRect, useRecordingWindow = true) => {
-    drawZoomedContentLayer(foregroundCtx, content, autoZoomAt(config.autoZooms, timeMs), zoomBounds);
-    if (config.withWatermark) {
-      drawFrostedWatermark(foregroundCtx, foreground.width, foreground.height, hasCamera ? 'bottom-left' : 'bottom-right');
-    }
+    const activeZoom = autoZoomAt(config.autoZooms, timeMs);
+    drawZoomedContentLayer(foregroundCtx, content, activeZoom, zoomBounds);
+    drawHighlightEffect(foregroundCtx, config.highlights, timeMs, zoomBounds, activeZoom);
+    drawKeyPointMotion(foregroundCtx, config.keyPointMotions, timeMs, zoomBounds, { reserveRight: hasCamera });
     if (cues.length > 0) {
       drawSubtitle(foregroundCtx, foreground.width, foreground.height, cues, timeMs, {
         reservedRightFraction: hasCamera ? 0.3 : 0,
       });
+    }
+    if (config.withWatermark) {
+      drawFrostedWatermark(foregroundCtx, foreground.width, foreground.height, hasCamera ? 'bottom-left' : 'bottom-right');
     }
     if (useRecordingWindow) drawRecordingWindow(ctx, foreground, config.videoBackground);
     else ctx.drawImage(foreground, 0, 0);
