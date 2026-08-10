@@ -8581,7 +8581,7 @@ body {
   flex: 0 0 auto;
 }
 
-.timeline-craft-action-menu > summary {
+.timeline-craft-action-menu > .timeline-craft-action-trigger {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -8590,15 +8590,9 @@ body {
   cursor: pointer;
 }
 
-.timeline-craft-action-menu > summary::-webkit-details-marker {
-  display: none;
-}
-
 .timeline-craft-action-popover {
-  position: absolute;
-  top: calc(100% + 7px);
-  left: 0;
-  z-index: 40;
+  position: fixed;
+  z-index: 10000;
   display: grid;
   width: max-content;
   min-width: 210px;
@@ -8610,7 +8604,7 @@ body {
   box-shadow: 0 12px 28px rgba(24, 25, 26, 0.16);
 }
 
-.editor-craft-main .timeline-craft-action-popover button {
+.timeline-craft-action-popover button {
   width: 100% !important;
   min-height: 30px !important;
   padding: 6px 9px !important;

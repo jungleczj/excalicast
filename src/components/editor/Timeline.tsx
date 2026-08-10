@@ -2,6 +2,7 @@
 
 import { useTranslations } from 'next-intl';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type JSX } from 'react';
+import { createPortal } from 'react-dom';
 import { I } from '@/components/icons';
 import { AutoEditControl } from '@/components/editor/AutoEditControl';
 import type { AutoEditMode, AutoEditProgress, AutoEditResult } from '@/services/autoEditAnalyzer';
@@ -122,10 +123,55 @@ export function Timeline({
   const [timelineZoom, setTimelineZoom] = useState<number>(1);
   const [viewportWidth, setViewportWidth] = useState(1);
   const [viewportScrollLeft, setViewportScrollLeft] = useState(0);
+  const [noiseMenuOpen, setNoiseMenuOpen] = useState(false);
+  const [noiseMenuPosition, setNoiseMenuPosition] = useState({ top: 0, left: 0 });
+  const noiseMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const noiseMenuPopoverRef = useRef<HTMLDivElement>(null);
   const contentWidth = Math.max(1, viewportWidth * timelineZoom);
   const px = useCallback((ms: number) => (Math.max(0, Math.min(dur, ms)) / dur) * contentWidth, [contentWidth, dur]);
   const visibleStartMs = Math.max(0, Math.min(dur, (viewportScrollLeft / contentWidth) * dur));
   const visibleEndMs = Math.max(visibleStartMs, Math.min(dur, ((viewportScrollLeft + viewportWidth) / contentWidth) * dur));
+
+  const updateNoiseMenuPosition = useCallback(() => {
+    const trigger = noiseMenuButtonRef.current;
+    if (!trigger) return;
+    const triggerRect = trigger.getBoundingClientRect();
+    const popoverWidth = noiseMenuPopoverRef.current?.offsetWidth ?? 220;
+    const popoverHeight = noiseMenuPopoverRef.current?.offsetHeight ?? 128;
+    const gap = 7;
+    const viewportGap = 8;
+    const left = Math.max(viewportGap, Math.min(triggerRect.left, window.innerWidth - popoverWidth - viewportGap));
+    const below = triggerRect.bottom + gap;
+    const top = below + popoverHeight <= window.innerHeight - viewportGap
+      ? below
+      : Math.max(viewportGap, triggerRect.top - popoverHeight - gap);
+    setNoiseMenuPosition({ top, left });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!noiseMenuOpen) return;
+    updateNoiseMenuPosition();
+    const frame = requestAnimationFrame(updateNoiseMenuPosition);
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && (noiseMenuButtonRef.current?.contains(target) || noiseMenuPopoverRef.current?.contains(target))) return;
+      setNoiseMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setNoiseMenuOpen(false);
+    };
+    window.addEventListener('resize', updateNoiseMenuPosition);
+    window.addEventListener('scroll', updateNoiseMenuPosition, true);
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('resize', updateNoiseMenuPosition);
+      window.removeEventListener('scroll', updateNoiseMenuPosition, true);
+      document.removeEventListener('pointerdown', closeOnOutsidePointer);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [noiseMenuOpen, updateNoiseMenuPosition]);
 
   // 被删段 = clips 在 [0,dur] 的补集
   const gaps: TimeSegment[] = (() => {
@@ -500,26 +546,40 @@ export function Timeline({
             />
           )}
           {audioEnhancement && (
-            <details className="timeline-craft-action-menu">
-              <summary
+            <div className="timeline-craft-action-menu">
+              <button
+                ref={noiseMenuButtonRef}
+                type="button"
                 data-testid="noise-reduction-menu"
                 data-phase={audioEnhancement.phase}
                 data-mode={audioEnhancement.mode}
-                className="timeline-craft-action btn-sketch"
+                className="timeline-craft-action timeline-craft-action-trigger btn-sketch"
                 title={labels.noiseReduction}
+                aria-haspopup="menu"
+                aria-expanded={noiseMenuOpen}
+                onClick={() => setNoiseMenuOpen((open) => !open)}
               >
                 <I.Mic size={11} /> {audioEnhancement.phase === 'processing'
                   ? `${labels.noiseReduction} ${Math.round(audioEnhancement.progress * 100)}%`
                   : labels.noiseReduction}
-              </summary>
-              <div className="timeline-craft-action-popover">
-                <button data-testid="noise-standard" type="button" aria-pressed={audioEnhancement.mode === 'standard'} onClick={() => audioEnhancement.onRun('standard')}>{labels.standardNoiseReduction}</button>
-                <button data-testid="noise-enhanced" type="button" aria-pressed={audioEnhancement.mode === 'enhanced'} onClick={() => audioEnhancement.onRun('enhanced')}>{labels.enhancedNoiseReduction}</button>
-                <button data-testid="noise-original" type="button" aria-pressed={audioEnhancement.mode === 'original'} onClick={audioEnhancement.onOriginal}>{labels.originalAudio}</button>
-                {audioEnhancement.phase === 'processing' && <button data-testid="noise-cancel" type="button" onClick={audioEnhancement.onCancel}>Cancel</button>}
-                {audioEnhancement.error && <span className="timeline-craft-action-error" role="alert">{audioEnhancement.error}</span>}
-              </div>
-            </details>
+              </button>
+              {noiseMenuOpen && createPortal(
+                <div
+                  ref={noiseMenuPopoverRef}
+                  data-testid="noise-reduction-popover"
+                  className="timeline-craft-action-popover"
+                  role="menu"
+                  style={noiseMenuPosition}
+                >
+                  <button data-testid="noise-standard" type="button" role="menuitem" aria-pressed={audioEnhancement.mode === 'standard'} onClick={() => { setNoiseMenuOpen(false); audioEnhancement.onRun('standard'); }}>{labels.standardNoiseReduction}</button>
+                  <button data-testid="noise-enhanced" type="button" role="menuitem" aria-pressed={audioEnhancement.mode === 'enhanced'} onClick={() => { setNoiseMenuOpen(false); audioEnhancement.onRun('enhanced'); }}>{labels.enhancedNoiseReduction}</button>
+                  <button data-testid="noise-original" type="button" role="menuitem" aria-pressed={audioEnhancement.mode === 'original'} onClick={() => { setNoiseMenuOpen(false); audioEnhancement.onOriginal(); }}>{labels.originalAudio}</button>
+                  {audioEnhancement.phase === 'processing' && <button data-testid="noise-cancel" type="button" role="menuitem" onClick={() => { setNoiseMenuOpen(false); audioEnhancement.onCancel(); }}>Cancel</button>}
+                  {audioEnhancement.error && <span className="timeline-craft-action-error" role="alert">{audioEnhancement.error}</span>}
+                </div>,
+                document.body,
+              )}
+            </div>
           )}
           {onGenerateKeyPointMotions && (
             <button

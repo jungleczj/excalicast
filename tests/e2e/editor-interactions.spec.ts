@@ -263,6 +263,21 @@ test('editor enhancement controls stay within one or two toolbar rows', async ({
   }
 });
 
+test('background noise menu renders above the scrollable editor toolbar', async ({ page }) => {
+  await page.setViewportSize({ width: 760, height: 720 });
+  await page.getByTestId('noise-reduction-menu').click();
+  const popover = page.getByTestId('noise-reduction-popover');
+  await expect(popover).toBeVisible();
+  await expect.poll(() => popover.evaluate((element) => element.parentElement === document.body)).toBe(true);
+  const box = await popover.boundingBox();
+  if (!box) throw new Error('noise reduction popover was not measured');
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(760);
+  expect(box.y + box.height).toBeLessThanOrEqual(720);
+  await expect(popover).toHaveCSS('position', 'fixed');
+});
+
 test('standard noise reduction creates a derived track and switches preview audio without replacing the source', async ({ page }) => {
   await page.evaluate(async (id) => {
     const sampleRate = 48_000;
@@ -306,6 +321,7 @@ test('standard noise reduction creates a derived track and switches preview audi
   await page.getByTestId('noise-standard').click();
   await expect(page.getByTestId('noise-reduction-menu')).toHaveAttribute('data-phase', 'ready', { timeout: 20_000 });
   await expect(page.getByTestId('export-preview-audio')).toHaveAttribute('data-enhanced-audio', 'standard');
+  await page.getByTestId('noise-reduction-menu').click();
   await page.getByTestId('noise-enhanced').click();
   await expect(page.getByTestId('noise-reduction-menu')).toHaveAttribute('data-phase', 'ready', { timeout: 30_000 });
   await expect(page.getByTestId('noise-reduction-menu')).toHaveAttribute('data-mode', 'enhanced');

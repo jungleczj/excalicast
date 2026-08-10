@@ -1,5 +1,31 @@
 # Bug Log
 
+## 2026-08-10 - Background-noise menu was clipped below the editor toolbar
+
+### Symptom
+
+The `Remove background noise` dropdown opened inside the Timeline but was partially hidden behind the editor surface.
+
+### Root cause
+
+The menu was absolutely positioned inside the toolbar's horizontal scroll container. CSS overflow axis normalization made that ancestor clip vertical content, so increasing the menu `z-index` could not move it above the clipping boundary.
+
+### Fix
+
+- Render the menu into `document.body` through a React Portal.
+- Use fixed positioning anchored to the trigger and recompute it on window resize or ancestor scrolling.
+- Flip above the trigger near the viewport bottom and clamp the menu within horizontal viewport bounds.
+- Close on selection, outside pointer input, or Escape while preserving the existing noise-processing actions.
+
+### Regression coverage
+
+- E2E verifies that the menu is a direct body child, uses fixed positioning, remains inside the viewport, and is visible above the scrollable toolbar.
+- Standard and Enhanced background-noise processing continue to complete after the interaction change.
+
+### Status
+
+- Fixed and verified locally.
+
 ## 2026-08-10 - Editor effect tracks disappeared after refresh
 
 ### Symptom
