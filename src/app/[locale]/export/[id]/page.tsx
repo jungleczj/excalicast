@@ -49,7 +49,8 @@ import type {
 import { normalizeSegments, isTrimmed } from '@/utils/segments';
 import { parseSrt } from '@/utils/srtParser';
 import { createAudioPeaksForBlob, loadOrCreateAudioPeakTrack } from '@/services/audioPeakTrack';
-import { buildLocalKeyPointMotions } from '@/services/keyPointMotion';
+import { buildLocalKeyPointMotions, migrateKeyPointMotionSegment } from '@/services/keyPointMotion';
+import { generateKeyPointMotions } from '@/services/keyPointMotionClient';
 import { audioSourceFingerprint, createEnhancedAudioTrack } from '@/services/audioEnhancement';
 import { Link, useRouter } from '@/i18n/navigation';
 
@@ -91,6 +92,9 @@ export default function EditorRecordingPage(): JSX.Element {
   const [keyPointMotions, setKeyPointMotions] = useState<KeyPointMotionSegment[]>([]);
   const [selectedKeyPointMotionId, setSelectedKeyPointMotionId] = useState<string | null>(null);
   const [keyPointGenerationPhase, setKeyPointGenerationPhase] = useState<'idle' | 'generating' | 'ready' | 'failed'>('idle');
+  const [keyPointGenerationSource, setKeyPointGenerationSource] = useState<'deepseek' | 'local' | null>(null);
+  const [keyPointGenerationError, setKeyPointGenerationError] = useState<string | null>(null);
+  const keyPointGenerationControllerRef = useRef<AbortController | null>(null);
   const [audioEnhancementPhase, setAudioEnhancementPhase] = useState<'idle' | 'processing' | 'ready' | 'failed'>('idle');
   const [audioEnhancementMode, setAudioEnhancementMode] = useState<NoiseReductionMode | 'original'>('original');
   const [audioEnhancementProgress, setAudioEnhancementProgress] = useState(0);
@@ -149,7 +153,7 @@ export default function EditorRecordingPage(): JSX.Element {
       setTitle(m.title?.trim() || (en ? `Recording ${id.slice(0, 8)}` : `录制 ${id.slice(0, 8)}`));
       const savedAutoZooms = m.autoZooms ?? [];
       const savedHighlights = m.highlights ?? [];
-      const savedKeyPointMotions = m.keyPointMotions ?? [];
+      const savedKeyPointMotions = (m.keyPointMotions ?? []).map(migrateKeyPointMotionSegment);
       const localizedDefaults = m.localizedTrackId
         ? { localizedTrackId: m.localizedTrackId, muteOriginalAudio: true }
         : {};
@@ -395,12 +399,29 @@ export default function EditorRecordingPage(): JSX.Element {
 
   const handleGenerateKeyPointMotions = useCallback(async () => {
     if (!meta?.subtitleSrt || captionCues.length === 0) return;
+    keyPointGenerationControllerRef.current?.abort();
+    const controller = new AbortController();
+    keyPointGenerationControllerRef.current = controller;
     setKeyPointGenerationPhase('generating');
+    setKeyPointGenerationSource(null);
+    setKeyPointGenerationError(null);
     try {
-      // The local fallback is deterministic and remains available offline. The
-      // DeepSeek path plugs into the same validated model once third-party text
-      // processing has been explicitly enabled for this deployment.
-      const generated = buildLocalKeyPointMotions(captionCues, meta.durationMs, locale === 'en' ? 'en' : 'zh');
+      let generated: KeyPointMotionSegment[];
+      let generationSource: 'deepseek' | 'local' = 'deepseek';
+      try {
+        const result = await generateKeyPointMotions({
+          cues: captionCues,
+          durationMs: meta.durationMs,
+          locale: locale === 'en' ? 'en' : 'zh',
+          signal: controller.signal,
+        });
+        generated = result.motions;
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        generated = buildLocalKeyPointMotions(captionCues, meta.durationMs, locale === 'en' ? 'en' : 'zh');
+        generationSource = 'local';
+        setKeyPointGenerationError(error instanceof Error ? error.message : 'key_point_generation_failed');
+      }
       if (generated.length === 0) throw new Error('no_key_points');
       if (keyPointMotions.length > 0 && !window.confirm(en
         ? 'Replace the existing key point motion track with this new version?'
@@ -411,11 +432,18 @@ export default function EditorRecordingPage(): JSX.Element {
       await updateRecordingKeyPointMotions(id, generated);
       setKeyPointMotions(generated);
       setSelectedKeyPointMotionId(generated[0]?.id ?? null);
+      setKeyPointGenerationSource(generationSource);
       setKeyPointGenerationPhase('ready');
-    } catch {
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setKeyPointGenerationError(error instanceof Error ? error.message : 'key_point_generation_failed');
       setKeyPointGenerationPhase('failed');
+    } finally {
+      if (keyPointGenerationControllerRef.current === controller) keyPointGenerationControllerRef.current = null;
     }
   }, [captionCues, en, id, keyPointMotions.length, locale, meta]);
+
+  useEffect(() => () => keyPointGenerationControllerRef.current?.abort(), []);
 
   const activateEnhancedTrack = useCallback(async (track: EnhancedAudioTrack) => {
     await setActiveEnhancedAudioTrack(id, track.id);
@@ -704,6 +732,8 @@ export default function EditorRecordingPage(): JSX.Element {
               onKeyPointMotionSelect={setSelectedKeyPointMotionId}
               onGenerateKeyPointMotions={handleGenerateKeyPointMotions}
               keyPointGenerationPhase={keyPointGenerationPhase}
+              keyPointGenerationSource={keyPointGenerationSource}
+              keyPointGenerationError={keyPointGenerationError}
               audioEnhancement={{
                 phase: audioEnhancementPhase,
                 mode: audioEnhancementMode,
@@ -767,6 +797,9 @@ export default function EditorRecordingPage(): JSX.Element {
                 keyPointMotion: en ? 'Generate key point motion' : '生成内容要点动效',
                 keyPointNeedsCaptions: en ? 'Generate captions first' : '请先生成字幕',
                 generating: en ? 'Generating…' : '生成中…',
+                keyPointAi: en ? 'AI generated' : 'AI 已生成',
+                keyPointLocal: en ? 'Local fallback' : '本地回退',
+                keyPointFailed: en ? 'Generation failed' : '生成失败',
                 spotlight: en ? 'Spotlight' : '聚光',
                 focusFrame: en ? 'Focus frame' : '焦点框',
                 cursorHalo: en ? 'Center halo' : '中心光晕',

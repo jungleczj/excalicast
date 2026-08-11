@@ -1,5 +1,43 @@
 # Development Log
 
+## 2026-08-11 - Web chapter and key-point drawer motion
+
+### User value
+
+- Reworked `Generate key point motion` into an editorial chapter-and-emphasis system instead of repeating caption sentences in cards.
+- Chapter openings use a B-style chapter drawer; meaningful interior moments use a C-style stack of concise key points.
+- Every visible line reveals word by word from below while the directional drawer enters from its own edge.
+
+### Generation and validation
+
+- Added a Pro-authenticated DeepSeek route that sends caption cues, timestamps, duration, and locale only; audio and video remain local.
+- Added a stable JSON-mode system prompt with chapter boundaries, evidence cue indices, output examples, and explicit Chinese/English brevity rules.
+- Chinese key points are limited to 2-5 Han characters; English key points are limited to 1-4 words and 28 visible characters.
+- Invalid full sentences, duplicate phrases, unsupported cue ranges, and overlapping generated moments are rejected or normalized before persistence.
+- DeepSeek/network failure uses an explicit local fallback and never clears an existing editable track.
+
+### Motion and composition
+
+- Left/right drawers cover the complete fixed video-frame height; top/bottom drawers cover its complete width.
+- Semi-transparent black gradients are strongest at the selected edge and fade toward the video center.
+- Right, left, top, and bottom placements enter and exit through the matching edge.
+- Word-level opacity and vertical offsets are deterministic functions of media time, keeping seek, pause, preview, WebCodecs, and compatibility export consistent.
+- The effect remains clipped inside the fixed recording frame and does not resize Autozoom, camera, subtitles, backgrounds, or the output canvas.
+
+### Compatibility
+
+- `KeyPointMotionSegment` schema v2 adds `chapter_drawer` and `key_points_drawer`.
+- Existing `chapter_title`, `side_card`, and `lower_third` segments migrate to their nearest v2 drawer behavior during load and persistence.
+- Timeline editing now exposes only the B/C drawer choices and shows AI, local fallback, or failure status.
+
+### Verification
+
+- `npm run typecheck` passed.
+- `npx playwright test tests/e2e/media-pipeline.spec.ts` passed all 40 tests, including B/C classification, matching-edge entry/exit, word staggering, range normalization, and v1 migration.
+- `E2E_BASE_URL=http://localhost:3027 npx playwright test tests/e2e/editor-interactions.spec.ts` passed 31 of 34 tests; the two transient preview/export failures passed on isolated rerun. The pre-existing English dubbing activation test remains failing because its localized track does not appear within the test timeout.
+- DeepSeek response handling, caption-only request data, local fallback, B/C editing, persistence, and reload all passed their editor E2E coverage.
+- `npm run build` passed with the existing ONNX/Hugging Face static-analysis warnings.
+
 ## 2026-08-10 - Web editor enhancements
 
 ### Baseline

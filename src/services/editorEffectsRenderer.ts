@@ -1,6 +1,12 @@
 import type { AutoZoomSegment, HighlightEffectSegment, KeyPointMotionSegment } from '@/types/recording';
 import { highlightAt, resolveHighlightFrameState } from '@/services/highlightEffects';
-import { keyPointMotionAt, resolveKeyPointMotionState } from '@/services/keyPointMotion';
+import {
+  keyPointMotionAt,
+  migrateKeyPointMotionSegment,
+  resolveKeyPointDrawerLayout,
+  resolveKeyPointDrawerState,
+  tokenizeKeyPointLine,
+} from '@/services/keyPointMotion';
 import { resolveFrameTransform, type FrameRect } from '@/services/frameTransform';
 
 type NormalizedRect = { x: number; y: number; width: number; height: number };
@@ -134,29 +140,64 @@ export function drawHighlightEffect(
   ctx.restore();
 }
 
-function keyPointRect(segment: KeyPointMotionSegment, bounds: FrameRect): FrameRect {
-  if (segment.kind === 'chapter_title') {
-    const width = bounds.width * 0.68;
-    const height = bounds.height * 0.2;
-    return { x: bounds.x + (bounds.width - width) / 2, y: bounds.y + bounds.height * 0.37, width, height };
+function keyPointLocale(text: string): 'en' | 'zh' {
+  return /\p{Script=Han}/u.test(text) ? 'zh' : 'en';
+}
+
+function keyPointGradient(
+  ctx: CanvasRenderingContext2D,
+  rect: FrameRect,
+  placement: Exclude<KeyPointMotionSegment['placement'], 'auto'>,
+): CanvasGradient {
+  const gradient = placement === 'left'
+    ? ctx.createLinearGradient(rect.x, rect.y, rect.x + rect.width, rect.y)
+    : placement === 'right'
+      ? ctx.createLinearGradient(rect.x, rect.y, rect.x + rect.width, rect.y)
+      : placement === 'top'
+        ? ctx.createLinearGradient(rect.x, rect.y, rect.x, rect.y + rect.height)
+        : ctx.createLinearGradient(rect.x, rect.y, rect.x, rect.y + rect.height);
+  if (placement === 'right' || placement === 'bottom') {
+    gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    gradient.addColorStop(0.38, 'rgba(0, 0, 0, 0.18)');
+    gradient.addColorStop(0.72, 'rgba(0, 0, 0, 0.52)');
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0.76)');
+  } else {
+    gradient.addColorStop(0, 'rgba(0, 0, 0, 0.76)');
+    gradient.addColorStop(0.28, 'rgba(0, 0, 0, 0.52)');
+    gradient.addColorStop(0.62, 'rgba(0, 0, 0, 0.18)');
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
   }
-  if (segment.kind === 'lower_third') {
-    const width = bounds.width * 0.62;
-    const height = bounds.height * 0.18;
-    const x = segment.placement === 'right'
-      ? bounds.x + bounds.width - width - bounds.width * 0.05
-      : bounds.x + bounds.width * 0.05;
-    return { x, y: bounds.y + bounds.height * 0.66, width, height };
-  }
-  const width = bounds.width * 0.34;
-  const height = bounds.height * 0.42;
-  const useRight = segment.placement === 'right';
-  return {
-    x: useRight ? bounds.x + bounds.width - width - bounds.width * 0.05 : bounds.x + bounds.width * 0.05,
-    y: bounds.y + bounds.height * 0.18,
-    width,
-    height,
-  };
+  return gradient;
+}
+
+function drawStaggeredKeyPointLine(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  locale: 'en' | 'zh',
+  x: number,
+  y: number,
+  align: CanvasTextAlign,
+  font: string,
+  tokenStates: ReturnType<typeof resolveKeyPointDrawerState>['tokens'],
+  tokenOffset: number,
+): number {
+  const tokens = tokenizeKeyPointLine(text, locale);
+  if (!tokens.length) return tokenOffset;
+  ctx.font = font;
+  ctx.textAlign = 'left';
+  const separator = locale === 'en' ? ' ' : '';
+  const widths = tokens.map((token, index) => ctx.measureText(`${token}${index < tokens.length - 1 ? separator : ''}`).width);
+  const totalWidth = widths.reduce((sum, width) => sum + width, 0);
+  let cursorX = align === 'right' ? x - totalWidth : align === 'center' ? x - totalWidth / 2 : x;
+  tokens.forEach((token, index) => {
+    const state = tokenStates[tokenOffset + index] ?? { opacity: 1, translateY: 0 };
+    ctx.save();
+    ctx.globalAlpha *= state.opacity;
+    ctx.fillText(token, cursorX, y + state.translateY);
+    ctx.restore();
+    cursorX += widths[index];
+  });
+  return tokenOffset + tokens.length;
 }
 
 export function drawKeyPointMotion(
@@ -168,47 +209,76 @@ export function drawKeyPointMotion(
 ): void {
   const segment = keyPointMotionAt(segments, timeMs);
   if (!segment) return;
-  const state = resolveKeyPointMotionState(segment, timeMs);
+  const migrated = migrateKeyPointMotionSegment(segment);
+  const placement = migrated.placement === 'auto'
+    ? (options.reserveRight ? 'left' as const : 'right' as const)
+    : migrated.placement;
+  const resolved = { ...migrated, placement };
+  const locale = keyPointLocale([resolved.title, ...resolved.bullets].join(''));
+  const visibleLines = [resolved.title, ...resolved.bullets].filter(Boolean);
+  const tokenCount = visibleLines.reduce((count, line) => count + tokenizeKeyPointLine(line, locale).length, 0);
+  const state = resolveKeyPointDrawerState(resolved, timeMs, tokenCount);
   if (!state.active || state.opacity <= 0) return;
-  const resolved = segment.placement === 'auto'
-    ? { ...segment, placement: options.reserveRight ? 'left' as const : (segment.kind === 'side_card' ? 'right' as const : 'left' as const) }
-    : segment;
-  const rect = keyPointRect(resolved, bounds);
-  const centerX = rect.x + rect.width / 2;
-  const centerY = rect.y + rect.height / 2;
-  const titleSize = Math.max(16, Math.round(Math.min(bounds.width, bounds.height) * (segment.kind === 'chapter_title' ? 0.055 : 0.035)));
-  const bodySize = Math.max(12, Math.round(titleSize * 0.56));
+  const rect = resolveKeyPointDrawerLayout(bounds, placement);
+  const translateX = state.drawerTranslateX * rect.width;
+  const translateY = state.drawerTranslateY * rect.height;
+  const minSide = Math.min(bounds.width, bounds.height);
+  const titleSize = Math.max(22, Math.round(minSide * (resolved.kind === 'chapter_drawer' ? 0.07 : 0.058)));
+  const bodySize = Math.max(18, Math.round(titleSize * 0.68));
+  const lineGap = Math.max(10, Math.round(bodySize * 0.55));
+  const totalHeight = titleSize + resolved.bullets.length * (bodySize + lineGap);
+  const horizontal = placement === 'left' || placement === 'right';
+  const align: CanvasTextAlign = placement === 'right' ? 'right' : placement === 'left' ? 'left' : 'center';
+  const anchorX = placement === 'right'
+    ? rect.x + rect.width * 0.86
+    : placement === 'left'
+      ? rect.x + rect.width * 0.14
+      : rect.x + rect.width / 2;
+  const startY = horizontal
+    ? rect.y + (rect.height - totalHeight) / 2
+    : placement === 'top'
+      ? rect.y + rect.height * 0.28
+      : rect.y + rect.height * 0.3;
 
   ctx.save();
   ctx.beginPath();
   ctx.rect(bounds.x, bounds.y, bounds.width, bounds.height);
   ctx.clip();
+  ctx.translate(translateX, translateY);
   ctx.globalAlpha = state.opacity;
-  ctx.translate(centerX, centerY + state.translateY);
-  ctx.scale(state.scale, state.scale);
-  ctx.translate(-centerX, -centerY);
-  ctx.fillStyle = segment.kind === 'chapter_title' ? 'rgba(16, 20, 26, 0.9)' : 'rgba(255, 253, 248, 0.94)';
-  roundedRectPath(ctx, rect, Math.max(8, Math.min(rect.width, rect.height) * 0.07));
-  ctx.fill();
-  ctx.strokeStyle = segment.kind === 'chapter_title' ? 'rgba(255,255,255,0.3)' : 'rgba(24,25,26,0.24)';
-  ctx.lineWidth = Math.max(1, Math.round(Math.min(bounds.width, bounds.height) * 0.002));
-  ctx.stroke();
+  ctx.fillStyle = keyPointGradient(ctx, rect, placement);
+  ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
 
-  const textColor = segment.kind === 'chapter_title' ? '#fffdf8' : '#18191a';
-  ctx.fillStyle = textColor;
+  ctx.fillStyle = '#fff';
   ctx.textBaseline = 'top';
-  ctx.font = `700 ${titleSize}px system-ui, sans-serif`;
-  const pad = Math.max(12, Math.round(rect.width * 0.07));
-  ctx.fillText(segment.title.slice(0, 120), rect.x + pad, rect.y + pad, rect.width - pad * 2);
-  if (segment.bullets.length > 0) {
-    ctx.font = `500 ${bodySize}px system-ui, sans-serif`;
-    let y = rect.y + pad + titleSize * 1.35;
-    const lineHeight = bodySize * 1.42;
-    for (const bullet of segment.bullets.slice(0, 4)) {
-      if (y + lineHeight > rect.y + rect.height - pad) break;
-      ctx.fillText(`• ${bullet.slice(0, 100)}`, rect.x + pad, y, rect.width - pad * 2);
-      y += lineHeight;
-    }
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.28)';
+  ctx.shadowBlur = Math.max(2, Math.round(minSide * 0.006));
+  let tokenOffset = 0;
+  tokenOffset = drawStaggeredKeyPointLine(
+    ctx,
+    resolved.title,
+    locale,
+    anchorX,
+    startY,
+    align,
+    `800 ${titleSize}px system-ui, sans-serif`,
+    state.tokens,
+    tokenOffset,
+  );
+  let lineY = startY + titleSize + lineGap;
+  for (const bullet of resolved.bullets.slice(0, resolved.kind === 'chapter_drawer' ? 2 : 3)) {
+    tokenOffset = drawStaggeredKeyPointLine(
+      ctx,
+      bullet,
+      locale,
+      anchorX,
+      lineY,
+      align,
+      `700 ${bodySize}px system-ui, sans-serif`,
+      state.tokens,
+      tokenOffset,
+    );
+    lineY += bodySize + lineGap;
   }
   ctx.restore();
 }

@@ -116,7 +116,7 @@ export interface KeyPointMotionSegment {
   id: string;
   start: number;
   end: number;
-  kind: 'chapter_title' | 'side_card' | 'lower_third';
+  kind: 'chapter_drawer' | 'key_points_drawer' | 'chapter_title' | 'side_card' | 'lower_third';
   title: string;
   bullets: string[];
   placement: 'auto' | 'left' | 'right' | 'top' | 'bottom';
@@ -129,7 +129,7 @@ export interface KeyPointMotionSegment {
   };
   enabled: boolean;
   generationSource: 'deepseek' | 'local';
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
 }
 
 export type NoiseReductionMode = 'standard' | 'enhanced';

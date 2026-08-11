@@ -644,6 +644,8 @@ export async function updateRecordingKeyPointMotions(recordingId: string, motion
     .filter((item) => Number.isFinite(item.start) && Number.isFinite(item.end) && item.end > item.start)
     .map((item) => ({
       ...item,
+      kind: item.kind === 'chapter_title' || item.kind === 'chapter_drawer' ? 'chapter_drawer' as const : 'key_points_drawer' as const,
+      schemaVersion: 2 as const,
       start: Math.max(0, Math.round(item.start)),
       end: Math.max(0, Math.round(item.end)),
       sourceCueStart: Math.max(0, Math.round(item.sourceCueStart)),

@@ -8634,6 +8634,32 @@ body {
   overflow-wrap: anywhere;
 }
 
+.timeline-craft-keypoint-action {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+}
+
+.timeline-craft-action-status {
+  max-width: 88px;
+  overflow: hidden;
+  color: var(--craft-blue-strong);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-craft-action-status.is-warning {
+  color: #8a5a12;
+}
+
+.timeline-craft-action-status.is-error {
+  color: #b23832;
+}
+
 .timeline-craft-effect-track {
   overflow: hidden;
   border: 1px solid rgba(24, 25, 26, 0.1);

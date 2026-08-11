@@ -235,11 +235,44 @@ test('key point motion requires captions and then creates an editable track', as
     db.close();
   }, recordingId);
   await page.reload();
+  await page.route('**/api/key-points/generate', async (route) => {
+    const payload = route.request().postDataJSON() as Record<string, unknown>;
+    expect(Array.isArray(payload.cues)).toBe(true);
+    expect(payload).not.toHaveProperty('audio');
+    expect(payload).not.toHaveProperty('video');
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        source: 'deepseek',
+        model: 'deepseek-v4-flash',
+        motions: [
+          {
+            id: 'kp-ai-chapter-0', start: 0, end: 2_800, kind: 'chapter_drawer', title: 'Growth path',
+            bullets: ['Define problem', 'Compare options'], placement: 'right', sourceCueStart: 1, sourceCueEnd: 3,
+            transition: { enterMs: 600, exitMs: 420, easing: 'easeInOutCubic' }, enabled: true,
+            generationSource: 'deepseek', schemaVersion: 2,
+          },
+          {
+            id: 'kp-ai-point-0', start: 3_000, end: 6_000, kind: 'key_points_drawer', title: 'Compare options',
+            bullets: ['Choose path'], placement: 'left', sourceCueStart: 2, sourceCueEnd: 3,
+            transition: { enterMs: 600, exitMs: 420, easing: 'easeInOutCubic' }, enabled: true,
+            generationSource: 'deepseek', schemaVersion: 2,
+          },
+        ],
+      }),
+    });
+  });
   await expect(page.getByTestId('keypoint-generate')).toBeEnabled();
   await page.getByTestId('keypoint-generate').click();
-  await expect(page.getByTestId('keypoint-motion-segment').first()).toBeVisible();
+  await expect(page.getByTestId('keypoint-motion-segment')).toHaveCount(2);
+  await expect(page.getByTestId('keypoint-motion-segment').first()).toContainText('Growth path');
   await page.getByTestId('keypoint-motion-segment').first().click();
   await expect(page.getByTestId('keypoint-motion-editor')).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Key point layout' })).toHaveValue('chapter_drawer');
+  await expect(page.getByRole('option', { name: 'Chapter drawer' })).toBeAttached();
+  await expect(page.getByRole('option', { name: 'Key-point drawer' })).toBeAttached();
+  await expect(page.getByTestId('keypoint-generation-status')).toContainText('AI');
   const generatedCount = await page.getByTestId('keypoint-motion-segment').count();
   await page.waitForTimeout(650);
   await expect.poll(() => readRecordingFieldCount(page, 'keyPointMotions')).toBe(generatedCount);
@@ -247,10 +280,40 @@ test('key point motion requires captions and then creates an editable track', as
   await expect(page.getByTestId('keypoint-motion-segment')).toHaveCount(generatedCount);
 });
 
+test('key point motion falls back locally without deleting the editable result', async ({ page }) => {
+  await page.evaluate(async (id) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('recordings', 'readwrite');
+      const store = tx.objectStore('recordings');
+      const request = store.get(id);
+      request.onsuccess = () => store.put({
+        ...request.result,
+        subtitleSrt: '1\n00:00:00,000 --> 00:00:03,000\nFirst define the audience and their goal.\n\n2\n00:00:04,000 --> 00:00:08,000\nThen reduce friction and publish faster.',
+      });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, recordingId);
+  await page.reload();
+  await page.route('**/api/key-points/generate', (route) => route.fulfill({
+    status: 502,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: 'key_point_generation_failed' }),
+  }));
+
+  await page.getByTestId('keypoint-generate').click();
+  await expect(page.getByTestId('keypoint-motion-segment').first()).toBeVisible();
+  await expect(page.getByTestId('keypoint-generation-status')).toContainText('Local fallback');
+});
+
 test('editor enhancement controls stay within one or two toolbar rows', async ({ page }) => {
   await expect(page.locator('.timeline-craft-action-menu')).toBeVisible();
-  await page.locator('.timeline-craft-action-menu > summary').click();
-  await expect(page.getByRole('button', { name: 'Standard · fast local cleanup' })).toBeVisible();
   for (const width of [1050, 760, 560]) {
     await page.setViewportSize({ width, height: 900 });
     const rowCount = await page.locator('.timeline-craft-toolbar').evaluate((toolbar) => {

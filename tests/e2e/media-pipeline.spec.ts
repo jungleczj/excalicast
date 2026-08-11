@@ -25,7 +25,13 @@ import {
 import { ChunkWriteBatcher } from '@/services/mediaRecorderHealth';
 import { dataUrlToBlob } from '@/services/workspaceShellCapture';
 import { resolveHighlightFrameState } from '@/services/highlightEffects';
-import { buildLocalKeyPointMotions, resolveKeyPointMotionState } from '@/services/keyPointMotion';
+import {
+  buildLocalKeyPointMotions,
+  migrateKeyPointMotionSegment,
+  resolveKeyPointDrawerLayout,
+  resolveKeyPointDrawerState,
+  tokenizeKeyPointLine,
+} from '@/services/keyPointMotion';
 import { parseKeyPointMotionResponse } from '@/services/keyPointMotionSchema';
 import { resolveEnhancedAudioSelection } from '@/services/audioEnhancement';
 import { projectHighlightAperture } from '@/services/editorEffectsRenderer';
@@ -106,7 +112,7 @@ test('highlight region follows the same content transform as Autozoom without ch
   expect(bounds).toEqual({ x: 100, y: 50, width: 800, height: 450 });
 });
 
-test('local key point fallback creates editable timed motions and deterministic animation state', () => {
+test('local key point fallback creates chapter and interior drawers without copying caption sentences', () => {
   const motions = buildLocalKeyPointMotions([
     { index: 1, startMs: 0, endMs: 2_000, text: 'First, define the problem.' },
     { index: 2, startMs: 2_200, endMs: 5_500, text: 'Then compare the available options.' },
@@ -114,33 +120,82 @@ test('local key point fallback creates editable timed motions and deterministic 
   ], 12_000, 'en');
 
   expect(motions.length).toBeGreaterThanOrEqual(2);
-  expect(motions[0]).toMatchObject({ kind: 'chapter_title', generationSource: 'local', enabled: true });
+  expect(motions[0]).toMatchObject({ kind: 'chapter_drawer', generationSource: 'local', enabled: true, schemaVersion: 2 });
+  expect(motions.slice(1).every((motion) => motion.kind === 'key_points_drawer')).toBe(true);
+  expect(motions.flatMap((motion) => [motion.title, ...motion.bullets])).not.toContain('First, define the problem.');
   expect(motions.every((motion) => motion.start >= 0 && motion.end <= 12_000 && motion.end > motion.start)).toBe(true);
-
-  const segment: KeyPointMotionSegment = motions[0];
-  const before = resolveKeyPointMotionState(segment, segment.start - 1);
-  const entering = resolveKeyPointMotionState(segment, segment.start + 120);
-  const hold = resolveKeyPointMotionState(segment, (segment.start + segment.end) / 2);
-  expect(before.active).toBe(false);
-  expect(entering.opacity).toBeGreaterThan(0);
-  expect(entering.opacity).toBeLessThan(1);
-  expect(hold.opacity).toBe(1);
+  expect(motions.slice(1).every((motion, index) => motion.start >= motions[index].end)).toBe(true);
 });
 
-test('AI key point response is sanitized, clamped, de-duplicated, and kept editable', () => {
+test('AI key point response creates B at chapter openings and C for concise interior points', () => {
+  const cues = [
+    { index: 1, startMs: 0, endMs: 2_000, text: '先理解用户真正想解决的问题。' },
+    { index: 2, startMs: 2_100, endMs: 5_000, text: '第一步是降低首次录制的操作门槛。' },
+    { index: 3, startMs: 5_100, endMs: 8_000, text: '完成后提供即时反馈并支持一键发布。' },
+  ];
   const motions = parseKeyPointMotionResponse(JSON.stringify({
-    motions: [
-      { startMs: -40, endMs: 2_400, title: '<b>Opening</b>', bullets: [' First ', '<script>x</script>'], kind: 'chapter_title', placement: 'auto', sourceCueStart: 1, sourceCueEnd: 2 },
-      { startMs: 100, endMs: 2_500, title: 'Opening', bullets: ['duplicate'], kind: 'side_card', placement: 'right', sourceCueStart: 1, sourceCueEnd: 2 },
-      { startMs: 8_800, endMs: 20_000, title: 'Decision', bullets: ['Choose the reliable path'], kind: 'side_card', placement: 'left', sourceCueStart: 4, sourceCueEnd: 5 },
-    ],
-  }), 10_000);
+    chapters: [{
+      title: '增长路径',
+      startCueIndex: 1,
+      endCueIndex: 3,
+      openingPoints: ['理解用户', '降低门槛'],
+      moments: [
+        { startCueIndex: 2, endCueIndex: 3, points: ['降低门槛', '即时反馈', '一键发布', '这是一整句不应进入画面的字幕内容'] },
+      ],
+    }],
+  }), cues, 10_000, 'zh');
 
   expect(motions).toHaveLength(2);
-  expect(motions[0]).toMatchObject({ start: 0, end: 2_400, title: 'Opening', generationSource: 'deepseek' });
-  expect(motions[0].bullets).toEqual(['First', 'x']);
-  expect(motions[1].end).toBe(10_000);
-  expect(motions.every((motion) => motion.enabled && motion.schemaVersion === 1)).toBe(true);
+  expect(motions[0]).toMatchObject({
+    kind: 'chapter_drawer', title: '增长路径', bullets: ['理解用户', '降低门槛'],
+    sourceCueStart: 1, sourceCueEnd: 3, generationSource: 'deepseek', schemaVersion: 2,
+  });
+  expect(motions[1]).toMatchObject({
+    kind: 'key_points_drawer', title: '降低门槛', bullets: ['即时反馈', '一键发布'],
+    sourceCueStart: 2, sourceCueEnd: 3, generationSource: 'deepseek', schemaVersion: 2,
+  });
+  expect(motions.flatMap((motion) => [motion.title, ...motion.bullets])).not.toContain('这是一整句不应进入画面的字幕内容');
+});
+
+test('key point drawer state enters and exits through its own edge and staggers words upward', () => {
+  const right: KeyPointMotionSegment = {
+    id: 'right', start: 0, end: 3_000, kind: 'key_points_drawer', title: '降低门槛', bullets: ['即时反馈'],
+    placement: 'right', sourceCueStart: 1, sourceCueEnd: 2,
+    transition: { enterMs: 600, exitMs: 420, easing: 'easeInOutCubic' },
+    enabled: true, generationSource: 'deepseek', schemaVersion: 2,
+  };
+  const left = { ...right, id: 'left', placement: 'left' as const };
+
+  const rightEntering = resolveKeyPointDrawerState(right, 120, 4);
+  const leftEntering = resolveKeyPointDrawerState(left, 120, 4);
+  const rightExiting = resolveKeyPointDrawerState(right, 2_850, 4);
+  expect(rightEntering.drawerTranslateX).toBeGreaterThan(0);
+  expect(leftEntering.drawerTranslateX).toBeLessThan(0);
+  expect(rightExiting.drawerTranslateX).toBeGreaterThan(0);
+  expect(rightEntering.tokens[0].translateY).toBeLessThan(rightEntering.tokens[3].translateY);
+  expect(rightEntering.tokens[0].opacity).toBeGreaterThan(rightEntering.tokens[3].opacity);
+
+  expect(resolveKeyPointDrawerLayout({ x: 10, y: 20, width: 800, height: 450 }, 'right')).toEqual({
+    x: 410, y: 20, width: 400, height: 450, axis: 'horizontal', edge: 'right',
+  });
+  expect(resolveKeyPointDrawerLayout({ x: 10, y: 20, width: 800, height: 450 }, 'top')).toEqual({
+    x: 10, y: 20, width: 800, height: 203, axis: 'vertical', edge: 'top',
+  });
+});
+
+test('key point tokenization reveals semantic words instead of whole lines', () => {
+  expect(tokenizeKeyPointLine('降低门槛', 'zh')).toEqual(['降低', '门槛']);
+  expect(tokenizeKeyPointLine('Ship publish ready videos', 'en')).toEqual(['Ship', 'publish', 'ready', 'videos']);
+});
+
+test('schema v1 key point cards migrate to schema v2 drawers', () => {
+  const migrated = migrateKeyPointMotionSegment({
+    id: 'legacy', start: 100, end: 2_500, title: 'Opening', bullets: ['First'], kind: 'chapter_title', placement: 'right',
+    sourceCueStart: 1, sourceCueEnd: 2, transition: { enterMs: 360, exitMs: 240, easing: 'easeInOutCubic' },
+    enabled: true, generationSource: 'local', schemaVersion: 1,
+  });
+
+  expect(migrated).toMatchObject({ id: 'legacy', kind: 'chapter_drawer', schemaVersion: 2, placement: 'right' });
 });
 
 test('enhanced audio replaces the original only when the derived track is ready and matches the source', () => {

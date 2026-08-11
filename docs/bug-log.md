@@ -1,5 +1,36 @@
 # Bug Log
 
+## 2026-08-11 - Generated key-point motion repeated captions in generic cards
+
+### Symptom
+
+`Generate key point motion` produced rounded chapter/side/lower-third cards whose title was often a truncated caption sentence. Direction, hierarchy, text density, and entry motion did not match the intended chapter-opening and interior-key-point treatment.
+
+### Root cause
+
+- The editor action never called DeepSeek; it always used a deterministic local caption selector.
+- Local generation copied the selected caption into `title` instead of performing semantic condensation.
+- The renderer scaled and faded a bounded card, so an item placed on the right did not behave as a full-height right-edge drawer.
+- Text was painted as complete lines, with no media-time word reveal.
+
+### Fix
+
+- Connect a caption-only DeepSeek JSON generation route with a fixed editorial prompt and evidence-cue contract.
+- Validate concise Chinese/English key points and map chapter openings to B drawers and interior moments to C drawers.
+- Replace card drawing with directional semi-transparent black gradients clipped to the fixed video frame.
+- Derive drawer travel and per-word upward reveal from media time, including matching-edge exit.
+- Preserve offline/service-failure behavior through a clearly identified local fallback and migrate schema-v1 tracks.
+
+### Regression coverage
+
+- Tests reject full-sentence Chinese points, verify B/C classification, enforce v1 migration, and check same-edge drawer travel.
+- Tests verify semantic token staggering and non-overlapping generated ranges.
+- Editor E2E verifies AI and local paths, durable persistence, and the B/C layout controls.
+
+### Status
+
+- Fixed and verified in the Web editor. Type checking, the 40-test media suite, both key-point editor E2E paths, and the production build pass. The unrelated pre-existing English dubbing activation E2E remains a known failure.
+
 ## 2026-08-10 - Background-noise menu was clipped below the editor toolbar
 
 ### Symptom

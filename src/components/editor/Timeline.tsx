@@ -43,6 +43,8 @@ interface Props {
   onKeyPointMotionSelect?: (id: string | null) => void;
   onGenerateKeyPointMotions?: () => void;
   keyPointGenerationPhase?: 'idle' | 'generating' | 'ready' | 'failed';
+  keyPointGenerationSource?: 'deepseek' | 'local' | null;
+  keyPointGenerationError?: string | null;
   audioEnhancement?: {
     phase: 'idle' | 'processing' | 'ready' | 'failed';
     mode: NoiseReductionMode | 'original';
@@ -78,6 +80,7 @@ interface Props {
     highlight: string; noiseReduction: string; standardNoiseReduction: string;
     enhancedNoiseReduction: string; originalAudio: string;
     keyPointMotion: string; keyPointNeedsCaptions: string; generating: string;
+    keyPointAi: string; keyPointLocal: string; keyPointFailed: string;
     spotlight: string; focusFrame: string; cursorHalo: string; textCallout: string;
     calloutText: string; opacity: string;
   };
@@ -102,7 +105,8 @@ export function Timeline({
   autoZooms = [], onAutoZoomChange, selectedAutoZoomId, onAutoZoomSelect,
   highlights = [], onHighlightChange, selectedHighlightId, onHighlightSelect,
   keyPointMotions = [], onKeyPointMotionChange, selectedKeyPointMotionId, onKeyPointMotionSelect,
-  onGenerateKeyPointMotions, keyPointGenerationPhase = 'idle', audioEnhancement,
+  onGenerateKeyPointMotions, keyPointGenerationPhase = 'idle', keyPointGenerationSource = null,
+  keyPointGenerationError = null, audioEnhancement,
   autoEdit,
   hasAudio, hasCaptions, audioPeaks = [], captionCues = [], labels,
 }: Props): JSX.Element {
@@ -582,17 +586,31 @@ export function Timeline({
             </div>
           )}
           {onGenerateKeyPointMotions && (
-            <button
-              data-testid="keypoint-generate"
-              type="button"
-              disabled={!hasCaptions || keyPointGenerationPhase === 'generating'}
-              onClick={onGenerateKeyPointMotions}
-              className="timeline-craft-action btn-sketch"
-              style={{ padding: '3px 9px' }}
-              title={!hasCaptions ? labels.keyPointNeedsCaptions : labels.keyPointMotion}
-            >
-              <I.Sparkles size={11} /> {keyPointGenerationPhase === 'generating' ? labels.generating : labels.keyPointMotion}
-            </button>
+            <div className="timeline-craft-keypoint-action">
+              <button
+                data-testid="keypoint-generate"
+                type="button"
+                disabled={!hasCaptions || keyPointGenerationPhase === 'generating'}
+                onClick={onGenerateKeyPointMotions}
+                className="timeline-craft-action btn-sketch"
+                style={{ padding: '3px 9px' }}
+                title={!hasCaptions ? labels.keyPointNeedsCaptions : labels.keyPointMotion}
+              >
+                <I.Sparkles size={11} /> {keyPointGenerationPhase === 'generating' ? labels.generating : labels.keyPointMotion}
+              </button>
+              {(keyPointGenerationSource || keyPointGenerationPhase === 'failed') && (
+                <span
+                  data-testid="keypoint-generation-status"
+                  className={`timeline-craft-action-status${keyPointGenerationSource === 'local' ? ' is-warning' : ''}${keyPointGenerationPhase === 'failed' ? ' is-error' : ''}`}
+                  title={keyPointGenerationError ?? undefined}
+                  role="status"
+                >
+                  {keyPointGenerationPhase === 'failed'
+                    ? labels.keyPointFailed
+                    : keyPointGenerationSource === 'local' ? labels.keyPointLocal : labels.keyPointAi}
+                </span>
+              )}
+            </div>
           )}
           {trimmed && (
             <button type="button" onClick={() => { onReset(); setSelectedIdx(null); }} className="timeline-craft-action btn-sketch" style={{ padding: '3px 8px' }}>
@@ -886,12 +904,11 @@ export function Timeline({
         if (!item) return null;
         return (
           <div className="timeline-craft-keypoint-editor" data-testid="keypoint-motion-editor">
-            <input value={item.title} maxLength={120} onChange={(event) => replaceKeyPointMotion(item.id, { title: event.target.value })} aria-label="Key point title" />
-            <input value={item.bullets.join(' · ')} maxLength={360} onChange={(event) => replaceKeyPointMotion(item.id, { bullets: event.target.value.split('·').map((value) => value.trim()).filter(Boolean).slice(0, 4) })} aria-label="Key point bullets" />
+            <input value={item.title} maxLength={48} onChange={(event) => replaceKeyPointMotion(item.id, { title: event.target.value })} aria-label="Key point title" />
+            <input value={item.bullets.join(' · ')} maxLength={120} onChange={(event) => replaceKeyPointMotion(item.id, { bullets: event.target.value.split('·').map((value) => value.trim()).filter(Boolean).slice(0, 4) })} aria-label="Key point bullets" />
             <select value={item.kind} onChange={(event) => replaceKeyPointMotion(item.id, { kind: event.target.value as KeyPointMotionSegment['kind'] })} aria-label="Key point layout">
-              <option value="chapter_title">Chapter</option>
-              <option value="side_card">Side card</option>
-              <option value="lower_third">Lower third</option>
+              <option value="chapter_drawer">Chapter drawer</option>
+              <option value="key_points_drawer">Key-point drawer</option>
             </select>
             <select value={item.placement} onChange={(event) => replaceKeyPointMotion(item.id, { placement: event.target.value as KeyPointMotionSegment['placement'] })} aria-label="Key point placement">
               {['auto', 'left', 'right', 'top', 'bottom'].map((value) => <option key={value} value={value}>{value}</option>)}
