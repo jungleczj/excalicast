@@ -15,6 +15,7 @@ import type {
   TimeSegment,
 } from '@/types/recording';
 import { keptDuration, moveSegment, outputToSource, sourceToOutput, splitSegments, removeSegmentAt, trimSegmentEdge } from '@/utils/segments';
+import { migrateKeyPointMotionSegment } from '@/services/keyPointMotion';
 
 interface Props {
   durationMs: number;
@@ -338,7 +339,12 @@ export function Timeline({
       if (item.id !== id) return item;
       const start = Math.max(0, Math.min(durationMs - 100, Math.round(patch.start ?? item.start)));
       const end = Math.max(start + 100, Math.min(durationMs, Math.round(patch.end ?? item.end)));
-      return { ...item, ...patch, start, end };
+      const movedAsBlock = patch.start !== undefined && patch.end !== undefined
+        && Math.abs((patch.end - item.end) - (patch.start - item.start)) < 2;
+      const lines = movedAsBlock
+        ? item.lines?.map((line) => ({ ...line, revealAtMs: Math.max(0, line.revealAtMs + start - item.start) }))
+        : item.lines;
+      return migrateKeyPointMotionSegment({ ...item, ...patch, lines, start, end });
     }).sort((a, b) => a.start - b.start));
   };
 

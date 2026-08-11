@@ -112,6 +112,15 @@ export interface HighlightEffectSegment {
   schemaVersion: 1;
 }
 
+export interface KeyPointMotionLine {
+  id: string;
+  role: 'title' | 'point';
+  text: string;
+  anchorCueIndex: number;
+  revealAtMs: number;
+  matchKind: 'exact' | 'partial' | 'semantic' | 'fallback';
+}
+
 export interface KeyPointMotionSegment {
   id: string;
   start: number;
@@ -119,6 +128,7 @@ export interface KeyPointMotionSegment {
   kind: 'chapter_drawer' | 'key_points_drawer' | 'chapter_title' | 'side_card' | 'lower_third';
   title: string;
   bullets: string[];
+  lines?: KeyPointMotionLine[];
   placement: 'auto' | 'left' | 'right' | 'top' | 'bottom';
   sourceCueStart: number;
   sourceCueEnd: number;
@@ -129,7 +139,7 @@ export interface KeyPointMotionSegment {
   };
   enabled: boolean;
   generationSource: 'deepseek' | 'local';
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
 }
 
 export type NoiseReductionMode = 'standard' | 'enhanced';

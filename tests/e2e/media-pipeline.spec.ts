@@ -33,6 +33,7 @@ import { dataUrlToBlob } from '@/services/workspaceShellCapture';
 import { resolveHighlightFrameState } from '@/services/highlightEffects';
 import {
   buildLocalKeyPointMotions,
+  alignKeyPointMotionLines,
   migrateKeyPointMotionSegment,
   resolveKeyPointDrawerLayout,
   resolveKeyPointDrawerState,
@@ -127,7 +128,8 @@ test('local key point fallback creates chapter and interior drawers without copy
   ], 12_000, 'en');
 
   expect(motions.length).toBeGreaterThanOrEqual(2);
-  expect(motions[0]).toMatchObject({ kind: 'chapter_drawer', generationSource: 'local', enabled: true, schemaVersion: 2 });
+  expect(motions[0]).toMatchObject({ kind: 'chapter_drawer', generationSource: 'local', enabled: true, schemaVersion: 3 });
+  expect(motions.every((motion) => motion.lines?.length === 1)).toBe(true);
   expect(motions.slice(1).every((motion) => motion.kind === 'key_points_drawer')).toBe(true);
   expect(motions.flatMap((motion) => [motion.title, ...motion.bullets])).not.toContain('First, define the problem.');
   expect(motions.every((motion) => motion.start >= 0 && motion.end <= 12_000 && motion.end > motion.start)).toBe(true);
@@ -145,23 +147,84 @@ test('AI key point response creates B at chapter openings and C for concise inte
       title: '增长路径',
       startCueIndex: 1,
       endCueIndex: 3,
-      openingPoints: ['理解用户', '降低门槛'],
+      titleAnchorCueIndex: 1,
+      openingPoints: [
+        { text: '理解用户', anchorCueIndex: 1 },
+      ],
       moments: [
-        { startCueIndex: 2, endCueIndex: 3, points: ['降低门槛', '即时反馈', '一键发布', '这是一整句不应进入画面的字幕内容'] },
+        {
+          startCueIndex: 2,
+          endCueIndex: 3,
+          points: [
+            { text: '降低门槛', anchorCueIndex: 2 },
+            { text: '即时反馈', anchorCueIndex: 3 },
+            { text: '一键发布', anchorCueIndex: 3 },
+            { text: '这是一整句不应进入画面的字幕内容', anchorCueIndex: 3 },
+          ],
+        },
       ],
     }],
   }), cues, 10_000, 'zh');
 
   expect(motions).toHaveLength(2);
   expect(motions[0]).toMatchObject({
-    kind: 'chapter_drawer', title: '增长路径', bullets: ['理解用户', '降低门槛'],
-    sourceCueStart: 1, sourceCueEnd: 3, generationSource: 'deepseek', schemaVersion: 2,
+    kind: 'chapter_drawer', title: '增长路径', bullets: ['理解用户'],
+    sourceCueStart: 1, sourceCueEnd: 3, generationSource: 'deepseek', schemaVersion: 3,
   });
+  expect(motions[0].lines).toEqual([
+    expect.objectContaining({ role: 'title', text: '增长路径', anchorCueIndex: 1 }),
+    expect.objectContaining({ role: 'point', text: '理解用户', anchorCueIndex: 1 }),
+  ]);
+  expect(motions[0].start).toBe(Math.max(0, motions[0].lines![0].revealAtMs - 150));
   expect(motions[1]).toMatchObject({
     kind: 'key_points_drawer', title: '降低门槛', bullets: ['即时反馈', '一键发布'],
-    sourceCueStart: 2, sourceCueEnd: 3, generationSource: 'deepseek', schemaVersion: 2,
+    sourceCueStart: 2, sourceCueEnd: 3, generationSource: 'deepseek', schemaVersion: 3,
   });
   expect(motions.flatMap((motion) => [motion.title, ...motion.bullets])).not.toContain('这是一整句不应进入画面的字幕内容');
+});
+
+test('semantic key point lines reveal with their caption cue instead of the drawer start', () => {
+  const segment: KeyPointMotionSegment = {
+    id: 'semantic', start: 850, end: 12_800, kind: 'chapter_drawer', title: '章节开始', bullets: ['语义要点'],
+    lines: [
+      { id: 'title', role: 'title', text: '章节开始', anchorCueIndex: 1, revealAtMs: 1_000, matchKind: 'exact' },
+      { id: 'point', role: 'point', text: '语义要点', anchorCueIndex: 8, revealAtMs: 10_000, matchKind: 'semantic' },
+    ],
+    placement: 'right', sourceCueStart: 1, sourceCueEnd: 8,
+    transition: { enterMs: 280, exitMs: 420, easing: 'easeInOutCubic' },
+    enabled: true, generationSource: 'deepseek', schemaVersion: 3,
+  };
+
+  const early = resolveKeyPointDrawerState(segment, 5_000, [2, 2]);
+  const entering = resolveKeyPointDrawerState(segment, 10_070, [2, 2]);
+  expect(early.lines[0].some((token) => token.opacity > 0)).toBe(true);
+  expect(early.lines[1].every((token) => token.opacity === 0)).toBe(true);
+  expect(entering.lines[1][0].opacity).toBeGreaterThan(0);
+  expect(entering.lines[1][1].opacity).toBe(0);
+});
+
+test('line alignment refines exact text locally and bounds semantic cue timing', () => {
+  const cues = [
+    { index: 4, startMs: 8_000, endMs: 10_000, text: '先解释背景，然后立即发布作品。' },
+    { index: 5, startMs: 10_000, endMs: 12_000, text: '这样最终能够更快完成成品。' },
+  ];
+  const lines = alignKeyPointMotionLines({
+    segmentId: 'aligned',
+    drafts: [
+      { role: 'title', text: '立即发布', anchorCueIndex: 999 },
+      { role: 'point', text: '交付提速', anchorCueIndex: 5 },
+    ],
+    cues,
+    sourceCueStart: 4,
+    sourceCueEnd: 5,
+  });
+
+  expect(lines[0]).toMatchObject({ anchorCueIndex: 4, matchKind: 'exact' });
+  expect(lines[0].revealAtMs).toBeGreaterThan(8_000);
+  expect(lines[0].revealAtMs).toBeLessThan(10_000);
+  expect(lines[1]).toMatchObject({ anchorCueIndex: 5, matchKind: 'semantic' });
+  expect(lines[1].revealAtMs).toBeGreaterThanOrEqual(10_080);
+  expect(lines[1].revealAtMs).toBeLessThanOrEqual(10_320);
 });
 
 test('key point drawer state enters and exits through its own edge and staggers words upward', () => {
@@ -173,8 +236,8 @@ test('key point drawer state enters and exits through its own edge and staggers 
   };
   const left = { ...right, id: 'left', placement: 'left' as const };
 
-  const rightEntering = resolveKeyPointDrawerState(right, 120, 4);
-  const leftEntering = resolveKeyPointDrawerState(left, 120, 4);
+  const rightEntering = resolveKeyPointDrawerState(right, 260, 4);
+  const leftEntering = resolveKeyPointDrawerState(left, 260, 4);
   const rightExiting = resolveKeyPointDrawerState(right, 2_850, 4);
   expect(rightEntering.drawerTranslateX).toBeGreaterThan(0);
   expect(leftEntering.drawerTranslateX).toBeLessThan(0);
@@ -195,14 +258,18 @@ test('key point tokenization reveals semantic words instead of whole lines', () 
   expect(tokenizeKeyPointLine('Ship publish ready videos', 'en')).toEqual(['Ship', 'publish', 'ready', 'videos']);
 });
 
-test('schema v1 key point cards migrate to schema v2 drawers', () => {
+test('schema v1 key point cards migrate to schema v3 semantic drawers', () => {
   const migrated = migrateKeyPointMotionSegment({
     id: 'legacy', start: 100, end: 2_500, title: 'Opening', bullets: ['First'], kind: 'chapter_title', placement: 'right',
     sourceCueStart: 1, sourceCueEnd: 2, transition: { enterMs: 360, exitMs: 240, easing: 'easeInOutCubic' },
     enabled: true, generationSource: 'local', schemaVersion: 1,
   });
 
-  expect(migrated).toMatchObject({ id: 'legacy', kind: 'chapter_drawer', schemaVersion: 2, placement: 'right' });
+  expect(migrated).toMatchObject({ id: 'legacy', kind: 'chapter_drawer', schemaVersion: 3, placement: 'right' });
+  expect(migrated.lines).toEqual([
+    expect.objectContaining({ role: 'title', text: 'Opening', revealAtMs: 250, matchKind: 'fallback' }),
+    expect.objectContaining({ role: 'point', text: 'First', revealAtMs: 430, matchKind: 'fallback' }),
+  ]);
 });
 
 test('enhanced audio replaces the original only when the derived track is ready and matches the source', () => {

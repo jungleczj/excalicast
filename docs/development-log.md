@@ -1,5 +1,34 @@
 # Development Log
 
+## 2026-08-11 - Caption-synchronized semantic key-point reveals
+
+### User value
+
+- Chapter and key-point drawers now enter only `150ms` before the first supporting caption instead of appearing near the beginning of a broad chapter range.
+- The title and every point reveal at their own caption-backed moment; words within each line rise independently from below.
+- Condensed phrases that do not literally occur in captions use DeepSeek's semantic cue anchor with bounded local validation.
+
+### Timing and generation
+
+- `KeyPointMotionSegment` schema v3 adds stable `lines` with role, text, anchor cue, reveal timestamp, and exact/partial/semantic/fallback provenance.
+- DeepSeek now returns `titleAnchorCueIndex` and a separate `anchorCueIndex` for every opening point and interior point.
+- Local alignment refines exact phrases by their position inside a cue, accepts meaningful partial matches, and keeps semantic fallback within `80-320ms` of the selected cue start.
+- Chinese partial matching requires at least two shared characters, preventing a common single character from overriding the semantic cue.
+- Drawer entry uses a `280ms` media-time animation; line tokens use `70ms` staggering and `260ms` upward reveal animation.
+
+### Compatibility
+
+- Existing v1/v2 tracks migrate to v3; recordings with captions are realigned from their source cue ranges, while recordings without captions retain deterministic fallback timing.
+- Timeline block moves shift every line reveal together, and title/point edits keep line timing and persistence synchronized.
+- Preview, seek, WebCodecs, and compatibility export continue to share the same deterministic renderer.
+
+### Baseline and verification
+
+- Mandatory pre-change checkpoint: `a182981` (`fix: stabilize AAC timestamps during MP4 export`).
+- Focused semantic timing, parser, renderer, and migration tests pass.
+- Full media/task regression: 51 tests passed.
+- Export editor generation, persistence/reload, and local fallback: 2 E2E tests passed.
+
 ## 2026-08-11 - Unified export task center and stable editor toolbar
 
 ### User value

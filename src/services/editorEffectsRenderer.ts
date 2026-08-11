@@ -179,10 +179,9 @@ function drawStaggeredKeyPointLine(
   align: CanvasTextAlign,
   font: string,
   tokenStates: ReturnType<typeof resolveKeyPointDrawerState>['tokens'],
-  tokenOffset: number,
-): number {
+): void {
   const tokens = tokenizeKeyPointLine(text, locale);
-  if (!tokens.length) return tokenOffset;
+  if (!tokens.length) return;
   ctx.font = font;
   ctx.textAlign = 'left';
   const separator = locale === 'en' ? ' ' : '';
@@ -190,14 +189,13 @@ function drawStaggeredKeyPointLine(
   const totalWidth = widths.reduce((sum, width) => sum + width, 0);
   let cursorX = align === 'right' ? x - totalWidth : align === 'center' ? x - totalWidth / 2 : x;
   tokens.forEach((token, index) => {
-    const state = tokenStates[tokenOffset + index] ?? { opacity: 1, translateY: 0 };
+    const state = tokenStates[index] ?? { opacity: 1, translateY: 0 };
     ctx.save();
     ctx.globalAlpha *= state.opacity;
     ctx.fillText(token, cursorX, y + state.translateY);
     ctx.restore();
     cursorX += widths[index];
   });
-  return tokenOffset + tokens.length;
 }
 
 export function drawKeyPointMotion(
@@ -216,8 +214,8 @@ export function drawKeyPointMotion(
   const resolved = { ...migrated, placement };
   const locale = keyPointLocale([resolved.title, ...resolved.bullets].join(''));
   const visibleLines = [resolved.title, ...resolved.bullets].filter(Boolean);
-  const tokenCount = visibleLines.reduce((count, line) => count + tokenizeKeyPointLine(line, locale).length, 0);
-  const state = resolveKeyPointDrawerState(resolved, timeMs, tokenCount);
+  const lineTokenCounts = visibleLines.map((line) => tokenizeKeyPointLine(line, locale).length);
+  const state = resolveKeyPointDrawerState(resolved, timeMs, lineTokenCounts);
   if (!state.active || state.opacity <= 0) return;
   const rect = resolveKeyPointDrawerLayout(bounds, placement);
   const translateX = state.drawerTranslateX * rect.width;
@@ -253,8 +251,7 @@ export function drawKeyPointMotion(
   ctx.textBaseline = 'top';
   ctx.shadowColor = 'rgba(0, 0, 0, 0.28)';
   ctx.shadowBlur = Math.max(2, Math.round(minSide * 0.006));
-  let tokenOffset = 0;
-  tokenOffset = drawStaggeredKeyPointLine(
+  drawStaggeredKeyPointLine(
     ctx,
     resolved.title,
     locale,
@@ -262,12 +259,11 @@ export function drawKeyPointMotion(
     startY,
     align,
     `800 ${titleSize}px system-ui, sans-serif`,
-    state.tokens,
-    tokenOffset,
+    state.lines[0] ?? [],
   );
   let lineY = startY + titleSize + lineGap;
-  for (const bullet of resolved.bullets.slice(0, resolved.kind === 'chapter_drawer' ? 2 : 3)) {
-    tokenOffset = drawStaggeredKeyPointLine(
+  resolved.bullets.slice(0, resolved.kind === 'chapter_drawer' ? 2 : 3).forEach((bullet, bulletIndex) => {
+    drawStaggeredKeyPointLine(
       ctx,
       bullet,
       locale,
@@ -275,10 +271,9 @@ export function drawKeyPointMotion(
       lineY,
       align,
       `700 ${bodySize}px system-ui, sans-serif`,
-      state.tokens,
-      tokenOffset,
+      state.lines[bulletIndex + 1] ?? [],
     );
     lineY += bodySize + lineGap;
-  }
+  });
   ctx.restore();
 }

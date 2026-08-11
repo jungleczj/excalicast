@@ -1,5 +1,33 @@
 # Bug Log
 
+## 2026-08-11 - Key-point lines appeared before their supporting captions
+
+### Symptom
+
+A chapter drawer could appear near the start of a broad chapter range and immediately reveal every title and point, even when the narration did not mention a later point until several seconds afterward.
+
+### Root cause
+
+- Generated data stored only one cue range per drawer, not an evidence cue per visible line.
+- All token animation was derived from `segment.start` with a fixed global stagger.
+- Persistence forced generated tracks back to schema v2, so derived line timing could not survive reload.
+
+### Fix
+
+- Added schema v3 line-level cue anchors and reveal timestamps.
+- DeepSeek assigns each concise phrase to the first cue that supports its meaning; local matching refines exact and partial phrases and bounds semantic fallback timing.
+- Drawer entry begins `150ms` before the first line, while each later line waits for its own cue and reveals its words upward.
+- Persisted line timing now survives edits, block moves, reload, preview, and both export paths.
+
+### Regression coverage
+
+- Tests cover a point first supported at ten seconds, exact cue-internal interpolation, semantic phrases absent from the caption text, invalid AI anchors, v1/v2 migration, seek determinism, and line-level token staggering.
+- Export editor E2E covers AI generation, local fallback, persistence, and reload.
+
+### Status
+
+- Fixed and verified locally.
+
 ## 2026-08-11 - Export tasks distorted the toolbar and stopped with panel lifecycle
 
 ### Symptom

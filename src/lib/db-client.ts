@@ -645,13 +645,23 @@ export async function updateRecordingKeyPointMotions(recordingId: string, motion
     .map((item) => ({
       ...item,
       kind: item.kind === 'chapter_title' || item.kind === 'chapter_drawer' ? 'chapter_drawer' as const : 'key_points_drawer' as const,
-      schemaVersion: 2 as const,
+      schemaVersion: 3 as const,
       start: Math.max(0, Math.round(item.start)),
       end: Math.max(0, Math.round(item.end)),
       sourceCueStart: Math.max(0, Math.round(item.sourceCueStart)),
       sourceCueEnd: Math.max(0, Math.round(item.sourceCueEnd)),
       title: item.title.trim().slice(0, 120),
       bullets: item.bullets.map((bullet) => bullet.trim()).filter(Boolean).slice(0, 4),
+      lines: item.lines?.map((line, index) => ({
+        id: line.id?.trim().slice(0, 160) || `${item.id}-line-${index}`,
+        role: line.role === 'title' ? 'title' as const : 'point' as const,
+        text: line.text.trim().slice(0, 120),
+        anchorCueIndex: Math.max(0, Math.round(line.anchorCueIndex)),
+        revealAtMs: Math.max(0, Math.round(line.revealAtMs)),
+        matchKind: line.matchKind === 'exact' || line.matchKind === 'partial' || line.matchKind === 'semantic'
+          ? line.matchKind
+          : 'fallback' as const,
+      })).filter((line) => line.text.length > 0),
       transition: {
         ...item.transition,
         enterMs: Math.max(80, Math.min(2_000, Math.round(item.transition.enterMs))),

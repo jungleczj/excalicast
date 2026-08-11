@@ -1,4 +1,5 @@
 import type { KeyPointMotionSegment, SubtitleCue } from '@/types/recording';
+import { alignKeyPointMotionLines } from '@/services/keyPointMotion';
 
 function text(value: unknown, maxLength: number): string {
   if (typeof value !== 'string') return '';
@@ -34,19 +35,42 @@ function cueRange(cues: SubtitleCue[], startIndex: number, endIndex: number): { 
   return { start: selected[0].startMs, end: selected[selected.length - 1].endMs };
 }
 
-function uniquePhrases(values: unknown, locale: 'en' | 'zh'): string[] {
+interface AnchoredPhrase {
+  text: string;
+  anchorCueIndex: number;
+}
+
+function anchoredPhrases(values: unknown, locale: 'en' | 'zh', fallbackCueIndex: number): AnchoredPhrase[] {
   if (!Array.isArray(values)) return [];
   const seen = new Set<string>();
-  const result: string[] = [];
+  const result: AnchoredPhrase[] = [];
   for (const value of values) {
-    const phrase = shortPhrase(value, locale, 'point');
+    const row = value && typeof value === 'object' ? value as Record<string, unknown> : null;
+    const phrase = shortPhrase(row?.text ?? value, locale, 'point');
     const key = phrase.toLocaleLowerCase();
     if (!phrase || seen.has(key)) continue;
     seen.add(key);
-    result.push(phrase);
+    result.push({
+      text: phrase,
+      anchorCueIndex: Math.max(0, Math.round(number(row?.anchorCueIndex, fallbackCueIndex))),
+    });
     if (result.length === 4) break;
   }
   return result;
+}
+
+function cueEnd(cues: SubtitleCue[], cueIndex: number, fallback: number): number {
+  return cues.find((cue) => cue.index === cueIndex)?.endMs ?? fallback;
+}
+
+function motionTiming(lines: NonNullable<KeyPointMotionSegment['lines']>, cues: SubtitleCue[], durationMs: number) {
+  const firstReveal = Math.min(...lines.map((line) => line.revealAtMs));
+  const lastReveal = Math.max(...lines.map((line) => line.revealAtMs));
+  const lastCueEnd = Math.max(...lines.map((line) => cueEnd(cues, line.anchorCueIndex, line.revealAtMs)));
+  return {
+    start: Math.max(0, firstReveal - 150),
+    end: Math.min(durationMs, Math.max(lastReveal + 800, lastCueEnd + 800)),
+  };
 }
 
 export function parseKeyPointMotionResponse(
@@ -74,63 +98,93 @@ export function parseKeyPointMotionResponse(
     const endCue = Math.max(startCue, Math.round(number(row.endCueIndex, startCue)));
     const range = cueRange(cues, startCue, endCue);
     if (!range) return;
-    const start = Math.max(0, Math.min(safeDuration, range.start));
-    const end = Math.min(safeDuration, Math.max(start + 1_800, Math.min(range.end, start + 3_800)));
-    if (end <= start || start >= safeDuration) return;
     const placement = row.placement === 'left' || row.placement === 'right' || row.placement === 'top' || row.placement === 'bottom'
       ? row.placement
       : 'auto';
-    const bullets = uniquePhrases(row.openingPoints, locale).filter((phrase) => phrase.toLocaleLowerCase() !== dedupeKey).slice(0, 2);
+    const titleAnchorCueIndex = Math.max(startCue, Math.min(endCue, Math.round(number(row.titleAnchorCueIndex, startCue))));
+    const openingPoints = anchoredPhrases(row.openingPoints, locale, startCue)
+      .filter((phrase) => phrase.text.toLocaleLowerCase() !== dedupeKey)
+      .slice(0, 2);
+    const chapterId = `kp-ai-chapter-${chapterIndex}-${range.start}`;
+    const lines = alignKeyPointMotionLines({
+      segmentId: chapterId,
+      drafts: [
+        { role: 'title', text: title, anchorCueIndex: titleAnchorCueIndex },
+        ...openingPoints.map((point) => ({ role: 'point' as const, text: point.text, anchorCueIndex: point.anchorCueIndex })),
+      ],
+      cues,
+      sourceCueStart: startCue,
+      sourceCueEnd: endCue,
+    });
+    if (!lines.length) return;
+    const timing = motionTiming(lines, cues, safeDuration);
+    if (timing.end <= timing.start || timing.start >= safeDuration) return;
     seen.add(dedupeKey);
     output.push({
-      id: `kp-ai-chapter-${chapterIndex}-${start}`,
-      start,
-      end,
+      id: chapterId,
+      start: timing.start,
+      end: timing.end,
       kind: 'chapter_drawer',
       title,
-      bullets,
+      bullets: openingPoints.map((point) => point.text),
+      lines,
       placement,
       sourceCueStart: startCue,
       sourceCueEnd: endCue,
-      transition: { enterMs: 600, exitMs: 420, easing: 'easeInOutCubic' },
+      transition: { enterMs: 280, exitMs: 420, easing: 'easeInOutCubic' },
       enabled: true,
       generationSource: 'deepseek',
-      schemaVersion: 2,
+      schemaVersion: 3,
     });
 
     const moments = Array.isArray(row.moments) ? row.moments : [];
-    let nextMomentStart = end + 100;
     moments.slice(0, 4).forEach((candidateMoment, momentIndex) => {
       if (!candidateMoment || typeof candidateMoment !== 'object') return;
       const moment = candidateMoment as Record<string, unknown>;
       const momentStartCue = Math.max(startCue, Math.round(number(moment.startCueIndex, startCue)));
       const momentEndCue = Math.min(endCue, Math.max(momentStartCue, Math.round(number(moment.endCueIndex, momentStartCue))));
       const momentRange = cueRange(cues, momentStartCue, momentEndCue);
-      const points = uniquePhrases(moment.points, locale);
+      const points = anchoredPhrases(moment.points, locale, momentStartCue);
       if (!momentRange || points.length === 0) return;
-      const momentStart = Math.max(nextMomentStart, momentRange.start);
-      const momentEnd = Math.min(safeDuration, Math.max(momentStart + 1_800, Math.min(momentRange.end + 800, momentStart + 3_800)));
-      if (momentStart >= safeDuration || momentEnd <= momentStart) return;
+      const momentId = `kp-ai-point-${chapterIndex}-${momentIndex}-${momentRange.start}`;
+      const momentLines = alignKeyPointMotionLines({
+        segmentId: momentId,
+        drafts: points.slice(0, 3).map((point, index) => ({
+          role: index === 0 ? 'title' as const : 'point' as const,
+          text: point.text,
+          anchorCueIndex: point.anchorCueIndex,
+        })),
+        cues,
+        sourceCueStart: momentStartCue,
+        sourceCueEnd: momentEndCue,
+      });
+      if (!momentLines.length) return;
+      const momentTiming = motionTiming(momentLines, cues, safeDuration);
+      if (momentTiming.start >= safeDuration || momentTiming.end <= momentTiming.start) return;
       output.push({
-        id: `kp-ai-point-${chapterIndex}-${momentIndex}-${momentStart}`,
-        start: momentStart,
-        end: momentEnd,
+        id: momentId,
+        start: momentTiming.start,
+        end: momentTiming.end,
         kind: 'key_points_drawer',
-        title: points[0],
-        bullets: points.slice(1),
+        title: points[0].text,
+        bullets: points.slice(1, 3).map((point) => point.text),
+        lines: momentLines,
         placement: moment.placement === 'left' || moment.placement === 'right' || moment.placement === 'top' || moment.placement === 'bottom'
           ? moment.placement
           : 'auto',
         sourceCueStart: momentStartCue,
         sourceCueEnd: momentEndCue,
-        transition: { enterMs: 600, exitMs: 420, easing: 'easeInOutCubic' },
+        transition: { enterMs: 280, exitMs: 420, easing: 'easeInOutCubic' },
         enabled: true,
         generationSource: 'deepseek',
-        schemaVersion: 2,
+        schemaVersion: 3,
       });
-      nextMomentStart = momentEnd + 100;
     });
   });
 
-  return output.sort((a, b) => a.start - b.start);
+  const sorted = output.sort((a, b) => a.start - b.start);
+  for (let index = 0; index < sorted.length - 1; index += 1) {
+    sorted[index].end = Math.min(sorted[index].end, sorted[index + 1].start - 100);
+  }
+  return sorted.filter((motion) => motion.end > motion.start);
 }

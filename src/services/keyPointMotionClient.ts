@@ -30,7 +30,7 @@ export async function generateKeyPointMotions(params: {
   }
   const motions = payload.motions
     .filter((motion) => motion && typeof motion === 'object' && typeof motion.title === 'string')
-    .map(migrateKeyPointMotionSegment);
+    .map((segment) => migrateKeyPointMotionSegment(segment));
   if (motions.length === 0) throw new Error('key_point_invalid_result');
   return { motions, model: payload.model ?? 'deepseek', source: 'deepseek' };
 }

@@ -169,7 +169,9 @@ export default function EditorRecordingPage(): JSX.Element {
       setTitle(m.title?.trim() || (en ? `Recording ${id.slice(0, 8)}` : `录制 ${id.slice(0, 8)}`));
       const savedAutoZooms = m.autoZooms ?? [];
       const savedHighlights = m.highlights ?? [];
-      const savedKeyPointMotions = (m.keyPointMotions ?? []).map(migrateKeyPointMotionSegment);
+      const savedCaptionCues = parseSrt(m.subtitleSrt ?? '');
+      const savedKeyPointMotions = (m.keyPointMotions ?? [])
+        .map((segment) => migrateKeyPointMotionSegment(segment, savedCaptionCues));
       const localizedDefaults = m.localizedTrackId
         ? { localizedTrackId: m.localizedTrackId, muteOriginalAudio: true }
         : {};
