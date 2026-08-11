@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { trackEvent } from '@/lib/analytics/track';
-import { cancelActiveExport, downloadBlob } from '@/services/exportPipeline';
+import { downloadBlob } from '@/services/exportPipeline';
 import { isPaid } from '@/services/paymentClient';
 import { I } from '@/components/icons';
 import { PaywallModal } from '@/components/PaywallModal';
@@ -12,25 +12,9 @@ import { useSubscription } from '@/hooks/useSubscription';
 import { formatPrice, usePaymentConfig } from '@/hooks/usePaymentConfig';
 import { ProBadge } from '@/components/ProBadge';
 import type { CroppingMode, ExportConfig } from '@/types/recording';
-import type { ExportDiagnosticReport, ExportProgressDetails } from '@/types/exportDiagnostics';
+import type { ExportDiagnosticReport } from '@/types/exportDiagnostics';
 import { useMediaTasks } from '@/components/providers/MediaTaskProvider';
-
-export type ExportProgressState = ExportProgressDetails;
-
-function initialProgress(phase = 'preparing', ratio = 0): ExportProgressState {
-  return {
-    phase,
-    ratio,
-    encoderPath: 'unknown',
-    decoderPaths: {},
-    processedFrames: 0,
-    totalFrames: 0,
-    decodedSourceFrames: 0,
-    throughputFps: 0,
-    elapsedMs: 0,
-    estimatedRemainingMs: null,
-  };
-}
+import { announceMediaTaskCreated, openMediaTaskCenter } from '@/components/MediaTaskCenter';
 
 interface Props {
   recordingId: string;
@@ -38,7 +22,6 @@ interface Props {
   fallbackCroppingMode?: CroppingMode;
   onConfigChange: (next: ExportConfig) => void;
   onPaidStateChange?: (paid: boolean) => void;
-  onProgress?: (state: ExportProgressState | null) => void;
 }
 
 export function ExportPanel({
@@ -47,10 +30,9 @@ export function ExportPanel({
   fallbackCroppingMode = 'fit_all_content',
   onConfigChange,
   onPaidStateChange,
-  onProgress,
 }: Props): JSX.Element {
   const t = useTranslations('exportPanel');
-  const { tasks, startExport, cancelTask } = useMediaTasks();
+  const { tasks, startExport } = useMediaTasks();
   const subscription = useSubscription();
   const { config: paymentCfg } = usePaymentConfig();
   const [paid, setPaid] = useState<boolean>(false);
@@ -67,14 +49,12 @@ export function ExportPanel({
 
   useEffect(() => {
     if (!currentTask) return;
-    if (currentTask.status === 'running') setBusy(true);
-    if (currentTask.details) onProgress?.(currentTask.details);
+    if (currentTask.status === 'running' || currentTask.status === 'queued') setBusy(true);
     if (currentTask.diagnostics) setDiagnostics(currentTask.diagnostics);
     if (currentTask.status === 'completed' || currentTask.status === 'failed' || currentTask.status === 'cancelled') {
       setBusy(false);
-      onProgress?.(null);
     }
-  }, [currentTask, onProgress]);
+  }, [currentTask]);
 
   const openUpgrade = useCallback((tier: 'pro' | 'max') => {
     setUpgradeTier(tier);
@@ -104,6 +84,10 @@ export function ExportPanel({
   }, [proUnlocked, onPaidStateChange]);
 
   const handleExport = useCallback(async () => {
+    if (busy) {
+      openMediaTaskCenter(recordingId);
+      return;
+    }
     trackEvent('feature_click', { feature: 'export', gated: !config.withWatermark && !effectivelyUnlocked });
     if (!config.withWatermark && !effectivelyUnlocked) {
       setPendingExport(true);
@@ -113,12 +97,11 @@ export function ExportPanel({
     setBusy(true);
     setError(null);
     setDiagnostics(null);
+    announceMediaTaskCreated(recordingId, document.activeElement);
     // 多选导出：逐个比例生成并依次下载（分辨率/格式/画质统一套用）。
     const ratios = (config.exportRatios && config.exportRatios.length > 0) ? config.exportRatios : [config.aspectRatio];
     const wmTag = config.withWatermark ? 'wm' : 'clean';
     const ext = config.format ?? 'mp4'; // mp4 / webm / gif
-
-    onProgress?.(initialProgress('preparing', 0));
 
     try {
       for (let i = 0; i < ratios.length; i++) {
@@ -131,9 +114,6 @@ export function ExportPanel({
               customOutput: config.customOutput,
             }
           : config.ratioFraming?.[ar];
-        setStatusMsg(ratios.length > 1
-          ? t('exportingStatus', { ratio: `${ar} (${i + 1}/${ratios.length})`, wm: config.withWatermark ? t('wmWithLabel') : t('wmCleanLabel') })
-          : t('exportingStatus', { ratio: ar, wm: config.withWatermark ? t('wmWithLabel') : t('wmCleanLabel') }));
         const exportConfig: ExportConfig = {
           ...config,
           aspectRatio: ar,
@@ -152,25 +132,16 @@ export function ExportPanel({
         downloadBlob(blob, `excalicast_${recordingId.slice(0, 8)}_${ar.replace(':', 'x')}_${wmTag}.${ext}`);
         trackEvent('export_success', { ratio: ar, watermark: config.withWatermark });
       }
-      setStatusMsg(t('doneStatus'));
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         setError(null);
-        setStatusMsg(t('cancelledStatus'));
       } else {
         setError(err instanceof Error ? err.message : 'export_failed');
       }
     } finally {
       setBusy(false);
-      onProgress?.(null);
     }
-  }, [config, recordingId, effectivelyUnlocked, fallbackCroppingMode, onProgress, startExport, t]);
-
-  const cancelExport = useCallback(() => {
-    if (currentTask?.status === 'running') cancelTask(currentTask.id);
-    cancelActiveExport();
-    setStatusMsg(t('cancelledStatus'));
-  }, [cancelTask, currentTask, t]);
+  }, [busy, config, recordingId, effectivelyUnlocked, fallbackCroppingMode, startExport]);
 
   const downloadDiagnostics = useCallback(() => {
     if (!diagnostics) return;
@@ -259,7 +230,6 @@ export function ExportPanel({
         <button
           type="button"
           onClick={handleExport}
-          disabled={busy}
           className="editor-craft-export-button mt-4 flex w-full items-center justify-center gap-2 transition"
           style={{
             padding: '14px 18px',
@@ -273,8 +243,8 @@ export function ExportPanel({
             fontWeight: 700,
             letterSpacing: '0.08em',
             textTransform: 'uppercase',
-            cursor: busy ? 'not-allowed' : 'pointer',
-            opacity: busy ? 0.5 : 1,
+            cursor: 'pointer',
+            opacity: 1,
           }}
         >
           {isCleanLocked ? (
@@ -289,29 +259,6 @@ export function ExportPanel({
             </>
           )}
         </button>
-
-        {busy && (
-          <button
-            type="button"
-            data-testid="cancel-export"
-            onClick={cancelExport}
-            className="mt-2 flex w-full items-center justify-center gap-2"
-            style={{
-              height: 38,
-              border: '1.4px solid var(--ink)',
-              borderRadius: 4,
-              background: 'var(--paper)',
-              color: 'var(--ink)',
-              fontFamily: 'var(--font-mono)',
-              fontSize: 11,
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
-          >
-            <I.Close size={13} />
-            {t('cancelExport')}
-          </button>
-        )}
 
         {diagnostics && !busy && (
           <div

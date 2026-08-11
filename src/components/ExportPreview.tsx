@@ -11,17 +11,17 @@ import type { AutoZoomSegment, CameraPositionEvent, EnhancedAudioTrack, ExportCo
 import { resolveExportOutputSize } from '@/types/recording';
 import { keptDuration, normalizeSegments, outputToSource, sourceToOutput } from '@/utils/segments';
 import { I } from '@/components/icons';
-import type { ExportProgressState } from '@/components/ExportPanel';
 import { analyzeCursorFocusTrack } from '@/services/cursorFocusTracker';
 import { LatestTaskRunner } from '@/lib/latestTaskRunner';
 import { resolvePreviewRenderSize } from '@/services/previewRenderPolicy';
 import { getVideoBackgroundPreset, resolveVideoBackground } from '@/config/videoBackgrounds';
+import { useMediaTaskActions } from '@/components/providers/MediaTaskProvider';
+import { announceMediaTaskCreated } from '@/components/MediaTaskCenter';
 
 interface Props {
   recordingId: string;
   metadata: RecordingMetadata;
   config: ExportConfig;
-  progress?: ExportProgressState | null;
   /** 保留段（源 ms）；播放 / 读数走「成片」时间，跳过被删段。 */
   segments: TimeSegment[];
   /** 受控播放头（源 ms）。 */
@@ -62,11 +62,12 @@ const resizeButtonStyle: React.CSSProperties = {
 };
 
 export function ExportPreview({
-  recordingId, metadata, config, progress, segments, playheadMs, onPlayheadChange,
+  recordingId, metadata, config, segments, playheadMs, onPlayheadChange,
   selectedAutoZoomId = null, onAutoZoomRegionChange,
   selectedHighlightId = null, onHighlightRegionChange,
 }: Props): JSX.Element {
   const t = useTranslations('exportPreview');
+  const { startTask } = useMediaTaskActions();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const renderCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -243,7 +244,13 @@ export function ExportPreview({
       setCursorTracking(null);
       return;
     }
-    void loadFullRecording(recordingId)
+    announceMediaTaskCreated(recordingId);
+    void startTask({
+      recordingId,
+      kind: 'cursor_analysis',
+      resourceClass: 'local_heavy',
+      configSnapshot: { durationMs: metadata.durationMs },
+    }, async (report, signal) => loadFullRecording(recordingId)
       .then(async (recording) => {
         if (cancelled || !recording.screenBlob) return;
         setCursorTracking({ progress: 0 });
@@ -251,19 +258,23 @@ export function ExportPreview({
           recordingId,
           screenBlob: recording.screenBlob,
           durationMs: metadata.durationMs,
+          signal,
           onProgress: (progress) => {
+            report({ phase: 'analyzing_cursor', ratio: progress });
             if (!cancelled) setCursorTracking((current) => ({ ...current, progress }));
           },
         });
         if (cancelled) return;
         setCursorTracking({ progress: 1, quality: track.quality });
         setFocusTrackRevision((revision) => revision + 1);
+        return { resultRef: `cursor-focus:${recordingId}` };
       })
-      .catch(() => {
+      .catch((error) => {
         if (!cancelled) setCursorTracking({ progress: 1, failed: true });
-      });
+        throw error;
+      })).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [config.alwaysKeepZoomedIn, metadata.durationMs, recordingId]);
+  }, [config.alwaysKeepZoomedIn, metadata.durationMs, recordingId, startTask]);
 
   useEffect(() => {
     let cancelled = false;
@@ -593,18 +604,6 @@ export function ExportPreview({
 
   const controlScale = Math.max(0.78, Math.min(1.35, previewBox.w / 720));
 
-  const exporting = progress != null;
-  const pct = exporting ? Math.round((progress?.ratio ?? 0) * 100) : 0;
-  const phaseKey = progress?.phase ?? '';
-  const phaseLabel = useMemo(() => {
-    if (!exporting) return '';
-    try {
-      return t(`phase.${phaseKey}` as never);
-    } catch {
-      return phaseKey;
-    }
-  }, [exporting, phaseKey, t]);
-
   // 摄像头气泡位置/尺寸由 cameraOverlayStyle 计算（events → 动态；无事件 → 右下角 18% 宽度）
   const cameraShape = metadata.setup?.camera.shape ?? 'circle';
   const previewAutoZoomScale = autoZoomAt(config.autoZooms, timeMs)?.scale ?? 1;
@@ -799,7 +798,7 @@ export function ExportPreview({
           className="h-full w-full object-contain"
         />
 
-        {(selectedAutoZoom || selectedHighlight) && !exporting && (
+        {(selectedAutoZoom || selectedHighlight) && (
           <button
             type="button"
             data-testid="toggle-preview-selection-overlays"
@@ -963,7 +962,7 @@ export function ExportPreview({
           {config.withWatermark ? t('watermarkBadge') : t('cleanBadge')}
         </div>
 
-        {rendering && !exporting && !playing && (
+        {rendering && !playing && (
           <span
             className="export-preview-craft-rendering fade-in absolute right-3 top-3"
             style={{
@@ -977,28 +976,6 @@ export function ExportPreview({
             }}
           >
             {t('renderingTag')}
-          </span>
-        )}
-        {cursorTracking && !exporting && (
-          <span
-            data-testid="cursor-tracking-status"
-            className="absolute left-1/2 top-3 z-40 -translate-x-1/2"
-            style={{
-              padding: '3px 9px',
-              borderRadius: 999,
-              border: '1px solid rgba(31,34,37,.18)',
-              background: 'rgba(255,253,248,.9)',
-              color: 'var(--ink-2)',
-              fontFamily: 'var(--font-mono)',
-              fontSize: 9.5,
-              backdropFilter: 'blur(10px)',
-            }}
-          >
-            {cursorTracking.failed
-              ? t('cursorTrackingFallback')
-              : cursorTracking.progress < 1
-                ? t('cursorTrackingProgress', { progress: Math.round(cursorTracking.progress * 100) })
-                : t(`cursorTrackingQuality.${cursorTracking.quality ?? 'poor'}` as never)}
           </span>
         )}
         {error && (
@@ -1018,7 +995,7 @@ export function ExportPreview({
           </span>
         )}
 
-        {!exporting && (
+        {(
           <div
             className="export-preview-craft-controls absolute inset-x-4 bottom-3 flex items-center gap-3"
             style={{
@@ -1089,7 +1066,7 @@ export function ExportPreview({
           </div>
         )}
 
-        {!exporting && (
+        {(
           <div
             className="absolute right-3 top-3 z-40 flex items-center gap-1"
             style={{ background: 'rgba(255,253,248,.9)', border: '1px solid rgba(31,34,37,.12)', borderRadius: 999, padding: 3, backdropFilter: 'blur(10px)' }}
@@ -1100,7 +1077,7 @@ export function ExportPreview({
           </div>
         )}
 
-        {!exporting && (
+        {(
           <button
             data-testid="preview-resize-handle"
             type="button"
@@ -1113,78 +1090,6 @@ export function ExportPreview({
           </button>
         )}
 
-        {exporting && (
-          <div
-            className="fade-in absolute inset-0 flex items-center justify-center"
-            style={{ background: 'rgba(26, 26, 26, 0.55)' }}
-          >
-            <div
-              className="export-preview-craft-progress-card w-[80%] max-w-[340px] px-5 py-4"
-              style={{
-                background: 'var(--paper)',
-                border: '1.8px solid var(--ink)',
-                borderRadius: 4,
-                boxShadow: '4px 4px 0 var(--ink)',
-              }}
-            >
-              <div className="flex items-center gap-3">
-                <div className="relative h-10 w-10 flex-shrink-0">
-                  <svg className="h-10 w-10 -rotate-90" viewBox="0 0 36 36">
-                    <circle cx="18" cy="18" r="15" fill="none" stroke="var(--rule-soft)" strokeWidth="3" />
-                    <circle
-                      cx="18" cy="18" r="15"
-                      fill="none"
-                      stroke="var(--ink)"
-                      strokeWidth="3"
-                      strokeDasharray={`${(pct / 100) * 94.25} 94.25`}
-                      strokeLinecap="round"
-                      style={{ transition: 'stroke-dasharray 200ms' }}
-                    />
-                  </svg>
-                  <span
-                    className="absolute inset-0 grid place-items-center tabular-nums"
-                    style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, color: 'var(--ink)' }}
-                  >
-                    {pct}%
-                  </span>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--ink)', letterSpacing: '-0.005em' }}>
-                    {t('generating')}
-                  </div>
-                  <div
-                    className="mt-0.5 truncate"
-                    style={{ fontSize: 11, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)' }}
-                  >
-                    {phaseLabel}
-                  </div>
-                  {progress && progress.totalFrames > 0 && (
-                    <div
-                      data-testid="export-performance-details"
-                      className="mt-1"
-                      style={{ fontSize: 9.5, color: 'var(--ink-3)', fontFamily: 'var(--font-mono)', lineHeight: 1.45 }}
-                    >
-                      <div>{progress.encoderPath} · {progress.processedFrames}/{progress.totalFrames} · {progress.throughputFps.toFixed(1)} fps</div>
-                      <div>
-                        decoded {progress.decodedSourceFrames}
-                        {progress.estimatedRemainingMs !== null ? ` · ETA ${Math.max(1, Math.ceil(progress.estimatedRemainingMs / 1000))}s` : ''}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div
-                className="export-preview-craft-progress-track mt-3 h-1.5 overflow-hidden"
-                style={{ background: 'var(--paper-3)', border: '1px solid var(--ink)', borderRadius: 999 }}
-              >
-                <div
-                  className="h-full transition-all"
-                  style={{ width: `${pct}%`, background: 'var(--hi)' }}
-                />
-              </div>
-            </div>
-          </div>
-        )}
       </div>
       </div>
     </div>

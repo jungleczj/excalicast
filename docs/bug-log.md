@@ -1,5 +1,61 @@
 # Bug Log
 
+## 2026-08-11 - Export tasks distorted the toolbar and stopped with panel lifecycle
+
+### Symptom
+
+- ChatCut, noise reduction, key-point generation, captions, dubbing, cursor analysis, and export each displayed progress in a different place.
+- Dynamic percentages and status sentences changed button widths, clipped controls, or covered the preview.
+- Buttons became grey and unclickable when a prerequisite or paid tier was missing, leaving no direct recovery path.
+- Caption and dubbing work owned by their panel could abort when the user switched tabs or pages.
+
+### Root cause
+
+- Every feature implemented its own React state, AbortController, progress UI, and persistence loop.
+- Export progress was passed back into the preview and rendered as a full blocking overlay.
+- Availability was represented with native or ARIA disabled semantics instead of an actionable reason.
+- Local decode/analyze/encode tasks had no shared resource scheduler and could contend for the same browser media resources.
+
+### Fix
+
+- Introduced a layout-level media task coordinator and a single top-right task center.
+- Serialized local-heavy work while allowing network-only jobs to run concurrently.
+- Removed distributed progress surfaces and kept only final content, actionable errors, and the central task list.
+- Made prerequisites and running states clickable: they guide to captions/audio/payment or locate the existing task.
+- Added immutable export snapshots, recoverable remote checkpoints, completion sounds, and explicit cancellation/retry controls.
+
+### Regression coverage
+
+- Domain tests cover queue ordering, network concurrency, duplicate suppression, snapshot immutability, checkpoints, and completion cues.
+- Editor tests cover two-row toolbar stability, clickable prerequisites, task-count placement, and panel boundaries.
+- Existing preview, Highlight, key-point, noise-reduction, export, and media-pipeline suites remain part of the release gate.
+
+### Status
+
+- Fixed and verified. Type checking and production build pass; 44 task/media tests and the focused export-editor regressions pass.
+
+## 2026-08-11 - Local dubbing test path required a production login
+
+### Symptom
+
+Local English dubbing failed with `login_required` before the mocked translation endpoint was called.
+
+### Root cause
+
+ASR treated localhost as a local media-job environment, but dubbing only checked `NEXT_PUBLIC_MEDIA_JOB_MOCKS`. It therefore attempted a private Supabase authorization upload even when the local API was intentionally mocked.
+
+### Fix
+
+Aligned dubbing with ASR: localhost, `127.0.0.1`, and IPv6 localhost use the local media-job path and skip the private authorization upload. Production hosts still require authenticated private Storage.
+
+### Regression coverage
+
+The English dubbing editor E2E now reaches translation, Kokoro synthesis, localized-track activation, preview audio binding, and export selection without a Supabase login.
+
+### Status
+
+- Fixed locally.
+
 ## 2026-08-11 - Generated key-point motion repeated captions in generic cards
 
 ### Symptom

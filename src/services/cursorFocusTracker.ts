@@ -337,6 +337,7 @@ export async function analyzeCursorFocusTrack(params: {
   screenBlob: Blob;
   durationMs: number;
   onProgress?: (progress: number) => void;
+  signal?: AbortSignal;
 }): Promise<CursorFocusTrack> {
   const source = await createDisplayFrameSource(params.screenBlob);
   const signature = cursorFocusSourceSignature(params.screenBlob, params.durationMs, source.width, source.height);
@@ -375,6 +376,7 @@ export async function analyzeCursorFocusTrack(params: {
     const samples: CursorFocusSample[] = [];
     try {
       for (let index = 0; index <= sampleCount; index += 1) {
+        if (params.signal?.aborted) throw new DOMException('Cursor analysis cancelled', 'AbortError');
         const timestamp = Math.min(durationMs, index * SAMPLE_INTERVAL_MS);
         const frame = await source.getFrameAt(timestamp);
         if (!frame) continue;

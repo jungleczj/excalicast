@@ -45,6 +45,9 @@ interface Props {
   keyPointGenerationPhase?: 'idle' | 'generating' | 'ready' | 'failed';
   keyPointGenerationSource?: 'deepseek' | 'local' | null;
   keyPointGenerationError?: string | null;
+  onRequireCaptions?: () => void;
+  onGuide?: (message: string) => void;
+  onLocateTask?: (kind: 'auto_edit' | 'noise_reduction' | 'key_point_motion') => void;
   audioEnhancement?: {
     phase: 'idle' | 'processing' | 'ready' | 'failed';
     mode: NoiseReductionMode | 'original';
@@ -63,6 +66,7 @@ interface Props {
     onRun: (preset: AutoEditMode) => void;
     onUndo: () => void;
     onCancel: () => void;
+    onLocateTask?: () => void;
     labels: {
       autoEdit: string; chatCut: string; lecture: string; walkthrough: string; shorts: string; timing: string;
       gentle: string; standard: string; tight: string; analyzing: string; noAudio: string;
@@ -83,6 +87,8 @@ interface Props {
     keyPointAi: string; keyPointLocal: string; keyPointFailed: string;
     spotlight: string; focusFrame: string; cursorHalo: string; textCallout: string;
     calloutText: string; opacity: string;
+    selectClipFirst: string; nothingToReset: string; noiseReductionNeedsAudio: string;
+    zoomMinimum: string; zoomMaximum: string;
   };
 }
 
@@ -106,10 +112,12 @@ export function Timeline({
   highlights = [], onHighlightChange, selectedHighlightId, onHighlightSelect,
   keyPointMotions = [], onKeyPointMotionChange, selectedKeyPointMotionId, onKeyPointMotionSelect,
   onGenerateKeyPointMotions, keyPointGenerationPhase = 'idle', keyPointGenerationSource = null,
-  keyPointGenerationError = null, audioEnhancement,
+  keyPointGenerationError = null, onRequireCaptions, onGuide, onLocateTask, audioEnhancement,
   autoEdit,
   hasAudio, hasCaptions, audioPeaks = [], captionCues = [], labels,
 }: Props): JSX.Element {
+  void keyPointGenerationSource;
+  void keyPointGenerationError;
   const zoomLabels = useTranslations('timelineZoom');
   const viewportRef = useRef<HTMLDivElement>(null);
   const interactionRef = useRef(false);
@@ -240,7 +248,10 @@ export function Timeline({
 
   const doSplit = () => { onChange(splitSegments(clips, playheadMs)); setSelectedIdx(null); };
   const doDelete = () => {
-    if (selectedIdx == null) return;
+    if (selectedIdx == null || !canDelete) {
+      onGuide?.(labels.selectClipFirst);
+      return;
+    }
     onChange(removeSegmentAt(clips, selectedIdx));
     setSelectedIdx(null);
   };
@@ -496,15 +507,15 @@ export function Timeline({
   return (
     <div className="timeline-craft-panel">
       <div className="timeline-craft-toolbar mb-2">
-        <div className="timeline-craft-toolbar-main">
+        <div data-testid="timeline-basic-tools" className="timeline-craft-toolbar-row timeline-craft-toolbar-basic">
           <span className="timeline-craft-label" style={{ marginRight: 4 }}>
             {labels.edit}
           </span>
           <button type="button" onClick={doSplit} className="timeline-craft-action btn-sketch" style={{ padding: '3px 9px' }} title={`${labels.split} (S)`}>
-            <span style={{ fontSize: 11 }}>✂</span> {labels.split}
+            <span style={{ fontSize: 11 }}>✂</span><span className="timeline-craft-action-label">{labels.split}</span>
           </button>
-          <button type="button" onClick={doDelete} disabled={!canDelete} className="timeline-craft-action timeline-craft-danger btn-sketch" style={{ padding: '3px 9px' }} title={`${labels.deleteClip} (Del)`}>
-            <I.Trash size={11} /> {labels.deleteClip}
+          <button type="button" onClick={doDelete} data-availability={canDelete ? 'ready' : 'prerequisite'} className="timeline-craft-action timeline-craft-danger btn-sketch" style={{ padding: '3px 9px' }} title={`${labels.deleteClip} (Del)`}>
+            <I.Trash size={11} /><span className="timeline-craft-action-label">{labels.deleteClip}</span>
           </button>
           {onAutoZoomChange && (
             <button
@@ -521,7 +532,7 @@ export function Timeline({
               style={{ padding: '3px 9px' }}
               title={labels.autoZoomHint}
             >
-              <I.Search size={11} /> {labels.autoZoom}
+              <I.Search size={11} /><span className="timeline-craft-action-label">{labels.autoZoom}</span>
             </button>
           )}
           {onHighlightChange && (
@@ -533,21 +544,8 @@ export function Timeline({
               style={{ padding: '3px 9px' }}
               title={labels.highlight}
             >
-              <I.Highlighter size={11} /> {labels.highlight}
+              <I.Highlighter size={11} /><span className="timeline-craft-action-label">{labels.highlight}</span>
             </button>
-          )}
-          {autoEdit && (
-            <AutoEditControl
-              hasAudio={hasAudio}
-              phase={autoEdit.phase}
-              result={autoEdit.result}
-              error={autoEdit.error}
-              progress={autoEdit.progress}
-              onRun={autoEdit.onRun}
-              onUndo={autoEdit.onUndo}
-              onCancel={autoEdit.onCancel}
-              labels={autoEdit.labels}
-            />
           )}
           {audioEnhancement && (
             <div className="timeline-craft-action-menu">
@@ -561,11 +559,19 @@ export function Timeline({
                 title={labels.noiseReduction}
                 aria-haspopup="menu"
                 aria-expanded={noiseMenuOpen}
-                onClick={() => setNoiseMenuOpen((open) => !open)}
+                onClick={() => {
+                  if (!hasAudio) {
+                    onGuide?.(labels.noiseReductionNeedsAudio);
+                    return;
+                  }
+                  if (audioEnhancement.phase === 'processing') {
+                    onLocateTask?.('noise_reduction');
+                    return;
+                  }
+                  setNoiseMenuOpen((open) => !open);
+                }}
               >
-                <I.Mic size={11} /> {audioEnhancement.phase === 'processing'
-                  ? `${labels.noiseReduction} ${Math.round(audioEnhancement.progress * 100)}%`
-                  : labels.noiseReduction}
+                <I.Mic size={11} /><span className="timeline-craft-action-label">{labels.noiseReduction}</span>
               </button>
               {noiseMenuOpen && createPortal(
                 <div
@@ -578,83 +584,109 @@ export function Timeline({
                   <button data-testid="noise-standard" type="button" role="menuitem" aria-pressed={audioEnhancement.mode === 'standard'} onClick={() => { setNoiseMenuOpen(false); audioEnhancement.onRun('standard'); }}>{labels.standardNoiseReduction}</button>
                   <button data-testid="noise-enhanced" type="button" role="menuitem" aria-pressed={audioEnhancement.mode === 'enhanced'} onClick={() => { setNoiseMenuOpen(false); audioEnhancement.onRun('enhanced'); }}>{labels.enhancedNoiseReduction}</button>
                   <button data-testid="noise-original" type="button" role="menuitem" aria-pressed={audioEnhancement.mode === 'original'} onClick={() => { setNoiseMenuOpen(false); audioEnhancement.onOriginal(); }}>{labels.originalAudio}</button>
-                  {audioEnhancement.phase === 'processing' && <button data-testid="noise-cancel" type="button" role="menuitem" onClick={() => { setNoiseMenuOpen(false); audioEnhancement.onCancel(); }}>Cancel</button>}
-                  {audioEnhancement.error && <span className="timeline-craft-action-error" role="alert">{audioEnhancement.error}</span>}
                 </div>,
                 document.body,
               )}
             </div>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              if (!trimmed) {
+                onGuide?.(labels.nothingToReset);
+                return;
+              }
+              onReset();
+              setSelectedIdx(null);
+            }}
+            data-availability={trimmed ? 'ready' : 'prerequisite'}
+            className="timeline-craft-action btn-sketch"
+            style={{ padding: '3px 8px' }}
+          >
+            <span aria-hidden>↶</span><span className="timeline-craft-action-label">{labels.reset}</span>
+          </button>
+          <div className="timeline-craft-toolbar-end">
+            <div className="timeline-craft-zoom-controls" role="group" aria-label={zoomLabels('group')}>
+              <button
+                type="button"
+                className="timeline-craft-zoom-button"
+                aria-label={zoomLabels('zoomOut')}
+                title={zoomLabels('zoomOut')}
+                data-availability={timelineZoom === 1 ? 'prerequisite' : 'ready'}
+                onClick={() => timelineZoom === 1 ? onGuide?.(labels.zoomMinimum) : zoomFromPlayhead(-1)}
+              >
+                <span aria-hidden="true">−</span>
+              </button>
+              <span data-testid="timeline-zoom-value" className="timeline-craft-zoom-value label-mono" aria-live="polite">
+                {timelineZoom === 1 ? zoomLabels('fit') : `${timelineZoom}x`}
+              </span>
+              <button
+                type="button"
+                className="timeline-craft-zoom-button"
+                aria-label={zoomLabels('zoomIn')}
+                title={zoomLabels('zoomIn')}
+                data-availability={timelineZoom === 32 ? 'prerequisite' : 'ready'}
+                onClick={() => timelineZoom === 32 ? onGuide?.(labels.zoomMaximum) : zoomFromPlayhead(1)}
+              >
+                <I.Plus size={13} />
+              </button>
+              <button
+                type="button"
+                className="timeline-craft-zoom-button"
+                aria-label={zoomLabels('fitTimeline')}
+                title={zoomLabels('fitTimeline')}
+                data-availability={timelineZoom === 1 ? 'prerequisite' : 'ready'}
+                onClick={() => timelineZoom === 1 ? onGuide?.(labels.zoomMinimum) : fitTimeline()}
+              >
+                <I.Ratio16x9 size={13} />
+              </button>
+            </div>
+            <span className="timeline-craft-kept label-mono">{labels.kept} · {fmt(kept)} / {fmt(durationMs)}</span>
+          </div>
+        </div>
+        <div data-testid="timeline-advanced-tools" className="timeline-craft-toolbar-row timeline-craft-toolbar-advanced">
+          {autoEdit && (
+            <AutoEditControl
+              hasAudio={hasAudio}
+              phase={autoEdit.phase}
+              result={autoEdit.result}
+              error={autoEdit.error}
+              progress={autoEdit.progress}
+              onRun={autoEdit.onRun}
+              onUndo={autoEdit.onUndo}
+              onCancel={autoEdit.onCancel}
+              onLocateTask={autoEdit.onLocateTask ?? (() => onLocateTask?.('auto_edit'))}
+              onGuide={onGuide}
+              labels={autoEdit.labels}
+            />
           )}
           {onGenerateKeyPointMotions && (
             <div className="timeline-craft-keypoint-action">
               <button
                 data-testid="keypoint-generate"
                 type="button"
-                disabled={!hasCaptions || keyPointGenerationPhase === 'generating'}
-                onClick={onGenerateKeyPointMotions}
+                data-availability={!hasCaptions ? 'prerequisite' : keyPointGenerationPhase === 'generating' ? 'running' : 'ready'}
+                onClick={() => {
+                  if (!hasCaptions) {
+                    onGuide?.(labels.keyPointNeedsCaptions);
+                    onRequireCaptions?.();
+                    return;
+                  }
+                  if (keyPointGenerationPhase === 'generating') {
+                    onLocateTask?.('key_point_motion');
+                    return;
+                  }
+                  onGenerateKeyPointMotions();
+                }}
                 className="timeline-craft-action btn-sketch"
                 style={{ padding: '3px 9px' }}
                 title={!hasCaptions ? labels.keyPointNeedsCaptions : labels.keyPointMotion}
               >
-                <I.Sparkles size={11} /> {keyPointGenerationPhase === 'generating' ? labels.generating : labels.keyPointMotion}
+                <I.Sparkles size={11} />
+                <span className="timeline-craft-action-label">{labels.keyPointMotion}</span>
               </button>
-              {(keyPointGenerationSource || keyPointGenerationPhase === 'failed') && (
-                <span
-                  data-testid="keypoint-generation-status"
-                  className={`timeline-craft-action-status${keyPointGenerationSource === 'local' ? ' is-warning' : ''}${keyPointGenerationPhase === 'failed' ? ' is-error' : ''}`}
-                  title={keyPointGenerationError ?? undefined}
-                  role="status"
-                >
-                  {keyPointGenerationPhase === 'failed'
-                    ? labels.keyPointFailed
-                    : keyPointGenerationSource === 'local' ? labels.keyPointLocal : labels.keyPointAi}
-                </span>
-              )}
             </div>
           )}
-          {trimmed && (
-            <button type="button" onClick={() => { onReset(); setSelectedIdx(null); }} className="timeline-craft-action btn-sketch" style={{ padding: '3px 8px' }}>
-              {labels.reset}
-            </button>
-          )}
-        </div>
-        <div className="timeline-craft-toolbar-end">
-          <div className="timeline-craft-zoom-controls" role="group" aria-label={zoomLabels('group')}>
-            <button
-              type="button"
-              className="timeline-craft-zoom-button"
-              aria-label={zoomLabels('zoomOut')}
-              title={zoomLabels('zoomOut')}
-              disabled={timelineZoom === 1}
-              onClick={() => zoomFromPlayhead(-1)}
-            >
-              <span aria-hidden="true">−</span>
-            </button>
-            <span data-testid="timeline-zoom-value" className="timeline-craft-zoom-value label-mono" aria-live="polite">
-              {timelineZoom === 1 ? zoomLabels('fit') : `${timelineZoom}x`}
-            </span>
-            <button
-              type="button"
-              className="timeline-craft-zoom-button"
-              aria-label={zoomLabels('zoomIn')}
-              title={zoomLabels('zoomIn')}
-              disabled={timelineZoom === 32}
-              onClick={() => zoomFromPlayhead(1)}
-            >
-              <I.Plus size={13} />
-            </button>
-            <button
-              type="button"
-              className="timeline-craft-zoom-button"
-              aria-label={zoomLabels('fitTimeline')}
-              title={zoomLabels('fitTimeline')}
-              disabled={timelineZoom === 1}
-              onClick={fitTimeline}
-            >
-              <I.Ratio16x9 size={13} />
-            </button>
-          </div>
-          <span className="timeline-craft-kept label-mono">{labels.kept} · {fmt(kept)} / {fmt(durationMs)}</span>
         </div>
       </div>
 

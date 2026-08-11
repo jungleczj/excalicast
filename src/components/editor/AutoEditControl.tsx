@@ -15,6 +15,8 @@ interface Props {
   onRun: (preset: AutoEditMode) => void;
   onUndo: () => void;
   onCancel?: () => void;
+  onLocateTask?: () => void;
+  onGuide?: (message: string) => void;
   labels: {
     autoEdit: string;
     chatCut: string;
@@ -70,17 +72,25 @@ export function AutoEditControl({
   progress,
   onRun,
   onUndo,
-  onCancel,
+  onLocateTask,
+  onGuide,
   labels,
 }: Props): JSX.Element {
   const [preset, setPreset] = useState<AutoEditMode>('walkthrough');
-  const disabled = !hasAudio || phase === 'analyzing';
-  const progressLocale = /[\u3400-\u9fff]/.test(labels.analyzing) ? 'zh' : 'en';
-  const progressView = progress ? formatAutoEditProgress(progress, progressLocale) : null;
-  const progressPercent = Math.round(Math.max(0, Math.min(1, progress?.progress ?? 0)) * 100);
-  const resultText = result && (result.removedMs > 0
-    ? labels.removed(result.cuts, (result.removedMs / 1000).toFixed(1))
-    : labels.noCuts);
+  void progress;
+  const hasUndo = Boolean(result && result.removedMs > 0);
+
+  const run = () => {
+    if (!hasAudio) {
+      onGuide?.(labels.noAudio);
+      return;
+    }
+    if (phase === 'analyzing') {
+      onLocateTask?.();
+      return;
+    }
+    onRun(preset);
+  };
 
   return (
     <div className="timeline-craft-autoedit" aria-live="polite">
@@ -89,7 +99,6 @@ export function AutoEditControl({
         onChange={(event) => setPreset(event.target.value as AutoEditMode)}
         className="timeline-craft-select"
         aria-label={labels.autoEdit}
-        disabled={phase === 'analyzing'}
       >
         <optgroup label={labels.chatCut}>
           <option value="lecture">{labels.lecture}</option>
@@ -105,61 +114,25 @@ export function AutoEditControl({
       <button
         data-testid="autoedit-standard"
         type="button"
-        disabled={disabled}
         className="timeline-craft-action btn-sketch"
         style={{ padding: '3px 9px' }}
         title={!hasAudio ? labels.noAudio : labels.autoEdit}
-        onClick={() => onRun(preset)}
+        onClick={run}
       >
-        {phase === 'analyzing' ? <span className="timeline-craft-spinner" aria-hidden /> : <I.Sparkles size={11} />}
-        {phase === 'analyzing' ? labels.analyzing : labels.autoEdit}
+        <I.Sparkles size={11} />
+        <span className="timeline-craft-action-label">{labels.autoEdit}</span>
       </button>
-      {phase === 'analyzing' && progressView && (
-        <span
-          data-testid="autoedit-progress"
-          className="timeline-craft-autoedit-result"
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, minWidth: 150 }}
-        >
-          <span>{progressView.stageLabel}</span>
-          <span>{progressView.percentLabel}</span>
-          {progressView.etaLabel && <span>{progressView.etaLabel}</span>}
-          <span
-            aria-hidden
-            style={{
-              display: 'inline-block', width: 42, height: 3, overflow: 'hidden',
-              borderRadius: 2, background: 'var(--paper-3, #ddd)',
-            }}
-          >
-            <span
-              style={{
-                display: 'block', width: `${progressPercent}%`, height: '100%',
-                background: 'var(--craft-blue, #1769ff)', transition: 'width 140ms ease',
-              }}
-            />
-          </span>
-        </span>
-      )}
-      {phase === 'analyzing' && progressView?.cancellable && onCancel && (
-        <button
-          data-testid="autoedit-cancel"
-          type="button"
-          className="timeline-craft-action btn-sketch"
-          style={{ padding: '3px 7px' }}
-          onClick={onCancel}
-        >
-          {progressLocale === 'zh' ? '取消' : 'Cancel'}
-        </button>
-      )}
-      {resultText && (
-        <span data-testid="autoedit-result" className="timeline-craft-autoedit-result">
-          {resultText}
-          {result!.removedMs > 0 && (
-            <button data-testid="autoedit-undo" type="button" onClick={onUndo}>{labels.undo}</button>
-          )}
-          {result!.chatCutPreset && <span data-testid="autoedit-scene-aware">{labels.sceneAware(result!.sceneTransitions ?? 0, result!.sceneCuts ?? 0)}</span>}
-        </span>
-      )}
-      {error && <span className="timeline-craft-autoedit-error">{error}</span>}
+      <button
+        data-testid="autoedit-undo"
+        type="button"
+        className="timeline-craft-action btn-sketch"
+        style={{ padding: '3px 8px' }}
+        title={hasUndo ? labels.undo : labels.noCuts}
+        onClick={() => hasUndo ? onUndo() : onGuide?.(labels.noCuts)}
+      >
+        <span aria-hidden>↶</span><span className="timeline-craft-action-label">{labels.undo}</span>
+      </button>
+      {error && <span className="sr-only" role="status">{error}</span>}
     </div>
   );
 }

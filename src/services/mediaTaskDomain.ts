@@ -1,5 +1,21 @@
-export type MediaTaskKind = 'export' | 'asr' | 'dubbing' | 'cursor_analysis' | 'audio_peaks';
+export type MediaTaskKind =
+  | 'export'
+  | 'asr'
+  | 'dubbing'
+  | 'cursor_analysis'
+  | 'audio_peaks'
+  | 'auto_edit'
+  | 'noise_reduction'
+  | 'key_point_motion';
 export type MediaTaskStatus = 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+export type MediaTaskResourceClass = 'local_heavy' | 'network';
+
+export type ActionAvailability =
+  | { state: 'ready' }
+  | { state: 'paywall'; tier: 'pro' | 'max' }
+  | { state: 'prerequisite'; reason: string; action?: string }
+  | { state: 'running'; taskId: string }
+  | { state: 'unsupported'; reason: string; alternative?: string };
 
 export interface MediaTaskCheckpoint {
   segmentIndex?: number;
@@ -15,6 +31,10 @@ export interface MediaTaskRecord {
   kind: MediaTaskKind;
   status: MediaTaskStatus;
   progress: number;
+  phase?: string;
+  resourceClass?: MediaTaskResourceClass;
+  etaMs?: number | null;
+  resultRef?: string;
   createdAt: number;
   updatedAt: number;
   checkpoint?: MediaTaskCheckpoint;

@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 const baseOrigin = new URL(process.env.E2E_BASE_URL ?? 'http://localhost:3002').origin;
 const recordingId = 'e2e-editor-interactions';
 
-async function readRecordingFieldCount(page: import('@playwright/test').Page, field: 'highlights' | 'keyPointMotions') {
+async function readRecordingFieldCount(page: import('@playwright/test').Page, field: 'highlights' | 'keyPointMotions' | 'segments') {
   return page.evaluate(async ({ id, fieldName }) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('excalicast');
@@ -214,7 +214,9 @@ test('Highlight creates an editable free-form region and a persisted timeline se
 
 test('key point motion requires captions and then creates an editable track', async ({ page }) => {
   const generate = page.getByTestId('keypoint-generate');
-  await expect(generate).toBeDisabled();
+  await expect(generate).toBeEnabled();
+  await generate.click();
+  await expect(page.locator('.editor-craft-tabs button[data-active="true"]')).toContainText('Captions');
   await page.evaluate(async (id) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('excalicast');
@@ -272,7 +274,7 @@ test('key point motion requires captions and then creates an editable track', as
   await expect(page.getByRole('combobox', { name: 'Key point layout' })).toHaveValue('chapter_drawer');
   await expect(page.getByRole('option', { name: 'Chapter drawer' })).toBeAttached();
   await expect(page.getByRole('option', { name: 'Key-point drawer' })).toBeAttached();
-  await expect(page.getByTestId('keypoint-generation-status')).toContainText('AI');
+  await expect(page.getByTestId('keypoint-generation-status')).toHaveCount(0);
   const generatedCount = await page.getByTestId('keypoint-motion-segment').count();
   await page.waitForTimeout(650);
   await expect.poll(() => readRecordingFieldCount(page, 'keyPointMotions')).toBe(generatedCount);
@@ -309,24 +311,85 @@ test('key point motion falls back locally without deleting the editable result',
 
   await page.getByTestId('keypoint-generate').click();
   await expect(page.getByTestId('keypoint-motion-segment').first()).toBeVisible();
-  await expect(page.getByTestId('keypoint-generation-status')).toContainText('Local fallback');
+  await expect(page.getByTestId('keypoint-generation-status')).toHaveCount(0);
 });
 
-test('editor enhancement controls stay within one or two toolbar rows', async ({ page }) => {
+test('editor enhancement controls stay in exactly two stable toolbar rows', async ({ page }) => {
   await expect(page.locator('.timeline-craft-action-menu')).toBeVisible();
   for (const width of [1050, 760, 560]) {
     await page.setViewportSize({ width, height: 900 });
-    const rowCount = await page.locator('.timeline-craft-toolbar').evaluate((toolbar) => {
-      const children = Array.from(toolbar.children) as HTMLElement[];
-      return new Set(children.map((child) => Math.round(child.getBoundingClientRect().top))).size;
-    });
-    expect(rowCount).toBeLessThanOrEqual(2);
+    await expect(page.getByTestId('timeline-basic-tools')).toBeVisible();
+    await expect(page.getByTestId('timeline-advanced-tools')).toBeVisible();
+    const rowCount = await page.locator('.timeline-craft-toolbar').evaluate((toolbar) => (
+      new Set(Array.from(toolbar.children).map((child) => Math.round(child.getBoundingClientRect().top))).size
+    ));
+    expect(rowCount).toBe(2);
     const bodyScroll = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(bodyScroll).toBeLessThanOrEqual(1);
   }
 });
 
+test('task center is the last topbar action and only overlays the settings column', async ({ page }) => {
+  await page.evaluate(async (id) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('mediaTasks', 'readwrite');
+      tx.objectStore('mediaTasks').put({
+        id: 'e2e-task', recordingId: id, kind: 'auto_edit', status: 'running', progress: 0.42,
+        phase: 'scene_coarse', resourceClass: 'local_heavy', createdAt: Date.now(), updatedAt: Date.now(),
+        checkpoint: { segmentIndex: 1 },
+      });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, recordingId);
+  await page.reload();
+
+  const taskButton = page.getByTestId('media-task-center-button');
+  await expect(taskButton).toBeVisible();
+  await expect(taskButton.getByTestId('media-task-count')).toHaveText('1');
+  const topbarButtons = page.locator('.editor-craft-topbar > button, .editor-craft-topbar > a');
+  await expect(topbarButtons.last()).toHaveAttribute('data-testid', 'media-task-center-button');
+  await taskButton.click();
+
+  const panel = page.getByTestId('media-task-center-panel');
+  await expect(panel).toBeVisible();
+  const [panelBox, sideBox, previewBox, timelineBox] = await Promise.all([
+    panel.boundingBox(),
+    page.locator('.editor-craft-side').boundingBox(),
+    page.getByTestId('export-preview-workspace').boundingBox(),
+    page.getByTestId('editor-timeline').boundingBox(),
+  ]);
+  if (!panelBox || !sideBox || !previewBox || !timelineBox) throw new Error('task center geometry was not measured');
+  expect(panelBox.x).toBeGreaterThanOrEqual(sideBox.x);
+  expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(sideBox.x + sideBox.width + 1);
+  expect(panelBox.x).toBeGreaterThanOrEqual(previewBox.x + previewBox.width);
+  expect(panelBox.x).toBeGreaterThanOrEqual(timelineBox.x + timelineBox.width);
+});
+
 test('background noise menu renders above the scrollable editor toolbar', async ({ page }) => {
+  await page.evaluate(async (id) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('recordings', 'readwrite');
+      const store = tx.objectStore('recordings');
+      const request = store.get(id);
+      request.onsuccess = () => store.put({ ...request.result, hasAudio: true });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, recordingId);
+  await page.reload();
   await page.setViewportSize({ width: 760, height: 720 });
   await page.getByTestId('noise-reduction-menu').click();
   const popover = page.getByTestId('noise-reduction-popover');
@@ -482,7 +545,10 @@ test('a display recording fills a newly selected portrait ratio without white ba
   expect(topPixel[2], `top pixel ${topPixel.join(',')}`).toBeGreaterThan(100);
 
   await page.getByRole('switch', { name: 'Always keep zoomed in' }).click();
-  await expect(page.getByTestId('cursor-tracking-status')).toBeVisible();
+  await expect(page.getByTestId('cursor-tracking-status')).toHaveCount(0);
+  await expect(page.getByTestId('media-task-count')).toBeVisible();
+  await page.getByTestId('media-task-center-button').click();
+  await expect(page.getByTestId('media-task-center-panel')).toContainText('Track focus');
   await expect.poll(async () => page.evaluate(async (id) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('excalicast');
@@ -959,7 +1025,7 @@ test('generated subtitles repaint the preview immediately without a reload', asy
   await expect(stage).toHaveAttribute('data-has-subtitles', 'false');
   const before = await canvas.evaluate((element: HTMLCanvasElement) => element.toDataURL());
 
-  await page.getByRole('button', { name: 'Captions' }).click();
+  await page.getByRole('button', { name: 'Captions', exact: true }).click();
   await page.getByRole('button', { name: 'Generate subtitles' }).click();
   await expect(page.getByText(/Subtitles attached to this recording/)).toBeVisible();
   await expect(stage).toHaveAttribute('data-has-subtitles', 'true');
@@ -1570,9 +1636,10 @@ test('auto edit removes locally detected silence and can be undone', async ({ pa
 
   await page.reload();
   await page.getByTestId('autoedit-standard').click();
-  await expect(page.getByTestId('autoedit-result')).toContainText(/removed/i, { timeout: 15_000 });
-  await expect(page.getByTestId('autoedit-scene-aware')).toContainText(/PySceneDetect.*[1-9] transition/i, { timeout: 15_000 });
+  await expect.poll(() => readRecordingFieldCount(page, 'segments'), { timeout: 15_000 }).toBeGreaterThan(1);
+  await expect(page.getByTestId('autoedit-result')).toHaveCount(0);
+  await expect(page.getByTestId('autoedit-scene-aware')).toHaveCount(0);
   await expect(page.getByTestId('autoedit-undo')).toBeVisible();
   await page.getByTestId('autoedit-undo').click();
-  await expect(page.getByTestId('autoedit-result')).toHaveCount(0);
+  await expect.poll(() => readRecordingFieldCount(page, 'segments')).toBe(0);
 });

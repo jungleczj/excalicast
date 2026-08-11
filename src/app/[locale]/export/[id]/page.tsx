@@ -6,7 +6,7 @@ import { useLocale } from 'next-intl';
 import { ExportRatioPicker } from '@/components/ExportRatioPicker';
 import { ExportFormatPanel } from '@/components/ExportFormatPanel';
 import { ExportPreview } from '@/components/ExportPreview';
-import { ExportPanel, type ExportProgressState } from '@/components/ExportPanel';
+import { ExportPanel } from '@/components/ExportPanel';
 import { VideoBackgroundPanel } from '@/components/VideoBackgroundPanel';
 import { WorkspaceShellToggle } from '@/components/WorkspaceShellToggle';
 import { SubtitlePanel } from '@/components/SubtitlePanel';
@@ -19,6 +19,8 @@ import { analyzeRecordingForAutoEdit, AutoEditError, type AutoEditMode, type Aut
 import { indexedDbAutoEditCache } from '@/services/autoEditCacheStore';
 import { TierBadge } from '@/components/TierBadge';
 import { ShareButton } from '@/components/ShareButton';
+import { MediaTaskCenter, announceMediaTaskCreated, openMediaTaskCenter } from '@/components/MediaTaskCenter';
+import { useMediaTaskActions } from '@/components/providers/MediaTaskProvider';
 import { useSubscription } from '@/hooks/useSubscription';
 import {
   deleteRecording,
@@ -71,6 +73,7 @@ export default function EditorRecordingPage(): JSX.Element {
   const locale = useLocale();
   const en = locale === 'en';
   const subscription = useSubscription();
+  const { startTask, cancelTask, findTask } = useMediaTaskActions();
   const isPro = subscription.tier === 'pro' || subscription.tier === 'max';
   const isMax = subscription.tier === 'max';
 
@@ -78,11 +81,11 @@ export default function EditorRecordingPage(): JSX.Element {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [finalizing, setFinalizing] = useState(false);
   const [config, setConfig] = useState<ExportConfig>(DEFAULT_CONFIG);
-  const [exportProgress, setExportProgress] = useState<ExportProgressState | null>(null);
   const [paymentDone, setPaymentDone] = useState(false);
   const [tab, setTab] = useState<Tab>('export');
   const [title, setTitle] = useState('');
   const [upgradeOpen, setUpgradeOpen] = useState<false | 'pro' | 'max'>(false);
+  const [actionGuide, setActionGuide] = useState<string | null>(null);
   // 时间轴裁剪：保留段（源 ms）+ 播放头源时间
   const [segments, setSegments] = useState<TimeSegment[]>([]);
   const [autoZooms, setAutoZooms] = useState<AutoZoomSegment[]>([]);
@@ -94,21 +97,22 @@ export default function EditorRecordingPage(): JSX.Element {
   const [keyPointGenerationPhase, setKeyPointGenerationPhase] = useState<'idle' | 'generating' | 'ready' | 'failed'>('idle');
   const [keyPointGenerationSource, setKeyPointGenerationSource] = useState<'deepseek' | 'local' | null>(null);
   const [keyPointGenerationError, setKeyPointGenerationError] = useState<string | null>(null);
-  const keyPointGenerationControllerRef = useRef<AbortController | null>(null);
   const [audioEnhancementPhase, setAudioEnhancementPhase] = useState<'idle' | 'processing' | 'ready' | 'failed'>('idle');
   const [audioEnhancementMode, setAudioEnhancementMode] = useState<NoiseReductionMode | 'original'>('original');
   const [audioEnhancementProgress, setAudioEnhancementProgress] = useState(0);
   const [audioEnhancementError, setAudioEnhancementError] = useState<string | null>(null);
-  const audioEnhancementControllerRef = useRef<AbortController | null>(null);
   const [autoEditPhase, setAutoEditPhase] = useState<'idle' | 'analyzing' | 'applied' | 'failed'>('idle');
   const [autoEditResult, setAutoEditResult] = useState<AutoEditResult | null>(null);
   const [autoEditError, setAutoEditError] = useState<string | null>(null);
   const [autoEditProgress, setAutoEditProgress] = useState<AutoEditProgress | null>(null);
   const [autoEditPreviousSegments, setAutoEditPreviousSegments] = useState<TimeSegment[] | null>(null);
-  const autoEditControllerRef = useRef<AbortController | null>(null);
   const [playheadMs, setPlayheadMs] = useState(0);
   const [audioPeaks, setAudioPeaks] = useState<number[]>([]);
   const captionCues = useMemo(() => parseSrt(meta?.subtitleSrt ?? ''), [meta?.subtitleSrt]);
+  const showActionGuide = useCallback((message: string) => {
+    setActionGuide(message);
+    window.setTimeout(() => setActionGuide((current) => current === message ? null : current), 3_200);
+  }, []);
   const handleSubtitleSaved = useCallback((subtitleSrt: string) => {
     setMeta((current) => current ? { ...current, subtitleSrt } : current);
     setConfig((current) => ({ ...current }));
@@ -124,13 +128,25 @@ export default function EditorRecordingPage(): JSX.Element {
       return;
     }
     let cancelled = false;
-    void loadOrCreateAudioPeakTrack(id, 4).then((track) => {
-      if (!cancelled) setAudioPeaks(track?.peaks ?? []);
+    const resultHolder: { peaks?: number[] } = {};
+    void startTask({
+      recordingId: id,
+      kind: 'audio_peaks',
+      resourceClass: 'local_heavy',
+      configSnapshot: { samplesPerSecond: 4 },
+    }, async (report) => {
+      report({ phase: 'building_waveform', ratio: 0.05 });
+      const track = await loadOrCreateAudioPeakTrack(id, 4);
+      resultHolder.peaks = track?.peaks ?? [];
+      report({ phase: 'building_waveform', ratio: 0.96 });
+      return { resultRef: `audio-peaks:${id}` };
+    }).then(() => {
+      if (!cancelled) setAudioPeaks(resultHolder.peaks ?? []);
     }).catch(() => {
       if (!cancelled) setAudioPeaks([]);
     });
     return () => { cancelled = true; };
-  }, [id, meta?.hasAudio]);
+  }, [id, meta?.hasAudio, startTask]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -263,58 +279,66 @@ export default function EditorRecordingPage(): JSX.Element {
   }, [id, title]);
 
   const clearAutoEditUndo = useCallback(() => {
-    autoEditControllerRef.current?.abort();
-    autoEditControllerRef.current = null;
+    const running = findTask(id, 'auto_edit');
+    if (running) cancelTask(running.id);
     setAutoEditPhase('idle');
     setAutoEditResult(null);
     setAutoEditError(null);
     setAutoEditProgress(null);
     setAutoEditPreviousSegments(null);
-  }, []);
+  }, [cancelTask, findTask, id]);
 
   const handleAutoEdit = useCallback(async (preset: AutoEditMode) => {
     if (!meta || !meta.hasAudio) return;
-    autoEditControllerRef.current?.abort();
-    const controller = new AbortController();
-    autoEditControllerRef.current = controller;
     const originalSegments = segments.map((segment) => ({ ...segment }));
-    let partialResult: AutoEditResult | null = null;
+    const resultHolder: { partial?: AutoEditResult; final?: AutoEditResult } = {};
     setAutoEditPhase('analyzing');
     setAutoEditResult(null);
     setAutoEditError(null);
     setAutoEditProgress({ stage: 'reading', progress: 0, etaMs: null });
     setAutoEditPreviousSegments(originalSegments);
+    announceMediaTaskCreated(id, document.activeElement);
     try {
-      const result = await analyzeRecordingForAutoEdit({
+      await startTask({
         recordingId: id,
-        durationMs: meta.durationMs,
-        currentSegments: originalSegments,
-        subtitleSrt: meta.subtitleSrt,
-        preset,
-        mediaSignature: `${meta.startedAt}:${meta.durationMs}:${Number(meta.hasAudio)}:${Number(meta.hasCamera)}`,
-        cache: indexedDbAutoEditCache,
-        signal: controller.signal,
-        onProgress: (stage, progress, etaMs) => {
-          if (autoEditControllerRef.current === controller) {
+        kind: 'auto_edit',
+        resourceClass: 'local_heavy',
+        configSnapshot: { preset, originalSegments },
+      }, async (report, signal) => {
+        const result = await analyzeRecordingForAutoEdit({
+          recordingId: id,
+          durationMs: meta.durationMs,
+          currentSegments: originalSegments,
+          subtitleSrt: meta.subtitleSrt,
+          preset,
+          mediaSignature: `${meta.startedAt}:${meta.durationMs}:${Number(meta.hasAudio)}:${Number(meta.hasCamera)}`,
+          cache: indexedDbAutoEditCache,
+          signal,
+          onProgress: (stage, progress, etaMs) => {
+            report({ phase: stage, ratio: progress, etaMs });
             setAutoEditProgress({ stage, progress, etaMs });
-          }
-        },
-        onStageResult: (_stage, stageResult) => {
-          if (autoEditControllerRef.current !== controller) return;
-          partialResult = stageResult;
-          setSegments(stageResult.segments);
-          setAutoEditResult(stageResult);
-        },
+          },
+          onStageResult: (_stage, stageResult) => {
+            resultHolder.partial = stageResult;
+            setSegments(stageResult.segments);
+            setAutoEditResult(stageResult);
+          },
+        });
+        resultHolder.final = result;
+        await updateRecordingSegments(id, result.segments);
+        return { resultRef: `auto-edit:${id}:${Date.now()}` };
       });
-      if (autoEditControllerRef.current !== controller) return;
-      setSegments(result.segments);
-      setAutoEditResult(result);
+      const result = resultHolder.final ?? resultHolder.partial;
+      if (result) {
+        setSegments(result.segments);
+        setAutoEditResult(result);
+      }
       setAutoEditProgress({ stage: 'complete', progress: 1, etaMs: 0 });
       setAutoEditPhase('applied');
     } catch (error) {
       if (error instanceof Error && error.name === 'AbortError') {
-        if (partialResult) {
-          setAutoEditResult(partialResult);
+        if (resultHolder.partial) {
+          setAutoEditResult(resultHolder.partial);
           setAutoEditPhase('applied');
         } else {
           setAutoEditPreviousSegments(null);
@@ -329,18 +353,13 @@ export default function EditorRecordingPage(): JSX.Element {
         : ({ no_audio: '这条录制没有可分析的音频。', audio_decode_failed: '无法读取这条录制的本地音轨。', browser_unsupported: '当前浏览器无法分析本地音频。' }[code]));
       setAutoEditPhase('failed');
       setAutoEditProgress(null);
-    } finally {
-      if (autoEditControllerRef.current === controller) autoEditControllerRef.current = null;
     }
-  }, [en, id, meta, segments]);
+  }, [en, id, meta, segments, startTask]);
 
   const handleCancelAutoEdit = useCallback(() => {
-    autoEditControllerRef.current?.abort();
-  }, []);
-
-  useEffect(() => () => {
-    autoEditControllerRef.current?.abort();
-  }, [id]);
+    const running = findTask(id, 'auto_edit');
+    if (running && ['queued', 'running'].includes(running.status)) cancelTask(running.id);
+  }, [cancelTask, findTask, id]);
 
   const handleUndoAutoEdit = useCallback(() => {
     if (autoEditPreviousSegments) setSegments(autoEditPreviousSegments);
@@ -399,51 +418,52 @@ export default function EditorRecordingPage(): JSX.Element {
 
   const handleGenerateKeyPointMotions = useCallback(async () => {
     if (!meta?.subtitleSrt || captionCues.length === 0) return;
-    keyPointGenerationControllerRef.current?.abort();
-    const controller = new AbortController();
-    keyPointGenerationControllerRef.current = controller;
+    if (keyPointMotions.length > 0 && !window.confirm(en
+      ? 'Replace the existing key point motion track with this new version?'
+      : '是否用新版本替换现有的内容要点动效轨道？')) return;
     setKeyPointGenerationPhase('generating');
     setKeyPointGenerationSource(null);
     setKeyPointGenerationError(null);
+    announceMediaTaskCreated(id, document.activeElement);
     try {
-      let generated: KeyPointMotionSegment[];
+      let generated: KeyPointMotionSegment[] = [];
       let generationSource: 'deepseek' | 'local' = 'deepseek';
-      try {
-        const result = await generateKeyPointMotions({
-          cues: captionCues,
-          durationMs: meta.durationMs,
-          locale: locale === 'en' ? 'en' : 'zh',
-          signal: controller.signal,
-        });
-        generated = result.motions;
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        generated = buildLocalKeyPointMotions(captionCues, meta.durationMs, locale === 'en' ? 'en' : 'zh');
-        generationSource = 'local';
-        setKeyPointGenerationError(error instanceof Error ? error.message : 'key_point_generation_failed');
-      }
-      if (generated.length === 0) throw new Error('no_key_points');
-      if (keyPointMotions.length > 0 && !window.confirm(en
-        ? 'Replace the existing key point motion track with this new version?'
-        : '是否用新版本替换现有的内容要点动效轨道？')) {
-        setKeyPointGenerationPhase('ready');
-        return;
-      }
-      await updateRecordingKeyPointMotions(id, generated);
+      await startTask({
+        recordingId: id,
+        kind: 'key_point_motion',
+        resourceClass: 'network',
+        configSnapshot: { locale: locale === 'en' ? 'en' : 'zh', cueCount: captionCues.length },
+      }, async (report, signal) => {
+        report({ phase: 'preparing', ratio: 0.05 });
+        try {
+          const result = await generateKeyPointMotions({
+            cues: captionCues,
+            durationMs: meta.durationMs,
+            locale: locale === 'en' ? 'en' : 'zh',
+            signal,
+          });
+          generated = result.motions;
+        } catch (error) {
+          if (signal.aborted) throw error;
+          generated = buildLocalKeyPointMotions(captionCues, meta.durationMs, locale === 'en' ? 'en' : 'zh');
+          generationSource = 'local';
+          setKeyPointGenerationError(error instanceof Error ? error.message : 'key_point_generation_failed');
+        }
+        if (generated.length === 0) throw new Error('no_key_points');
+        report({ phase: generationSource === 'local' ? 'local_fallback' : 'saving', ratio: 0.9 });
+        await updateRecordingKeyPointMotions(id, generated);
+        return { resultRef: `key-points:${id}:${generationSource}` };
+      });
       setKeyPointMotions(generated);
       setSelectedKeyPointMotionId(generated[0]?.id ?? null);
       setKeyPointGenerationSource(generationSource);
       setKeyPointGenerationPhase('ready');
     } catch (error) {
-      if (controller.signal.aborted) return;
+      if (error instanceof DOMException && error.name === 'AbortError') return;
       setKeyPointGenerationError(error instanceof Error ? error.message : 'key_point_generation_failed');
       setKeyPointGenerationPhase('failed');
-    } finally {
-      if (keyPointGenerationControllerRef.current === controller) keyPointGenerationControllerRef.current = null;
     }
-  }, [captionCues, en, id, keyPointMotions.length, locale, meta]);
-
-  useEffect(() => () => keyPointGenerationControllerRef.current?.abort(), []);
+  }, [captionCues, en, id, keyPointMotions.length, locale, meta, startTask]);
 
   const activateEnhancedTrack = useCallback(async (track: EnhancedAudioTrack) => {
     await setActiveEnhancedAudioTrack(id, track.id);
@@ -457,55 +477,64 @@ export default function EditorRecordingPage(): JSX.Element {
 
   const handleRunAudioEnhancement = useCallback(async (mode: NoiseReductionMode) => {
     if (!meta?.hasAudio) return;
-    audioEnhancementControllerRef.current?.abort();
-    const controller = new AbortController();
-    audioEnhancementControllerRef.current = controller;
     setAudioEnhancementMode(mode);
     setAudioEnhancementPhase('processing');
     setAudioEnhancementProgress(0);
     setAudioEnhancementError(null);
-    let pendingTrack: EnhancedAudioTrack | null = null;
+    const resultHolder: { pending?: EnhancedAudioTrack; completed?: EnhancedAudioTrack } = {};
+    announceMediaTaskCreated(id, document.activeElement);
     try {
-      const recording = await loadRecordingMediaTracks(id, ['audio']);
-      if (!recording.audioBlob) throw new Error('audio_source_missing');
-      const sourceFingerprint = audioSourceFingerprint(recording.audioBlob, meta.durationMs);
-      const cached = (await listEnhancedAudioTracks(id)).find((track) => (
-        track.mode === mode
-        && track.status === 'ready'
-        && track.sourceFingerprint === sourceFingerprint
-        && track.audioBlob.size > 0
-      ));
-      if (cached) {
-        await activateEnhancedTrack(cached);
-        return;
-      }
-      pendingTrack = {
-        id: `noise-${mode}-${Date.now().toString(36)}`,
+      await startTask({
         recordingId: id,
-        sourceFingerprint,
-        mode,
-        modelVersion: mode === 'enhanced' ? 'rnnoise-2025.1.5' : 'speech-filter-v1',
-        status: 'processing',
-        durationMs: meta.durationMs,
-        audioBlob: new Blob([], { type: 'audio/wav' }),
-        createdAt: Date.now(),
-      };
-      await saveEnhancedAudioTrack(pendingTrack, false);
-      const generated = await createEnhancedAudioTrack({
-        recordingId: id,
-        audioBlob: recording.audioBlob,
-        durationMs: meta.durationMs,
-        mode,
-        signal: controller.signal,
-        onProgress: (_phase, progress) => setAudioEnhancementProgress(progress),
+        kind: 'noise_reduction',
+        resourceClass: 'local_heavy',
+        configSnapshot: { mode },
+      }, async (report, signal) => {
+        report({ phase: 'reading_audio', ratio: 0.01 });
+        const recording = await loadRecordingMediaTracks(id, ['audio']);
+        if (!recording.audioBlob) throw new Error('audio_source_missing');
+        const sourceFingerprint = audioSourceFingerprint(recording.audioBlob, meta.durationMs);
+        const cached = (await listEnhancedAudioTracks(id)).find((track) => (
+          track.mode === mode
+          && track.status === 'ready'
+          && track.sourceFingerprint === sourceFingerprint
+          && track.audioBlob.size > 0
+        ));
+        if (cached) {
+          resultHolder.completed = cached;
+          await setActiveEnhancedAudioTrack(id, cached.id);
+          return { resultRef: cached.id };
+        }
+        resultHolder.pending = {
+          id: `noise-${mode}-${Date.now().toString(36)}`,
+          recordingId: id,
+          sourceFingerprint,
+          mode,
+          modelVersion: mode === 'enhanced' ? 'rnnoise-2025.1.5' : 'speech-filter-v1',
+          status: 'processing',
+          durationMs: meta.durationMs,
+          audioBlob: new Blob([], { type: 'audio/wav' }),
+          createdAt: Date.now(),
+        };
+        await saveEnhancedAudioTrack(resultHolder.pending, false);
+        const generated = await createEnhancedAudioTrack({
+          recordingId: id,
+          audioBlob: recording.audioBlob,
+          durationMs: meta.durationMs,
+          mode,
+          signal,
+          onProgress: (phase, progress) => {
+            setAudioEnhancementProgress(progress);
+            report({ phase, ratio: progress });
+          },
+        });
+        const readyTrack: EnhancedAudioTrack = { ...generated, id: resultHolder.pending.id, status: 'ready' };
+        await saveEnhancedAudioTrack(readyTrack, true);
+        await setActiveEnhancedAudioTrack(id, readyTrack.id);
+        resultHolder.completed = readyTrack;
+        return { resultRef: readyTrack.id };
       });
-      const readyTrack: EnhancedAudioTrack = {
-        ...generated,
-        id: pendingTrack.id,
-        status: 'ready',
-      };
-      await saveEnhancedAudioTrack(readyTrack, true);
-      await activateEnhancedTrack(readyTrack);
+      if (resultHolder.completed) await activateEnhancedTrack(resultHolder.completed);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         setAudioEnhancementPhase('idle');
@@ -514,16 +543,15 @@ export default function EditorRecordingPage(): JSX.Element {
       const message = error instanceof Error ? error.message : 'audio_enhancement_failed';
       setAudioEnhancementError(message);
       setAudioEnhancementPhase('failed');
-      if (pendingTrack) {
-        await saveEnhancedAudioTrack({ ...pendingTrack, status: 'failed', error: message }, false).catch(() => undefined);
+      if (resultHolder.pending) {
+        await saveEnhancedAudioTrack({ ...resultHolder.pending, status: 'failed', error: message }, false).catch(() => undefined);
       }
-    } finally {
-      if (audioEnhancementControllerRef.current === controller) audioEnhancementControllerRef.current = null;
     }
-  }, [activateEnhancedTrack, id, meta]);
+  }, [activateEnhancedTrack, id, meta, startTask]);
 
   const handleUseOriginalAudio = useCallback(() => {
-    audioEnhancementControllerRef.current?.abort();
+    const running = findTask(id, 'noise_reduction');
+    if (running && ['queued', 'running'].includes(running.status)) cancelTask(running.id);
     setAudioEnhancementMode('original');
     setAudioEnhancementPhase('idle');
     setAudioEnhancementProgress(0);
@@ -532,11 +560,7 @@ export default function EditorRecordingPage(): JSX.Element {
     setConfig((current) => ({ ...current, activeEnhancedAudioTrackId: undefined }));
     void setActiveEnhancedAudioTrack(id, undefined);
     if (meta?.hasAudio) void loadOrCreateAudioPeakTrack(id, 4).then((track) => setAudioPeaks(track?.peaks ?? []));
-  }, [id, meta?.hasAudio]);
-
-  useEffect(() => () => {
-    audioEnhancementControllerRef.current?.abort();
-  }, [id]);
+  }, [cancelTask, findTask, id, meta?.hasAudio]);
 
   const handleLocalizedTrackReady = useCallback((track: LocalizedTrack) => {
     setMeta((current) => current ? { ...current, localizedTrackId: track.id } : current);
@@ -551,6 +575,23 @@ export default function EditorRecordingPage(): JSX.Element {
       return rest;
     });
   }, []);
+
+  useEffect(() => {
+    const subtitleSaved = (event: Event) => {
+      const detail = (event as CustomEvent<{ recordingId: string; srt: string }>).detail;
+      if (detail.recordingId === id) handleSubtitleSaved(detail.srt);
+    };
+    const dubbingReady = (event: Event) => {
+      const detail = (event as CustomEvent<{ recordingId: string; track: LocalizedTrack }>).detail;
+      if (detail.recordingId === id) handleLocalizedTrackReady(detail.track);
+    };
+    window.addEventListener('excalicast:subtitle-saved', subtitleSaved);
+    window.addEventListener('excalicast:dubbing-ready', dubbingReady);
+    return () => {
+      window.removeEventListener('excalicast:subtitle-saved', subtitleSaved);
+      window.removeEventListener('excalicast:dubbing-ready', dubbingReady);
+    };
+  }, [handleLocalizedTrackReady, handleSubtitleSaved, id]);
 
   const handleDelete = useCallback(async () => {
     if (!id) return;
@@ -598,7 +639,6 @@ export default function EditorRecordingPage(): JSX.Element {
         fallbackCroppingMode="fit_all_content"
         onConfigChange={setConfig}
         onPaidStateChange={handlePaidChange}
-        onProgress={setExportProgress}
       />
     </div>
   );
@@ -671,7 +711,15 @@ export default function EditorRecordingPage(): JSX.Element {
         </div>
         <ShareButton recordingId={id} isMax={isMax} onUpgrade={() => setUpgradeOpen('max')} />
         <TierBadge tier={subscription.tier} />
+        <MediaTaskCenter recordingId={id} en={en} />
       </div>
+
+      {actionGuide && (
+        <div className="editor-action-guide" role="status" data-testid="editor-action-guide">
+          {actionGuide}
+          <button type="button" aria-label={en ? 'Dismiss' : '关闭'} onClick={() => setActionGuide(null)}><I.Close size={13} /></button>
+        </div>
+      )}
 
       {paymentDone && (
         <div className="fixed left-1/2 top-4 z-50 -translate-x-1/2 px-4 py-2" style={{ background: 'var(--ok, #1a7f37)', color: '#fff', border: '1.4px solid var(--ink)', borderRadius: 4, boxShadow: '3px 3px 0 var(--ink)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
@@ -690,7 +738,6 @@ export default function EditorRecordingPage(): JSX.Element {
                 recordingId={id}
                 metadata={meta}
                 config={config}
-                progress={exportProgress}
                 segments={segments}
                 playheadMs={playheadMs}
                 onPlayheadChange={setPlayheadMs}
@@ -734,6 +781,9 @@ export default function EditorRecordingPage(): JSX.Element {
               keyPointGenerationPhase={keyPointGenerationPhase}
               keyPointGenerationSource={keyPointGenerationSource}
               keyPointGenerationError={keyPointGenerationError}
+              onRequireCaptions={() => setTab('captions')}
+              onGuide={showActionGuide}
+              onLocateTask={() => openMediaTaskCenter(id)}
               audioEnhancement={{
                 phase: audioEnhancementPhase,
                 mode: audioEnhancementMode,
@@ -741,7 +791,7 @@ export default function EditorRecordingPage(): JSX.Element {
                 error: audioEnhancementError,
                 onRun: (mode) => { void handleRunAudioEnhancement(mode); },
                 onOriginal: handleUseOriginalAudio,
-                onCancel: () => audioEnhancementControllerRef.current?.abort(),
+                onCancel: handleUseOriginalAudio,
               }}
               autoEdit={{
                 phase: autoEditPhase,
@@ -806,6 +856,11 @@ export default function EditorRecordingPage(): JSX.Element {
                 textCallout: en ? 'Text callout' : '文字标注',
                 calloutText: en ? 'Callout text' : '标注文案',
                 opacity: en ? 'Shade' : '遮罩',
+                selectClipFirst: en ? 'Select a clip before deleting it.' : '请先选择需要删除的片段。',
+                nothingToReset: en ? 'There are no timeline edits to restore.' : '当前没有需要复原的时间轴修改。',
+                noiseReductionNeedsAudio: en ? 'Record microphone audio before removing background noise.' : '请先录制麦克风音频，再使用背景降噪。',
+                zoomMinimum: en ? 'The timeline already fits the window.' : '时间轴已经适合当前窗口。',
+                zoomMaximum: en ? 'The timeline is already at maximum zoom.' : '时间轴已经放大到最大比例。',
               }}
             />
           </div>

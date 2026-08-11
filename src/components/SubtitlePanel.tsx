@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
 import { downloadSrt, pollSubtitleJob, submitSubtitleJob } from '@/services/subtitleClient';
-import { clearSubtitleSrt, getLatestMediaTask, getRecording, loadRecordingMediaTracks, saveMediaTask, saveSubtitleSrt } from '@/lib/db-client';
+import { clearSubtitleSrt, getRecording, loadRecordingMediaTracks, saveSubtitleSrt } from '@/lib/db-client';
 import { trackEvent } from '@/lib/analytics/track';
+import { useMediaTasks } from '@/components/providers/MediaTaskProvider';
+import { announceMediaTaskCreated, openMediaTaskCenter } from '@/components/MediaTaskCenter';
 
 /**
  * 客户端预检阈值：低于此值的音频几乎肯定无法被 ASR 识别。
@@ -61,204 +63,119 @@ type Phase = 'idle' | 'reading' | 'uploading' | 'pending' | 'running' | 'done' |
 const POLL_INTERVAL_MS = 2500;
 const POLL_MAX = 240;
 
+async function waitForPoll(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) throw new DOMException('Subtitle generation cancelled', 'AbortError');
+  await new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, POLL_INTERVAL_MS);
+    const abort = () => {
+      window.clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
+      reject(new DOMException('Subtitle generation cancelled', 'AbortError'));
+    };
+    signal.addEventListener('abort', abort, { once: true });
+  });
+}
+
 export function SubtitlePanel({ open, recordingId, onSaved, onRemoved }: Props): JSX.Element | null {
   const t = useTranslations('subtitlePanel');
   const [phase, setPhase] = useState<Phase>('idle');
   const [srt, setSrt] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
   const [mockReason, setMockReason] = useState<string | null>(null);
   const [existingSrt, setExistingSrt] = useState<string | null>(null);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const requestAbortRef = useRef<AbortController | null>(null);
+  const { tasks, startTask } = useMediaTasks();
+  const currentTask = tasks.find((task) => task.recordingId === recordingId && task.kind === 'asr');
+  const running = currentTask?.status === 'queued' || currentTask?.status === 'running';
 
   useEffect(() => {
     if (!open) {
       setPhase('idle');
       setSrt('');
       setError(null);
-      setJobId(null);
       setMockReason(null);
       setExistingSrt(null);
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-      requestAbortRef.current?.abort();
-      requestAbortRef.current = null;
       return;
     }
-    // 打开时检查是否已有字幕
     let cancelled = false;
-    void Promise.all([getRecording(recordingId), getLatestMediaTask(recordingId, 'asr')]).then(([r, task]) => {
+    void getRecording(recordingId).then((r) => {
       if (cancelled) return;
       const existing = r?.subtitleSrt ?? null;
       if (existing) {
         setExistingSrt(existing);
         setSrt(existing);
         setPhase('done');
-        return;
-      }
-      const remoteJobId = typeof task?.checkpoint?.remoteJobId === 'string'
-        ? task.checkpoint.remoteJobId
-        : null;
-      if (remoteJobId && (task?.status === 'queued' || task?.status === 'running' || task?.status === 'paused')) {
-        pollCount.current = 0;
-        setJobId(remoteJobId);
-        setPhase('pending');
-        void pollOnce(remoteJobId);
-        pollRef.current = setInterval(() => void pollOnce(remoteJobId), POLL_INTERVAL_MS);
       }
     });
-    return () => {
-      cancelled = true;
-      if (pollRef.current) clearInterval(pollRef.current);
-      pollRef.current = null;
-      requestAbortRef.current?.abort();
-      requestAbortRef.current = null;
-    };
+    return () => { cancelled = true; };
   }, [open, recordingId]);
 
   const startJob = async () => {
-    requestAbortRef.current?.abort();
-    const controller = new AbortController();
-    requestAbortRef.current = controller;
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = null;
-    pollCount.current = 0;
-    setError(null);
-    setPhase('reading');
-    setUploadProgress(0);
-    // 客户端预检：避免给 DashScope 扔肯定识别不了的样本
-    let preparedAudio: Blob | undefined;
-    try {
-      const full = await loadRecordingMediaTracks(recordingId, ['audio']);
-      if (!full.audioBlob) {
-        setPhase('failed');
-        setError('no_audio_track');
-        return;
-      }
-      if ((full.metadata?.durationMs ?? 0) < AUDIO_MIN_DURATION_MS) {
-        setPhase('failed');
-        setError('audio_too_short');
-        return;
-      }
-      if (full.audioBlob.size < AUDIO_MIN_BYTES) {
-        setPhase('failed');
-        setError('no_speech_detected');
-        return;
-      }
-      preparedAudio = full.audioBlob;
-    } catch {
-      // 预检本身出错就不阻塞，继续走线上识别
-    }
-
-    try {
-      setPhase('uploading');
-      const r = await submitSubtitleJob(recordingId, {
-        audioBlob: preparedAudio,
-        signal: controller.signal,
-        onUploadProgress: (uploaded, total) => {
-          setUploadProgress(total > 0 ? Math.min(1, uploaded / total) : 0);
-        },
-      });
-      setJobId(r.jobId);
-      const now = Date.now();
-      await saveMediaTask({
-        id: `asr:${r.jobId}`,
-        recordingId,
-        kind: 'asr',
-        status: 'running',
-        progress: 0,
-        checkpoint: { remoteJobId: r.jobId },
-        createdAt: now,
-        updatedAt: now,
-      });
-      if (r.mock) {
-        setMockReason(r.reason ?? t('mockReason'));
-      }
-      setPhase('pending');
-      void pollOnce(r.jobId);
-      pollRef.current = setInterval(() => void pollOnce(r.jobId), POLL_INTERVAL_MS);
-    } catch (err) {
-      if (controller.signal.aborted) return;
-      setPhase('failed');
-      setError(err instanceof Error ? err.message : 'submit_failed');
-    }
-  };
-
-  const pollCount = useRef(0);
-  const pollOnce = async (id: string) => {
-    pollCount.current += 1;
-    if (pollCount.current > POLL_MAX) {
-      if (pollRef.current) clearInterval(pollRef.current);
-      pollRef.current = null;
-      setPhase('failed');
-      setError(t('timeout'));
+    if (running) {
+      openMediaTaskCenter(recordingId);
       return;
     }
+    setError(null);
+    setPhase('reading');
     try {
-      const r = await pollSubtitleJob(id);
-      if (r.status === 'done') {
-        const existingTask = await getLatestMediaTask(recordingId, 'asr');
-        const finalSrt = r.srt ?? '';
-        setSrt(finalSrt);
-        setPhase('done');
-        if (finalSrt) trackEvent('subtitle_generate', { recordingId });
-        if (pollRef.current) clearInterval(pollRef.current);
-        pollRef.current = null;
-        if (finalSrt) {
-          await saveSubtitleSrt(recordingId, finalSrt);
-          setExistingSrt(finalSrt);
-          onSaved?.(finalSrt);
-          // 若该录制已上云：把字幕同步到云端行，否则分享/讲义读不到（先上传后生成字幕的情况）。
-          // best-effort：未登录/未上云返回 401/404，忽略即可。
-          void syncSubtitleToCloud(recordingId, finalSrt);
+      announceMediaTaskCreated(recordingId, document.activeElement);
+      const result = await startTask({
+        recordingId,
+        kind: 'asr',
+        resourceClass: 'network',
+        configSnapshot: { language: 'auto' },
+      }, async (report, signal) => {
+        report({ phase: 'reading', ratio: 0.02 });
+        const full = await loadRecordingMediaTracks(recordingId, ['audio']);
+        if (!full.audioBlob) throw new Error('no_audio_track');
+        if ((full.metadata?.durationMs ?? 0) < AUDIO_MIN_DURATION_MS) throw new Error('audio_too_short');
+        if (full.audioBlob.size < AUDIO_MIN_BYTES) throw new Error('no_speech_detected');
+        const submitted = await submitSubtitleJob(recordingId, {
+          audioBlob: full.audioBlob,
+          signal,
+          onUploadProgress: (uploaded, total) => report({
+            phase: 'uploading',
+            ratio: total > 0 ? 0.05 + Math.min(1, uploaded / total) * 0.2 : 0.05,
+          }),
+        });
+        if (submitted.mock) setMockReason(submitted.reason ?? t('mockReason'));
+        for (let attempt = 0; attempt < POLL_MAX; attempt += 1) {
+          const polled = await pollSubtitleJob(submitted.jobId);
+          if (polled.status === 'failed') throw new Error(polled.error ?? 'unknown');
+          if (polled.status === 'done') {
+            const finalSrt = polled.srt?.trim() ?? '';
+            if (!finalSrt) throw new Error('subtitle_empty');
+            report({ phase: 'saving', ratio: 0.96, checkpoint: { remoteJobId: submitted.jobId } });
+            await saveSubtitleSrt(recordingId, finalSrt);
+            void syncSubtitleToCloud(recordingId, finalSrt);
+            return { resultRef: `subtitle:${recordingId}`, details: { srt: finalSrt } };
+          }
+          report({
+            phase: polled.status,
+            ratio: polled.status === 'running' ? 0.65 : 0.28,
+            checkpoint: { remoteJobId: submitted.jobId },
+          });
+          await waitForPoll(signal);
         }
-        await saveMediaTask({
-          id: `asr:${id}`,
-          recordingId,
-          kind: 'asr',
-          status: 'completed',
-          progress: 1,
-          checkpoint: { remoteJobId: id },
-          createdAt: existingTask?.createdAt ?? Date.now(),
-          updatedAt: Date.now(),
-        });
-      } else if (r.status === 'failed') {
-        const existingTask = await getLatestMediaTask(recordingId, 'asr');
-        setPhase('failed');
-        setError(r.error ?? 'unknown');
-        if (pollRef.current) clearInterval(pollRef.current);
-        pollRef.current = null;
-        await saveMediaTask({
-          id: `asr:${id}`,
-          recordingId,
-          kind: 'asr',
-          status: 'failed',
-          progress: 0,
-          checkpoint: { remoteJobId: id },
-          error: r.error ?? 'unknown',
-          createdAt: existingTask?.createdAt ?? Date.now(),
-          updatedAt: Date.now(),
-        });
-      } else {
-        setPhase(r.status);
-        const existingTask = await getLatestMediaTask(recordingId, 'asr');
-        await saveMediaTask({
-          id: `asr:${id}`,
-          recordingId,
-          kind: 'asr',
-          status: 'running',
-          progress: r.status === 'running' ? 0.65 : 0.25,
-          checkpoint: { remoteJobId: id },
-          createdAt: existingTask?.createdAt ?? Date.now(),
-          updatedAt: Date.now(),
-        });
+        throw new Error(t('timeout'));
+      });
+      const finalSrt = result.details && 'srt' in result.details && typeof result.details.srt === 'string'
+        ? result.details.srt
+        : '';
+      if (finalSrt) {
+        setSrt(finalSrt);
+        setExistingSrt(finalSrt);
+        setPhase('done');
+        trackEvent('subtitle_generate', { recordingId });
+        onSaved?.(finalSrt);
       }
-    } catch {
-      // transient — keep polling
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      setPhase('failed');
+      setError(err instanceof Error ? err.message : 'submit_failed');
     }
   };
 
@@ -304,23 +221,10 @@ export function SubtitlePanel({ open, recordingId, onSaved, onRemoved }: Props):
           </button>
         )}
 
-        {(phase === 'reading' || phase === 'uploading' || phase === 'pending' || phase === 'running') && (
-          <div
-            className="subtitle-craft-status fade-in mt-2 flex items-center gap-3 p-3"
-            style={{ border: '1.4px solid var(--ink)', background: 'var(--paper-2)', borderRadius: 3 }}
-          >
-            <span
-              className="inline-block h-4 w-4 flex-shrink-0 animate-spin rounded-full"
-              style={{ border: '2px solid var(--rule-soft)', borderTopColor: 'var(--ink)' }}
-              aria-hidden
-            />
-            <span style={{ fontSize: 12, color: 'var(--ink)' }}>
-              {phase === 'reading' && t('reading')}
-              {phase === 'uploading' && `${t('uploading')} ${Math.round(uploadProgress * 100)}%`}
-              {phase === 'pending' && t('pending')}
-              {phase === 'running' && t('running')}
-            </span>
-          </div>
+        {running && (
+          <button type="button" onClick={() => openMediaTaskCenter(recordingId)} className="btn-sketch mt-2" style={{ justifyContent: 'center' }}>
+            <I.List size={13} /> {t('running')}
+          </button>
         )}
 
         {phase === 'done' && (

@@ -1,5 +1,36 @@
 # Development Log
 
+## 2026-08-11 - Unified export task center and stable editor toolbar
+
+### User value
+
+- Added one task center at the far right of the export header for export, ChatCut, noise reduction, key-point motion, captions, dubbing, cursor analysis, and waveform generation.
+- Kept preview playback, seek, background changes, and timeline editing available while an export uses an immutable start-time snapshot.
+- Replaced disabled prerequisite actions with clickable guidance; running actions locate their existing task instead of changing size or duplicating work.
+
+### Task orchestration
+
+- Added generic media-task runners with single-flight task identity, serial local-heavy execution, parallel network execution, cancellation, retry, checkpoints, phase, ETA, and result references.
+- Moved the provider to own task lifecycle beyond export-page panel mounts. Recoverable ASR and dubbing checkpoints resume after refresh; interrupted local work remains paused for retry.
+- Added a coalesced Web Audio completion cue and a locally persisted sound toggle.
+- Export configuration is cloned when work starts, so later edits affect preview and the next export only.
+- Split task actions from reactive task state so frequent progress updates do not rerender the full export page or preview canvas.
+
+### Interface
+
+- Added a top-right count badge and a dynamically measured panel constrained to the settings column.
+- The task list is the only progress surface. Legacy preview overlays, toolbar percentages, caption upload blocks, dubbing progress bars, and cursor-analysis pills were removed.
+- Rebuilt the Timeline toolbar as exactly two stable rows. Compact widths shorten labels without creating a third row or horizontal page overflow.
+- Added a portal-based task creation flight and centralized task cancellation, retry, and dismissal.
+
+### Baseline and verification
+
+- Mandatory pre-change checkpoint: `aa0c842` (`docs: require local checkpoints before changes`).
+- `npm run typecheck` passed.
+- `npm run build` passed with the existing ONNX/Hugging Face static-analysis warnings.
+- Media task coordinator and media pipeline: 44 tests passed.
+- Focused editor regression: clickable prerequisites, strict two-row toolbar, settings-column task geometry, portal noise menu, ChatCut persistence/undo, cursor analysis, subtitle repaint, and English dubbing all passed.
+
 ## 2026-08-11 - Web chapter and key-point drawer motion
 
 ### User value

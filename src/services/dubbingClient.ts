@@ -35,6 +35,8 @@ export interface DubbingProgress {
 interface DubbingOptions {
   signal?: AbortSignal;
   onProgress?: (progress: DubbingProgress) => void;
+  onCheckpoint?: (checkpoint: { remoteJobId: string; sourceAudioHash: string }) => void;
+  persistTask?: boolean;
 }
 
 const POLL_INTERVAL_MS = 1200;
@@ -115,9 +117,11 @@ async function pollDubbingJob(
     if (status.status === 'failed') throw new Error(status.error ?? 'dubbing_failed');
     const progress = status.status === 'running' ? 0.3 : 0.15;
     options.onProgress?.({ stage: 'translating', progress });
-    await persistDubbingTask({
-      recordingId, jobId, sourceAudioHash, status: 'running', progress, stage: 'translating',
-    });
+    if (options.persistTask !== false) {
+      await persistDubbingTask({
+        recordingId, jobId, sourceAudioHash, status: 'running', progress, stage: 'translating',
+      });
+    }
     await wait(POLL_INTERVAL_MS, options.signal);
   }
   throw new Error('dubbing_timeout');
@@ -163,16 +167,18 @@ async function finishEnglishDubbingTrack(params: {
         options.onProgress?.(progress);
         if (Date.now() - lastPersistedAt < 600) return;
         lastPersistedAt = Date.now();
-        void persistDubbingTask({
-          recordingId: params.recordingId,
-          jobId: params.jobId,
-          sourceAudioHash: params.sourceAudioHash,
-          status: 'running',
-          progress: progress.progress,
-          stage: progress.stage,
-          completedChunks: progress.completedChunks,
-          totalChunks: progress.totalChunks,
-        }).catch(() => undefined);
+        if (options.persistTask !== false) {
+          void persistDubbingTask({
+            recordingId: params.recordingId,
+            jobId: params.jobId,
+            sourceAudioHash: params.sourceAudioHash,
+            status: 'running',
+            progress: progress.progress,
+            stage: progress.stage,
+            completedChunks: progress.completedChunks,
+            totalChunks: progress.totalChunks,
+          }).catch(() => undefined);
+        }
       },
     });
     options.onProgress?.({ stage: 'saving', progress: 0.99 });
@@ -189,25 +195,29 @@ async function finishEnglishDubbingTrack(params: {
       lipSync: 'skipped',
     };
     await saveLocalizedTrack(track, true);
-    await persistDubbingTask({
-      recordingId: params.recordingId,
-      jobId: params.jobId,
-      sourceAudioHash: params.sourceAudioHash,
-      status: 'completed',
-      progress: 1,
-      stage: 'saving',
-    });
+    if (options.persistTask !== false) {
+      await persistDubbingTask({
+        recordingId: params.recordingId,
+        jobId: params.jobId,
+        sourceAudioHash: params.sourceAudioHash,
+        status: 'completed',
+        progress: 1,
+        stage: 'saving',
+      });
+    }
     return track;
   } catch (error) {
     const aborted = error instanceof DOMException && error.name === 'AbortError';
-    await persistDubbingTask({
-      recordingId: params.recordingId,
-      jobId: params.jobId,
-      sourceAudioHash: params.sourceAudioHash,
-      status: aborted ? 'paused' : 'failed',
-      progress: 0,
-      error: aborted ? 'interrupted' : error instanceof Error ? error.message : 'dubbing_failed',
-    });
+    if (options.persistTask !== false) {
+      await persistDubbingTask({
+        recordingId: params.recordingId,
+        jobId: params.jobId,
+        sourceAudioHash: params.sourceAudioHash,
+        status: aborted ? 'paused' : 'failed',
+        progress: 0,
+        error: aborted ? 'interrupted' : error instanceof Error ? error.message : 'dubbing_failed',
+      });
+    }
     throw error;
   }
 }
@@ -232,7 +242,8 @@ export async function createEnglishDubbingTrack(params: {
 
   const sourceAudioHash = await audioFingerprint(media.audioBlob);
   const nonce = crypto.randomUUID();
-  const localMock = shouldUseMediaJobMocks(process.env.NEXT_PUBLIC_MEDIA_JOB_MOCKS);
+  const localMock = shouldUseMediaJobMocks(process.env.NEXT_PUBLIC_MEDIA_JOB_MOCKS)
+    || /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname);
   let proofAsset: Awaited<ReturnType<typeof uploadPrivateJobAsset>> | null = null;
   if (!localMock) {
     proofAsset = await uploadPrivateJobAsset({
@@ -263,14 +274,17 @@ export async function createEnglishDubbingTrack(params: {
       }),
     });
     const { jobId } = await parseMediaJobResponse<SubmitResponse>(submit);
-    await persistDubbingTask({
-      recordingId: params.recordingId,
-      jobId,
-      sourceAudioHash,
-      status: 'running',
-      progress: 0.08,
-      stage: 'translating',
-    });
+    params.onCheckpoint?.({ remoteJobId: jobId, sourceAudioHash });
+    if (params.persistTask !== false) {
+      await persistDubbingTask({
+        recordingId: params.recordingId,
+        jobId,
+        sourceAudioHash,
+        status: 'running',
+        progress: 0.08,
+        stage: 'translating',
+      });
+    }
     return finishEnglishDubbingTrack({
       recordingId: params.recordingId,
       jobId,
