@@ -66,6 +66,16 @@ interface Mp4VideoChunkTarget {
   ) => void;
 }
 
+interface Mp4AudioChunkTarget {
+  addAudioChunk: (chunk: any, meta: any, timestamp: number) => void;
+}
+
+interface BufferedAudioChunk {
+  chunk: any;
+  meta: any;
+  order: number;
+}
+
 /** Keep H.264 presentation order separate from the monotonic MP4 decode timeline. */
 export function createMp4VideoChunkWriter(fps: number, target: Mp4VideoChunkTarget) {
   const mapTimestamp = createMp4TimestampMapper(fps);
@@ -77,6 +87,27 @@ export function createMp4VideoChunkWriter(fps: number, target: Mp4VideoChunkTarg
       timestamp.presentationTimestampUs,
       timestamp.compositionTimeOffsetUs,
     );
+  };
+}
+
+/** AAC callbacks may be delivered out of timestamp order; MP4 requires monotonic audio DTS. */
+export function createMp4AudioChunkBuffer(target: Mp4AudioChunkTarget) {
+  const pending: BufferedAudioChunk[] = [];
+  return {
+    push(chunk: any, meta: any): void {
+      pending.push({ chunk, meta, order: pending.length });
+    },
+    flush(): void {
+      pending.sort((a, b) => {
+        const byTimestamp = Number(a.chunk.timestamp) - Number(b.chunk.timestamp);
+        return byTimestamp || a.order - b.order;
+      });
+      const normalizeTimestamp = new MonotonicTimestampNormalizer(1);
+      for (const { chunk, meta } of pending) {
+        target.addAudioChunk(chunk, meta, normalizeTimestamp.push(chunk.timestamp as number));
+      }
+      pending.length = 0;
+    },
   };
 }
 
@@ -405,8 +436,12 @@ async function encodeAudioTrack(
 ): Promise<void> {
   const sampleRate = buffer.sampleRate;
   let err: unknown = null;
+  const mp4AudioChunks = audioCodec === 'mp4a.40.2' ? createMp4AudioChunkBuffer(muxer) : null;
   const audioEncoder = new AudioEncoderCtor({
-    output: (chunk: any, meta: any) => muxer.addAudioChunk(chunk, meta),
+    output: (chunk: any, meta: any) => {
+      if (mp4AudioChunks) mp4AudioChunks.push(chunk, meta);
+      else muxer.addAudioChunk(chunk, meta);
+    },
     error: (e: unknown) => { err = e; },
   });
   audioEncoder.configure({ codec: audioCodec, sampleRate, numberOfChannels: channels, bitrate: 128_000 });
@@ -439,6 +474,7 @@ async function encodeAudioTrack(
       if ((off / block) % 64 === 0) onProgress?.(off / total);
     }
     await drainEncoderBackpressure({ encodeQueueSize: 17, flush: () => audioEncoder.flush() }, 16, signal);
+    mp4AudioChunks?.flush();
   } finally {
     try { audioEncoder.close(); } catch { /* codec may already be reclaimed */ }
   }

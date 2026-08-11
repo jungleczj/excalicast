@@ -2,7 +2,12 @@ import { expect, test } from '@playwright/test';
 import { ArrayBufferTarget, Muxer } from 'mp4-muxer';
 import { LatestTaskRunner } from '@/lib/latestTaskRunner';
 import { buildPrivateMediaPath, parseMediaSubmitPayload } from '@/lib/privateMedia';
-import { createMp4VideoChunkWriter, drainEncoderBackpressure, resolveWebCodecsAudioMode } from '@/services/webCodecsExport';
+import {
+  createMp4AudioChunkBuffer,
+  createMp4VideoChunkWriter,
+  drainEncoderBackpressure,
+  resolveWebCodecsAudioMode,
+} from '@/services/webCodecsExport';
 import { resolveVideoRateControl } from '@/services/webCodecsExport';
 import { PendingFocusRequests } from '@/services/cursorFocusTracker';
 import { createExportDiagnostics } from '@/services/exportDiagnostics';
@@ -283,6 +288,27 @@ test('real MP4 muxer accepts the reordered H.264 regression sequence', () => {
       writer({ timestamp, index }, undefined);
     });
   }).not.toThrow();
+});
+
+test('MP4 audio chunks are sorted before muxing when AAC callbacks arrive out of order', () => {
+  const writes: number[] = [];
+  let lastTimestamp = -1;
+  const buffer = createMp4AudioChunkBuffer({
+    addAudioChunk: (_chunk, _meta, timestamp) => {
+      if (timestamp <= lastTimestamp) {
+        throw new Error(`non_monotonic_audio_timestamp:${lastTimestamp}:${timestamp}`);
+      }
+      lastTimestamp = timestamp;
+      writes.push(timestamp);
+    },
+  });
+
+  for (const timestamp of [0, 21_333, 42_667, 405_333, 362_667, 384_000, 426_667]) {
+    buffer.push({ timestamp }, undefined);
+  }
+
+  expect(() => buffer.flush()).not.toThrow();
+  expect(writes).toEqual([0, 21_333, 42_667, 362_667, 384_000, 405_333, 426_667]);
 });
 
 test('edited clip sequence preserves split boundaries and user-defined playback order', () => {

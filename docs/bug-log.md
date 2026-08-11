@@ -139,6 +139,32 @@ Chrome's H.264 encoder may emit B frames in decode order while `EncodedVideoChun
 
 - Fixed and verified locally.
 
+## 2026-08-11 - AAC callback order still produced regressing MP4 DTS
+
+### Symptom
+
+After the H.264 timestamp fix, MP4 export could still fail with `Timestamps must be monotonically increasing (DTS went from 405333 to 362667)`.
+
+### Root cause
+
+The second sequence is audio, not video: at 48 kHz, AAC input is encoded in 1024-sample blocks, or about `21,333us` per block. Chrome delivered encoded AAC callbacks out of presentation order, and the audio callback passed each chunk directly to mp4-muxer. The muxer therefore rejected the lower audio DTS even though the video track was already normalized.
+
+### Fix
+
+- Buffer MP4 AAC output until `AudioEncoder.flush()` completes.
+- Stable-sort chunks by their source timestamp before muxing.
+- Normalize duplicate timestamps to a strictly increasing audio timeline.
+- Keep WebM audio streaming unchanged.
+
+### Regression coverage
+
+- The exact `405333 -> 362667` callback sequence now verifies sorted, strictly increasing mux timestamps.
+- The existing H.264 reordered-PTS and real mp4-muxer regressions remain active so both tracks are covered independently.
+
+### Status
+
+- Fixed and verified locally.
+
 ## 2026-08-11 - Dragged clip order reverted during persistence and reload
 
 ### Symptom
