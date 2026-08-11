@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
+import { ArrayBufferTarget, Muxer } from 'mp4-muxer';
 import { LatestTaskRunner } from '@/lib/latestTaskRunner';
 import { buildPrivateMediaPath, parseMediaSubmitPayload } from '@/lib/privateMedia';
-import { drainEncoderBackpressure, resolveWebCodecsAudioMode } from '@/services/webCodecsExport';
+import { createMp4VideoChunkWriter, drainEncoderBackpressure, resolveWebCodecsAudioMode } from '@/services/webCodecsExport';
 import { resolveVideoRateControl } from '@/services/webCodecsExport';
 import { PendingFocusRequests } from '@/services/cursorFocusTracker';
 import { createExportDiagnostics } from '@/services/exportDiagnostics';
@@ -36,6 +37,7 @@ import { parseKeyPointMotionResponse } from '@/services/keyPointMotionSchema';
 import { resolveEnhancedAudioSelection } from '@/services/audioEnhancement';
 import { projectHighlightAperture } from '@/services/editorEffectsRenderer';
 import { assembleTimedPcm16Wav, hasAudiblePcm16Audio, parsePcm16Wav } from '@/lib/dubbingAudio';
+import { moveSegment, normalizeSegmentSequence, outputToSource, sourceToOutput } from '@/utils/segments';
 import type { EnhancedAudioTrack, HighlightEffectSegment, KeyPointMotionSegment } from '@/types/recording';
 
 function createFloat32Wav(samples: Float32Array, sampleRate = 24_000): Uint8Array {
@@ -240,6 +242,64 @@ test('MP4 mux timestamps keep DTS monotonic while preserving reordered H.264 PTS
   expect(mapped.map((sample) => sample.compositionTimeOffsetUs)).toEqual([
     0, 0, 0, 241_178, 128_071, 174_511,
   ]);
+});
+
+test('MP4 export writer never passes reordered H.264 PTS through as DTS', () => {
+  const writes: Array<{ pts: number; offset: number }> = [];
+  const writer = createMp4VideoChunkWriter(15, {
+    addVideoChunk: (_chunk, _meta, pts, offset) => writes.push({ pts, offset }),
+  });
+
+  for (const pts of [0, 66_667, 133_334, 441_179, 394_739, 507_846]) {
+    writer({ timestamp: pts }, undefined);
+  }
+
+  const decodeTimestamps = writes.map(({ pts, offset }) => pts - offset);
+  expect(decodeTimestamps).toEqual([0, 66_667, 133_334, 200_001, 266_668, 333_335]);
+  expect(decodeTimestamps.every((value, index) => index === 0 || value > decodeTimestamps[index - 1])).toBe(true);
+});
+
+test('real MP4 muxer accepts the reordered H.264 regression sequence', () => {
+  const muxer = new Muxer({
+    target: new ArrayBufferTarget(),
+    fastStart: 'in-memory',
+    video: { codec: 'avc', width: 1920, height: 1080 },
+  });
+  const writer = createMp4VideoChunkWriter(15, {
+    addVideoChunk: (chunk, _meta, timestamp, compositionTimeOffset) => {
+      muxer.addVideoChunkRaw(
+        new Uint8Array([0, 0, 0, 1, chunk.index]),
+        chunk.index === 0 ? 'key' : 'delta',
+        timestamp,
+        66_667,
+        undefined,
+        compositionTimeOffset,
+      );
+    },
+  });
+
+  expect(() => {
+    [0, 66_667, 133_334, 441_179, 394_739, 507_846].forEach((timestamp, index) => {
+      writer({ timestamp, index }, undefined);
+    });
+  }).not.toThrow();
+});
+
+test('edited clip sequence preserves split boundaries and user-defined playback order', () => {
+  const reordered = moveSegment([
+    { start: 0, end: 4_000 },
+    { start: 4_000, end: 8_000 },
+    { start: 8_000, end: 12_000 },
+  ], 0, 2);
+  const sequence = normalizeSegmentSequence(reordered, 12_000);
+
+  expect(sequence).toEqual([
+    { start: 4_000, end: 8_000 },
+    { start: 8_000, end: 12_000 },
+    { start: 0, end: 4_000 },
+  ]);
+  expect(outputToSource(sequence, 500)).toBe(4_500);
+  expect(sourceToOutput(sequence, 500)).toBe(8_500);
 });
 
 test('concatenated media timestamps are rebased across resets and duplicates', () => {

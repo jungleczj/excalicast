@@ -113,6 +113,60 @@ The menu was absolutely positioned inside the toolbar's horizontal scroll contai
 
 - Fixed and verified locally.
 
+## 2026-08-11 - H.264 export treated reordered PTS as regressing DTS
+
+### Symptom
+
+MP4 export failed with `Timestamps must be monotonically increasing (DTS went from 441179 to 394739)`.
+
+### Root cause
+
+Chrome's H.264 encoder may emit B frames in decode order while `EncodedVideoChunk.timestamp` remains the presentation timestamp. A presentation timestamp can legitimately move backward. Passing that value directly to mp4-muxer makes it interpret PTS as DTS and reject the fifth sample.
+
+### Fix
+
+- Added one `createMp4VideoChunkWriter()` boundary for the MP4 encoder callback.
+- Generate a strictly increasing decode timeline from output order.
+- Preserve the encoder PTS and pass `compositionTimeOffset = PTS - DTS` to mp4-muxer.
+- Keep WebM behavior unchanged because its muxer contract differs.
+
+### Regression coverage
+
+- The exact `441179 -> 394739` sequence is tested through the writer boundary.
+- A real mp4-muxer `addVideoChunkRaw()` regression verifies that the mapped sequence no longer throws.
+
+### Status
+
+- Fixed and verified locally.
+
+## 2026-08-11 - Dragged clip order reverted during persistence and reload
+
+### Symptom
+
+Moving split clips could appear correct in memory but restore chronological source order after persistence, reload, preview normalization, or export.
+
+### Root cause
+
+- `updateRecordingSegments()` sorted every saved array by `start`.
+- `normalizeSegments()` also sorted and merged adjacent split clips, erasing the edit decision boundary.
+- Timeline geometry was based only on source-time positions rather than output sequence positions.
+
+### Fix
+
+- Preserve the segment array as the authoritative playback sequence.
+- Introduce order-preserving normalization for editor load, preview, and export.
+- Render draggable clips on a ripple output timeline and keep source ranges immutable.
+- Map screen frames and audio through the same ordered sequence.
+
+### Regression coverage
+
+- Domain tests verify split-boundary preservation and source/output time mapping after reorder.
+- Chromium E2E creates three clips through the real Split action, drags the first to the end, and verifies the persisted IndexedDB order.
+
+### Status
+
+- Fixed and verified locally.
+
 ## 2026-08-10 - Editor effect tracks disappeared after refresh
 
 ### Symptom

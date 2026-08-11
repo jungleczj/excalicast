@@ -34,6 +34,33 @@ export function normalizeSegments(segments: TimeSegment[] | undefined, durationM
   return merged;
 }
 
+/**
+ * Normalize an edited playback sequence without changing its order or merging
+ * adjacent split clips. Array order is the user's final playback order.
+ */
+export function normalizeSegmentSequence(segments: TimeSegment[] | undefined, durationMs: number): TimeSegment[] {
+  const dur = Math.max(0, durationMs);
+  if (dur === 0) return [{ start: 0, end: 0 }];
+  if (!segments || segments.length === 0) return [{ start: 0, end: dur }];
+  const sequence = segments
+    .map((segment) => ({
+      start: Math.max(0, Math.min(dur, Math.min(segment.start, segment.end))),
+      end: Math.max(0, Math.min(dur, Math.max(segment.start, segment.end))),
+    }))
+    .filter((segment) => segment.end - segment.start >= 1);
+  return sequence.length > 0 ? sequence : [{ start: 0, end: dur }];
+}
+
+export function moveSegment(segments: TimeSegment[], fromIndex: number, toIndex: number): TimeSegment[] {
+  if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= segments.length || toIndex >= segments.length) {
+    return segments;
+  }
+  const next = segments.map((segment) => ({ ...segment }));
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+  return next;
+}
+
 /** 从保留段里挖掉源区间 [a,b]（框选删除）。可能把一段切成两段 / 截短 / 整段删除。 */
 export function subtractRange(segments: TimeSegment[], a: number, b: number): TimeSegment[] {
   const lo = Math.min(a, b);
@@ -89,10 +116,14 @@ export function trimSegmentEdge(
   const out = segments.map((s) => ({ ...s }));
   const seg = out[i];
   if (side === 'start') {
-    const lo = i > 0 ? out[i - 1].end : 0;
+    const lo = out.reduce((boundary, candidate, index) => (
+      index !== i && candidate.end <= seg.start ? Math.max(boundary, candidate.end) : boundary
+    ), 0);
     seg.start = Math.max(lo, Math.min(t, seg.end - MIN_SEGMENT_MS));
   } else {
-    const hi = i < out.length - 1 ? out[i + 1].start : Number.POSITIVE_INFINITY;
+    const hi = out.reduce((boundary, candidate, index) => (
+      index !== i && candidate.start >= seg.end ? Math.min(boundary, candidate.start) : boundary
+    ), Number.POSITIVE_INFINITY);
     seg.end = Math.min(hi, Math.max(t, seg.start + MIN_SEGMENT_MS));
   }
   return out;
@@ -122,9 +153,13 @@ export function outputToSource(segments: TimeSegment[], outMs: number): number {
 export function sourceToOutput(segments: TimeSegment[], srcMs: number): number {
   let acc = 0;
   for (const s of segments) {
-    if (srcMs < s.start) return acc;          // 在该段之前的 gap → 吸附到该段输出起点
-    if (srcMs <= s.end) return acc + (srcMs - s.start);
+    if (srcMs >= s.start && srcMs <= s.end) return acc + (srcMs - s.start);
     acc += s.end - s.start;
   }
-  return acc; // 超过最后一段 → keptDuration
+  const chronologicalNext = segments
+    .map((segment, index) => ({ segment, index }))
+    .filter(({ segment }) => segment.start > srcMs)
+    .sort((a, b) => a.segment.start - b.segment.start)[0];
+  if (!chronologicalNext) return acc;
+  return segments.slice(0, chronologicalNext.index).reduce((total, segment) => total + segment.end - segment.start, 0);
 }

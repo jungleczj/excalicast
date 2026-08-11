@@ -5918,6 +5918,9 @@ body {
   margin-top: 10px !important;
   color: rgba(24, 25, 26, 0.46) !important;
   font-family: var(--font-sans) !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  line-height: 1.35 !important;
   letter-spacing: -0.01em !important;
   text-transform: none !important;
 }
@@ -8854,7 +8857,38 @@ body {
   min-height: 34px;
   align-items: center;
   gap: 6px;
-  overflow: visible;
+  overflow-x: auto;
+  overflow-y: visible;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(24, 25, 26, 0.18) transparent;
+}
+
+.timeline-craft-group-label {
+  width: 78px;
+  min-width: 78px;
+  flex: 0 0 78px;
+  margin-right: 0;
+  white-space: nowrap;
+}
+
+.timeline-craft-transport-row {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 3px 2px 3px 0;
+}
+
+.timeline-craft-transport-row .timeline-craft-toolbar-end {
+  margin-left: auto;
+}
+
+.timeline-craft-clip[draggable="true"]:active {
+  cursor: grabbing !important;
+}
+
+.timeline-craft-clip.is-dragging {
+  opacity: 0.48;
 }
 
 .timeline-craft-toolbar-advanced {
@@ -9074,17 +9108,12 @@ body {
     gap: 4px;
   }
 
-  .timeline-craft-toolbar .timeline-craft-action-label,
-  .timeline-craft-toolbar .timeline-craft-label {
-    display: none;
-  }
-
   .editor-craft-main .timeline-craft-action {
-    width: 30px;
-    min-width: 30px;
+    width: auto;
+    min-width: max-content;
     height: 30px;
     justify-content: center;
-    padding: 0 !important;
+    padding: 0 8px !important;
   }
 
   .timeline-craft-toolbar .timeline-craft-select {

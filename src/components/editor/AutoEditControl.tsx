@@ -130,7 +130,7 @@ export function AutoEditControl({
         title={hasUndo ? labels.undo : labels.noCuts}
         onClick={() => hasUndo ? onUndo() : onGuide?.(labels.noCuts)}
       >
-        <span aria-hidden>↶</span><span className="timeline-craft-action-label">{labels.undo}</span>
+        <I.Undo size={11} /><span className="timeline-craft-action-label">{labels.undo}</span>
       </button>
       {error && <span className="sr-only" role="status">{error}</span>}
     </div>

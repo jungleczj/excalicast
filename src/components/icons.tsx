@@ -72,6 +72,12 @@ export const I = {
   ChevronRight: (p: IconProps) => <Base {...p}><path d="M9 6 l6 6 l-6 6" /></Base>,
   ChevronDown: (p: IconProps) => <Base {...p}><path d="M6 9 l6 6 l6 -6" /></Base>,
   ArrowRight: (p: IconProps) => <Base {...p}><path d="M5 12 h13 M13 6.5 l5.5 5.5 l-5.5 5.5" /></Base>,
+  Undo: (p: IconProps) => (
+    <Base {...p}>
+      <path d="M9 7 L4 12 L9 17" />
+      <path d="M5 12 h8.5 a5.5 5.5 0 0 1 0 11" />
+    </Base>
+  ),
   Download: (p: IconProps) => (
     <Base {...p}>
       <path d="M12 4 v11 M7 11 l5 5 l5 -5 M4.5 20 h15" />

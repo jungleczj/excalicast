@@ -57,6 +57,29 @@ export interface WebCodecsEncodeResult {
   audioEncoded: boolean;
 }
 
+interface Mp4VideoChunkTarget {
+  addVideoChunk: (
+    chunk: any,
+    meta: any,
+    presentationTimestampUs: number,
+    compositionTimeOffsetUs: number,
+  ) => void;
+}
+
+/** Keep H.264 presentation order separate from the monotonic MP4 decode timeline. */
+export function createMp4VideoChunkWriter(fps: number, target: Mp4VideoChunkTarget) {
+  const mapTimestamp = createMp4TimestampMapper(fps);
+  return (chunk: any, meta: any): void => {
+    const timestamp = mapTimestamp(chunk.timestamp as number);
+    target.addVideoChunk(
+      chunk,
+      meta,
+      timestamp.presentationTimestampUs,
+      timestamp.compositionTimeOffsetUs,
+    );
+  };
+}
+
 export async function drainEncoderBackpressure(
   encoder: { encodeQueueSize: number; flush: () => Promise<void> },
   maxQueueSize = 8,
@@ -235,20 +258,14 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<WebCodec
 
   // 4) 视频编码
   let encErr: unknown = null;
-  const mapMp4Timestamp = createMp4TimestampMapper(fps);
+  const writeMp4VideoChunk = createMp4VideoChunkWriter(fps, muxer);
   const videoEncoder = new VideoEncoderCtor({
     output: (chunk: any, meta: any) => {
       if (isWebm) {
         muxer.addVideoChunk(chunk, meta);
         return;
       }
-      const timestamp = mapMp4Timestamp(chunk.timestamp as number);
-      muxer.addVideoChunk(
-        chunk,
-        meta,
-        timestamp.presentationTimestampUs,
-        timestamp.compositionTimeOffsetUs,
-      );
+      writeMp4VideoChunk(chunk, meta);
     },
     error: (e: unknown) => { encErr = e; },
   });

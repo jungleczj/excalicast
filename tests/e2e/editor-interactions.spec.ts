@@ -320,13 +320,72 @@ test('editor enhancement controls stay in exactly two stable toolbar rows', asyn
     await page.setViewportSize({ width, height: 900 });
     await expect(page.getByTestId('timeline-basic-tools')).toBeVisible();
     await expect(page.getByTestId('timeline-advanced-tools')).toBeVisible();
+    await expect(page.getByTestId('timeline-basic-tools').getByText('Basic', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('timeline-advanced-tools').getByText('Advanced', { exact: true })).toBeVisible();
+    const [basicActionBox, advancedActionBox] = await Promise.all([
+      page.getByTestId('timeline-basic-tools').locator('.timeline-craft-action').first().boundingBox(),
+      page.getByTestId('timeline-advanced-tools').locator('.timeline-craft-select').first().boundingBox(),
+    ]);
+    if (!basicActionBox || !advancedActionBox) throw new Error('toolbar action alignment was not measured');
+    expect(Math.abs(basicActionBox.x - advancedActionBox.x)).toBeLessThanOrEqual(1);
+    const [toolbarBox, transportBox, trackBox] = await Promise.all([
+      page.locator('.timeline-craft-toolbar').boundingBox(),
+      page.getByTestId('timeline-transport-row').boundingBox(),
+      page.getByTestId('timeline-video-track').boundingBox(),
+    ]);
+    if (!toolbarBox || !transportBox || !trackBox) throw new Error('timeline transport placement was not measured');
+    expect(transportBox.y).toBeGreaterThanOrEqual(toolbarBox.y + toolbarBox.height - 1);
+    expect(transportBox.y + transportBox.height).toBeLessThanOrEqual(trackBox.y + 1);
     const rowCount = await page.locator('.timeline-craft-toolbar').evaluate((toolbar) => (
       new Set(Array.from(toolbar.children).map((child) => Math.round(child.getBoundingClientRect().top))).size
     ));
     expect(rowCount).toBe(2);
     const bodyScroll = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(bodyScroll).toBeLessThanOrEqual(1);
+    const actionLabels = page.locator('.timeline-craft-toolbar .timeline-craft-action-label');
+    expect(await actionLabels.count()).toBeGreaterThan(0);
+    for (const label of await actionLabels.all()) {
+      await expect(label).toBeVisible();
+      await expect(label).not.toHaveText('');
+    }
+    await expect(page.getByTestId('autoedit-undo').locator('svg')).toBeVisible();
+    const selectFontSize = await page.locator('.timeline-craft-select').evaluate((element) => getComputedStyle(element).fontSize);
+    await expect(page.locator('.timeline-craft-hint')).toHaveCSS('font-size', selectFontSize);
+    await expect(page.getByTestId('timeline-current-time')).toHaveCSS('font-size', selectFontSize);
   }
+});
+
+test('split clips can be dragged into a new playback order that persists', async ({ page }) => {
+  const track = page.getByTestId('timeline-video-track');
+  const ruler = page.locator('.timeline-craft-ruler');
+  const rulerBox = await ruler.boundingBox();
+  if (!rulerBox) throw new Error('timeline ruler was not measured');
+  await ruler.click({ position: { x: rulerBox.width / 3, y: rulerBox.height / 2 } });
+  await page.getByRole('button', { name: /Split/ }).click();
+  await ruler.click({ position: { x: rulerBox.width * 2 / 3, y: rulerBox.height / 2 } });
+  await page.getByRole('button', { name: /Split/ }).click();
+  const clips = page.getByTestId('timeline-video-clip');
+  await expect(clips).toHaveCount(3);
+  const originalStarts = await clips.evaluateAll((elements) => elements.map((element) => Number(element.getAttribute('data-source-start'))));
+  await clips.nth(0).dragTo(clips.nth(2));
+  await expect(clips.nth(0)).toHaveAttribute('data-source-start', String(originalStarts[1]));
+  await expect(clips.nth(2)).toHaveAttribute('data-source-start', String(originalStarts[0]));
+  await page.waitForTimeout(650);
+  await expect.poll(async () => page.evaluate(async (id) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const value = await new Promise<Array<{ start: number; end: number }>>((resolve, reject) => {
+      const tx = db.transaction('recordings', 'readonly');
+      const request = tx.objectStore('recordings').get(id);
+      request.onsuccess = () => resolve(request.result?.segments ?? []);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return value.map((segment) => segment.start);
+  }, recordingId)).toEqual([originalStarts[1], originalStarts[2], originalStarts[0]]);
 });
 
 test('task center is the last topbar action and only overlays the settings column', async ({ page }) => {

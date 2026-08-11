@@ -578,10 +578,10 @@ export async function updateRecordingTags(recordingId: string, tags: string[]): 
 }
 
 export async function updateRecordingSegments(recordingId: string, segments: TimeSegment[]): Promise<void> {
-  // 规整：去掉非法/零长段，按 start 排序；空数组存 undefined（=整段）。
+  // Array order is the edited playback order. Only discard invalid ranges.
   const clean = segments
     .filter((s) => Number.isFinite(s.start) && Number.isFinite(s.end) && s.end > s.start)
-    .sort((a, b) => a.start - b.start);
+    .map((segment) => ({ start: Math.round(segment.start), end: Math.round(segment.end) }));
   await getClientDb().recordings.update(recordingId, { segments: clean.length > 0 ? clean : undefined });
   invalidateRecordingMediaCache(recordingId);
 }

@@ -4,7 +4,11 @@ import {
   MediaTaskCoordinator,
   type MediaTaskRunner,
 } from '@/services/mediaTaskCoordinator';
-import type { MediaTaskRecord } from '@/services/mediaTaskDomain';
+import {
+  isMediaTaskVisible,
+  MEDIA_TASK_COMPLETION_RETENTION_MS,
+  type MediaTaskRecord,
+} from '@/services/mediaTaskDomain';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -114,4 +118,16 @@ test('completion cue only reacts to newly completed tasks', () => {
   expect(collectNewlyCompletedTaskIds([base], [{ ...base, status: 'completed' }])).toEqual(['task-1']);
   expect(collectNewlyCompletedTaskIds([{ ...base, status: 'completed' }], [{ ...base, status: 'completed' }])).toEqual([]);
   expect(collectNewlyCompletedTaskIds([base], [{ ...base, status: 'failed' }])).toEqual([]);
+});
+
+test('completed tasks remain visible for exactly three seconds', () => {
+  const completedAt = 10_000;
+  const task: MediaTaskRecord = {
+    id: 'task-complete', recordingId: 'r1', kind: 'export', status: 'completed', progress: 1,
+    createdAt: 1, updatedAt: completedAt,
+  };
+
+  expect(MEDIA_TASK_COMPLETION_RETENTION_MS).toBe(3_000);
+  expect(isMediaTaskVisible(task, 'r1', completedAt + 2_999)).toBe(true);
+  expect(isMediaTaskVisible(task, 'r1', completedAt + 3_000)).toBe(false);
 });

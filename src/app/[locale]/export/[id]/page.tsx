@@ -48,7 +48,7 @@ import type {
   RecordingMetadata,
   TimeSegment,
 } from '@/types/recording';
-import { normalizeSegments, isTrimmed } from '@/utils/segments';
+import { normalizeSegmentSequence, isTrimmed } from '@/utils/segments';
 import { parseSrt } from '@/utils/srtParser';
 import { createAudioPeaksForBlob, loadOrCreateAudioPeakTrack } from '@/services/audioPeakTrack';
 import { buildLocalKeyPointMotions, migrateKeyPointMotionSegment } from '@/services/keyPointMotion';
@@ -207,7 +207,7 @@ export default function EditorRecordingPage(): JSX.Element {
           keyPointMotions: savedKeyPointMotions.length ? savedKeyPointMotions : undefined,
         }));
       }
-      setSegments(normalizeSegments(m.segments, m.durationMs));
+      setSegments(normalizeSegmentSequence(m.segments, m.durationMs));
       setPlayheadMs(0);
     };
 
@@ -759,7 +759,7 @@ export default function EditorRecordingPage(): JSX.Element {
               onChange={handleTimelineSegmentsChange}
               onReset={() => {
                 clearAutoEditUndo();
-                setSegments(normalizeSegments(undefined, meta.durationMs));
+                setSegments(normalizeSegmentSequence(undefined, meta.durationMs));
               }}
               hasAudio={meta.hasAudio}
               hasCaptions={!!meta.subtitleSrt}
@@ -824,7 +824,8 @@ export default function EditorRecordingPage(): JSX.Element {
                 },
               }}
               labels={{
-                edit: en ? 'Edit' : '剪辑',
+                basic: en ? 'Basic' : '基础功能',
+                advanced: en ? 'Advanced' : '高级功能',
                 reset: en ? 'Reset' : '复原',
                 kept: en ? 'Kept' : '保留',
                 mic: en ? 'Mic' : '麦克风',

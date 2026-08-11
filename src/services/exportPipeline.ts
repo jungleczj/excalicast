@@ -34,7 +34,7 @@ import {
   type WorkspaceShellRow,
 } from '@/types/recording';
 import { compileSubtitles, drawFrostedWatermark, drawSubtitle, subtitleLayout, chunkByWidth, subtitlePageIndex } from '@/utils/frameOverlays';
-import { normalizeSegments, keptDuration, isTrimmed, outputToSource } from '@/utils/segments';
+import { normalizeSegmentSequence, keptDuration, isTrimmed, outputToSource } from '@/utils/segments';
 import { cueAt } from '@/utils/srtParser';
 import { createCameraFrameSource, type CameraFrameSource } from './webmCameraFrames';
 import { drawLaserOverlay } from '@/utils/laserRender';
@@ -809,7 +809,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
 
   // 时间轴裁剪：任意多段保留（segments）。缺省/整段=不裁。导出只输出保留段、按序拼接，
   // 输出时间从 0 连续起算，每帧源时间 = outputToSource(kept, 输出时间)。
-  const kept = normalizeSegments(opts.segments, durationMs);
+  const kept = normalizeSegmentSequence(opts.segments, durationMs);
   const trimmed = isTrimmed(kept, durationMs);
   const outDurationMs = trimmed ? keptDuration(kept) : durationMs;
   const totalFrames = Math.max(1, Math.round((outDurationMs / 1000) * fps));

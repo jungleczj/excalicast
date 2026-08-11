@@ -9,7 +9,7 @@ import { isUsableLocalizedTrack } from '@/lib/localizedTrack';
 import { audioSourceFingerprint } from '@/services/audioEnhancement';
 import type { AutoZoomSegment, CameraPositionEvent, EnhancedAudioTrack, ExportConfig, HighlightEffectSegment, LocalizedTrack, RecordingMetadata, ShellCanvasRect, ShellSize, TimeSegment } from '@/types/recording';
 import { resolveExportOutputSize } from '@/types/recording';
-import { keptDuration, normalizeSegments, outputToSource, sourceToOutput } from '@/utils/segments';
+import { keptDuration, normalizeSegmentSequence, outputToSource, sourceToOutput } from '@/utils/segments';
 import { I } from '@/components/icons';
 import { analyzeCursorFocusTrack } from '@/services/cursorFocusTracker';
 import { LatestTaskRunner } from '@/lib/latestTaskRunner';
@@ -75,7 +75,7 @@ export function ExportPreview({
   // 受控播放头（源时间）。播放/读数走「成片」输出时间（跳过被删段）。
   const timeMs = playheadMs;
   const setTimeMs = onPlayheadChange;
-  const kept = useMemo(() => normalizeSegments(segments, metadata.durationMs), [segments, metadata.durationMs]);
+  const kept = useMemo(() => normalizeSegmentSequence(segments, metadata.durationMs), [segments, metadata.durationMs]);
   const keptDur = useMemo(() => keptDuration(kept), [kept]);
   const [rendering, setRendering] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);

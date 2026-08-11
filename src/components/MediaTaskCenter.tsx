@@ -4,9 +4,8 @@ import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { I } from '@/components/icons';
 import { useMediaTasks } from '@/components/providers/MediaTaskProvider';
-import type { MediaTaskKind, MediaTaskStatus } from '@/services/mediaTaskDomain';
+import { isMediaTaskVisible, type MediaTaskKind, type MediaTaskStatus } from '@/services/mediaTaskDomain';
 
-const COMPLETE_VISIBLE_MS = 2_400;
 const PANEL_GAP = 10;
 
 const TASK_CREATED_EVENT = 'excalicast:media-task-created';
@@ -71,11 +70,10 @@ export function MediaTaskCenter({ recordingId, en }: { recordingId: string; en: 
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const visibleTasks = useMemo(() => tasks.filter((task) => (
-    task.recordingId === recordingId
-    && task.status !== 'cancelled'
-    && (task.status !== 'completed' || now - task.updatedAt < COMPLETE_VISIBLE_MS)
-  )), [now, recordingId, tasks]);
+  const visibleTasks = useMemo(
+    () => tasks.filter((task) => isMediaTaskVisible(task, recordingId, now)),
+    [now, recordingId, tasks],
+  );
   const attentionCount = visibleTasks.filter((task) => ['queued', 'running', 'paused', 'failed'].includes(task.status)).length;
 
   const updatePanelGeometry = useCallback(() => {

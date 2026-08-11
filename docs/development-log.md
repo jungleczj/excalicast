@@ -134,3 +134,34 @@
 
 - Web implementation and production verification are complete except the consent-gated remote DeepSeek request.
 - The verified feature commit is the required baseline for the separate macOS Phase 1 worktree.
+
+## 2026-08-11 - Export toolbar clarity and reorderable clip sequence
+
+### Baseline
+
+- Mandatory pre-change checkpoint: `63afb78` (`feat: add unified export task center`).
+- Worktree: `/Users/chenzhijiang/.codex/worktrees/53c2/pro`.
+- Branch: `codex/recovered-53c2`.
+
+### Toolbar and task center
+
+- Editing actions now always render as icon plus text. Compact containers use horizontal row overflow instead of hiding labels.
+- Added fixed-width `Basic` / `Advanced` group headings so the first control in both rows has the same left edge.
+- Moved timeline zoom, fit, and kept-duration controls into a dedicated right-aligned transport strip above the tracks.
+- Reset and ChatCut Undo now use the shared conventional Undo icon while retaining their text labels.
+- Reduced the bottom scrub hint and current-time typography to the same 12px scale as toolbar selects.
+- Completed task entries remain visible for exactly 3,000ms before leaving the task list.
+
+### Reorderable clip sequence
+
+- Split video clips are draggable. Array order is now the authoritative preview and export order.
+- Added `normalizeSegmentSequence()` to clamp invalid ranges while preserving order and adjacent split boundaries.
+- Removed source-time sorting from recording segment persistence.
+- Preview frame mapping, WebCodecs composition, ffmpeg frame generation, and audio concatenation consume the same ordered sequence.
+- Timeline clip and fallback waveform geometry use output-time positions, while source timestamps remain non-destructive references into the original media.
+
+### Verification
+
+- Type checking passed.
+- MP4 timestamp writer, real mp4-muxer regression, exact task retention, and clip sequence domain tests passed.
+- Focused Chromium E2E passed for persistent clip drag reorder and responsive two-row toolbar layout.

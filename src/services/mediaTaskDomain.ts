@@ -43,6 +43,14 @@ export interface MediaTaskRecord {
   ownerId?: string;
 }
 
+export const MEDIA_TASK_COMPLETION_RETENTION_MS = 3_000;
+
+export function isMediaTaskVisible(task: MediaTaskRecord, recordingId: string, now = Date.now()): boolean {
+  return task.recordingId === recordingId
+    && task.status !== 'cancelled'
+    && (task.status !== 'completed' || now - task.updatedAt < MEDIA_TASK_COMPLETION_RETENTION_MS);
+}
+
 export interface ExportTaskSegment {
   index: number;
   startMs: number;
