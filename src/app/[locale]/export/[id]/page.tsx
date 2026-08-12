@@ -592,12 +592,13 @@ export default function EditorRecordingPage(): JSX.Element {
   }, [activateEnhancedTrack, audioRepairSettings, id, meta, startTask]);
 
   const handleUseEnhancedAudio = useCallback(() => {
-    if (lastAudioRepairTrack) {
+    const settingsFingerprint = audioRepairSettingsFingerprint(audioRepairSettings);
+    if (lastAudioRepairTrack?.settingsFingerprint === settingsFingerprint) {
       void activateEnhancedTrack(lastAudioRepairTrack);
       return;
     }
     void handleRunAudioRepair();
-  }, [activateEnhancedTrack, handleRunAudioRepair, lastAudioRepairTrack]);
+  }, [activateEnhancedTrack, audioRepairSettings, handleRunAudioRepair, lastAudioRepairTrack]);
 
   const handleRunAudioEnhancement = useCallback(async (mode: NoiseReductionMode) => {
     if (!meta?.hasAudio) return;
@@ -605,6 +606,7 @@ export default function EditorRecordingPage(): JSX.Element {
     setAudioEnhancementPhase('processing');
     setAudioEnhancementProgress(0);
     setAudioEnhancementError(null);
+    setAudioRepairError(null);
     const resultHolder: { pending?: EnhancedAudioTrack; completed?: EnhancedAudioTrack } = {};
     announceMediaTaskCreated(id, document.activeElement);
     try {
@@ -680,8 +682,10 @@ export default function EditorRecordingPage(): JSX.Element {
     if (repairTask && ['queued', 'running'].includes(repairTask.status)) cancelTask(repairTask.id);
     setAudioEnhancementMode('original');
     setAudioEnhancementPhase('idle');
+    setAudioRepairPhase('idle');
     setAudioEnhancementProgress(0);
     setAudioEnhancementError(null);
+    setAudioRepairError(null);
     setMeta((current) => current ? { ...current, activeEnhancedAudioTrackId: undefined } : current);
     setConfig((current) => ({ ...current, activeEnhancedAudioTrackId: undefined }));
     void setActiveEnhancedAudioTrack(id, undefined);
@@ -1043,7 +1047,7 @@ export default function EditorRecordingPage(): JSX.Element {
                 diagnosis={audioRepairDiagnosis}
                 phase={audioRepairPhase}
                 error={audioRepairError}
-                hasGeneratedTrack={!!lastAudioRepairTrack}
+                hasGeneratedTrack={lastAudioRepairTrack?.settingsFingerprint === audioRepairSettingsFingerprint(audioRepairSettings)}
                 usingOriginal={!config.activeEnhancedAudioTrackId}
                 onSettingsChange={setAudioRepairSettings}
                 onApply={() => { void handleRunAudioRepair(); }}

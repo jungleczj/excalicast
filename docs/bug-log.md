@@ -344,6 +344,11 @@ The prototype intentionally isolated all state in memory and had no connection t
 
 - E2E verifies the action appears only in the Advanced row, provides a prerequisite guide without microphone audio, and opens inside the existing export side panel.
 - Domain tests cover presets, normalization, settings fingerprints, and stable diagnosis severity.
+
+### Post-verification hardening
+
+- A/B switching now reuses a repair track only when its complete settings fingerprint matches the current controls.
+- Restoring original audio clears both denoise and voice-repair task state, preventing stale repair errors or progress from surviving the switch.
 - The complete audio interaction E2E verifies Standard and Enhanced denoise remain functional before applying a Clear Voice repair track, and that preview, persistence, and both Timeline audio lanes select the repair result.
 
 ### Status
