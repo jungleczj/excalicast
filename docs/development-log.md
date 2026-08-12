@@ -164,6 +164,22 @@
 - Web implementation and production verification are complete except the consent-gated remote DeepSeek request.
 - The verified feature commit is the required baseline for the separate macOS Phase 1 worktree.
 
+## 2026-08-12 - Audio repair and voice enhancement interface prototype
+
+### Goal
+
+- Validate the first-phase interaction model for repairing damaged source audio and actively enhancing voice quality before changing the production audio pipeline.
+
+### Prototype
+
+- Added a development-only, non-indexable prototype route at `/[locale]/audio-repair-prototype`.
+- Shows automatic quality diagnosis, Natural / Clear Voice / Studio Repair presets, individual hiss/click/clip/hum/sibilance repairs, voice-shaping controls, original-signal preservation, and A/B auditioning.
+- Keeps the visual language aligned with the export editor while isolating all state in memory; it does not read recordings, persist settings, or process audio.
+
+### Status
+
+- Awaiting visual and interaction approval before production audio-domain design and implementation.
+
 ## 2026-08-12 - Subtitle-driven key-point motion language
 
 ### Behavior
