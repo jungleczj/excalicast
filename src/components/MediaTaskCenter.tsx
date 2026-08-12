@@ -51,6 +51,7 @@ function kindLabel(kind: MediaTaskKind, en: boolean): string {
     audio_peaks: ['Build waveform', '生成波形'],
     auto_edit: ['Apply ChatCut', '应用 ChatCut'],
     noise_reduction: ['Remove background noise', '去除背景杂音'],
+    audio_repair: ['Repair and enhance voice', '修复并增强原声'],
     key_point_motion: ['Generate key point motion', '生成内容要点动效'],
   };
   return labels[kind][en ? 0 : 1];

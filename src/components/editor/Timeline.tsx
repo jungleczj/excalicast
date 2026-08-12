@@ -48,7 +48,10 @@ interface Props {
   keyPointGenerationError?: string | null;
   onRequireCaptions?: () => void;
   onGuide?: (message: string) => void;
-  onLocateTask?: (kind: 'auto_edit' | 'noise_reduction' | 'key_point_motion') => void;
+  onLocateTask?: (kind: 'auto_edit' | 'noise_reduction' | 'audio_repair' | 'key_point_motion') => void;
+  onOpenAudioRepair?: () => void;
+  hasEnhancedAudioTrack?: boolean;
+  enhancedAudioLabel?: string;
   audioEnhancement?: {
     phase: 'idle' | 'processing' | 'ready' | 'failed';
     mode: NoiseReductionMode | 'original';
@@ -84,6 +87,7 @@ interface Props {
     autoZoom: string; autoZoomHint: string; editAutoZoomScale: string;
     highlight: string; noiseReduction: string; standardNoiseReduction: string;
     enhancedNoiseReduction: string; originalAudio: string;
+    audioRepair: string; audioRepairNeedsAudio: string;
     keyPointMotion: string; keyPointNeedsCaptions: string; generating: string;
     keyPointAi: string; keyPointLocal: string; keyPointFailed: string;
     spotlight: string; focusFrame: string; cursorHalo: string; textCallout: string;
@@ -113,7 +117,8 @@ export function Timeline({
   highlights = [], onHighlightChange, selectedHighlightId, onHighlightSelect,
   keyPointMotions = [], onKeyPointMotionChange, selectedKeyPointMotionId, onKeyPointMotionSelect,
   onGenerateKeyPointMotions, keyPointGenerationPhase = 'idle', keyPointGenerationSource = null,
-  keyPointGenerationError = null, onRequireCaptions, onGuide, onLocateTask, audioEnhancement,
+  keyPointGenerationError = null, onRequireCaptions, onGuide, onLocateTask, onOpenAudioRepair,
+  hasEnhancedAudioTrack = false, enhancedAudioLabel, audioEnhancement,
   autoEdit,
   hasAudio, hasCaptions, audioPeaks = [], captionCues = [], labels,
 }: Props): JSX.Element {
@@ -675,6 +680,25 @@ export function Timeline({
               </button>
             </div>
           )}
+          {onOpenAudioRepair && (
+            <button
+              data-testid="audio-repair-open"
+              type="button"
+              data-availability={hasAudio ? 'ready' : 'prerequisite'}
+              onClick={() => {
+                if (!hasAudio) {
+                  onGuide?.(labels.audioRepairNeedsAudio);
+                  return;
+                }
+                onOpenAudioRepair();
+              }}
+              className="timeline-craft-action btn-sketch"
+              style={{ padding: '3px 9px' }}
+              title={labels.audioRepair}
+            >
+              <I.Sparkles size={11} /><span className="timeline-craft-action-label">{labels.audioRepair}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -801,6 +825,20 @@ export function Timeline({
           visibleStartMs={visibleStartMs}
           visibleEndMs={visibleEndMs}
         />
+        {hasEnhancedAudioTrack && (
+          <DerivedAudioLane
+            clips={clips}
+            durationMs={durationMs}
+            timelineDurationMs={timelineDurationMs}
+            peaks={audioPeaks}
+            label={enhancedAudioLabel ?? labels.audioRepair}
+            viewportScrollLeft={viewportScrollLeft}
+            viewportWidth={viewportWidth}
+            contentWidth={contentWidth}
+            visibleStartMs={visibleStartMs}
+            visibleEndMs={visibleEndMs}
+          />
+        )}
         {hasCaptions && (
           <CaptionLane
             cues={captionCues}
@@ -1072,6 +1110,27 @@ function AudioLane({
       {hasAudio && peaks.length === 0 && clipLayouts.map(({ index, outputStart, outputEnd }) => (
         <div key={index} style={{ position: 'absolute', top: 5, bottom: 5, left: outputPx(outputStart), width: outputPx(outputEnd) - outputPx(outputStart), background: 'var(--hi-soft)', opacity: 0.78 }} />
       ))}
+    </div>
+  );
+}
+
+function DerivedAudioLane({
+  clips, peaks, durationMs, timelineDurationMs, label,
+  viewportScrollLeft, viewportWidth, contentWidth, visibleStartMs, visibleEndMs,
+}: {
+  clips: TimeSegment[]; peaks: number[]; durationMs: number; timelineDurationMs: number; label: string;
+  viewportScrollLeft: number; viewportWidth: number; contentWidth: number; visibleStartMs: number; visibleEndMs: number;
+}): JSX.Element {
+  return (
+    <div data-testid="timeline-enhanced-audio-track" className="timeline-craft-derived-audio" title={label}>
+      <span className="timeline-craft-derived-audio-label"><I.Sparkles size={10} />{label}</span>
+      {peaks.length > 0 && (
+        <WaveformCanvas
+          peaks={peaks} clips={clips} durationMs={durationMs} timelineDurationMs={timelineDurationMs}
+          viewportScrollLeft={viewportScrollLeft} viewportWidth={viewportWidth} contentWidth={contentWidth}
+          visibleStartMs={visibleStartMs} visibleEndMs={visibleEndMs}
+        />
+      )}
     </div>
   );
 }

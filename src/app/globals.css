@@ -8993,6 +8993,294 @@ body {
   color: #b23832;
 }
 
+/* Audio repair stays inside the existing export side panel. */
+.editor-craft-side .audio-repair-panel {
+  display: grid;
+  gap: 14px;
+  color: var(--craft-ink);
+}
+
+.editor-craft-side .audio-repair-panel-header {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.editor-craft-side .audio-repair-panel-header h2 {
+  margin: 0;
+  font-family: var(--font-editorial);
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.12;
+}
+
+.editor-craft-side .audio-repair-panel-header p,
+.editor-craft-side .audio-repair-diagnosis > p,
+.editor-craft-side .audio-repair-privacy {
+  margin: 4px 0 0;
+  color: rgba(24, 25, 26, 0.6);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.editor-craft-side .audio-repair-icon-button {
+  width: 32px !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+  display: grid !important;
+  place-items: center;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+
+.editor-craft-side .audio-repair-diagnosis {
+  padding: 12px;
+  border: 1px solid rgba(84, 156, 220, 0.24);
+  border-radius: 10px;
+  background: rgba(219, 238, 255, 0.45);
+}
+
+.editor-craft-side .audio-repair-diagnosis > strong {
+  font-size: 11px;
+}
+
+.editor-craft-side .audio-repair-diagnosis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.editor-craft-side .audio-repair-diagnosis-grid span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 7px 8px;
+  border: 1px solid rgba(24, 25, 26, 0.08);
+  border-radius: 6px;
+  background: rgba(255, 253, 248, 0.7);
+}
+
+.editor-craft-side .audio-repair-diagnosis-grid small {
+  color: rgba(24, 25, 26, 0.6);
+  font-size: 9px;
+}
+
+.editor-craft-side .audio-repair-diagnosis-grid b {
+  font-size: 9px;
+}
+
+.editor-craft-side .audio-repair-diagnosis-grid b[data-severity="medium"],
+.editor-craft-side .audio-repair-diagnosis-grid b[data-severity="high"] {
+  color: #9a5e10;
+}
+
+.editor-craft-side .audio-repair-presets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.editor-craft-side .audio-repair-presets button {
+  min-width: 0;
+  min-height: 44px;
+  padding: 7px 6px !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  font-size: 9px;
+  line-height: 1.2;
+}
+
+.editor-craft-side .audio-repair-presets button[aria-pressed="true"] {
+  border-color: rgba(24, 25, 26, 0.7) !important;
+  background: rgba(219, 238, 255, 0.72) !important;
+  box-shadow: inset 0 -2px 0 var(--craft-blue-strong) !important;
+  font-weight: 700;
+}
+
+.editor-craft-side .audio-repair-audition {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.editor-craft-side .audio-repair-audition > div {
+  display: flex;
+  padding: 2px;
+  border: 1px solid rgba(24, 25, 26, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 253, 248, 0.75);
+}
+
+.editor-craft-side .audio-repair-audition button {
+  min-height: 28px !important;
+  padding: 4px 10px !important;
+  border: 0 !important;
+  border-radius: 7px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: 9px;
+}
+
+.editor-craft-side .audio-repair-audition button[aria-pressed="true"] {
+  background: rgba(94, 230, 194, 0.22) !important;
+  font-weight: 700;
+}
+
+.editor-craft-side .audio-repair-sliders {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(24, 25, 26, 0.09);
+  border-radius: 10px;
+  background: rgba(255, 253, 248, 0.58);
+}
+
+.editor-craft-side .audio-repair-sliders label {
+  display: grid;
+  gap: 5px;
+}
+
+.editor-craft-side .audio-repair-sliders span {
+  display: flex;
+  justify-content: space-between;
+  color: rgba(24, 25, 26, 0.68);
+  font-size: 9px;
+}
+
+.editor-craft-side .audio-repair-sliders b {
+  color: var(--craft-ink);
+  font-family: var(--font-mono);
+}
+
+.editor-craft-side .audio-repair-sliders input[type="range"] {
+  width: 100%;
+  min-height: 18px;
+  padding: 0;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  accent-color: var(--craft-blue-strong);
+}
+
+.editor-craft-side .audio-repair-details {
+  padding: 10px 12px;
+  border: 1px solid rgba(24, 25, 26, 0.09);
+  border-radius: 10px;
+  background: rgba(255, 253, 248, 0.58);
+}
+
+.editor-craft-side .audio-repair-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+}
+
+.editor-craft-side .audio-repair-details[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.editor-craft-side .audio-repair-details label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 9px;
+  color: rgba(24, 25, 26, 0.72);
+  font-size: 9px;
+}
+
+.editor-craft-side .audio-repair-details input[type="checkbox"] {
+  width: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 4px !important;
+  box-shadow: none !important;
+  accent-color: var(--craft-blue-strong);
+}
+
+.editor-craft-side .audio-repair-primary,
+.editor-craft-side .audio-repair-restore {
+  width: 100%;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 10px !important;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.editor-craft-side .audio-repair-primary {
+  border-color: rgba(84, 156, 220, 0.42) !important;
+  background: rgba(219, 238, 255, 0.86) !important;
+}
+
+.editor-craft-side .audio-repair-restore {
+  margin-top: -7px;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.editor-craft-side .audio-repair-error {
+  margin: 0;
+  color: #b23832;
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+
+.editor-craft-side .audio-repair-privacy {
+  margin: -4px 0 0;
+  text-align: center;
+  font-size: 8px;
+}
+
+.timeline-craft-derived-audio {
+  position: relative;
+  height: 34px;
+  overflow: hidden;
+  border: 1px solid rgba(84, 156, 220, 0.25);
+  border-radius: 6px;
+  background: rgba(219, 238, 255, 0.48);
+}
+
+.timeline-craft-derived-audio-label {
+  position: absolute;
+  left: 8px;
+  top: 5px;
+  z-index: 2;
+  display: inline-flex;
+  max-width: calc(100% - 16px);
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  color: #315f73;
+  font-size: 8px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-craft-derived-audio canvas {
+  opacity: 0.5;
+}
+
 .timeline-craft-effect-track {
   overflow: hidden;
   border: 1px solid rgba(24, 25, 26, 0.1);

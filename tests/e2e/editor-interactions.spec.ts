@@ -550,6 +550,12 @@ test('standard noise reduction creates a derived track and switches preview audi
   await expect(page.getByTestId('noise-reduction-menu')).toHaveAttribute('data-phase', 'ready', { timeout: 30_000 });
   await expect(page.getByTestId('noise-reduction-menu')).toHaveAttribute('data-mode', 'enhanced');
   await expect(page.getByTestId('export-preview-audio')).toHaveAttribute('data-enhanced-audio', 'enhanced');
+  await page.getByTestId('audio-repair-open').click();
+  await page.getByRole('button', { name: 'Clear voice' }).click();
+  await page.getByRole('button', { name: 'Generate enhanced track' }).click();
+  await expect(page.getByTestId('export-preview-audio')).toHaveAttribute('data-enhanced-audio', 'repair', { timeout: 30_000 });
+  await expect(page.getByTestId('timeline-audio-track')).toBeVisible();
+  await expect(page.getByTestId('timeline-enhanced-audio-track')).toBeVisible();
   const persisted = await page.evaluate(async (id) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open('excalicast');
@@ -567,11 +573,12 @@ test('standard noise reduction creates a derived track and switches preview audi
       request.onerror = () => reject(request.error);
     });
     db.close();
-    return { active: recording.activeEnhancedAudioTrackId, tracks: tracks.map((track) => ({ status: track.status, mode: track.mode })) };
+    return { active: recording.activeEnhancedAudioTrackId, tracks: tracks.map((track) => ({ status: track.status, mode: track.mode, preset: (track.repairSettings as { preset?: string } | undefined)?.preset })) };
   }, recordingId);
   expect(persisted.active).toBeTruthy();
-  expect(persisted.tracks).toContainEqual({ status: 'ready', mode: 'standard' });
-  expect(persisted.tracks).toContainEqual({ status: 'ready', mode: 'enhanced' });
+  expect(persisted.tracks).toContainEqual({ status: 'ready', mode: 'standard', preset: undefined });
+  expect(persisted.tracks).toContainEqual({ status: 'ready', mode: 'enhanced', preset: undefined });
+  expect(persisted.tracks).toContainEqual({ status: 'ready', mode: 'repair', preset: 'clear' });
 });
 
 test('a display recording fills a newly selected portrait ratio without white bars', async ({ page }) => {

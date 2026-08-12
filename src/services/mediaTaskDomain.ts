@@ -6,6 +6,7 @@ export type MediaTaskKind =
   | 'audio_peaks'
   | 'auto_edit'
   | 'noise_reduction'
+  | 'audio_repair'
   | 'key_point_motion';
 export type MediaTaskStatus = 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
 export type MediaTaskResourceClass = 'local_heavy' | 'network';

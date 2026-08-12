@@ -1,6 +1,7 @@
 import type { EnhancedAudioTrack, NoiseReductionMode } from '@/types/recording';
 import type { AudioRepairSettings } from '@/services/audioRepairDomain';
 import { audioRepairSettingsFingerprint, normalizeAudioRepairSettings } from '@/services/audioRepairDomain';
+import { summarizeAudioRepairDiagnosis, type AudioRepairDiagnosis } from '@/services/audioRepairDomain';
 
 export function audioSourceFingerprint(blob: Blob | null, durationMs: number): string {
   return `${blob?.size ?? 0}:${blob?.type ?? 'none'}:${Math.max(0, Math.round(durationMs))}`;
@@ -141,6 +142,43 @@ async function* decodeMonoChunks(options: EnhanceOptions, targetSampleRate: numb
   } finally {
     input.dispose();
   }
+}
+
+export async function analyzeAudioRepairSource(
+  audioBlob: Blob,
+  durationMs: number,
+  signal?: AbortSignal,
+): Promise<AudioRepairDiagnosis> {
+  let samples = 0;
+  let highFrequencyEnergy = 0;
+  let totalEnergy = 0;
+  let clicks = 0;
+  let clipped = 0;
+  let lowFrequencyEnergy = 0;
+  let previous = 0;
+  let lowPassed = 0;
+  for await (const chunk of decodeMonoChunks({ recordingId: 'diagnosis', audioBlob, durationMs, mode: 'standard', signal }, 16_000)) {
+    for (let index = 0; index < chunk.length; index += 1) {
+      const sample = chunk[index];
+      const delta = sample - previous;
+      lowPassed += (sample - lowPassed) * 0.018;
+      totalEnergy += sample * sample;
+      highFrequencyEnergy += delta * delta;
+      lowFrequencyEnergy += lowPassed * lowPassed;
+      if (Math.abs(delta) > 0.32) clicks += 1;
+      if (Math.abs(sample) > 0.985) clipped += 1;
+      previous = sample;
+      samples += 1;
+    }
+    if (samples >= 30 * 16_000) break;
+  }
+  const energy = Math.max(1e-8, totalEnergy);
+  return summarizeAudioRepairDiagnosis({
+    highFrequencyRatio: highFrequencyEnergy / energy,
+    clickRate: clicks / Math.max(1, samples),
+    clippedRatio: clipped / Math.max(1, samples),
+    humRatio: lowFrequencyEnergy / energy,
+  });
 }
 
 export async function createEnhancedAudioTrack(options: EnhanceOptions): Promise<EnhancedAudioTrack> {

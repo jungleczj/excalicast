@@ -322,3 +322,30 @@ Chunking started after full-file decoding, so it bounded Worker messages but not
 ### Status
 
 - Fixed and verified locally.
+
+## 2026-08-12 - Voice repair existed as a disconnected prototype
+
+### Symptom
+
+The approved voice-repair controls lived on a standalone prototype route, so users could not apply them to the recording currently open in the export editor.
+
+### Root cause
+
+The prototype intentionally isolated all state in memory and had no connection to recording media, derived tracks, the task coordinator, preview audio, Timeline, or export configuration.
+
+### Fix
+
+- Place the entry in the Advanced editor toolbar and render the controls inside the existing right settings column.
+- Connect diagnosis and processing to the recording microphone track and save a reversible derived audio track.
+- Route processing through the unified task center and bind the selected track to both preview and final export.
+- Remove the standalone prototype route to prevent a second export-editor experience from remaining in the product.
+
+### Regression coverage
+
+- E2E verifies the action appears only in the Advanced row, provides a prerequisite guide without microphone audio, and opens inside the existing export side panel.
+- Domain tests cover presets, normalization, settings fingerprints, and stable diagnosis severity.
+- The complete audio interaction E2E verifies Standard and Enhanced denoise remain functional before applying a Clear Voice repair track, and that preview, persistence, and both Timeline audio lanes select the repair result.
+
+### Status
+
+- Fixed and verified locally.

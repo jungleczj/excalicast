@@ -12,6 +12,7 @@ import { WorkspaceShellToggle } from '@/components/WorkspaceShellToggle';
 import { SubtitlePanel } from '@/components/SubtitlePanel';
 import { HandoutPanel } from '@/components/HandoutPanel';
 import { DubbingPanel } from '@/components/DubbingPanel';
+import { AudioRepairPanel } from '@/components/AudioRepairPanel';
 import { ProUpgradeModal } from '@/components/ProUpgradeModal';
 import { Timeline } from '@/components/editor/Timeline';
 import { I, LogoMark } from '@/components/icons';
@@ -25,6 +26,7 @@ import { useSubscription } from '@/hooks/useSubscription';
 import {
   deleteRecording,
   getRecording,
+  getEnhancedAudioTrack,
   loadRecordingMediaTracks,
   saveEnhancedAudioTrack,
   setActiveEnhancedAudioTrack,
@@ -53,7 +55,14 @@ import { parseSrt } from '@/utils/srtParser';
 import { createAudioPeaksForBlob, loadOrCreateAudioPeakTrack } from '@/services/audioPeakTrack';
 import { buildLocalKeyPointMotions, migrateKeyPointMotionSegment, resolveKeyPointMotionLanguage } from '@/services/keyPointMotion';
 import { generateKeyPointMotions } from '@/services/keyPointMotionClient';
-import { audioSourceFingerprint, createEnhancedAudioTrack } from '@/services/audioEnhancement';
+import { analyzeAudioRepairSource, audioSourceFingerprint, createEnhancedAudioTrack } from '@/services/audioEnhancement';
+import {
+  AUDIO_REPAIR_PRESETS,
+  audioRepairSettingsFingerprint,
+  normalizeAudioRepairSettings,
+  type AudioRepairDiagnosis,
+  type AudioRepairSettings,
+} from '@/services/audioRepairDomain';
 import { Link, useRouter } from '@/i18n/navigation';
 
 const DEFAULT_CONFIG: ExportConfig = {
@@ -101,6 +110,13 @@ export default function EditorRecordingPage(): JSX.Element {
   const [audioEnhancementMode, setAudioEnhancementMode] = useState<NoiseReductionMode | 'original'>('original');
   const [audioEnhancementProgress, setAudioEnhancementProgress] = useState(0);
   const [audioEnhancementError, setAudioEnhancementError] = useState<string | null>(null);
+  const [audioRepairOpen, setAudioRepairOpen] = useState(false);
+  const [audioRepairSettings, setAudioRepairSettings] = useState<AudioRepairSettings>(() => normalizeAudioRepairSettings(AUDIO_REPAIR_PRESETS.natural));
+  const [audioRepairDiagnosis, setAudioRepairDiagnosis] = useState<AudioRepairDiagnosis | null>(null);
+  const [audioRepairPhase, setAudioRepairPhase] = useState<'idle' | 'processing' | 'ready' | 'failed'>('idle');
+  const [audioRepairError, setAudioRepairError] = useState<string | null>(null);
+  const [lastAudioRepairTrack, setLastAudioRepairTrack] = useState<EnhancedAudioTrack | null>(null);
+  const [activeEnhancedTrack, setActiveEnhancedTrack] = useState<EnhancedAudioTrack | null>(null);
   const [autoEditPhase, setAutoEditPhase] = useState<'idle' | 'analyzing' | 'applied' | 'failed'>('idle');
   const [autoEditResult, setAutoEditResult] = useState<AutoEditResult | null>(null);
   const [autoEditError, setAutoEditError] = useState<string | null>(null);
@@ -136,8 +152,14 @@ export default function EditorRecordingPage(): JSX.Element {
       configSnapshot: { samplesPerSecond: 4 },
     }, async (report) => {
       report({ phase: 'building_waveform', ratio: 0.05 });
-      const track = await loadOrCreateAudioPeakTrack(id, 4);
-      resultHolder.peaks = track?.peaks ?? [];
+      if (meta.activeEnhancedAudioTrackId) {
+        const enhanced = await getEnhancedAudioTrack(meta.activeEnhancedAudioTrackId);
+        resultHolder.peaks = enhanced?.status === 'ready'
+          ? await createAudioPeaksForBlob(enhanced.audioBlob, enhanced.durationMs, 4)
+          : (await loadOrCreateAudioPeakTrack(id, 4))?.peaks ?? [];
+      } else {
+        resultHolder.peaks = (await loadOrCreateAudioPeakTrack(id, 4))?.peaks ?? [];
+      }
       report({ phase: 'building_waveform', ratio: 0.96 });
       return { resultRef: `audio-peaks:${id}` };
     }).then(() => {
@@ -146,7 +168,34 @@ export default function EditorRecordingPage(): JSX.Element {
       if (!cancelled) setAudioPeaks([]);
     });
     return () => { cancelled = true; };
-  }, [id, meta?.hasAudio, startTask]);
+  }, [id, meta?.activeEnhancedAudioTrackId, meta?.hasAudio, startTask]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!config.activeEnhancedAudioTrackId) return;
+    void getEnhancedAudioTrack(config.activeEnhancedAudioTrackId).then((track) => {
+      if (!cancelled && track?.status === 'ready') {
+        setActiveEnhancedTrack(track);
+        if (track.mode === 'repair') {
+          setLastAudioRepairTrack(track);
+          if (track.repairSettings) setAudioRepairSettings(normalizeAudioRepairSettings(track.repairSettings));
+        }
+      }
+    });
+    return () => { cancelled = true; };
+  }, [config.activeEnhancedAudioTrackId]);
+
+  useEffect(() => {
+    if (!audioRepairOpen || !meta?.hasAudio || audioRepairDiagnosis) return;
+    const controller = new AbortController();
+    void loadRecordingMediaTracks(id, ['audio']).then(({ audioBlob }) => {
+      if (!audioBlob) throw new Error('audio_source_missing');
+      return analyzeAudioRepairSource(audioBlob, meta.durationMs, controller.signal);
+    }).then(setAudioRepairDiagnosis).catch((error) => {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) setAudioRepairError(error instanceof Error ? error.message : 'audio_diagnosis_failed');
+    });
+    return () => controller.abort();
+  }, [audioRepairDiagnosis, audioRepairOpen, id, meta?.durationMs, meta?.hasAudio]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -472,11 +521,83 @@ export default function EditorRecordingPage(): JSX.Element {
     await setActiveEnhancedAudioTrack(id, track.id);
     setMeta((current) => current ? { ...current, activeEnhancedAudioTrackId: track.id } : current);
     setConfig((current) => ({ ...current, activeEnhancedAudioTrackId: track.id }));
-    setAudioEnhancementMode(track.mode);
+    if (track.mode !== 'repair') setAudioEnhancementMode(track.mode);
+    setActiveEnhancedTrack(track);
     setAudioEnhancementPhase('ready');
     setAudioEnhancementProgress(1);
     setAudioPeaks(await createAudioPeaksForBlob(track.audioBlob, track.durationMs, 4));
   }, [id]);
+
+  const handleRunAudioRepair = useCallback(async () => {
+    if (!meta?.hasAudio) return;
+    const settings = normalizeAudioRepairSettings(audioRepairSettings);
+    const settingsFingerprint = audioRepairSettingsFingerprint(settings);
+    setAudioRepairPhase('processing');
+    setAudioRepairError(null);
+    announceMediaTaskCreated(id, document.activeElement);
+    const resultHolder: { pending?: EnhancedAudioTrack; completed?: EnhancedAudioTrack } = {};
+    try {
+      await startTask({
+        recordingId: id,
+        kind: 'audio_repair',
+        resourceClass: 'local_heavy',
+        configSnapshot: { preset: settings.preset, settingsFingerprint },
+      }, async (report, signal) => {
+        report({ phase: 'reading_audio', ratio: 0.01 });
+        const recording = await loadRecordingMediaTracks(id, ['audio']);
+        if (!recording.audioBlob) throw new Error('audio_source_missing');
+        const sourceFingerprint = audioSourceFingerprint(recording.audioBlob, meta.durationMs);
+        const cached = (await listEnhancedAudioTracks(id)).find((track) => (
+          track.mode === 'repair' && track.status === 'ready' && track.sourceFingerprint === sourceFingerprint
+          && track.settingsFingerprint === settingsFingerprint && track.audioBlob.size > 0
+        ));
+        if (cached) {
+          resultHolder.completed = cached;
+          await setActiveEnhancedAudioTrack(id, cached.id);
+          return { resultRef: cached.id };
+        }
+        resultHolder.pending = {
+          id: `repair-${Date.now().toString(36)}`, recordingId: id, sourceFingerprint, mode: 'repair',
+          settingsFingerprint, repairSettings: settings, modelVersion: 'voice-repair-v1', status: 'processing',
+          durationMs: meta.durationMs, audioBlob: new Blob([], { type: 'audio/wav' }), createdAt: Date.now(),
+        };
+        await saveEnhancedAudioTrack(resultHolder.pending, false);
+        const generated = await createEnhancedAudioTrack({
+          recordingId: id, audioBlob: recording.audioBlob, durationMs: meta.durationMs,
+          mode: settings.preset === 'natural' ? 'standard' : 'enhanced', repairSettings: settings, signal,
+          onProgress: (phase, progress) => {
+            report({ phase, ratio: progress });
+          },
+        });
+        const readyTrack = { ...generated, id: resultHolder.pending.id, status: 'ready' as const };
+        await saveEnhancedAudioTrack(readyTrack, true);
+        resultHolder.completed = readyTrack;
+        return { resultRef: readyTrack.id };
+      });
+      if (resultHolder.completed) {
+        setLastAudioRepairTrack(resultHolder.completed);
+        await activateEnhancedTrack(resultHolder.completed);
+      }
+      setAudioRepairPhase('ready');
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        setAudioRepairPhase('idle');
+        return;
+      }
+      const message = error instanceof Error ? error.message : 'audio_repair_failed';
+      setAudioRepairError(message);
+      setAudioRepairPhase('failed');
+      if (resultHolder.pending) await saveEnhancedAudioTrack({ ...resultHolder.pending, status: 'failed', error: message }, false).catch(() => undefined);
+    }
+  }, [activateEnhancedTrack, audioRepairSettings, id, meta, startTask]);
+
+  const handleUseEnhancedAudio = useCallback(() => {
+    if (lastAudioRepairTrack) {
+      void activateEnhancedTrack(lastAudioRepairTrack);
+      return;
+    }
+    void handleRunAudioRepair();
+  }, [activateEnhancedTrack, handleRunAudioRepair, lastAudioRepairTrack]);
 
   const handleRunAudioEnhancement = useCallback(async (mode: NoiseReductionMode) => {
     if (!meta?.hasAudio) return;
@@ -555,6 +676,8 @@ export default function EditorRecordingPage(): JSX.Element {
   const handleUseOriginalAudio = useCallback(() => {
     const running = findTask(id, 'noise_reduction');
     if (running && ['queued', 'running'].includes(running.status)) cancelTask(running.id);
+    const repairTask = findTask(id, 'audio_repair');
+    if (repairTask && ['queued', 'running'].includes(repairTask.status)) cancelTask(repairTask.id);
     setAudioEnhancementMode('original');
     setAudioEnhancementPhase('idle');
     setAudioEnhancementProgress(0);
@@ -787,6 +910,11 @@ export default function EditorRecordingPage(): JSX.Element {
               onRequireCaptions={() => setTab('captions')}
               onGuide={showActionGuide}
               onLocateTask={() => openMediaTaskCenter(id)}
+              onOpenAudioRepair={() => setAudioRepairOpen(true)}
+              hasEnhancedAudioTrack={!!config.activeEnhancedAudioTrackId}
+              enhancedAudioLabel={activeEnhancedTrack?.mode === 'repair'
+                ? (en ? `Enhanced track · ${activeEnhancedTrack.repairSettings?.preset ?? 'custom'}` : `增强音轨 · ${activeEnhancedTrack.repairSettings?.preset === 'clear' ? '清晰人声' : activeEnhancedTrack.repairSettings?.preset === 'studio' ? '录音室修复' : '自然增强'}`)
+                : (en ? 'Enhanced audio track' : '增强音轨')}
               audioEnhancement={{
                 phase: audioEnhancementPhase,
                 mode: audioEnhancementMode,
@@ -848,6 +976,8 @@ export default function EditorRecordingPage(): JSX.Element {
                 standardNoiseReduction: en ? 'Standard · fast local cleanup' : '标准 · 快速本地降噪',
                 enhancedNoiseReduction: en ? 'Enhanced · local AI' : '增强 · 本地 AI',
                 originalAudio: en ? 'Original audio' : '原声',
+                audioRepair: en ? 'Repair and enhance voice' : '修复并增强原声',
+                audioRepairNeedsAudio: en ? 'Record microphone audio before repairing the voice.' : '请先录制麦克风音频，再修复并增强原声。',
                 keyPointMotion: en ? 'Generate key point motion' : '生成内容要点动效',
                 keyPointNeedsCaptions: en ? 'Generate captions first' : '请先生成字幕',
                 generating: en ? 'Generating…' : '生成中…',
@@ -879,7 +1009,7 @@ export default function EditorRecordingPage(): JSX.Element {
 
         {/* Right: tabbed panel */}
         <aside className="editor-craft-side flex-shrink-0 overflow-y-auto p-6" style={{ width: 420, background: 'var(--paper)' }}>
-          <div className="editor-craft-tabs mb-5 flex gap-1" style={{ borderBottom: '1.5px solid var(--ink)' }}>
+          {!audioRepairOpen && <div className="editor-craft-tabs mb-5 flex gap-1" style={{ borderBottom: '1.5px solid var(--ink)' }}>
             {tabs.map((tb) => {
               const active = tab === tb.id;
               return (
@@ -903,9 +1033,27 @@ export default function EditorRecordingPage(): JSX.Element {
                 </button>
               );
             })}
-          </div>
+          </div>}
           {/* 切 Tab 内容淡入（key 变化重新触发入场） */}
-          <div key={tab} className="fade-in">{tabContent}</div>
+          <div key={audioRepairOpen ? 'audio-repair' : tab} className="fade-in">
+            {audioRepairOpen ? (
+              <AudioRepairPanel
+                en={en}
+                settings={audioRepairSettings}
+                diagnosis={audioRepairDiagnosis}
+                phase={audioRepairPhase}
+                error={audioRepairError}
+                hasGeneratedTrack={!!lastAudioRepairTrack}
+                usingOriginal={!config.activeEnhancedAudioTrackId}
+                onSettingsChange={setAudioRepairSettings}
+                onApply={() => { void handleRunAudioRepair(); }}
+                onUseOriginal={handleUseOriginalAudio}
+                onUseEnhanced={handleUseEnhancedAudio}
+                onClose={() => setAudioRepairOpen(false)}
+                onLocateTask={() => openMediaTaskCenter(id)}
+              />
+            ) : tabContent}
+          </div>
         </aside>
       </div>
 

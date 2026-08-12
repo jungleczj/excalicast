@@ -180,6 +180,36 @@
 
 - Awaiting visual and interaction approval before production audio-domain design and implementation.
 
+## 2026-08-12 - Audio repair integrated into the export editor
+
+### Baseline
+
+- Mandatory pre-change checkpoint: `bda4f28` (`chore: checkpoint before audio repair integration`).
+- Worktree: `/Users/chenzhijiang/.codex/worktrees/53c2/pro`.
+- Branch: `codex/recovered-53c2`.
+
+### Product behavior
+
+- Moved `Repair and enhance voice` into the existing Advanced toolbar row; it is not a separate editor or export route.
+- Clicking the action opens a contextual panel inside the existing export settings column while preserving preview, Timeline, tabs, and project state.
+- Added local source diagnosis, Natural / Clear Voice / Studio presets, repair controls, reversible A/B source selection, and a derived enhanced-audio Timeline lane.
+- Audio repair runs through the unified task center as a local-heavy `audio_repair` task; the source track is retained and export reads the selected derived track.
+- Removed the approved prototype route after integrating its interaction model into the production editor.
+
+### Implementation
+
+- Added normalized repair settings, stable cache fingerprints, diagnosis metrics, and repair-track metadata.
+- The audio Worker performs bounded local repair before optional RNNoise enhancement; no recording audio is uploaded.
+- Cached repair tracks are reused only when the source fingerprint and complete settings fingerprint match.
+- The production editor keeps noise reduction and source repair as separate task states so one tool cannot impersonate the other.
+
+### Verification
+
+- `npm run typecheck`: passed.
+- `npm run build`: passed; only existing ONNX/Hugging Face static-analysis warnings remain.
+- Audio-repair domain tests: 3 passed.
+- Toolbar, popover, prerequisite, side-panel, Standard/Enhanced denoise, repair-track persistence, preview binding, and Timeline derived-track E2E: 5 passed.
+
 ## 2026-08-12 - Subtitle-driven key-point motion language
 
 ### Behavior
