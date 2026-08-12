@@ -1,4 +1,6 @@
 import type { EnhancedAudioTrack, NoiseReductionMode } from '@/types/recording';
+import type { AudioRepairSettings } from '@/services/audioRepairDomain';
+import { audioRepairSettingsFingerprint, normalizeAudioRepairSettings } from '@/services/audioRepairDomain';
 
 export function audioSourceFingerprint(blob: Blob | null, durationMs: number): string {
   return `${blob?.size ?? 0}:${blob?.type ?? 'none'}:${Math.max(0, Math.round(durationMs))}`;
@@ -48,6 +50,7 @@ interface EnhanceOptions {
   audioBlob: Blob;
   durationMs: number;
   mode: NoiseReductionMode;
+  repairSettings?: AudioRepairSettings;
   signal?: AbortSignal;
   onProgress?: (phase: 'decoding' | 'loading_model' | 'processing' | 'encoding', progress: number) => void;
 }
@@ -182,7 +185,10 @@ export async function createEnhancedAudioTrack(options: EnhanceOptions): Promise
         worker.addEventListener('message', onMessage);
         worker.addEventListener('error', onWorkerError, { once: true });
         options.signal?.addEventListener('abort', onRequestAbort, { once: true });
-        worker.postMessage({ type: 'process', requestId: currentRequestId, mode: options.mode, samples: mixed, sampleRate: targetSampleRate }, [mixed.buffer]);
+        worker.postMessage({
+          type: 'process', requestId: currentRequestId, mode: options.mode, samples: mixed,
+          sampleRate: targetSampleRate, repairSettings: options.repairSettings,
+        }, [mixed.buffer]);
       });
       for (let index = 0; index < result.length; index += 1) {
         const absolute = Math.abs(result[index]);
@@ -204,11 +210,13 @@ export async function createEnhancedAudioTrack(options: EnhanceOptions): Promise
     if (Math.abs(durationMs - options.durationMs) > Math.max(1_000, options.durationMs * 0.02)) throw new Error('audio_enhancement_duration_mismatch');
     options.onProgress?.('encoding', 1);
     return {
-      id: `enh-${options.recordingId}-${options.mode}-${Date.now().toString(36)}`,
+      id: `enh-${options.recordingId}-${options.repairSettings ? 'repair' : options.mode}-${Date.now().toString(36)}`,
       recordingId: options.recordingId,
       sourceFingerprint: audioSourceFingerprint(options.audioBlob, options.durationMs),
-      mode: options.mode,
-      modelVersion: options.mode === 'enhanced' ? 'rnnoise-wasm-2025.1.5' : 'speech-cleanup-v1',
+      mode: options.repairSettings ? 'repair' : options.mode,
+      settingsFingerprint: options.repairSettings ? audioRepairSettingsFingerprint(options.repairSettings) : undefined,
+      repairSettings: options.repairSettings ? normalizeAudioRepairSettings(options.repairSettings) : undefined,
+      modelVersion: options.repairSettings ? 'voice-repair-v1' : options.mode === 'enhanced' ? 'rnnoise-wasm-2025.1.5' : 'speech-cleanup-v1',
       status: 'ready',
       durationMs,
       audioBlob,

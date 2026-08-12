@@ -463,6 +463,45 @@ test('background noise menu renders above the scrollable editor toolbar', async 
   await expect(popover).toHaveCSS('position', 'fixed');
 });
 
+test('voice repair is an advanced tool and guides recordings without microphone audio', async ({ page }) => {
+  const advanced = page.getByTestId('timeline-advanced-tools');
+  const basic = page.getByTestId('timeline-basic-tools');
+  await expect(advanced.getByTestId('audio-repair-open')).toBeVisible();
+  await expect(basic.getByTestId('audio-repair-open')).toHaveCount(0);
+  await advanced.getByTestId('audio-repair-open').click();
+  await expect(page.getByTestId('editor-action-guide')).toContainText('Record microphone audio');
+});
+
+test('voice repair opens inside the existing export side panel', async ({ page }) => {
+  await page.evaluate(async (id) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('recordings', 'readwrite');
+      const store = tx.objectStore('recordings');
+      const request = store.get(id);
+      request.onsuccess = () => store.put({ ...request.result, hasAudio: true });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, recordingId);
+  await page.reload();
+  await page.getByTestId('audio-repair-open').click();
+  const panel = page.getByTestId('audio-repair-panel');
+  await expect(panel).toBeVisible();
+  await expect(panel.getByRole('heading', { name: 'Repair and enhance voice' })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Natural enhancement' })).toHaveAttribute('aria-pressed', 'true');
+  const sideBox = await page.locator('.editor-craft-side').boundingBox();
+  const panelBox = await panel.boundingBox();
+  if (!sideBox || !panelBox) throw new Error('audio repair side panel was not measured');
+  expect(panelBox.x).toBeGreaterThanOrEqual(sideBox.x);
+  expect(panelBox.x + panelBox.width).toBeLessThanOrEqual(sideBox.x + sideBox.width + 1);
+});
+
 test('standard noise reduction creates a derived track and switches preview audio without replacing the source', async ({ page }) => {
   await page.evaluate(async (id) => {
     const sampleRate = 48_000;

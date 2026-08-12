@@ -143,12 +143,17 @@ export interface KeyPointMotionSegment {
 }
 
 export type NoiseReductionMode = 'standard' | 'enhanced';
+export type AudioEnhancementKind = NoiseReductionMode | 'repair';
 
 export interface EnhancedAudioTrack {
   id: string;
   recordingId: string;
   sourceFingerprint: string;
-  mode: NoiseReductionMode;
+  mode: AudioEnhancementKind;
+  /** Stable settings signature for repair tracks; absent on legacy denoise tracks. */
+  settingsFingerprint?: string;
+  /** Normalized repair settings are kept with the derived track for reproducible export. */
+  repairSettings?: import('@/services/audioRepairDomain').AudioRepairSettings;
   modelVersion: string;
   status: 'processing' | 'ready' | 'failed';
   durationMs: number;
