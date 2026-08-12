@@ -52,6 +52,20 @@ const EN_STOP_WORDS = new Set([
   'of', 'on', 'or', 'that', 'the', 'then', 'this', 'to', 'we', 'with', 'you', 'your',
 ]);
 
+export function resolveKeyPointMotionLanguage(
+  cues: SubtitleCue[],
+  fallback: 'en' | 'zh' = 'zh',
+): 'en' | 'zh' {
+  let hanCharacters = 0;
+  let latinWords = 0;
+  for (const cue of cues) {
+    hanCharacters += cue.text.match(/\p{Script=Han}/gu)?.length ?? 0;
+    latinWords += cue.text.match(/[A-Za-z]+(?:['-][A-Za-z]+)*/g)?.length ?? 0;
+  }
+  if (hanCharacters === latinWords) return fallback;
+  return hanCharacters > latinWords ? 'zh' : 'en';
+}
+
 function localShortPhrase(value: string, locale: 'en' | 'zh'): string {
   const clean = value.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
   if (locale === 'en') {
@@ -323,12 +337,13 @@ export function keyPointMotionAt(
 export function buildLocalKeyPointMotions(
   cues: SubtitleCue[],
   durationMs: number,
-  locale: 'en' | 'zh',
+  languageHint: 'en' | 'zh',
 ): KeyPointMotionSegment[] {
   const clean = cues
     .filter((cue) => cue.text.trim() && cue.endMs > cue.startMs)
     .sort((a, b) => a.startMs - b.startMs);
   if (!clean.length || durationMs <= 0) return [];
+  const locale = resolveKeyPointMotionLanguage(clean, languageHint);
 
   const candidates = clean.filter((cue, index) => (
     index === 0

@@ -1,4 +1,5 @@
 import type { SubtitleCue } from '@/types/recording';
+import { resolveKeyPointMotionLanguage } from '@/services/keyPointMotion';
 
 export const KEY_POINT_MOTION_SYSTEM_PROMPT = `你是一名专业的视频内容导演和章节编辑。你的任务不是改写字幕，也不是摘抄完整句子，而是识别视频的章节结构和真正值得在画面中强调的短要点。
 
@@ -28,6 +29,7 @@ export const KEY_POINT_MOTION_SYSTEM_PROMPT = `你是一名专业的视频内容
   ]
 }
 编辑规则：
+- 必须严格使用用户提示中的“输出语言”，所有 title、openingPoints 和 moments 都使用该语言；不能跟随界面语言，也不能把字幕翻译成另一种语言。
 - 先按主题转换、步骤转换或结论转换识别章节，不能按固定时间机械切段。
 - 章节开头会显示 B 型章节抽屉；title 是章节名称，openingPoints 是该章最重要的 0-2 个短要点。
 - 章节中间只在出现明确方法、结论、决策、步骤或关键提醒时创建 C 型重点词组；每章 0-3 个 moments，宁缺毋滥。
@@ -49,11 +51,12 @@ export function buildKeyPointMotionPrompt(params: {
   durationMs: number;
   locale: 'en' | 'zh';
 }): string {
+  const outputLanguage = resolveKeyPointMotionLanguage(params.cues, params.locale);
   const cueLines = params.cues.map((cue) => (
     `[cue=${cue.index} startMs=${Math.round(cue.startMs)} endMs=${Math.round(cue.endMs)}] ${cue.text.replace(/\s+/g, ' ').trim()}`
   ));
   return [
-    `输出语言：${params.locale === 'zh' ? '中文' : 'English'}`,
+    `输出语言：${outputLanguage === 'zh' ? '中文' : 'English'}`,
     `视频总时长：${Math.round(params.durationMs)}ms`,
     '以下是带稳定 cue index 的字幕：',
     ...cueLines,

@@ -164,6 +164,27 @@
 - Web implementation and production verification are complete except the consent-gated remote DeepSeek request.
 - The verified feature commit is the required baseline for the separate macOS Phase 1 worktree.
 
+## 2026-08-12 - Subtitle-driven key-point motion language
+
+### Behavior
+
+- Key-point motion now uses the dominant language of the complete subtitle track instead of the export page locale.
+- Chinese-dominant captions produce one consistently Chinese track; English-dominant captions produce one consistently English track.
+- Mixed captions resolve once for the whole track, preventing adjacent chapter and key-point drawers from switching languages.
+- Non-linguistic captions retain the interface language only as a fallback hint.
+
+### Implementation
+
+- Added `resolveKeyPointMotionLanguage()` as the shared deterministic language boundary.
+- The export page resolves subtitle language before task creation and reuses it for DeepSeek generation and local fallback.
+- The key-point API independently resolves language from validated subtitle cues, so a client hint cannot override detectable caption content.
+- Prompt construction also resolves from cues and explicitly requires all titles and points to remain in that language.
+
+### Verification
+
+- Added regressions for English UI with Chinese captions, Chinese UI with English captions, mixed-language dominance, and non-linguistic fallback.
+- Focused language tests passed after reproducing both the missing resolver and page-locale prompt failure.
+
 ## 2026-08-11 - Export toolbar clarity and reorderable clip sequence
 
 ### Baseline

@@ -9,13 +9,13 @@ export interface KeyPointMotionGenerationResult {
 export async function generateKeyPointMotions(params: {
   cues: SubtitleCue[];
   durationMs: number;
-  locale: 'en' | 'zh';
+  languageHint: 'en' | 'zh';
   signal?: AbortSignal;
 }): Promise<KeyPointMotionGenerationResult> {
   const response = await fetch('/api/key-points/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cues: params.cues, durationMs: params.durationMs, locale: params.locale }),
+    body: JSON.stringify({ cues: params.cues, durationMs: params.durationMs, locale: params.languageHint }),
     signal: params.signal,
   });
   const payload = await response.json().catch(() => null) as {

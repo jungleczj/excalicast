@@ -35,10 +35,12 @@ import {
   buildLocalKeyPointMotions,
   alignKeyPointMotionLines,
   migrateKeyPointMotionSegment,
+  resolveKeyPointMotionLanguage,
   resolveKeyPointDrawerLayout,
   resolveKeyPointDrawerState,
   tokenizeKeyPointLine,
 } from '@/services/keyPointMotion';
+import { buildKeyPointMotionPrompt } from '@/services/keyPointMotionPrompt';
 import { parseKeyPointMotionResponse } from '@/services/keyPointMotionSchema';
 import { resolveEnhancedAudioSelection } from '@/services/audioEnhancement';
 import { projectHighlightAperture } from '@/services/editorEffectsRenderer';
@@ -134,6 +136,44 @@ test('local key point fallback creates chapter and interior drawers without copy
   expect(motions.flatMap((motion) => [motion.title, ...motion.bullets])).not.toContain('First, define the problem.');
   expect(motions.every((motion) => motion.start >= 0 && motion.end <= 12_000 && motion.end > motion.start)).toBe(true);
   expect(motions.slice(1).every((motion, index) => motion.start >= motions[index].end)).toBe(true);
+});
+
+test('key point language follows the dominant subtitle language instead of the interface locale', () => {
+  const chineseCues = [
+    { index: 1, startMs: 0, endMs: 1_000, text: '先理解用户需求，再降低录制门槛。' },
+    { index: 2, startMs: 1_000, endMs: 2_000, text: '最后生成 publish ready 视频。' },
+  ];
+  const englishCues = [
+    { index: 1, startMs: 0, endMs: 1_000, text: 'Start with the user problem and compare every option.' },
+    { index: 2, startMs: 1_000, endMs: 2_000, text: '最后发布。' },
+  ];
+
+  expect(resolveKeyPointMotionLanguage(chineseCues, 'en')).toBe('zh');
+  expect(resolveKeyPointMotionLanguage(englishCues, 'zh')).toBe('en');
+  expect(resolveKeyPointMotionLanguage([
+    { index: 1, startMs: 0, endMs: 1_000, text: '1234 -- ...' },
+  ], 'en')).toBe('en');
+});
+
+test('key point prompt and local fallback use the resolved caption language', () => {
+  const chineseCues = [
+    { index: 1, startMs: 0, endMs: 2_000, text: '先理解用户真正需要解决的问题。' },
+    { index: 2, startMs: 2_100, endMs: 4_000, text: '然后降低首次录制门槛。' },
+  ];
+  const englishCues = [
+    { index: 1, startMs: 0, endMs: 2_000, text: 'First understand the actual user problem.' },
+    { index: 2, startMs: 2_100, endMs: 4_000, text: 'Then reduce the recording setup friction.' },
+  ];
+
+  expect(buildKeyPointMotionPrompt({ cues: chineseCues, durationMs: 5_000, locale: 'en' }))
+    .toContain('输出语言：中文');
+  expect(buildKeyPointMotionPrompt({ cues: englishCues, durationMs: 5_000, locale: 'zh' }))
+    .toContain('输出语言：English');
+
+  const chineseFallback = buildLocalKeyPointMotions(chineseCues, 5_000, 'en');
+  const englishFallback = buildLocalKeyPointMotions(englishCues, 5_000, 'zh');
+  expect(chineseFallback[0].title).toMatch(/\p{Script=Han}/u);
+  expect(englishFallback[0].title).toMatch(/^[A-Za-z]/);
 });
 
 test('AI key point response creates B at chapter openings and C for concise interior points', () => {

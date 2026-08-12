@@ -51,7 +51,7 @@ import type {
 import { normalizeSegmentSequence, isTrimmed } from '@/utils/segments';
 import { parseSrt } from '@/utils/srtParser';
 import { createAudioPeaksForBlob, loadOrCreateAudioPeakTrack } from '@/services/audioPeakTrack';
-import { buildLocalKeyPointMotions, migrateKeyPointMotionSegment } from '@/services/keyPointMotion';
+import { buildLocalKeyPointMotions, migrateKeyPointMotionSegment, resolveKeyPointMotionLanguage } from '@/services/keyPointMotion';
 import { generateKeyPointMotions } from '@/services/keyPointMotionClient';
 import { audioSourceFingerprint, createEnhancedAudioTrack } from '@/services/audioEnhancement';
 import { Link, useRouter } from '@/i18n/navigation';
@@ -427,6 +427,7 @@ export default function EditorRecordingPage(): JSX.Element {
     setKeyPointGenerationSource(null);
     setKeyPointGenerationError(null);
     announceMediaTaskCreated(id, document.activeElement);
+    const keyPointLanguage = resolveKeyPointMotionLanguage(captionCues, locale === 'en' ? 'en' : 'zh');
     try {
       let generated: KeyPointMotionSegment[] = [];
       let generationSource: 'deepseek' | 'local' = 'deepseek';
@@ -434,20 +435,20 @@ export default function EditorRecordingPage(): JSX.Element {
         recordingId: id,
         kind: 'key_point_motion',
         resourceClass: 'network',
-        configSnapshot: { locale: locale === 'en' ? 'en' : 'zh', cueCount: captionCues.length },
+        configSnapshot: { language: keyPointLanguage, cueCount: captionCues.length },
       }, async (report, signal) => {
         report({ phase: 'preparing', ratio: 0.05 });
         try {
           const result = await generateKeyPointMotions({
             cues: captionCues,
             durationMs: meta.durationMs,
-            locale: locale === 'en' ? 'en' : 'zh',
+            languageHint: keyPointLanguage,
             signal,
           });
           generated = result.motions;
         } catch (error) {
           if (signal.aborted) throw error;
-          generated = buildLocalKeyPointMotions(captionCues, meta.durationMs, locale === 'en' ? 'en' : 'zh');
+          generated = buildLocalKeyPointMotions(captionCues, meta.durationMs, keyPointLanguage);
           generationSource = 'local';
           setKeyPointGenerationError(error instanceof Error ? error.message : 'key_point_generation_failed');
         }

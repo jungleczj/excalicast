@@ -3,6 +3,7 @@ import { requireTier } from '@/lib/tier';
 import { deepseekChat } from '@/services/deepseekClient';
 import { buildKeyPointMotionPrompt, KEY_POINT_MOTION_SYSTEM_PROMPT } from '@/services/keyPointMotionPrompt';
 import { parseKeyPointMotionResponse } from '@/services/keyPointMotionSchema';
+import { resolveKeyPointMotionLanguage } from '@/services/keyPointMotion';
 import type { SubtitleCue } from '@/types/recording';
 
 export const runtime = 'nodejs';
@@ -48,21 +49,22 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
   const cues = parseCues(body.cues);
   const durationMs = Number(body.durationMs);
-  const locale = body.locale === 'en' ? 'en' : 'zh';
+  const languageHint = body.locale === 'en' ? 'en' : 'zh';
   if (!cues.length || !Number.isFinite(durationMs) || durationMs <= 0 || durationMs > 24 * 60 * 60 * 1_000) {
     return NextResponse.json({ error: 'invalid_key_point_input' }, { status: 400 });
   }
+  const language = resolveKeyPointMotionLanguage(cues, languageHint);
 
   try {
     const chat = await deepseekChat({
       systemPrompt: KEY_POINT_MOTION_SYSTEM_PROMPT,
-      prompt: buildKeyPointMotionPrompt({ cues, durationMs, locale }),
+      prompt: buildKeyPointMotionPrompt({ cues, durationMs, locale: language }),
       jsonMode: true,
       timeoutMs: 75_000,
     });
-    const motions = parseKeyPointMotionResponse(chat.text, cues, durationMs, locale);
+    const motions = parseKeyPointMotionResponse(chat.text, cues, durationMs, language);
     if (!motions.length) throw new Error('key_point_empty_result');
-    return NextResponse.json({ motions, model: chat.modelUsed, source: 'deepseek' });
+    return NextResponse.json({ motions, model: chat.modelUsed, source: 'deepseek', language });
   } catch (error) {
     return NextResponse.json({
       error: 'key_point_generation_failed',

@@ -193,6 +193,33 @@ The second sequence is audio, not video: at 48 kHz, AAC input is encoded in 1024
 
 - Fixed and verified locally.
 
+## 2026-08-12 - Generated key points used the interface language
+
+### Symptom
+
+Chinese subtitles could generate English key-point motion when the export page was open in English, and English subtitles could be forced through Chinese phrase validation on the Chinese page.
+
+### Root cause
+
+The export route locale was passed directly into the DeepSeek prompt, response parser, and local fallback. Subtitle content was never treated as the language source of truth.
+
+### Fix
+
+- Resolve one dominant language from all validated subtitle cues.
+- Use the resolved language for remote generation, response validation, task metadata, and local fallback.
+- Recompute it inside the API instead of trusting the client hint.
+- Keep the UI locale only as a fallback for captions without meaningful Chinese or English text.
+
+### Regression coverage
+
+- English UI plus Chinese captions must produce Chinese output constraints and Chinese local key points.
+- Chinese UI plus English captions must produce English output constraints and English local key points.
+- Mixed captions use one dominant language for the complete track.
+
+### Status
+
+- Fixed and verified locally.
+
 ## 2026-08-11 - Dragged clip order reverted during persistence and reload
 
 ### Symptom
