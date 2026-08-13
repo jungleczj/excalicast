@@ -291,4 +291,5 @@
 ### Verification
 
 - Audio domain and dubbing regression suites cover callback reordering, missing AAC frames, source-kind parity, silence retention, clipping rejection, clip reordering, and dubbing edge fades.
+- Real Chromium round-trip covers `Float32 WAV -> prepared PCM -> AAC -> H.264 MP4 -> decoded PCM` and verifies 48 kHz mono output, bounded duration error, and no internal silence gap.
 - Type checking and production build are required before the feature commit.

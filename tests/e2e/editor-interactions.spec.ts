@@ -835,6 +835,119 @@ test('a short display recording exports through the local WebCodecs pipeline and
   expect(report.breakdownMs?.background_blur_gpu).toBeGreaterThan(0);
 });
 
+test('H.264 MP4 round-trip keeps a continuous 48 kHz mono audio track', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.evaluate(async (id) => {
+    const durationMs = 1_200;
+    const sampleRate = 48_000;
+    const samples = new Float32Array(Math.round(sampleRate * durationMs / 1_000));
+    for (let index = 0; index < samples.length; index += 1) {
+      samples[index] = Math.sin(index / sampleRate * Math.PI * 2 * 997) * 0.32;
+    }
+    const wav = new Uint8Array(44 + samples.byteLength);
+    const wavView = new DataView(wav.buffer);
+    const text = (offset: number, value: string) => {
+      for (let index = 0; index < value.length; index += 1) wavView.setUint8(offset + index, value.charCodeAt(index));
+    };
+    text(0, 'RIFF'); wavView.setUint32(4, 36 + samples.byteLength, true); text(8, 'WAVE'); text(12, 'fmt ');
+    wavView.setUint32(16, 16, true); wavView.setUint16(20, 3, true); wavView.setUint16(22, 1, true);
+    wavView.setUint32(24, sampleRate, true); wavView.setUint32(28, sampleRate * 4, true);
+    wavView.setUint16(32, 4, true); wavView.setUint16(34, 32, true); text(36, 'data');
+    wavView.setUint32(40, samples.byteLength, true);
+    wav.set(new Uint8Array(samples.buffer), 44);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 160; canvas.height = 90;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('round-trip fixture canvas unavailable');
+    context.fillStyle = '#176f87'; context.fillRect(0, 0, canvas.width, canvas.height);
+    const stream = canvas.captureStream(15);
+    const screenBlob = await new Promise<Blob>((resolve, reject) => {
+      const chunks: BlobPart[] = [];
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onerror = () => reject(new Error('round-trip fixture recorder failed'));
+      recorder.onstop = () => resolve(new Blob(chunks, { type: 'video/webm' }));
+      recorder.start();
+      window.setTimeout(() => recorder.stop(), durationMs);
+    });
+    stream.getTracks().forEach((track) => track.stop());
+
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(['recordings', 'audioChunks', 'screenChunks'], 'readwrite');
+      const recordings = tx.objectStore('recordings');
+      const request = recordings.get(id);
+      request.onsuccess = () => {
+        const source = { kind: 'desktop', sourceSize: { width: 160, height: 90 } };
+        recordings.put({
+          ...request.result,
+          durationMs,
+          hasAudio: true,
+          source,
+          setup: { ...request.result.setup, source },
+        });
+      };
+      tx.objectStore('audioChunks').add({ recordingId: id, index: 0, blob: new Blob([wav], { type: 'audio/wav' }) });
+      tx.objectStore('screenChunks').add({ recordingId: id, index: 0, blob: screenBlob });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, recordingId);
+  await page.reload();
+
+  await page.locator('.editor-craft-setting-row').filter({ hasText: 'Resolution' }).locator('select').selectOption('sd');
+  await page.locator('.editor-craft-setting-row').filter({ hasText: 'Format' }).locator('select').selectOption('mp4');
+  await page.locator('.editor-craft-setting-row').filter({ hasText: 'Frame rate' }).locator('select').selectOption('15');
+  const downloadPromise = page.waitForEvent('download', { timeout: 90_000 });
+  await page.getByRole('button', { name: /Render & download/ }).click();
+  const download = await downloadPromise;
+  const downloadStream = await download.createReadStream();
+  if (!downloadStream) throw new Error('MP4 download stream unavailable');
+  const chunks: Buffer[] = [];
+  for await (const chunk of downloadStream) chunks.push(Buffer.from(chunk));
+  const base64 = Buffer.concat(chunks).toString('base64');
+
+  const decoded = await page.evaluate(async (encoded) => {
+    const binary = atob(encoded);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    const context = new AudioContext({ sampleRate: 48_000 });
+    try {
+      const audio = await context.decodeAudioData(bytes.buffer);
+      const samples = audio.getChannelData(0);
+      const from = Math.round(samples.length * 0.05);
+      const to = Math.round(samples.length * 0.95);
+      let silentRun = 0;
+      let maxSilentRun = 0;
+      for (let index = from; index < to; index += 1) {
+        if (Math.abs(samples[index]) < 0.002) silentRun += 1;
+        else silentRun = 0;
+        maxSilentRun = Math.max(maxSilentRun, silentRun);
+      }
+      return {
+        sampleRate: audio.sampleRate,
+        channels: audio.numberOfChannels,
+        durationMs: audio.duration * 1_000,
+        maxSilentMs: maxSilentRun / audio.sampleRate * 1_000,
+      };
+    } finally {
+      await context.close();
+    }
+  }, base64);
+
+  expect(decoded.sampleRate).toBe(48_000);
+  expect(decoded.channels).toBe(1);
+  expect(decoded.durationMs).toBeGreaterThanOrEqual(1_150);
+  expect(decoded.durationMs).toBeLessThanOrEqual(1_230);
+  expect(decoded.maxSilentMs).toBeLessThan(20);
+});
+
 test('switching away from a custom recording ratio restores its original framing when returning', async ({ page }) => {
   await page.evaluate(async (id) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {

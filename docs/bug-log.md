@@ -57,6 +57,7 @@ Original unprocessed recordings sounded continuous in the editor, but exported H
 - Original, enhanced, repaired, and dubbed tracks pass the same sample-clock contract.
 - Unprocessed PCM is sample-identical before encoding, and clipped/non-finite derived tracks are rejected.
 - Dubbing edge fades preserve the complete scheduled duration and late-timeline speech.
+- A real H.264 MP4 browser round-trip decodes the downloaded file and rejects wrong sample rate, stereo output, duration drift, or internal silent gaps.
 
 ### Status
 
