@@ -55,6 +55,14 @@ import { StreamingCubicResampler, resolveEnhancedAudioSelection } from '@/servic
 import { projectHighlightAperture } from '@/services/editorEffectsRenderer';
 import { assembleTimedPcm16Wav, hasAudiblePcm16Audio, parsePcm16Wav } from '@/lib/dubbingAudio';
 import { moveSegment, normalizeSegmentSequence, outputToSource, sourceToOutput } from '@/utils/segments';
+import {
+  appendRecordingClip,
+  insertRecordingClip,
+  mainTrackDuration,
+  moveMainTrackClip,
+  resolveMainTrackPosition,
+} from '@/services/mainTrack';
+import { resolveHybridPreviewMode } from '@/services/hybridPreviewPolicy';
 import type { EnhancedAudioTrack, HighlightEffectSegment, KeyPointMotionSegment } from '@/types/recording';
 
 function createFloat32Wav(samples: Float32Array, sampleRate = 24_000): Uint8Array {
@@ -579,6 +587,42 @@ test('edited clip sequence preserves split boundaries and user-defined playback 
   ]);
   expect(outputToSource(sequence, 500)).toBe(4_500);
   expect(sourceToOutput(sequence, 500)).toBe(8_500);
+});
+
+test('main track accepts multiple recordings and inserts at the playhead', () => {
+  const initial = appendRecordingClip([], { recordingId: 'primary', durationMs: 10_000 });
+  const withSecond = appendRecordingClip(initial, { recordingId: 'second', durationMs: 5_000 });
+  const result = insertRecordingClip(withSecond, { recordingId: 'inserted', durationMs: 4_000 }, 6_000);
+
+  expect(result.map((clip) => [clip.recordingId, clip.sourceStart, clip.sourceEnd])).toEqual([
+    ['primary', 0, 6_000],
+    ['inserted', 0, 4_000],
+    ['primary', 6_000, 10_000],
+    ['second', 0, 5_000],
+  ]);
+  expect(mainTrackDuration(result)).toBe(19_000);
+});
+
+test('main track time mapping and reordering preserve source recording ranges', () => {
+  const track = [
+    { id: 'a', recordingId: 'first', sourceStart: 2_000, sourceEnd: 5_000 },
+    { id: 'b', recordingId: 'second', sourceStart: 10_000, sourceEnd: 14_000 },
+    { id: 'c', recordingId: 'third', sourceStart: 0, sourceEnd: 2_000 },
+  ];
+  expect(resolveMainTrackPosition(track, 3_500)).toMatchObject({
+    clipId: 'b', recordingId: 'second', sourceTimeMs: 10_500,
+  });
+  const reordered = moveMainTrackClip(track, 2, 0);
+  expect(reordered.map((clip) => clip.id)).toEqual(['c', 'a', 'b']);
+  expect(resolveMainTrackPosition(reordered, 2_500)).toMatchObject({
+    clipId: 'a', recordingId: 'first', sourceTimeMs: 2_500,
+  });
+});
+
+test('hybrid preview uses proxies for long playback but original frames for precise seeks', () => {
+  expect(resolveHybridPreviewMode({ durationMs: 3_700_000, playing: true, preciseSeek: false })).toBe('proxy');
+  expect(resolveHybridPreviewMode({ durationMs: 3_700_000, playing: false, preciseSeek: true })).toBe('original');
+  expect(resolveHybridPreviewMode({ durationMs: 120_000, playing: true, preciseSeek: false })).toBe('original');
 });
 
 test('concatenated media timestamps are rebased across resets and duplicates', () => {

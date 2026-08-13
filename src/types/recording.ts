@@ -52,6 +52,8 @@ export interface RecordingMetadata {
   tags?: string[];
   /** 时间轴保留段（ms，相对录制开始）。缺省=整段 [0,durationMs]。导出按段裁剪输出。 */
   segments?: TimeSegment[];
+  /** 多录制主轨。缺省时由当前录制的 segments 兼容生成。数组顺序即最终成片顺序。 */
+  mainTrack?: MainTrackClip[];
   /** 自动放大段（ms，相对录制开始）。 */
   autoZooms?: AutoZoomSegment[];
   /** 后期高亮效果段（ms，相对录制开始）。 */
@@ -87,6 +89,15 @@ export interface RecordingLibrarySummary {
 export interface TimeSegment {
   start: number;
   end: number;
+}
+
+/** 主轨片段引用原始录制的一个非破坏性时间范围。 */
+export interface MainTrackClip {
+  id: string;
+  recordingId: string;
+  sourceStart: number;
+  sourceEnd: number;
+  title?: string;
 }
 
 /** Auto zoom 段：在指定源时间窗口内把画面按中心点放大。 */
@@ -371,6 +382,8 @@ export interface ExportConfig {
   }>>;
   /** 时间轴裁剪保留段（ms）；缺省=整段。导出只输出这些段、按序拼接。 */
   segments?: TimeSegment[];
+  /** 多素材拼接导出的不可变主轨快照。 */
+  mainTrack?: MainTrackClip[];
   /** 指定时间窗口内自动放大画面。 */
   autoZooms?: AutoZoomSegment[];
   /** 指定时间窗口内的高亮效果。 */
