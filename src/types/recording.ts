@@ -30,6 +30,8 @@ export interface RecordingMetadata {
   startedAt: number;
   durationMs: number;
   hasAudio: boolean;
+  /** Browser-granted microphone format. Export uses this for diagnostics; the codec remains the source of truth. */
+  audioSourceInfo?: AudioSourceInfo;
   hasCamera: boolean;
   status: 'recording' | 'finalizing' | 'interrupted' | 'done' | 'error';
   /** 录制轨提前结束或媒体分片落库失败。存在警告时不会标记为干净的 done。 */
@@ -60,6 +62,13 @@ export interface RecordingMetadata {
   activeEnhancedAudioTrackId?: string;
   /** 当前用于预览/导出的本地化音轨；只引用 localizedTracks，不把大 Blob 塞进 metadata。 */
   localizedTrackId?: string;
+}
+
+export interface AudioSourceInfo {
+  sampleRate?: number;
+  channelCount?: number;
+  mimeType: string;
+  bitsPerSecond: number;
 }
 
 /** 录制库列表专用的轻量视图；不包含字幕、构图配置或媒体数据。 */
@@ -157,6 +166,9 @@ export interface EnhancedAudioTrack {
   modelVersion: string;
   status: 'processing' | 'ready' | 'failed';
   durationMs: number;
+  sampleRate?: number;
+  channelCount?: number;
+  totalFrames?: number;
   audioBlob: Blob;
   createdAt: number;
   error?: string;
@@ -192,6 +204,9 @@ export interface LocalizedTrack {
   sourceAudioHash: string;
   translatedSrt: string;
   audioBlob: Blob;
+  sampleRate?: number;
+  channelCount?: number;
+  totalFrames?: number;
   /** lip-sync 后的人像气泡视频；没有摄像头或服务不可用时为空。 */
   cameraBlob?: Blob;
   /** skipped 表示没有摄像头或未配置 lip-sync；failed 表示不阻塞英文音轨。 */

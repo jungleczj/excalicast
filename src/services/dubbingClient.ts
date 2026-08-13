@@ -11,6 +11,7 @@ import { generateKokoroDubbingAudio, type KokoroDubbingProgress } from '@/servic
 import { parseMediaJobResponse } from '@/services/mediaJobClient';
 import { shouldUseMediaJobMocks } from '@/services/mediaJobMode';
 import { removePrivateJobAssets, uploadPrivateJobAsset } from '@/services/privateMediaUpload';
+import { parsePcm16Wav } from '@/lib/dubbingAudio';
 
 interface SubmitResponse { jobId: string }
 
@@ -181,6 +182,7 @@ async function finishEnglishDubbingTrack(params: {
         }
       },
     });
+    const audioInfo = parsePcm16Wav(new Uint8Array(await audioBlob.arrayBuffer()));
     options.onProgress?.({ stage: 'saving', progress: 0.99 });
     const track: LocalizedTrack = {
       id: `localized-${params.recordingId}-${Date.now()}`,
@@ -192,6 +194,9 @@ async function finishEnglishDubbingTrack(params: {
       sourceAudioHash: params.sourceAudioHash,
       translatedSrt,
       audioBlob,
+      sampleRate: audioInfo.sampleRate,
+      channelCount: audioInfo.channels,
+      totalFrames: Math.floor(audioInfo.samples.length / audioInfo.channels),
       lipSync: 'skipped',
     };
     await saveLocalizedTrack(track, true);

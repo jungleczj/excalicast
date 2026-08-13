@@ -369,6 +369,7 @@ export async function importCloudRecording(
         startedAt: metaJson.startedAt,
         durationMs: metaJson.durationMs,
         hasAudio: !!metaJson.hasAudio,
+        audioSourceInfo: metaJson.audioSourceInfo,
         hasCamera: !!metaJson.hasCamera,
         status: 'done',
         title: metaJson.title,

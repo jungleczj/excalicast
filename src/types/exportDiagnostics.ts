@@ -11,6 +11,22 @@ export type ExportDecoderPath =
   | 'legacy-array-buffer'
   | 'html-video';
 
+export type ExportAudioEncoderPath = 'pending' | 'webcodecs-aac' | 'webcodecs-opus' | 'ffmpeg-aac' | 'ffmpeg-opus';
+
+export interface ExportAudioDiagnostics {
+  sourceKind: 'original' | 'enhanced' | 'repair' | 'dubbing';
+  sourceTrackId?: string;
+  sampleRate: number;
+  channels: number;
+  totalFrames: number;
+  durationMs: number;
+  peak: number;
+  clippedSamples: number;
+  nonFiniteSamples: number;
+  encoderPath: ExportAudioEncoderPath;
+  fallbackReason?: string;
+}
+
 export interface ExportProgressDetails {
   phase: string;
   ratio: number;
@@ -39,4 +55,5 @@ export interface ExportDiagnosticReport extends ExportProgressDetails {
     screen: { chunks: number; bytes: number };
   };
   breakdownMs: Record<string, number>;
+  audio?: ExportAudioDiagnostics;
 }

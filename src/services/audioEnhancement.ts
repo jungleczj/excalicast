@@ -2,6 +2,7 @@ import type { EnhancedAudioTrack, NoiseReductionMode } from '@/types/recording';
 import type { AudioRepairSettings } from '@/services/audioRepairDomain';
 import { audioRepairSettingsFingerprint, normalizeAudioRepairSettings } from '@/services/audioRepairDomain';
 import { summarizeAudioRepairDiagnosis, type AudioRepairDiagnosis } from '@/services/audioRepairDomain';
+import { EXPORT_AUDIO_SAMPLE_RATE, validateProcessedAudioFrameCount } from '@/services/exportAudio';
 
 export function audioSourceFingerprint(blob: Blob | null, durationMs: number): string {
   return `${blob?.size ?? 0}:${blob?.type ?? 'none'}:${Math.max(0, Math.round(durationMs))}`;
@@ -182,7 +183,7 @@ export async function analyzeAudioRepairSource(
 }
 
 export async function createEnhancedAudioTrack(options: EnhanceOptions): Promise<EnhancedAudioTrack> {
-  const targetSampleRate = 48_000;
+  const targetSampleRate = EXPORT_AUDIO_SAMPLE_RATE;
   const { createAudioEnhancementWorker } = await import('@/services/audioEnhancementWorkerFactory');
   const worker = createAudioEnhancementWorker();
   const abort = () => worker.terminate();
@@ -193,12 +194,15 @@ export async function createEnhancedAudioTrack(options: EnhanceOptions): Promise
 
     const pcmParts: BlobPart[] = [];
     let processedSamples = 0;
+    let decodedSamples = 0;
     let peak = 0;
     let energy = 0;
     let requestId = 0;
     const expectedSamples = Math.max(1, Math.round(options.durationMs / 1000 * targetSampleRate));
     for await (const mixed of decodeMonoChunks(options, targetSampleRate)) {
       if (options.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+      const inputSampleCount = mixed.length;
+      decodedSamples += inputSampleCount;
       const currentRequestId = ++requestId;
       const result = await new Promise<Int16Array>((resolve, reject) => {
         const cleanup = () => {
@@ -228,6 +232,7 @@ export async function createEnhancedAudioTrack(options: EnhanceOptions): Promise
           sampleRate: targetSampleRate, repairSettings: options.repairSettings,
         }, [mixed.buffer]);
       });
+      validateProcessedAudioFrameCount(inputSampleCount, result.length, 0);
       for (let index = 0; index < result.length; index += 1) {
         const absolute = Math.abs(result[index]);
         peak = Math.max(peak, absolute);
@@ -243,9 +248,9 @@ export async function createEnhancedAudioTrack(options: EnhanceOptions): Promise
     options.onProgress?.('encoding', 0.96);
     const rms = processedSamples > 0 ? Math.sqrt(energy / processedSamples) : 0;
     if (processedSamples === 0 || peak < 64 || rms < 8) throw new Error('audio_enhancement_silent_output');
+    validateProcessedAudioFrameCount(decodedSamples, processedSamples, 0);
     const audioBlob = new Blob([wavHeader(targetSampleRate, processedSamples), ...pcmParts], { type: 'audio/wav' });
     const durationMs = Math.round((processedSamples / targetSampleRate) * 1000);
-    if (Math.abs(durationMs - options.durationMs) > Math.max(1_000, options.durationMs * 0.02)) throw new Error('audio_enhancement_duration_mismatch');
     options.onProgress?.('encoding', 1);
     return {
       id: `enh-${options.recordingId}-${options.repairSettings ? 'repair' : options.mode}-${Date.now().toString(36)}`,
@@ -257,6 +262,9 @@ export async function createEnhancedAudioTrack(options: EnhanceOptions): Promise
       modelVersion: options.repairSettings ? 'voice-repair-v1' : options.mode === 'enhanced' ? 'rnnoise-wasm-2025.1.5' : 'speech-cleanup-v1',
       status: 'ready',
       durationMs,
+      sampleRate: targetSampleRate,
+      channelCount: 1,
+      totalFrames: processedSamples,
       audioBlob,
       createdAt: Date.now(),
     };

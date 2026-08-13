@@ -17,8 +17,14 @@
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 import { Muxer as WebmMuxer, ArrayBufferTarget as WebmTarget } from 'webm-muxer';
 import { createMp4TimestampMapper, MonotonicTimestampNormalizer } from '@/services/mediaTimestamps';
+import {
+  EXPORT_AUDIO_BITRATE,
+  EXPORT_AUDIO_SAMPLE_RATE,
+  createContinuousAacTimeline,
+  type PreparedExportAudio,
+} from '@/services/exportAudio';
 import { createCameraFrameSource } from './webmCameraFrames';
-import type { ExportQuality, TimeSegment } from '@/types/recording';
+import type { ExportQuality } from '@/types/recording';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -27,15 +33,13 @@ interface EncodeParams {
   fps: number;
   width: number;
   height: number;
-  audioBlob: Blob | null;
+  preparedAudio: Promise<PreparedExportAudio> | null;
   /** 容器/编码：'mp4'＝H.264+AAC+mp4-muxer；'webm'＝VP9+Opus+webm-muxer。缺省 mp4。 */
   format?: 'mp4' | 'webm';
   /** 码率倍率（质量档），乘到 estimateBitrate 上。缺省 1。 */
   bitrateMultiplier?: number;
   /** 质量优先的编码策略；Auto 优先恒定质量，旧调用仍可用 bitrateMultiplier。 */
   quality?: ExportQuality;
-  /** 源时间保留段（ms）；提供则导出前把音频按段拼接，与裁剪后的帧时间轴对齐。 */
-  audioSegments?: TimeSegment[];
   renderFrame: (i: number) => Promise<HTMLCanvasElement>;
   onProgress?: (p: number) => void; // 0..1
   signal?: AbortSignal;
@@ -98,13 +102,13 @@ export function createMp4AudioChunkBuffer(target: Mp4AudioChunkTarget) {
       pending.push({ chunk, meta, order: pending.length });
     },
     flush(): void {
-      pending.sort((a, b) => {
-        const byTimestamp = Number(a.chunk.timestamp) - Number(b.chunk.timestamp);
-        return byTimestamp || a.order - b.order;
-      });
-      const normalizeTimestamp = new MonotonicTimestampNormalizer(1);
-      for (const { chunk, meta } of pending) {
-        target.addAudioChunk(chunk, meta, normalizeTimestamp.push(chunk.timestamp as number));
+      const timeline = createContinuousAacTimeline(pending.map(({ chunk }) => ({
+        timestamp: Number(chunk.timestamp),
+        duration: Number(chunk.duration),
+      })));
+      for (let index = 0; index < timeline.order.length; index += 1) {
+        const { chunk, meta } = pending[timeline.order[index]];
+        target.addAudioChunk(chunk, meta, timeline.timestamps[index]);
       }
       pending.length = 0;
     },
@@ -130,31 +134,6 @@ export async function drainEncoderBackpressure(
     signal.addEventListener('abort', onAbort, { once: true });
     encoder.flush().then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
   });
-}
-
-/** 按保留段（源 ms）把 AudioBuffer 拼接成连续音轨（用于时间轴裁剪）。 */
-function spliceAudioBuffer(ctx: any, src: AudioBuffer, segments: TimeSegment[]): AudioBuffer {
-  const sr = src.sampleRate;
-  const ch = src.numberOfChannels;
-  const ranges = segments.map((s) => {
-    const a = Math.max(0, Math.min(src.length, Math.floor((s.start / 1000) * sr)));
-    const b = Math.max(a, Math.min(src.length, Math.ceil((s.end / 1000) * sr)));
-    return { a, b };
-  });
-  let totalFrames = 0;
-  for (const r of ranges) totalFrames += r.b - r.a;
-  totalFrames = Math.max(1, totalFrames);
-  const out: AudioBuffer = ctx.createBuffer(ch, totalFrames, sr);
-  for (let c = 0; c < ch; c++) {
-    const dst = out.getChannelData(c);
-    const srcData = src.getChannelData(c);
-    let off = 0;
-    for (const r of ranges) {
-      dst.set(srcData.subarray(r.a, r.b), off);
-      off += r.b - r.a;
-    }
-  }
-  return out;
 }
 
 const G = globalThis as any;
@@ -198,7 +177,7 @@ export function resolveVideoRateControl(input: {
 }
 
 export async function encodeWebCodecsMp4(params: EncodeParams): Promise<WebCodecsEncodeResult> {
-  const { totalFrames, fps, width, height, audioBlob, audioSegments, renderFrame, onProgress, signal } = params;
+  const { totalFrames, fps, width, height, preparedAudio, renderFrame, onProgress, signal } = params;
   const format = params.format ?? 'mp4';
   const bitrateMul = params.bitrateMultiplier ?? 1;
   const quality = params.quality ?? 'auto';
@@ -215,28 +194,19 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<WebCodec
 
   // 1) 仅在浏览器具备直接音频编码能力时解码音频。若缺少 AAC/Opus
   // AudioEncoder，视频仍走硬件编码，调用方随后只用 ffmpeg remux 音频。
-  let audio: { buffer: AudioBuffer; channels: number; sampleRate: number } | null = null;
   let audioConfigSupported = false;
   const audioEncoderAvailable = !!AudioEncoderCtor && !!AudioDataCtor;
-  if (audioBlob && audioEncoderAvailable) {
+  if (preparedAudio && audioEncoderAvailable) {
     try {
-      const AC = G.AudioContext || G.webkitAudioContext;
-      const ctx = new AC();
-      let decoded: AudioBuffer = await ctx.decodeAudioData(await audioBlob.arrayBuffer());
-      // 裁剪：按保留段拼接音频，与帧的输出时间轴对齐（须在 ctx.close 前 createBuffer）。
-      if (audioSegments && audioSegments.length > 0) decoded = spliceAudioBuffer(ctx, decoded, audioSegments);
-      audio = { buffer: decoded, channels: Math.min(2, decoded.numberOfChannels), sampleRate: decoded.sampleRate };
-      await ctx.close();
       const audioConfig = {
         codec: isWebm ? 'opus' : 'mp4a.40.2',
-        sampleRate: audio.sampleRate,
-        numberOfChannels: audio.channels,
-        bitrate: 128_000,
+        sampleRate: EXPORT_AUDIO_SAMPLE_RATE,
+        numberOfChannels: 1,
+        bitrate: EXPORT_AUDIO_BITRATE,
       };
       const audioSupport = await AudioEncoderCtor.isConfigSupported(audioConfig);
       audioConfigSupported = !!audioSupport?.supported;
     } catch {
-      audio = null;
       audioConfigSupported = false;
     }
   }
@@ -267,24 +237,24 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<WebCodec
   }
 
   const audioMode = resolveWebCodecsAudioMode({
-    hasAudio: !!audioBlob,
+    hasAudio: !!preparedAudio,
     audioEncoderAvailable,
     audioConfigSupported,
   });
-  const canAudio = audioMode === 'direct' && !!audio;
+  const canAudio = audioMode === 'direct';
 
   // 3) muxer（mp4-muxer / webm-muxer），音频 mp4→AAC，webm→Opus
   const muxer: any = isWebm
     ? new WebmMuxer({
         target: new WebmTarget(),
         video: { codec: 'V_VP9', width, height, frameRate: fps },
-        audio: canAudio ? { codec: 'A_OPUS', numberOfChannels: audio!.channels, sampleRate: audio!.sampleRate } : undefined,
+        audio: canAudio ? { codec: 'A_OPUS', numberOfChannels: 1, sampleRate: EXPORT_AUDIO_SAMPLE_RATE } : undefined,
       })
     : new Muxer({
         target: new ArrayBufferTarget(),
         fastStart: 'in-memory',
         video: { codec: 'avc', width, height },
-        audio: canAudio ? { codec: 'aac', numberOfChannels: audio!.channels, sampleRate: audio!.sampleRate } : undefined,
+        audio: canAudio ? { codec: 'aac', numberOfChannels: 1, sampleRate: EXPORT_AUDIO_SAMPLE_RATE } : undefined,
       });
 
   // 4) 视频编码
@@ -337,7 +307,8 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<WebCodec
 
   // 5) 音频编码（mp4→AAC mp4a.40.2；webm→Opus）
   if (canAudio) {
-    await encodeAudioTrack(audio!.buffer, audio!.channels, isWebm ? 'opus' : 'mp4a.40.2', AudioEncoderCtor, AudioDataCtor, muxer,
+    const audio = await preparedAudio!;
+    await encodeAudioTrack(audio, isWebm ? 'opus' : 'mp4a.40.2', AudioEncoderCtor, AudioDataCtor, muxer,
       (p) => onProgress?.(0.85 + p * 0.15), signal);
   }
 
@@ -425,8 +396,7 @@ export async function transcodeCameraForUpload(blob: Blob): Promise<Blob> {
 }
 
 async function encodeAudioTrack(
-  buffer: AudioBuffer,
-  channels: number,
+  audio: PreparedExportAudio,
   audioCodec: string,
   AudioEncoderCtor: any,
   AudioDataCtor: any,
@@ -434,7 +404,8 @@ async function encodeAudioTrack(
   onProgress?: (p: number) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const sampleRate = buffer.sampleRate;
+  const sampleRate = audio.sampleRate;
+  const channels = audio.channels;
   let err: unknown = null;
   const mp4AudioChunks = audioCodec === 'mp4a.40.2' ? createMp4AudioChunkBuffer(muxer) : null;
   const audioEncoder = new AudioEncoderCtor({
@@ -444,12 +415,11 @@ async function encodeAudioTrack(
     },
     error: (e: unknown) => { err = e; },
   });
-  audioEncoder.configure({ codec: audioCodec, sampleRate, numberOfChannels: channels, bitrate: 128_000 });
+  audioEncoder.configure({ codec: audioCodec, sampleRate, numberOfChannels: channels, bitrate: EXPORT_AUDIO_BITRATE });
 
-  const total = buffer.length;
+  const total = audio.totalFrames;
   const block = 1024;
-  const chData: Float32Array[] = [];
-  for (let c = 0; c < channels; c++) chData.push(buffer.getChannelData(c));
+  const chData = [audio.samples];
 
   try {
     for (let off = 0; off < total; off += block) {

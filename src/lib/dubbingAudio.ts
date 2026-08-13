@@ -167,8 +167,19 @@ export function assembleTimedPcm16Wav(
   const output = new Int16Array(lastSample);
   for (const entry of parsed) {
     const start = Math.max(0, Math.round(entry.startMs / 1000 * sampleRate)) * channels;
+    const frameCount = Math.floor(entry.audio.samples.length / channels);
+    const fadeFrames = Math.min(Math.round(sampleRate * 0.005), Math.floor(frameCount / 2));
     for (let index = 0; index < entry.audio.samples.length && start + index < output.length; index += 1) {
-      const mixed = output[start + index] + entry.audio.samples[index];
+      const frame = Math.floor(index / channels);
+      const fadeIn = fadeFrames > 0 && frame < fadeFrames
+        ? Math.sin((frame / fadeFrames) * Math.PI / 2)
+        : 1;
+      const framesFromEnd = frameCount - 1 - frame;
+      const fadeOut = fadeFrames > 0 && framesFromEnd < fadeFrames
+        ? Math.sin((Math.max(0, framesFromEnd) / fadeFrames) * Math.PI / 2)
+        : 1;
+      const sample = Math.round(entry.audio.samples[index] * Math.min(fadeIn, fadeOut));
+      const mixed = output[start + index] + sample;
       output[start + index] = Math.max(-32_768, Math.min(32_767, mixed));
     }
   }

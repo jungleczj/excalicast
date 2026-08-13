@@ -54,6 +54,7 @@ import { cameraPlacementFromEvent, projectCameraPlacement } from '@/services/cam
 import type { ExportDiagnosticReport, ExportProgressDetails } from '@/types/exportDiagnostics';
 import { previewPlaybackRegistry } from '@/services/previewPlaybackRegistry';
 import { resolveFrameTransform } from '@/services/frameTransform';
+import { EXPORT_AUDIO_BITRATE, EXPORT_AUDIO_SAMPLE_RATE, prepareExportAudio } from '@/services/exportAudio';
 
 export interface ExportOptions extends ExportConfig {
   recordingId: string;
@@ -88,36 +89,21 @@ async function remuxEncodedVideoWithAudio(
   videoBlob: Blob,
   audioBlob: Blob,
   format: 'mp4' | 'webm',
-  segments: TimeSegment[] | undefined,
   onLog?: (message: string) => void,
 ): Promise<Blob> {
   const ffmpeg = await getFfmpeg(onLog);
   const videoName = format === 'webm' ? '__fast_video.webm' : '__fast_video.mp4';
   const outputName = format === 'webm' ? '__fast_output.webm' : '__fast_output.mp4';
-  const audioName = '__fast_audio.webm';
+  const audioName = '__fast_audio.wav';
   try {
     await ffmpeg.writeFile(videoName, new Uint8Array(await videoBlob.arrayBuffer()));
     await ffmpeg.writeFile(audioName, new Uint8Array(await audioBlob.arrayBuffer()));
 
     const args = ['-i', videoName, '-i', audioName];
-    if (segments && segments.length > 0) {
-      const filters: string[] = [];
-      const labels: string[] = [];
-      segments.forEach((segment, index) => {
-        const label = `__fast_a${index}`;
-        filters.push(
-          `[1:a]atrim=start=${(segment.start / 1000).toFixed(3)}:end=${(segment.end / 1000).toFixed(3)},asetpts=PTS-STARTPTS[${label}]`,
-        );
-        labels.push(`[${label}]`);
-      });
-      if (labels.length > 1) filters.push(`${labels.join('')}concat=n=${labels.length}:v=0:a=1[__fast_aout]`);
-      args.push('-filter_complex', filters.join(';'), '-map', '0:v', '-map', labels.length > 1 ? '[__fast_aout]' : labels[0]);
-    } else {
-      args.push('-map', '0:v', '-map', '1:a');
-    }
+    args.push('-map', '0:v', '-map', '1:a');
     args.push('-c:v', 'copy');
-    if (format === 'webm') args.push('-c:a', 'libopus');
-    else args.push('-c:a', 'aac');
+    if (format === 'webm') args.push('-c:a', 'libopus', '-ar', String(EXPORT_AUDIO_SAMPLE_RATE), '-ac', '1');
+    else args.push('-c:a', 'aac', '-ar', String(EXPORT_AUDIO_SAMPLE_RATE), '-ac', '1', '-b:a', String(EXPORT_AUDIO_BITRATE));
     args.push('-shortest', outputName);
 
     await ffmpeg.exec(args);
@@ -814,6 +800,38 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const outDurationMs = trimmed ? keptDuration(kept) : durationMs;
   const totalFrames = Math.max(1, Math.round((outDurationMs / 1000) * fps));
   diagnostics.setTotalFrames(totalFrames);
+  const audioSourceKind = useLocalizedTrack
+    ? 'dubbing' as const
+    : enhancedSelection.track?.mode === 'repair'
+      ? 'repair' as const
+      : enhancedSelection.track
+        ? 'enhanced' as const
+        : 'original' as const;
+  // Decode/resample once while the video renderer is preparing. Both encoders
+  // consume this exact PCM timeline, so fallback cannot change the audio.
+  const preparedAudioPromise = effectiveAudioBlob && format !== 'gif'
+    ? prepareExportAudio({
+        blob: effectiveAudioBlob,
+        segments: trimmed ? kept : undefined,
+        sourceKind: audioSourceKind,
+        sourceTrackId: useLocalizedTrack ? localizedTrack.id : enhancedSelection.track?.id,
+        signal: opts.signal,
+      }).then((audio) => {
+        diagnostics.setAudio({
+          sourceKind: audio.sourceKind,
+          sourceTrackId: audio.sourceTrackId,
+          sampleRate: audio.sampleRate,
+          channels: audio.channels,
+          totalFrames: audio.totalFrames,
+          durationMs: audio.durationMs,
+          peak: audio.diagnostics.peak,
+          clippedSamples: audio.diagnostics.clippedSamples,
+          nonFiniteSamples: audio.diagnostics.nonFiniteSamples,
+          encoderPath: 'pending',
+        });
+        return audio;
+      })
+    : null;
 
   const filesForExport: Record<string, unknown> = {};
   for (const bf of binaryFiles) filesForExport[bf.fileId] = bf.data;
@@ -1253,8 +1271,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         fps,
         width: outputW,
         height: outputH,
-        audioBlob: effectiveAudioBlob ?? null,
-        audioSegments: trimmed ? kept : undefined,
+        preparedAudio: preparedAudioPromise,
         signal: opts.signal,
         renderFrame: async (i) => {
           checkCancelled();
@@ -1270,17 +1287,20 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       });
       diagnostics.addBreakdown('hardware_composition_and_encoding', performance.now() - hardwareStarted);
       let blob = encoded.blob;
-      if (effectiveAudioBlob && !encoded.audioEncoded) {
+      if (preparedAudioPromise && encoded.audioEncoded) {
+        diagnostics.setAudioEncoderPath(format === 'webm' ? 'webcodecs-opus' : 'webcodecs-aac');
+      }
+      if (preparedAudioPromise && !encoded.audioEncoded) {
         setPhase('muxing_audio');
         setProgress(0.98);
         const muxStarted = performance.now();
         blob = await remuxEncodedVideoWithAudio(
           blob,
-          effectiveAudioBlob,
+          (await preparedAudioPromise).wavBlob,
           format,
-          trimmed ? kept : undefined,
           opts.onLog,
         );
+        diagnostics.setAudioEncoderPath(format === 'webm' ? 'ffmpeg-opus' : 'ffmpeg-aac');
         diagnostics.addBreakdown('audio_muxing', performance.now() - muxStarted);
       }
       cameraSource?.close();
@@ -1301,6 +1321,10 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       if (opts.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
       if (err instanceof DOMException && err.name === 'AbortError') throw err;
       setPhase('fallback_encoding');
+      diagnostics.setAudioEncoderPath(
+        format === 'webm' ? 'ffmpeg-opus' : 'ffmpeg-aac',
+        err instanceof Error ? err.message : 'hardware_audio_fallback',
+      );
       // 回退前清理摄像头解码资源 + 复位标志（ffmpeg 路径用 overlay 自己处理摄像头）
       try { cameraSource?.close(); } catch { /* */ }
       cursorAnalyzer?.close();
@@ -1414,10 +1438,11 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   }
 
   let audioFile: string | null = null;
-  if (effectiveAudioBlob && format !== 'gif') { // GIF 无音轨
-    audioFile = 'audio.webm';
+  if (preparedAudioPromise) { // GIF 无音轨
+    audioFile = 'audio.wav';
     const audioWriteStarted = performance.now();
-    await ffmpeg.writeFile(audioFile, new Uint8Array(await effectiveAudioBlob.arrayBuffer()));
+    await ffmpeg.writeFile(audioFile, new Uint8Array(await (await preparedAudioPromise).wavBlob.arrayBuffer()));
+    diagnostics.setAudioEncoderPath(format === 'webm' ? 'ffmpeg-opus' : 'ffmpeg-aac');
     diagnostics.addBreakdown('audio_virtual_fs', performance.now() - audioWriteStarted);
   }
 
@@ -1509,23 +1534,8 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     }
   }
 
-  // 音频裁剪：按保留段 atrim + asetpts 归零，再 concat 拼成连续音轨 [aout]。
+  // 音频已在统一 PCM 时间线中完成裁剪与重排，ffmpeg 只负责编码。
   let audioOutLabel: string | null = null;
-  if (audioIdx !== null && trimmed) {
-    const aLabels: string[] = [];
-    kept.forEach((seg, i) => {
-      const s0 = (seg.start / 1000).toFixed(3);
-      const s1 = (seg.end / 1000).toFixed(3);
-      filterParts.push(`[${audioIdx}:a]atrim=start=${s0}:end=${s1},asetpts=PTS-STARTPTS[a${i}]`);
-      aLabels.push(`[a${i}]`);
-    });
-    if (aLabels.length === 1) {
-      audioOutLabel = aLabels[0];
-    } else {
-      filterParts.push(`${aLabels.join('')}concat=n=${aLabels.length}:v=0:a=1[aout]`);
-      audioOutLabel = '[aout]';
-    }
-  }
 
   const filter: string[] = [];
   const haveVideoFilter = curLabel !== '[0:v]';
@@ -1561,13 +1571,13 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     outMime = 'image/gif';
   } else if (format === 'webm') {
     codec = useSegmentedFrames ? ['-c:v', 'copy'] : softwareVideoCodec;
-    audioCodec = audioFile ? ['-c:a', 'libopus', '-shortest'] : [];
+    audioCodec = audioFile ? ['-c:a', 'libopus', '-ar', String(EXPORT_AUDIO_SAMPLE_RATE), '-ac', '1', '-shortest'] : [];
     outName = 'output.webm';
     outMime = 'video/webm';
   } else {
     // 分段已按最终质量编码，最终仅拼接视频流，避免二次有损编码。
     codec = useSegmentedFrames ? ['-c:v', 'copy'] : softwareVideoCodec;
-    audioCodec = audioFile ? ['-c:a', 'aac', '-shortest'] : [];
+    audioCodec = audioFile ? ['-c:a', 'aac', '-ar', String(EXPORT_AUDIO_SAMPLE_RATE), '-ac', '1', '-b:a', String(EXPORT_AUDIO_BITRATE), '-shortest'] : [];
     outName = 'output.mp4';
     outMime = 'video/mp4';
   }

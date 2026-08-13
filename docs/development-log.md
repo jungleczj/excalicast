@@ -261,3 +261,33 @@
 - Type checking passed.
 - MP4 timestamp writer, real mp4-muxer regression, exact task retention, and clip sequence domain tests passed.
 - Focused Chromium E2E passed for persistent clip drag reorder and responsive two-row toolbar layout.
+
+## 2026-08-13 - Unified continuous export audio timeline
+
+### Baseline
+
+- Mandatory pre-change checkpoint: `f1d3a48` (`chore: checkpoint before audio continuity fixes`).
+- Worktree: `/Users/chenzhijiang/.codex/worktrees/53c2/pro`.
+- Branch: `codex/recovered-53c2`.
+
+### Product behavior
+
+- Original microphone audio, noise-reduced audio, repaired voice, and English dubbing now enter one 48 kHz mono PCM export contract.
+- New microphone recordings request 48 kHz mono Opus at 128 kbps while retaining the browser-granted sample rate and channel count for diagnosis.
+- MP4 audio is encoded as 48 kHz mono AAC-LC at 160 kbps in both WebCodecs and ffmpeg paths.
+- Timeline cuts and reordered clips are applied once at PCM sample boundaries. Intentional microphone mute and dubbing silence remain intact.
+- Localized speech chunks receive a 5ms edge fade to suppress splice clicks without changing their scheduled duration.
+
+### Implementation
+
+- Added `prepareExportAudio()` as the only audio entry into export. Browser audio decoding performs the one required high-quality resample for legacy 16 kHz, 44.1 kHz, or 24 kHz sources.
+- WebCodecs and ffmpeg consume the same prepared PCM. The ffmpeg fallback no longer rereads or retrims the original WebM.
+- AAC callbacks are validated for missing, duplicate, or overlapping access units and remapped to a cumulative 1024-sample clock before MP4 muxing.
+- Derived processing must preserve every decoded sample; empty, silent, non-finite, clipped, or sample-short output cannot become a ready track.
+- Export diagnostics now record source track, source kind, sample count, duration, peak, invalid samples, encoder path, and fallback reason.
+- Cloud import preserves optional microphone source diagnostics while remaining compatible with legacy recordings.
+
+### Verification
+
+- Audio domain and dubbing regression suites cover callback reordering, missing AAC frames, source-kind parity, silence retention, clipping rejection, clip reordering, and dubbing edge fades.
+- Type checking and production build are required before the feature commit.

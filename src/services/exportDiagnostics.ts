@@ -1,6 +1,8 @@
 import type {
   ExportDecoderPath,
   ExportDiagnosticReport,
+  ExportAudioDiagnostics,
+  ExportAudioEncoderPath,
   ExportEncoderPath,
   ExportProgressDetails,
 } from '@/types/exportDiagnostics';
@@ -42,6 +44,7 @@ export function createExportDiagnostics(options: CreateOptions) {
   let media = structuredClone(EMPTY_MEDIA);
   const stageDurationsMs: Record<string, number> = {};
   const breakdownMs: Record<string, number> = {};
+  let audio: ExportAudioDiagnostics | undefined;
 
   const sampleHeap = () => {
     const current = heapBytes();
@@ -86,6 +89,11 @@ export function createExportDiagnostics(options: CreateOptions) {
     },
     setProgress(next: number) { ratio = Math.max(0, Math.min(1, next)); },
     setEncoderPath(next: ExportEncoderPath) { encoderPath = next; },
+    setAudio(next: ExportAudioDiagnostics) { audio = { ...next }; },
+    setAudioEncoderPath(next: ExportAudioEncoderPath, fallbackReason?: string) {
+      if (!audio) return;
+      audio = { ...audio, encoderPath: next, ...(fallbackReason ? { fallbackReason } : {}) };
+    },
     setDecoderPath(track: 'screen' | 'camera', path: ExportDecoderPath) {
       if (track === 'screen') {
         decoderPaths.screen = path;
@@ -113,6 +121,7 @@ export function createExportDiagnostics(options: CreateOptions) {
         stageDurationsMs: { ...stageDurationsMs },
         media,
         breakdownMs: { ...breakdownMs },
+        ...(audio ? { audio: { ...audio } } : {}),
       };
     },
   };

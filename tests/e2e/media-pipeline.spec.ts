@@ -1,5 +1,14 @@
 import { expect, test } from '@playwright/test';
 import { ArrayBufferTarget, Muxer } from 'mp4-muxer';
+import {
+  EXPORT_AUDIO_BITRATE,
+  EXPORT_AUDIO_SAMPLE_RATE,
+  buildExportMonoPcm,
+  createContinuousAacTimeline,
+  encodeFloat32Wav,
+  validateProcessedAudioFrameCount,
+} from '@/services/exportAudio';
+import { AUDIO_RECORDING_BITS_PER_SECOND, MIC_CONSTRAINTS, buildAudioSourceInfo } from '@/services/audioRecorder';
 import { LatestTaskRunner } from '@/lib/latestTaskRunner';
 import { buildPrivateMediaPath, parseMediaSubmitPayload } from '@/lib/privateMedia';
 import {
@@ -410,12 +419,123 @@ test('MP4 audio chunks are sorted before muxing when AAC callbacks arrive out of
     },
   });
 
-  for (const timestamp of [0, 21_333, 42_667, 405_333, 362_667, 384_000, 426_667]) {
+  for (const timestamp of [0, 21_333, 42_667, 85_333, 64_000, 106_667]) {
     buffer.push({ timestamp }, undefined);
   }
 
   expect(() => buffer.flush()).not.toThrow();
-  expect(writes).toEqual([0, 21_333, 42_667, 362_667, 384_000, 405_333, 426_667]);
+  expect(writes).toEqual([0, 21_333, 42_667, 64_000, 85_333, 106_667]);
+});
+
+test('new microphone recordings request 48 kHz mono Opus at 128 kbps', () => {
+  const audio = MIC_CONSTRAINTS.audio as MediaTrackConstraints;
+  expect(audio.sampleRate).toEqual({ ideal: 48_000 });
+  expect(audio.channelCount).toEqual({ ideal: 1 });
+  expect(AUDIO_RECORDING_BITS_PER_SECOND).toBe(128_000);
+});
+
+test('recordings retain the microphone settings actually granted by the browser', () => {
+  expect(buildAudioSourceInfo({ sampleRate: 44_100, channelCount: 2 }, 'audio/webm;codecs=opus')).toEqual({
+    sampleRate: 44_100,
+    channelCount: 2,
+    mimeType: 'audio/webm;codecs=opus',
+    bitsPerSecond: 128_000,
+  });
+});
+
+test('export audio uses a continuous 48 kHz AAC sample clock after callback reordering', () => {
+  expect(EXPORT_AUDIO_SAMPLE_RATE).toBe(48_000);
+  expect(EXPORT_AUDIO_BITRATE).toBe(160_000);
+  const frameDurationUs = 1_024 / EXPORT_AUDIO_SAMPLE_RATE * 1_000_000;
+  const timeline = createContinuousAacTimeline([
+    { timestamp: Math.round(frameDurationUs * 2), duration: Math.round(frameDurationUs) },
+    { timestamp: 0, duration: Math.round(frameDurationUs) },
+    { timestamp: Math.round(frameDurationUs), duration: Math.round(frameDurationUs) },
+  ]);
+
+  expect(timeline.timestamps).toEqual([0, 21_333, 42_667]);
+  expect(timeline.diagnostics).toMatchObject({ duplicateFrames: 0, missingFrames: 0 });
+});
+
+test('export audio rejects missing AAC frames instead of muxing a stuttering track', () => {
+  expect(() => createContinuousAacTimeline([
+    { timestamp: 0, duration: 21_333 },
+    { timestamp: 42_667, duration: 21_333 },
+  ])).toThrow('aac_audio_timeline_discontinuous');
+});
+
+test('derived audio processing must preserve every decoded PCM frame', () => {
+  expect(() => validateProcessedAudioFrameCount(96_000, 96_000, 0)).not.toThrow();
+  expect(() => validateProcessedAudioFrameCount(96_000, 95_999, 0)).toThrow('processed_audio_frame_count_mismatch');
+});
+
+test('unprocessed 48 kHz mono audio remains sample-identical before export encoding', () => {
+  const source = Float32Array.from([0, 0.25, -0.5, 0.75, -1, 0.125]);
+  const prepared = buildExportMonoPcm({
+    channels: [source],
+    sampleRate: EXPORT_AUDIO_SAMPLE_RATE,
+    durationMs: source.length / EXPORT_AUDIO_SAMPLE_RATE * 1_000,
+  });
+  expect([...prepared.samples]).toEqual([...source]);
+  expect(prepared.diagnostics).toMatchObject({ nonFiniteSamples: 0, sourceFrames: 6, outputFrames: 6 });
+});
+
+test('every audio source kind enters the same continuous export PCM contract', () => {
+  const samples = Float32Array.from({ length: 4_800 }, (_value, index) => (
+    index >= 1_600 && index < 3_200 ? 0 : Math.sin(index / 17) * 0.4
+  ));
+  for (const sourceKind of ['original', 'enhanced', 'repair', 'dubbing'] as const) {
+    const prepared = buildExportMonoPcm({
+      channels: [samples],
+      sampleRate: EXPORT_AUDIO_SAMPLE_RATE,
+      durationMs: 100,
+      sourceKind,
+      sourceTrackId: `${sourceKind}-track`,
+    });
+    expect(prepared.sourceKind).toBe(sourceKind);
+    expect(prepared.sourceTrackId).toBe(`${sourceKind}-track`);
+    expect(prepared.totalFrames).toBe(samples.length);
+    expect(prepared.samples.slice(1_600, 3_200).every((sample) => sample === 0)).toBe(true);
+  }
+});
+
+test('export PCM rejects clipped or non-finite derived tracks instead of delivering distortion', () => {
+  expect(() => buildExportMonoPcm({
+    channels: [Float32Array.from([0, 1.01, 0])],
+    sampleRate: EXPORT_AUDIO_SAMPLE_RATE,
+    durationMs: 1,
+  })).toThrow('export_audio_clipped_samples');
+  expect(() => buildExportMonoPcm({
+    channels: [Float32Array.from([0, Number.NaN, 0])],
+    sampleRate: EXPORT_AUDIO_SAMPLE_RATE,
+    durationMs: 1,
+  })).toThrow('export_audio_non_finite_samples');
+});
+
+test('export PCM downmixes without gain and preserves exact reordered segment duration', () => {
+  const left = Float32Array.from({ length: 480 }, (_value, index) => index / 480);
+  const right = Float32Array.from({ length: 480 }, (_value, index) => -index / 480);
+  const prepared = buildExportMonoPcm({
+    channels: [left, right],
+    sampleRate: EXPORT_AUDIO_SAMPLE_RATE,
+    durationMs: 10,
+    segments: [{ start: 5, end: 10 }, { start: 0, end: 5 }],
+    crossfadeMs: 0,
+  });
+  expect(prepared.samples).toHaveLength(480);
+  expect(prepared.samples.every((sample) => Math.abs(sample) < 1e-7)).toBe(true);
+});
+
+test('ffmpeg compatibility audio is a 48 kHz mono float WAV', () => {
+  const blob = encodeFloat32Wav(Float32Array.from([0, 0.5, -0.5]), EXPORT_AUDIO_SAMPLE_RATE);
+  expect(blob.type).toBe('audio/wav');
+  return blob.arrayBuffer().then((buffer) => {
+    const view = new DataView(buffer);
+    expect(view.getUint16(20, true)).toBe(3);
+    expect(view.getUint16(22, true)).toBe(1);
+    expect(view.getUint32(24, true)).toBe(48_000);
+    expect(view.getUint16(34, true)).toBe(32);
+  });
 });
 
 test('edited clip sequence preserves split boundaries and user-defined playback order', () => {
@@ -940,6 +1060,19 @@ test('export diagnostics reports stage timing, frame throughput, and remaining t
     wallClock: () => 1_000,
   });
   diagnostics.setEncoderPath('webcodecs-h264');
+  diagnostics.setAudio({
+    sourceKind: 'repair',
+    sourceTrackId: 'repair-1',
+    sampleRate: 48_000,
+    channels: 1,
+    totalFrames: 144_000,
+    durationMs: 3_000,
+    peak: 0.82,
+    clippedSamples: 0,
+    nonFiniteSamples: 0,
+    encoderPath: 'pending',
+  });
+  diagnostics.setAudioEncoderPath('webcodecs-aac');
   diagnostics.setPhase('loading_media');
   now = 100;
   diagnostics.setPhase('rendering_frames');
@@ -959,6 +1092,12 @@ test('export diagnostics reports stage timing, frame throughput, and remaining t
   expect(report.stageDurationsMs.loading_media).toBe(100);
   expect(report.stageDurationsMs.rendering_frames).toBe(1_000);
   expect(report.elapsedMs).toBe(1_100);
+  expect(report.audio).toMatchObject({
+    sourceKind: 'repair',
+    sampleRate: 48_000,
+    totalFrames: 144_000,
+    encoderPath: 'webcodecs-aac',
+  });
 });
 
 test('software export batches bound JPEG residency without dropping tail frames', () => {

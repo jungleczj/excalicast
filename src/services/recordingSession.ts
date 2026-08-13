@@ -117,7 +117,12 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
   let audio: AudioRecorderHandle | null = null;
   try { audio = await startAudioRecorder(recordingId, opts.audioStream); } catch { audio = null; }
   const hasAudio = audio !== null;
-  if (hasAudio) await db.recordings.update(recordingId, { hasAudio: true });
+  if (audio) {
+    await db.recordings.update(recordingId, {
+      hasAudio: true,
+      audioSourceInfo: audio.sourceInfo,
+    });
+  }
 
   let camera: CameraHandle | null = null;
   if (opts.withCamera) {

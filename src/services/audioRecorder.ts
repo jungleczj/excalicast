@@ -3,8 +3,10 @@
 import { getClientDb } from '@/lib/db-client';
 import { ChunkWriteBatcher } from '@/services/mediaRecorderHealth';
 import { stopMediaRecorderSafely } from '@/services/mediaRecorderStop';
+import type { AudioSourceInfo } from '@/types/recording';
 
 const RECORDER_TIMESLICE_MS = 250;
+export const AUDIO_RECORDING_BITS_PER_SECOND = 128_000;
 
 export interface AudioRecorderHandle {
   /** 麦克风 MediaStream —— 给上层做软静音（track.enabled toggle）用。 */
@@ -13,24 +15,52 @@ export interface AudioRecorderHandle {
   pause: () => void;
   resume: () => void;
   getMimeType: () => string;
+  sourceInfo: AudioSourceInfo;
 }
 
-/** 语音场景标准麦克风约束（16kHz 单声道 + 回声/降噪）。 */
+/** 语音场景标准麦克风约束（48kHz 单声道 + 回声/降噪）。 */
 export const MIC_CONSTRAINTS: MediaStreamConstraints = {
   audio: {
     echoCancellation: true,
     noiseSuppression: true,
-    sampleRate: 16000,
-    channelCount: 1,
+    sampleRate: { ideal: 48_000 },
+    channelCount: { ideal: 1 },
   },
 };
+
+const FALLBACK_MIC_CONSTRAINTS: MediaStreamConstraints = {
+  audio: {
+    echoCancellation: true,
+    noiseSuppression: true,
+    channelCount: { ideal: 1 },
+  },
+};
+
+export function buildAudioSourceInfo(
+  settings: MediaTrackSettings,
+  mimeType: string,
+  bitsPerSecond = AUDIO_RECORDING_BITS_PER_SECOND,
+): AudioSourceInfo {
+  return {
+    ...(typeof settings.sampleRate === 'number' ? { sampleRate: settings.sampleRate } : {}),
+    ...(typeof settings.channelCount === 'number' ? { channelCount: settings.channelCount } : {}),
+    mimeType,
+    bitsPerSecond,
+  };
+}
 
 /** 预先获取麦克风流（取景阶段用，供后续 startAudioRecorder 复用）。失败返回 null。 */
 export async function acquireMicStream(): Promise<MediaStream | null> {
   try {
     return await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
-  } catch {
-    return null;
+  } catch (error) {
+    const errorName = error instanceof DOMException ? error.name : '';
+    if (errorName !== 'OverconstrainedError' && !(error instanceof TypeError)) return null;
+    try {
+      return await navigator.mediaDevices.getUserMedia(FALLBACK_MIC_CONSTRAINTS);
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -45,7 +75,12 @@ export async function startAudioRecorder(
   const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
     ? 'audio/webm;codecs=opus'
     : 'audio/webm';
-  const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 32000 });
+  const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: AUDIO_RECORDING_BITS_PER_SECOND });
+  const sourceInfo = buildAudioSourceInfo(
+    stream.getAudioTracks()[0]?.getSettings?.() ?? {},
+    recorder.mimeType || mimeType,
+    recorder.audioBitsPerSecond || AUDIO_RECORDING_BITS_PER_SECOND,
+  );
 
   let chunkIndex = 0;
   let stopping = false;
@@ -74,6 +109,7 @@ export async function startAudioRecorder(
 
   return {
     stream,
+    sourceInfo,
     async stop() {
       stopping = true;
       await stopMediaRecorderSafely(recorder);

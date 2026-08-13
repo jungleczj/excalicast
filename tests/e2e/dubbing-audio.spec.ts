@@ -74,6 +74,20 @@ test('dubbed wav keeps audible speech at each subtitle position', () => {
   expect(Array.from(parsed.samples.slice(lateStart, lateEnd)).some((sample) => Math.abs(sample) > 1_000)).toBe(true);
 });
 
+test('dubbed speech chunks use short edge fades without changing timeline length', () => {
+  const output = assembleTimedPcm16Wav([{ startMs: 250, wav: makeToneWav(900) }], 1_500);
+  const parsed = parsePcm16Wav(output);
+  const start = Math.round(parsed.sampleRate * 0.25) * parsed.channels;
+  const middleStart = Math.round(parsed.sampleRate * 0.45) * parsed.channels;
+  const middleEnd = Math.round(parsed.sampleRate * 0.55) * parsed.channels;
+  const end = Math.round(parsed.sampleRate * 1.15) * parsed.channels - 1;
+
+  expect(parsed.durationMs).toBe(1_500);
+  expect(Math.abs(parsed.samples[start])).toBeLessThanOrEqual(1);
+  expect(Math.max(...parsed.samples.slice(middleStart, middleEnd).map(Math.abs))).toBeGreaterThan(1_000);
+  expect(Math.abs(parsed.samples[end])).toBeLessThan(200);
+});
+
 test('localhost uses real media jobs unless mocks are explicitly enabled', () => {
   expect(shouldUseMediaJobMocks(undefined)).toBe(false);
   expect(shouldUseMediaJobMocks('0')).toBe(false);

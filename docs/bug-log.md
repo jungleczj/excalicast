@@ -28,6 +28,39 @@ A chapter drawer could appear near the start of a broad chapter range and immedi
 
 - Fixed and verified locally.
 
+## 2026-08-13 - Exported MP4 audio stuttered while preview audio was smooth
+
+### Symptom
+
+Original unprocessed recordings sounded continuous in the editor, but exported H.264 MP4 files could contain periodic cuts, timestamp errors, or audible splice artifacts. Selecting denoise, repair, or dubbing could use a different timing path.
+
+### Root cause
+
+- Microphone capture was constrained to 16 kHz at only 32 kbps, then decoded and resampled independently by different exporters.
+- WebCodecs AAC callbacks were sorted and forced forward without proving that every encoded access unit existed.
+- ffmpeg fallback reread the original compressed track and independently applied trim filters, so it did not share the WebCodecs timeline.
+- Derived-track validation allowed roughly one second or two percent of duration drift, permitting missing samples to be saved as ready.
+- Timed dubbing chunks were inserted with hard waveform edges.
+
+### Fix
+
+- Build one continuous 48 kHz mono PCM timeline and feed that exact data to both WebCodecs and ffmpeg.
+- Generate AAC mux timestamps from cumulative sample count and reject missing, duplicate, or overlapping frames.
+- Require exact input/output sample conservation for noise reduction and voice repair.
+- Preserve deliberate silence and add only short fades at artificial edit or dubbing boundaries.
+- Record the actual browser capture format and full audio continuity diagnostics.
+
+### Regression coverage
+
+- Reordered AAC callbacks are accepted only when the complete sample sequence is present; missing frames fail export.
+- Original, enhanced, repaired, and dubbed tracks pass the same sample-clock contract.
+- Unprocessed PCM is sample-identical before encoding, and clipped/non-finite derived tracks are rejected.
+- Dubbing edge fades preserve the complete scheduled duration and late-timeline speech.
+
+### Status
+
+- Fixed locally; full production verification is recorded with the implementation commit.
+
 ## 2026-08-11 - Export tasks distorted the toolbar and stopped with panel lifecycle
 
 ### Symptom
