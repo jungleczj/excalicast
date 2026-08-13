@@ -281,6 +281,7 @@
 ### Implementation
 
 - Added `prepareExportAudio()` as the only audio entry into export. Browser audio decoding performs the one required high-quality resample for legacy 16 kHz, 44.1 kHz, or 24 kHz sources.
+- Legacy recordings that enter noise reduction or voice repair use a bounded, stateful cubic resampler; chunk boundaries retain interpolation context and cannot reset the waveform.
 - WebCodecs and ffmpeg consume the same prepared PCM. The ffmpeg fallback no longer rereads or retrims the original WebM.
 - AAC callbacks are validated for missing, duplicate, or overlapping access units and remapped to a cumulative 1024-sample clock before MP4 muxing.
 - Derived processing must preserve every decoded sample; empty, silent, non-finite, clipped, or sample-short output cannot become a ready track.

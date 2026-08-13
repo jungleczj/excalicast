@@ -51,7 +51,7 @@ import {
 } from '@/services/keyPointMotion';
 import { buildKeyPointMotionPrompt } from '@/services/keyPointMotionPrompt';
 import { parseKeyPointMotionResponse } from '@/services/keyPointMotionSchema';
-import { resolveEnhancedAudioSelection } from '@/services/audioEnhancement';
+import { StreamingCubicResampler, resolveEnhancedAudioSelection } from '@/services/audioEnhancement';
 import { projectHighlightAperture } from '@/services/editorEffectsRenderer';
 import { assembleTimedPcm16Wav, hasAudiblePcm16Audio, parsePcm16Wav } from '@/lib/dubbingAudio';
 import { moveSegment, normalizeSegmentSequence, outputToSource, sourceToOutput } from '@/utils/segments';
@@ -467,6 +467,32 @@ test('export audio rejects missing AAC frames instead of muxing a stuttering tra
 test('derived audio processing must preserve every decoded PCM frame', () => {
   expect(() => validateProcessedAudioFrameCount(96_000, 96_000, 0)).not.toThrow();
   expect(() => validateProcessedAudioFrameCount(96_000, 95_999, 0)).toThrow('processed_audio_frame_count_mismatch');
+});
+
+test('legacy 16 kHz audio uses a stateful cubic resampler without chunk-boundary discontinuities', () => {
+  const source = Float32Array.from({ length: 1_600 }, (_value, index) => (
+    Math.sin(index / 16_000 * Math.PI * 2 * 997) * 0.45
+  ));
+  const collect = (parts: Float32Array[]) => {
+    const output = new Float32Array(parts.reduce((sum, part) => sum + part.length, 0));
+    let offset = 0;
+    for (const part of parts) { output.set(part, offset); offset += part.length; }
+    return output;
+  };
+
+  const whole = new StreamingCubicResampler(16_000, 48_000);
+  const expected = collect([whole.push(source), whole.flush()]);
+  const chunked = new StreamingCubicResampler(16_000, 48_000);
+  const actual = collect([
+    chunked.push(source.slice(0, 317)),
+    chunked.push(source.slice(317, 901)),
+    chunked.push(source.slice(901)),
+    chunked.flush(),
+  ]);
+
+  expect(actual).toHaveLength(4_800);
+  expect(actual).toEqual(expected);
+  expect(Math.max(...actual.map(Math.abs))).toBeGreaterThan(0.4);
 });
 
 test('unprocessed 48 kHz mono audio remains sample-identical before export encoding', () => {

@@ -57,40 +57,81 @@ interface EnhanceOptions {
   onProgress?: (phase: 'decoding' | 'loading_model' | 'processing' | 'encoding', progress: number) => void;
 }
 
-interface ResamplerState {
-  sourceSampleRate: number | null;
-  inputFrames: number;
-  outputFrames: number;
-  previousSample: number;
-}
+/** Bounded, stateful resampling for legacy/derived audio. Two source frames are
+ * retained so a processing chunk boundary cannot become an audible seam. */
+export class StreamingCubicResampler {
+  private buffer = new Float32Array();
+  private bufferStart = 0;
+  private inputFrames = 0;
+  private outputFrames = 0;
+  private finalized = false;
 
-function resampleMonoChunk(
-  input: Float32Array,
-  sourceSampleRate: number,
-  targetSampleRate: number,
-  state: ResamplerState,
-): Float32Array {
-  if (state.sourceSampleRate === null) state.sourceSampleRate = sourceSampleRate;
-  if (state.sourceSampleRate !== sourceSampleRate) throw new Error('audio_sample_rate_changed');
-  if (input.length === 0) return new Float32Array();
-
-  const inputStart = state.inputFrames;
-  const inputEnd = inputStart + input.length;
-  const targetEnd = Math.round(inputEnd * targetSampleRate / sourceSampleRate);
-  const output = new Float32Array(Math.max(0, targetEnd - state.outputFrames));
-  for (let index = 0; index < output.length; index += 1) {
-    const sourcePosition = (state.outputFrames + index) * sourceSampleRate / targetSampleRate - inputStart;
-    const lowerIndex = Math.floor(sourcePosition);
-    const upperIndex = Math.ceil(sourcePosition);
-    const lower = lowerIndex < 0 ? state.previousSample : input[Math.min(input.length - 1, lowerIndex)];
-    const upper = upperIndex < 0 ? state.previousSample : input[Math.min(input.length - 1, upperIndex)];
-    const fraction = sourcePosition - lowerIndex;
-    output[index] = lower + (upper - lower) * fraction;
+  constructor(
+    private readonly sourceSampleRate: number,
+    private readonly targetSampleRate: number,
+  ) {
+    if (sourceSampleRate <= 0 || targetSampleRate <= 0) throw new Error('invalid_audio_sample_rate');
   }
-  state.inputFrames = inputEnd;
-  state.outputFrames = targetEnd;
-  state.previousSample = input[input.length - 1];
-  return output;
+
+  push(input: Float32Array): Float32Array {
+    if (this.finalized) throw new Error('audio_resampler_finalized');
+    if (input.length === 0) return new Float32Array();
+    const next = new Float32Array(this.buffer.length + input.length);
+    next.set(this.buffer);
+    next.set(input, this.buffer.length);
+    this.buffer = next;
+    this.inputFrames += input.length;
+    return this.produce(false);
+  }
+
+  flush(): Float32Array {
+    if (this.finalized) return new Float32Array();
+    this.finalized = true;
+    return this.produce(true);
+  }
+
+  private sampleAt(index: number): number {
+    const clamped = Math.max(0, Math.min(this.inputFrames - 1, index));
+    const local = clamped - this.bufferStart;
+    return this.buffer[Math.max(0, Math.min(this.buffer.length - 1, local))] ?? 0;
+  }
+
+  private produce(final: boolean): Float32Array {
+    const limit = final
+      ? Math.round(this.inputFrames * this.targetSampleRate / this.sourceSampleRate)
+      : Math.max(this.outputFrames, Math.ceil(
+          Math.max(0, this.inputFrames - 2) * this.targetSampleRate / this.sourceSampleRate,
+        ));
+    const output = new Float32Array(Math.max(0, limit - this.outputFrames));
+    const firstOutputFrame = this.outputFrames;
+    for (let offset = 0; offset < output.length; offset += 1) {
+      const sourcePosition = (firstOutputFrame + offset) * this.sourceSampleRate / this.targetSampleRate;
+      const base = Math.floor(sourcePosition);
+      const fraction = sourcePosition - base;
+      const p0 = this.sampleAt(base - 1);
+      const p1 = this.sampleAt(base);
+      const p2 = this.sampleAt(base + 1);
+      const p3 = this.sampleAt(base + 2);
+      const f2 = fraction * fraction;
+      const f3 = f2 * fraction;
+      output[offset] = 0.5 * (
+        2 * p1
+        + (-p0 + p2) * fraction
+        + (2 * p0 - 5 * p1 + 4 * p2 - p3) * f2
+        + (-p0 + 3 * p1 - 3 * p2 + p3) * f3
+      );
+    }
+    this.outputFrames = limit;
+
+    const nextSourcePosition = this.outputFrames * this.sourceSampleRate / this.targetSampleRate;
+    const keepFrom = Math.max(0, Math.floor(nextSourcePosition) - 1);
+    const discard = Math.max(0, Math.min(this.buffer.length, keepFrom - this.bufferStart));
+    if (discard > 0) {
+      this.buffer = this.buffer.slice(discard);
+      this.bufferStart += discard;
+    }
+    return output;
+  }
 }
 
 async function* decodeMonoChunks(options: EnhanceOptions, targetSampleRate: number): AsyncGenerator<Float32Array> {
@@ -102,11 +143,23 @@ async function* decodeMonoChunks(options: EnhanceOptions, targetSampleRate: numb
   const chunkSamples = Math.max(480, Math.round(targetSampleRate * 2 / 480) * 480);
   let pending = new Float32Array(chunkSamples);
   let pendingLength = 0;
-  const resampler: ResamplerState = {
-    sourceSampleRate: null,
-    inputFrames: 0,
-    outputFrames: 0,
-    previousSample: 0,
+  let resampler: StreamingCubicResampler | null = null;
+  let sourceSampleRate: number | null = null;
+  const appendResampled = (resampled: Float32Array): Float32Array[] => {
+    const completed: Float32Array[] = [];
+    let offset = 0;
+    while (offset < resampled.length) {
+      const copyLength = Math.min(pending.length - pendingLength, resampled.length - offset);
+      pending.set(resampled.subarray(offset, offset + copyLength), pendingLength);
+      pendingLength += copyLength;
+      offset += copyLength;
+      if (pendingLength === pending.length) {
+        completed.push(pending);
+        pending = new Float32Array(chunkSamples);
+        pendingLength = 0;
+      }
+    }
+    return completed;
   };
   try {
     const track = await input.getPrimaryAudioTrack();
@@ -121,23 +174,19 @@ async function* decodeMonoChunks(options: EnhanceOptions, targetSampleRate: numb
           sample.copyTo(plane, { planeIndex: channel, format: 'f32-planar' });
           for (let index = 0; index < mono.length; index += 1) mono[index] += plane[index] / sample.numberOfChannels;
         }
-        const resampled = resampleMonoChunk(mono, sample.sampleRate, targetSampleRate, resampler);
-        let offset = 0;
-        while (offset < resampled.length) {
-          const copyLength = Math.min(pending.length - pendingLength, resampled.length - offset);
-          pending.set(resampled.subarray(offset, offset + copyLength), pendingLength);
-          pendingLength += copyLength;
-          offset += copyLength;
-          if (pendingLength === pending.length) {
-            yield pending;
-            pending = new Float32Array(chunkSamples);
-            pendingLength = 0;
-          }
+        if (!resampler) {
+          sourceSampleRate = sample.sampleRate;
+          resampler = new StreamingCubicResampler(sample.sampleRate, targetSampleRate);
         }
+        if (sample.sampleRate !== sourceSampleRate) throw new Error('audio_sample_rate_changed');
+        for (const completed of appendResampled(resampler.push(mono))) yield completed;
         options.onProgress?.('decoding', Math.max(0.02, Math.min(0.94, sample.timestamp * 1000 / Math.max(1, options.durationMs))));
       } finally {
         sample.close();
       }
+    }
+    if (resampler) {
+      for (const completed of appendResampled(resampler.flush())) yield completed;
     }
     if (pendingLength > 0) yield pending.slice(0, pendingLength);
   } finally {

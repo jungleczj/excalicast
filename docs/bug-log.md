@@ -47,6 +47,7 @@ Original unprocessed recordings sounded continuous in the editor, but exported H
 - Build one continuous 48 kHz mono PCM timeline and feed that exact data to both WebCodecs and ffmpeg.
 - Generate AAC mux timestamps from cumulative sample count and reject missing, duplicate, or overlapping frames.
 - Require exact input/output sample conservation for noise reduction and voice repair.
+- Replace the derived-track linear chunk resampler with a stateful cubic resampler that produces identical output regardless of decoder chunk boundaries.
 - Preserve deliberate silence and add only short fades at artificial edit or dubbing boundaries.
 - Record the actual browser capture format and full audio continuity diagnostics.
 
