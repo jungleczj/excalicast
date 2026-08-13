@@ -358,6 +358,38 @@ Chunking started after full-file decoding, so it bounded Worker messages but not
 
 - Fixed and verified locally.
 
+## 2026-08-13 - Recording made network activity appear unusably slow
+
+### Symptom
+
+High-quality desktop recording made unrelated web activity feel severely bandwidth constrained even though recording media was intended to remain local.
+
+### Root cause
+
+- A 4K/60 display stream can locally produce up to the existing 90 Mbps recording budget, creating continuous encoding, memory-copy, and IndexedDB write pressure in the browser process.
+- Payment polling, analytics, route prefetch, and Excalidraw hover prewarming could still start during capture and compete for CPU, disk, and network scheduling.
+- The application had no evidence boundary separating MediaRecorder byte production from actual WAN transfer, so local throughput was easily mistaken for uploaded traffic.
+- The earlier Goodall experiment also cancelled running local media tasks and synchronously awaited diagnostics during stop, which would have introduced task regressions and slower export-page navigation.
+
+### Fix
+
+- Keep all existing quality and bitrate settings unchanged.
+- Defer only noncritical, voluntary background work during capture; do not cancel active media tasks.
+- Preserve accepted recorder chunks in ordered batches and expose pending/persisted write metrics.
+- Store an aggregate local report that distinguishes actual WAN bytes from local media and IndexedDB throughput.
+- Run storage-estimate diagnostics outside the stop-to-export critical path and exclude post-recording deferred requests from the recording interval.
+
+### Regression coverage
+
+- Slow IndexedDB writes retain all chunks in order and expose high/critical pressure.
+- The resource gate is reference counted and resumes voluntary work without polling.
+- Diagnostic serialization contains aggregate bytes but no URLs or media.
+- The current 48 kHz / 128 kbps microphone quality baseline remains unchanged.
+
+### Status
+
+- Fixed and verified locally.
+
 ## 2026-08-12 - Voice repair existed as a disconnected prototype
 
 ### Symptom

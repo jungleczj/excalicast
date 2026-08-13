@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslations } from 'next-intl';
 import { I, LogoMark } from '@/components/icons';
 import { useAuth } from '@/hooks/useAuth';
@@ -8,6 +8,17 @@ import { LoginModal } from '@/components/LoginModal';
 import { LanguageToggle } from '@/components/LanguageToggle';
 import { TierBadge } from '@/components/TierBadge';
 import { Link, usePathname } from '@/i18n/navigation';
+import { recordingResourceGate } from '@/services/recordingResourceGate';
+
+const subscribeRecordingGate = (listener: () => void) => recordingResourceGate.subscribe(() => listener());
+
+function useRecordingActive(): boolean {
+  return useSyncExternalStore(
+    subscribeRecordingGate,
+    () => recordingResourceGate.snapshot().active,
+    () => false,
+  );
+}
 
 interface Props {
   tier?: 'free' | 'pro' | 'max';
@@ -15,8 +26,9 @@ interface Props {
 }
 
 export function Brand(): JSX.Element {
+  const recordingActive = useRecordingActive();
   return (
-    <Link href="/" className="flex items-center gap-2.5">
+    <Link href="/" prefetch={recordingActive ? false : undefined} className="flex items-center gap-2.5">
       <LogoMark size={28} />
       <span className="app-craft-brand-word" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18, letterSpacing: '-0.02em', color: 'var(--ink)' }}>
         Excalicast
@@ -145,9 +157,11 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
 }
 
 function NavItem({ href, active, children }: { href: string; active?: boolean; children: React.ReactNode }) {
+  const recordingActive = useRecordingActive();
   return (
     <Link
       href={href}
+      prefetch={recordingActive ? false : undefined}
       className={active ? 'is-active' : undefined}
       style={{
         position: 'relative',

@@ -5,6 +5,7 @@ import { initializePaddle, type Paddle, type CheckoutEventNames } from '@paddle/
 import type { PublicPaymentConfig } from '@/lib/paymentConfig';
 import { recordingLifecycle } from '@/services/recordingLifecycleSingleton';
 import { normalizePaddleCheckoutEvent } from '@/services/paddleClient';
+import { recordingResourceGate } from '@/services/recordingResourceGate';
 
 type PaddleEvent = { name: CheckoutEventNames; data?: unknown };
 
@@ -27,7 +28,7 @@ export function PaddleProvider({ children }: { children: ReactNode }): JSX.Eleme
     let cancelled = false;
     const locale = getPaddleLocale();
     const refreshProvider = async () => {
-      if (recordingLifecycle.activeSession()) return;
+      if (recordingResourceGate.isActive() || recordingLifecycle.activeSession()) return;
       const res = await fetch('/api/payment/provider', { cache: 'no-store' });
       if (!res.ok) throw new Error(`payment provider ${res.status}`);
       const cfg = (await res.json()) as PublicPaymentConfig;

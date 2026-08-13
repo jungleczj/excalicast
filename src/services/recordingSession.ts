@@ -9,6 +9,8 @@ import { startDisplayCaptureRecorder, type DisplayCaptureHandle } from '@/servic
 import { collectRecorderWarnings, type RecorderTrackKind } from '@/services/mediaRecorderHealth';
 import { ShellCapturer } from '@/services/workspaceShellCapture';
 import { captureCameraPlacement } from '@/services/cameraPlacement';
+import { RecordingDiagnosticSession } from '@/services/recordingDiagnostics';
+import { recordingResourceGate } from '@/services/recordingResourceGate';
 import type { LaserEvent, RecordingMetadata, RecordingSetupConfig } from '@/types/recording';
 
 /** 裁切框 viewport 矩形（viewport 像素）。摄像头位置/尺寸相对它归一。 */
@@ -114,28 +116,42 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
     ...(opts.setup ? { setup: opts.setup } : {}),
   });
 
+  // Capturing quality and cadence are untouched. The gate only lets unrelated,
+  // noncritical callers defer their own work until the recording is finalized.
+  const releaseRecordingResources = recordingResourceGate.acquire(recordingId);
+  const diagnosticSession = new RecordingDiagnosticSession(recordingId, startedAt);
+
   let audio: AudioRecorderHandle | null = null;
-  try { audio = await startAudioRecorder(recordingId, opts.audioStream); } catch { audio = null; }
-  const hasAudio = audio !== null;
-  if (audio) {
-    await db.recordings.update(recordingId, {
-      hasAudio: true,
-      audioSourceInfo: audio.sourceInfo,
-    });
-  }
-
   let camera: CameraHandle | null = null;
-  if (opts.withCamera) {
-    try { camera = await startCameraRecorder(recordingId, opts.cameraStream); } catch { camera = null; }
-  }
-  if (camera) await db.recordings.update(recordingId, { hasCamera: true });
-
   const source = opts.setup?.source ?? { kind: 'whiteboard' };
   let display: DisplayCaptureHandle | null = null;
-  if (source.kind !== 'whiteboard' && opts.displayStream) {
-    display = await startDisplayCaptureRecorder(recordingId, source, opts.displayStream);
-    await db.recordings.update(recordingId, { source });
+  try {
+    try { audio = await startAudioRecorder(recordingId, opts.audioStream); } catch { audio = null; }
+    if (audio) {
+      await db.recordings.update(recordingId, {
+        hasAudio: true,
+        audioSourceInfo: audio.sourceInfo,
+      });
+    }
+    if (opts.withCamera) {
+      try { camera = await startCameraRecorder(recordingId, opts.cameraStream); } catch { camera = null; }
+    }
+    if (camera) await db.recordings.update(recordingId, { hasCamera: true });
+    if (source.kind !== 'whiteboard' && opts.displayStream) {
+      display = await startDisplayCaptureRecorder(recordingId, source, opts.displayStream);
+      await db.recordings.update(recordingId, { source });
+    }
+  } catch (error) {
+    await Promise.allSettled([
+      audio?.stop(),
+      camera?.stop(),
+      display?.stop(),
+    ].filter((operation): operation is Promise<void> => !!operation));
+    diagnosticSession.dispose();
+    releaseRecordingResources();
+    throw error;
   }
+  const hasAudio = audio !== null;
 
   const writtenFileIds = new Set<string>();
   let lastSnapshotAt = -Infinity;
@@ -402,11 +418,12 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
       display?.resume();
     },
     async stop(finalStatus = 'done') {
-      if (paused) {
-        pausedTotal += Date.now() - pauseStartedAt;
-        paused = false;
-      }
-      const durationMs = Date.now() - startedAt - pausedTotal;
+      try {
+        if (paused) {
+          pausedTotal += Date.now() - pauseStartedAt;
+          paused = false;
+        }
+        const durationMs = Date.now() - startedAt - pausedTotal;
       // Call every MediaRecorder.stop() before the first await. The detached
       // controller may close immediately after this method returns its promise;
       // delaying stop behind IndexedDB work can otherwise lose the final chunk.
@@ -448,9 +465,21 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
         status: finalStatus === 'done' && warnings.length > 0 ? 'interrupted' : finalStatus,
         warnings,
       });
-      const meta = await db.recordings.get(recordingId);
-      if (!meta) throw new Error('recording_lost_after_stop');
-      return meta;
+        const meta = await db.recordings.get(recordingId);
+        if (!meta) throw new Error('recording_lost_after_stop');
+        return meta;
+      } finally {
+        const tracks = {
+          ...(audio ? { audio: audio.diagnostics() } : {}),
+          ...(camera ? { camera: camera.diagnostics() } : {}),
+          ...(display ? { screen: display.diagnostics() } : {}),
+        };
+        // Storage estimation can be slow on a busy profile. It is diagnostic
+        // only and must never delay navigation to the export editor.
+        const diagnosticFinalization = diagnosticSession.finish(tracks);
+        releaseRecordingResources();
+        void diagnosticFinalization.catch(() => diagnosticSession.dispose());
+      }
     },
   };
 }

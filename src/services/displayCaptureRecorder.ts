@@ -1,7 +1,7 @@
 'use client';
 
 import { getClientDb } from '@/lib/db-client';
-import { ChunkWriteBatcher } from '@/services/mediaRecorderHealth';
+import { ChunkWriteBatcher, type ChunkWriteMetrics } from '@/services/mediaRecorderHealth';
 import { stopMediaRecorderSafely } from '@/services/mediaRecorderStop';
 import type { RecordingSourceConfig, RecordingSourceKind, SourceCropWindow } from '@/types/recording';
 
@@ -13,6 +13,7 @@ export interface DisplayCaptureHandle {
   stop: () => Promise<void>;
   pause: () => void;
   resume: () => void;
+  diagnostics: () => ChunkWriteMetrics;
 }
 
 function mimeType(): string {
@@ -288,5 +289,6 @@ export async function startDisplayCaptureRecorder(
       catch { throw new Error('screen_chunk_write_failed'); }
       if (endedUnexpectedly) throw new Error('screen_track_ended');
     },
+    diagnostics: () => chunkWriter.metrics(),
   };
 }

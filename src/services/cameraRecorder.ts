@@ -1,7 +1,7 @@
 'use client';
 
 import { getClientDb } from '@/lib/db-client';
-import { ChunkWriteBatcher } from '@/services/mediaRecorderHealth';
+import { ChunkWriteBatcher, type ChunkWriteMetrics } from '@/services/mediaRecorderHealth';
 import { stopMediaRecorderSafely } from '@/services/mediaRecorderStop';
 
 const RECORDER_TIMESLICE_MS = 250;
@@ -24,6 +24,7 @@ export interface CameraHandle {
    */
   setMuted: (muted: boolean) => Promise<void>;
   getMimeType: () => string;
+  diagnostics: () => ChunkWriteMetrics;
 }
 
 function pickMimeType(): string {
@@ -135,5 +136,6 @@ export async function startCameraRecorder(
       }
     },
     getMimeType() { return mimeType; },
+    diagnostics() { return chunkWriter.metrics(); },
   };
 }

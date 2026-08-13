@@ -288,6 +288,35 @@
 - Export diagnostics now record source track, source kind, sample count, duration, peak, invalid samples, encoder path, and fallback reason.
 - Cloud import preserves optional microphone source diagnostics while remaining compatible with legacy recordings.
 
+## 2026-08-13 - Recording resource isolation and local diagnostics
+
+### Baseline
+
+- Mandatory pre-change checkpoint: `50d7f1d` (`chore: checkpoint before goodall fix`).
+- Worktree: `/Users/chenzhijiang/.codex/worktrees/53c2/pro`.
+- Branch: `codex/recovered-53c2`.
+
+### Product behavior
+
+- Active recording now owns an explicit resource-gate lease without changing capture resolution, frame rate, video bitrate, microphone sample rate, or audio bitrate.
+- Analytics delivery, Paddle background refresh, route prefetch, and heavy whiteboard hover prewarming voluntarily defer while capture is active.
+- Existing exports, ChatCut, noise reduction, dubbing, and other media tasks are never aborted or restarted when recording begins.
+- Each completed recording stores a local-only diagnostic summary of true same-origin/WAN transfer bytes, long tasks, IndexedDB write backlog, write latency, persisted bytes, and storage growth.
+
+### Implementation
+
+- Added a reference-counted `RecordingResourceGate`; it exposes state and idle notification but has no authority to throttle MediaRecorder or cancel tasks.
+- Extended `ChunkWriteBatcher` with an ordered pending-batch drain and pressure metrics. Every accepted chunk is retained until its IndexedDB transaction succeeds or reports a final failure.
+- Audio, camera, and display recorder handles expose read-only write diagnostics.
+- Recording finalization snapshots Resource Timing synchronously, releases deferred work, and saves storage diagnostics in the background so export-page navigation is not delayed.
+- Diagnostic reports aggregate byte counts only and never persist request URLs, media blobs, or personal identifiers.
+
+### Verification
+
+- Type checking passed.
+- Focused resource, write-backpressure, quality-baseline, and recording-lifecycle tests passed.
+- Production build is required before the feature commit.
+
 ### Verification
 
 - Audio domain and dubbing regression suites cover callback reordering, missing AAC frames, source-kind parity, silence retention, clipping rejection, clip reordering, and dubbing edge fades.

@@ -4,6 +4,7 @@ import { useRef, type ComponentProps, type MouseEvent } from 'react';
 import { Link } from '@/i18n/navigation';
 import { trackEvent } from '@/lib/analytics/track';
 import type { KnownEvent } from '@/lib/analytics/events';
+import { recordingResourceGate } from '@/services/recordingResourceGate';
 
 type LinkProps = ComponentProps<typeof Link>;
 
@@ -44,7 +45,7 @@ export function TrackedLink({
 } & LinkProps): JSX.Element {
   const warmed = useRef(false);
   const warm = () => {
-    if (warmed.current || !prefetchKind) return;
+    if (warmed.current || !prefetchKind || recordingResourceGate.isActive()) return;
     warmed.current = true;
     void PREFETCHERS[prefetchKind]().catch(() => { warmed.current = false; });
   };

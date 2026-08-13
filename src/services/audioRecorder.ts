@@ -1,7 +1,7 @@
 'use client';
 
 import { getClientDb } from '@/lib/db-client';
-import { ChunkWriteBatcher } from '@/services/mediaRecorderHealth';
+import { ChunkWriteBatcher, type ChunkWriteMetrics } from '@/services/mediaRecorderHealth';
 import { stopMediaRecorderSafely } from '@/services/mediaRecorderStop';
 import type { AudioSourceInfo } from '@/types/recording';
 
@@ -16,6 +16,7 @@ export interface AudioRecorderHandle {
   resume: () => void;
   getMimeType: () => string;
   sourceInfo: AudioSourceInfo;
+  diagnostics: () => ChunkWriteMetrics;
 }
 
 /** 语音场景标准麦克风约束（48kHz 单声道 + 回声/降噪）。 */
@@ -126,6 +127,9 @@ export async function startAudioRecorder(
     },
     getMimeType() {
       return mimeType;
+    },
+    diagnostics() {
+      return chunkWriter.metrics();
     },
   };
 }

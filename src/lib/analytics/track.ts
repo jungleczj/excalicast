@@ -2,6 +2,7 @@
 
 import { track } from '@vercel/analytics';
 import { recordingLifecycle } from '@/services/recordingLifecycleSingleton';
+import { recordingResourceGate } from '@/services/recordingResourceGate';
 import { getOrCreateGuestId } from '@/lib/ownerKey';
 import type { KnownEvent } from './events';
 
@@ -88,7 +89,7 @@ export function trackEvent(event: KnownEvent, props?: Props): void {
       sessionId: sessionId(),
       guestId: safeGuestId(),
     });
-    if (recordingLifecycle.activeSession()) {
+    if (recordingResourceGate.isActive() || recordingLifecycle.activeSession()) {
       deferredEvents.push({ event, props: mergedProps, body });
       return;
     }
@@ -116,9 +117,15 @@ function sendAnalyticsBody(body: string): void {
 }
 
 function flushDeferredEvents(): void {
-  if (recordingLifecycle.activeSession()) return;
+  if (recordingResourceGate.isActive() || recordingLifecycle.activeSession()) return;
   for (const queued of deferredEvents.splice(0)) {
     try { track(queued.event, queued.props); } catch { /* ignore */ }
     sendAnalyticsBody(queued.body);
   }
+}
+
+if (typeof window !== 'undefined') {
+  recordingResourceGate.subscribe((snapshot) => {
+    if (!snapshot.active && deferredEvents.length > 0) queueMicrotask(flushDeferredEvents);
+  });
 }
