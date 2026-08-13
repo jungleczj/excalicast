@@ -4,6 +4,7 @@ import {
   EXPORT_AUDIO_BITRATE,
   EXPORT_AUDIO_SAMPLE_RATE,
   buildExportMonoPcm,
+  concatenatePreparedExportAudio,
   createContinuousAacTimeline,
   encodeFloat32Wav,
   validateProcessedAudioFrameCount,
@@ -59,6 +60,7 @@ import {
   appendRecordingClip,
   insertRecordingClip,
   mainTrackDuration,
+  mapProjectRangeToClip,
   moveMainTrackClip,
   resolveMainTrackPosition,
 } from '@/services/mainTrack';
@@ -533,6 +535,29 @@ test('every audio source kind enters the same continuous export PCM contract', (
   }
 });
 
+test('multiple imported clips become one continuous PCM clock before AAC encoding', () => {
+  const first = buildExportMonoPcm({
+    channels: [new Float32Array(48_000).fill(0.25)],
+    sampleRate: 48_000,
+    durationMs: 1_000,
+    sourceKind: 'original',
+  });
+  const second = buildExportMonoPcm({
+    channels: [new Float32Array(24_000).fill(-0.25)],
+    sampleRate: 48_000,
+    durationMs: 500,
+    sourceKind: 'original',
+  });
+
+  const joined = concatenatePreparedExportAudio([first, second]);
+
+  expect(joined.totalFrames).toBe(72_000);
+  expect(joined.durationMs).toBe(1_500);
+  expect(joined.wavBlob.type).toBe('audio/wav');
+  expect(joined.diagnostics.nonFiniteSamples).toBe(0);
+  expect(joined.diagnostics.clippedSamples).toBe(0);
+});
+
 test('export PCM rejects clipped or non-finite derived tracks instead of delivering distortion', () => {
   expect(() => buildExportMonoPcm({
     channels: [Float32Array.from([0, 1.01, 0])],
@@ -623,6 +648,14 @@ test('hybrid preview uses proxies for long playback but original frames for prec
   expect(resolveHybridPreviewMode({ durationMs: 3_700_000, playing: true, preciseSeek: false })).toBe('proxy');
   expect(resolveHybridPreviewMode({ durationMs: 3_700_000, playing: false, preciseSeek: true })).toBe('original');
   expect(resolveHybridPreviewMode({ durationMs: 120_000, playing: true, preciseSeek: false })).toBe('original');
+});
+
+test('project effects are clipped and shifted into each imported recording range', () => {
+  const clip = { id: 'b', recordingId: 'second', sourceStart: 10_000, sourceEnd: 15_000 };
+  expect(mapProjectRangeToClip({ id: 'effect', start: 4_500, end: 6_500 }, clip, 5_000)).toEqual({
+    id: 'effect', start: 10_000, end: 11_500,
+  });
+  expect(mapProjectRangeToClip({ id: 'outside', start: 0, end: 4_000 }, clip, 5_000)).toBeNull();
 });
 
 test('concatenated media timestamps are rebased across resets and duplicates', () => {

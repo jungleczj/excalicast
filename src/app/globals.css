@@ -8909,6 +8909,174 @@ body {
   opacity: 1;
 }
 
+.timeline-craft-clip-title {
+  position: absolute;
+  inset: 0 12px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  color: rgba(22, 25, 27, .72);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.recording-import-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10040;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(18, 20, 22, .32);
+  backdrop-filter: blur(4px);
+}
+
+.recording-import-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(180px, 1fr) auto;
+  width: min(620px, calc(100vw - 32px));
+  max-height: min(720px, calc(100dvh - 48px));
+  overflow: hidden;
+  border: 1.5px solid var(--ink);
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: 6px 7px 0 rgba(18, 20, 22, .2);
+}
+
+.recording-import-header,
+.recording-import-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+}
+
+.recording-import-header {
+  border-bottom: 1px solid rgba(24, 25, 26, .13);
+}
+
+.recording-import-header h2 {
+  margin: 4px 0 3px;
+  font-family: var(--font-sans);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.recording-import-header p {
+  max-width: 480px;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.recording-import-close {
+  display: grid;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid rgba(24, 25, 26, .15);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+}
+
+.recording-import-list {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  overflow: auto;
+  padding: 14px 16px;
+}
+
+.recording-import-item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid rgba(24, 25, 26, .15);
+  border-radius: 6px;
+  background: var(--paper-2);
+  color: var(--ink);
+  text-align: left;
+}
+
+.recording-import-item:hover,
+.recording-import-item:focus-visible {
+  border-color: var(--craft-blue);
+  outline: none;
+}
+
+.recording-import-item.is-selected {
+  border-color: var(--craft-blue);
+  background: color-mix(in srgb, var(--craft-blue) 9%, var(--paper));
+}
+
+.recording-import-check {
+  display: grid;
+  width: 21px;
+  height: 21px;
+  place-items: center;
+  border: 1.4px solid var(--ink);
+  border-radius: 4px;
+  background: var(--paper);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.recording-import-item.is-selected .recording-import-check {
+  border-color: var(--craft-blue);
+  background: var(--craft-blue);
+  color: white;
+}
+
+.recording-import-copy {
+  min-width: 0;
+}
+
+.recording-import-copy strong,
+.recording-import-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recording-import-copy strong { font-size: 12px; }
+.recording-import-copy small { margin-top: 3px; color: var(--ink-2); font-family: var(--font-mono); font-size: 9px; }
+.recording-import-media { color: var(--ink-2); font-family: var(--font-mono); font-size: 9px; }
+.recording-import-empty { padding: 48px 16px; color: var(--ink-2); font-size: 12px; text-align: center; }
+.recording-import-empty.is-error { color: var(--rec); }
+
+.recording-import-footer {
+  align-items: center;
+  border-top: 1px solid rgba(24, 25, 26, .13);
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.recording-import-footer > div { display: flex; gap: 8px; }
+.recording-import-footer .btn-sketch { padding: 7px 12px; font-size: 10px; }
+.recording-import-footer .btn-sketch.is-primary { background: var(--ink); color: var(--paper); }
+.recording-import-footer .btn-sketch[aria-disabled="true"] { opacity: .45; }
+
+@media (max-width: 640px) {
+  .recording-import-backdrop { padding: 12px; }
+  .recording-import-dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
+  .recording-import-header, .recording-import-footer { padding: 14px; }
+  .recording-import-media { display: none; }
+}
+
 .timeline-craft-action-menu {
   position: relative;
   flex: 0 0 auto;

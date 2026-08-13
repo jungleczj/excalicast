@@ -1,7 +1,7 @@
 'use client';
 
 import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { getCursorFocusTrack, getEnhancedAudioTrack, getLocalizedTrack, getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
+import { getCursorFocusTrack, getEnhancedAudioTrack, getLocalizedTrack, getRecording, getWorkspaceShells, loadFullRecording } from '@/lib/db-client';
 import { isUsableLocalizedTrack } from '@/lib/localizedTrack';
 import { audioSourceFingerprint, resolveEnhancedAudioSelection } from '@/services/audioEnhancement';
 import { drawHighlightEffect, drawKeyPointMotion } from '@/services/editorEffectsRenderer';
@@ -26,6 +26,7 @@ import {
   type ExportQuality,
   type RecordingSourceKind,
   type RecordingMetadata,
+  type MainTrackClip,
   type SceneRect,
   type SourceCropWindow,
   type TimeSegment,
@@ -54,7 +55,15 @@ import { cameraPlacementFromEvent, projectCameraPlacement } from '@/services/cam
 import type { ExportDiagnosticReport, ExportProgressDetails } from '@/types/exportDiagnostics';
 import { previewPlaybackRegistry } from '@/services/previewPlaybackRegistry';
 import { resolveFrameTransform } from '@/services/frameTransform';
-import { EXPORT_AUDIO_BITRATE, EXPORT_AUDIO_SAMPLE_RATE, prepareExportAudio } from '@/services/exportAudio';
+import {
+  concatenatePreparedExportAudio,
+  createSilentExportAudio,
+  EXPORT_AUDIO_BITRATE,
+  EXPORT_AUDIO_SAMPLE_RATE,
+  prepareExportAudio,
+  type PreparedExportAudio,
+} from '@/services/exportAudio';
+import { mapProjectRangeToClip, normalizeMainTrack } from '@/services/mainTrack';
 
 export interface ExportOptions extends ExportConfig {
   recordingId: string;
@@ -64,6 +73,69 @@ export interface ExportOptions extends ExportConfig {
   onProgressDetails?: (details: ExportProgressDetails) => void;
   onDiagnostics?: (report: ExportDiagnosticReport) => void;
   signal?: AbortSignal;
+  /** Internal: make every multi-clip segment expose the same continuous audio stream layout. */
+  forceSilentAudio?: boolean;
+  /** Internal: render video only; the main track muxes one canonical audio timeline afterwards. */
+  suppressAudio?: boolean;
+}
+
+export type DeterministicExportFailureStage = 'frame_composition';
+
+export interface WebCodecsFailureDecision {
+  action: 'fail' | 'software_reencode';
+  error: Error;
+  stage?: DeterministicExportFailureStage;
+}
+
+type DeterministicExportFailure = {
+  exportFailureKind: 'deterministic_input';
+  stage: DeterministicExportFailureStage;
+  cause: unknown;
+};
+
+function normalizeExportError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  if (typeof error === 'string' && error.trim()) return new Error(error.trim());
+  if (error && typeof error === 'object') {
+    const candidate = error as { message?: unknown; name?: unknown };
+    if (typeof candidate.message === 'string' && candidate.message.trim()) {
+      const normalized = new Error(candidate.message.trim());
+      if (typeof candidate.name === 'string' && candidate.name.trim()) normalized.name = candidate.name.trim();
+      return normalized;
+    }
+  }
+  return new Error('export_failed');
+}
+
+export function normalizeExportPreparation<T>(preparation: Promise<T> | null): Promise<T> | null {
+  if (!preparation) return null;
+  return preparation.catch((error: unknown) => {
+    throw normalizeExportError(error);
+  });
+}
+
+function deterministicExportFailure(
+  stage: DeterministicExportFailureStage,
+  cause: unknown,
+): DeterministicExportFailure {
+  return { exportFailureKind: 'deterministic_input', stage, cause };
+}
+
+export function classifyWebCodecsFailure(error: unknown): WebCodecsFailureDecision {
+  if (error && typeof error === 'object') {
+    const failure = error as Partial<DeterministicExportFailure>;
+    if (
+      failure.exportFailureKind === 'deterministic_input'
+      && failure.stage === 'frame_composition'
+    ) {
+      return {
+        action: 'fail',
+        error: normalizeExportError(failure.cause),
+        stage: failure.stage,
+      };
+    }
+  }
+  return { action: 'software_reencode', error: normalizeExportError(error) };
 }
 
 let _ffmpeg: FFmpeg | null = null;
@@ -83,6 +155,130 @@ async function getFfmpeg(onLog?: (m: string) => void): Promise<FFmpeg> {
 export function cancelActiveExport(): void {
   try { _ffmpeg?.terminate(); } catch { /* best effort */ }
   _ffmpeg = null;
+}
+
+async function concatenateRenderedSegments(
+  blobs: Blob[],
+  format: 'mp4' | 'webm' | 'gif',
+  onLog?: (message: string) => void,
+): Promise<Blob> {
+  if (blobs.length === 1) return blobs[0];
+  const ffmpeg = await getFfmpeg(onLog);
+  const extension = format === 'gif' ? 'gif' : format;
+  const names: string[] = [];
+  const listName = '__main_track_segments.txt';
+  const outputName = `__main_track_output.${extension}`;
+  try {
+    for (let index = 0; index < blobs.length; index += 1) {
+      const name = `__main_track_${String(index).padStart(4, '0')}.${extension}`;
+      names.push(name);
+      await ffmpeg.writeFile(name, new Uint8Array(await blobs[index].arrayBuffer()));
+    }
+    await ffmpeg.writeFile(listName, new TextEncoder().encode(names.map((name) => `file '${name}'`).join('\n')));
+    await ffmpeg.exec(['-f', 'concat', '-safe', '0', '-i', listName, '-c', 'copy', outputName]);
+    const result = await ffmpeg.readFile(outputName);
+    const bytes = result instanceof Uint8Array ? result : new TextEncoder().encode(String(result));
+    const copy = new ArrayBuffer(bytes.byteLength);
+    new Uint8Array(copy).set(bytes);
+    return new Blob([copy], { type: format === 'gif' ? 'image/gif' : `video/${format}` });
+  } finally {
+    for (const name of [...names, listName, outputName]) {
+      try { await ffmpeg.deleteFile(name); } catch { /* best effort */ }
+    }
+  }
+}
+
+function mapProjectEffectsToClip(opts: ExportOptions, clip: MainTrackClip, outputStartMs: number): ExportOptions {
+  const mapRanges = <T extends { start: number; end: number }>(items: T[] | undefined): T[] | undefined => {
+    const mapped = items?.map((item) => mapProjectRangeToClip(item, clip, outputStartMs))
+      .filter((item): item is T => !!item);
+    return mapped?.length ? mapped : undefined;
+  };
+  const keyPointMotions = mapRanges(opts.keyPointMotions)?.map((item) => ({
+    ...item,
+    lines: item.lines?.map((line) => ({
+      ...line,
+      revealAtMs: clip.sourceStart + line.revealAtMs - outputStartMs,
+    })),
+  }));
+  return {
+    ...opts,
+    mainTrack: undefined,
+    segments: [{ start: clip.sourceStart, end: clip.sourceEnd }],
+    autoZooms: mapRanges(opts.autoZooms),
+    highlights: mapRanges(opts.highlights),
+    keyPointMotions,
+  };
+}
+
+async function exportMainTrack(opts: ExportOptions, clips: MainTrackClip[]): Promise<Blob> {
+  const rendered: Blob[] = [];
+  const preparedAudioTracks: PreparedExportAudio[] = [];
+  let outputStartMs = 0;
+  for (let index = 0; index < clips.length; index += 1) {
+    if (opts.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
+    const clip = clips[index];
+    const metadata = await getRecording(clip.recordingId);
+    if (!metadata) throw new Error(`main_track_recording_missing:${clip.recordingId}`);
+    const clipDurationMs = clip.sourceEnd - clip.sourceStart;
+    if ((opts.format ?? 'mp4') !== 'gif') {
+      const media = await loadFullRecording(clip.recordingId);
+      let sourceAudio = media.audioBlob;
+      let sourceKind: PreparedExportAudio['sourceKind'] = 'original';
+      let sourceTrackId: string | undefined;
+      if (clip.recordingId === opts.recordingId) {
+        const localized = opts.localizedTrackId ? await getLocalizedTrack(opts.localizedTrackId) : undefined;
+        const useLocalized = isUsableLocalizedTrack(localized) && opts.muteOriginalAudio !== false;
+        const enhanced = !useLocalized && opts.activeEnhancedAudioTrackId
+          ? await getEnhancedAudioTrack(opts.activeEnhancedAudioTrackId)
+          : undefined;
+        const selection = resolveEnhancedAudioSelection(
+          media.audioBlob,
+          enhanced ? [enhanced] : [],
+          opts.activeEnhancedAudioTrackId,
+          audioSourceFingerprint(media.audioBlob, media.metadata.durationMs),
+        );
+        sourceAudio = useLocalized ? localized.audioBlob : selection.blob;
+        sourceKind = useLocalized
+          ? 'dubbing'
+          : selection.track?.mode === 'repair' ? 'repair' : selection.track ? 'enhanced' : 'original';
+        sourceTrackId = useLocalized ? localized.id : selection.track?.id;
+      }
+      preparedAudioTracks.push(sourceAudio
+        ? await prepareExportAudio({
+          blob: sourceAudio,
+          segments: [{ start: clip.sourceStart, end: clip.sourceEnd }],
+          sourceKind,
+          sourceTrackId,
+          signal: opts.signal,
+        })
+        : createSilentExportAudio(clipDurationMs));
+    }
+    const segmentOptions = mapProjectEffectsToClip(opts, clip, outputStartMs);
+    rendered.push(await exportRecording({
+      ...segmentOptions,
+      recordingId: clip.recordingId,
+      suppressAudio: true,
+      localizedTrackId: clip.recordingId === opts.recordingId ? opts.localizedTrackId : undefined,
+      activeEnhancedAudioTrackId: clip.recordingId === opts.recordingId ? opts.activeEnhancedAudioTrackId : undefined,
+      onProgress: (ratio) => opts.onProgress?.(((index + ratio) / clips.length) * 0.9),
+      onPhase: (phase) => opts.onPhase?.(`main_track_${index + 1}_${phase}`),
+      onProgressDetails: undefined,
+      onDiagnostics: undefined,
+    }));
+    outputStartMs += clipDurationMs;
+  }
+  opts.onPhase?.('main_track_joining');
+  const format = opts.format ?? 'mp4';
+  let result = await concatenateRenderedSegments(rendered, format, opts.onLog);
+  if (format !== 'gif') {
+    opts.onPhase?.('main_track_muxing_audio');
+    opts.onProgress?.(0.96);
+    const continuousAudio = concatenatePreparedExportAudio(preparedAudioTracks);
+    result = await remuxEncodedVideoWithAudio(result, continuousAudio.wavBlob, format, opts.onLog);
+  }
+  opts.onProgress?.(1);
+  return result;
 }
 
 async function remuxEncodedVideoWithAudio(
@@ -721,6 +917,8 @@ function buildGhostRect(crop: SceneRect): Record<string, unknown> {
 }
 
 export async function exportRecording(opts: ExportOptions): Promise<Blob> {
+  const mainTrack = normalizeMainTrack(opts.mainTrack);
+  if (mainTrack.length > 0) return exportMainTrack(opts, mainTrack);
   const diagnostics = createExportDiagnostics({ recordingId: opts.recordingId, totalFrames: 0 });
   let diagnosticsCompleted = false;
   let releaseExportResources = () => {};
@@ -809,8 +1007,10 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         : 'original' as const;
   // Decode/resample once while the video renderer is preparing. Both encoders
   // consume this exact PCM timeline, so fallback cannot change the audio.
-  const preparedAudioPromise = effectiveAudioBlob && format !== 'gif'
-    ? prepareExportAudio({
+  const preparedAudioPromise = normalizeExportPreparation(format === 'gif' || opts.suppressAudio
+    ? null
+    : effectiveAudioBlob
+      ? prepareExportAudio({
         blob: effectiveAudioBlob,
         segments: trimmed ? kept : undefined,
         sourceKind: audioSourceKind,
@@ -831,7 +1031,9 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         });
         return audio;
       })
-    : null;
+      : opts.forceSilentAudio
+        ? Promise.resolve(createSilentExportAudio(outDurationMs))
+        : null);
 
   const filesForExport: Record<string, unknown> = {};
   for (const bf of binaryFiles) filesForExport[bf.fileId] = bf.data;
@@ -1243,6 +1445,14 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     return target;
   };
 
+  // Decode/resample starts in parallel with renderer setup, but must settle
+  // before either encoder renders frame 0. The resolved value is reused by
+  // WebCodecs, audio remux, and the ffmpeg compatibility path.
+  if (preparedAudioPromise) setPhase('preparing_audio');
+  const preparedAudio = preparedAudioPromise ? await preparedAudioPromise : null;
+  const reusablePreparedAudio = preparedAudio ? Promise.resolve(preparedAudio) : null;
+  if (preparedAudioPromise) setPhase('rendering_frames');
+
   // —— WebCodecs 硬件编码主路径：浏览器支持时启用，失败自动回退 ffmpeg ——
   // 含摄像头时尝试用 VideoDecoder+webm 解复用把摄像头帧在画布内合成；解码不可用/失败 → 回退。
   // 裁剪也走此路径：音频在解码后按保留段拼接 AudioBuffer（audioSegments），摄像头画布内
@@ -1271,32 +1481,37 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         fps,
         width: outputW,
         height: outputH,
-        preparedAudio: preparedAudioPromise,
+        preparedAudio: reusablePreparedAudio,
         signal: opts.signal,
         renderFrame: async (i) => {
-          checkCancelled();
-          const started = performance.now();
-          const canvas = await composeFrame(frameInputs(i));
-          diagnostics.addBreakdown('decode_and_compose', performance.now() - started);
-          diagnostics.setProcessedFrames(i + 1);
-          diagnostics.setDecodedSourceFrames(displaySource?.getDecodedFrameCount?.() ?? 0);
-          emitDetails();
-          return canvas;
+          try {
+            checkCancelled();
+            const started = performance.now();
+            const canvas = await composeFrame(frameInputs(i));
+            diagnostics.addBreakdown('decode_and_compose', performance.now() - started);
+            diagnostics.setProcessedFrames(i + 1);
+            diagnostics.setDecodedSourceFrames(displaySource?.getDecodedFrameCount?.() ?? 0);
+            emitDetails();
+            return canvas;
+          } catch (error) {
+            if (error instanceof DOMException && error.name === 'AbortError') throw error;
+            throw deterministicExportFailure('frame_composition', error);
+          }
         },
         onProgress: (p) => setProgress(0.08 + p * 0.9),
       });
       diagnostics.addBreakdown('hardware_composition_and_encoding', performance.now() - hardwareStarted);
       let blob = encoded.blob;
-      if (preparedAudioPromise && encoded.audioEncoded) {
+      if (preparedAudio && encoded.audioEncoded) {
         diagnostics.setAudioEncoderPath(format === 'webm' ? 'webcodecs-opus' : 'webcodecs-aac');
       }
-      if (preparedAudioPromise && !encoded.audioEncoded) {
+      if (preparedAudio && !encoded.audioEncoded) {
         setPhase('muxing_audio');
         setProgress(0.98);
         const muxStarted = performance.now();
         blob = await remuxEncodedVideoWithAudio(
           blob,
-          (await preparedAudioPromise).wavBlob,
+          preparedAudio.wavBlob,
           format,
           opts.onLog,
         );
@@ -1320,10 +1535,12 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     } catch (err) {
       if (opts.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
       if (err instanceof DOMException && err.name === 'AbortError') throw err;
+      const decision = classifyWebCodecsFailure(err);
+      if (decision.action === 'fail') throw decision.error;
       setPhase('fallback_encoding');
       diagnostics.setAudioEncoderPath(
         format === 'webm' ? 'ffmpeg-opus' : 'ffmpeg-aac',
-        err instanceof Error ? err.message : 'hardware_audio_fallback',
+        decision.error.message,
       );
       // 回退前清理摄像头解码资源 + 复位标志（ffmpeg 路径用 overlay 自己处理摄像头）
       try { cameraSource?.close(); } catch { /* */ }
@@ -1343,7 +1560,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       lastFinalSig = null;
       lastFinalCanvas = null;
       // eslint-disable-next-line no-console
-      console.warn('[export] WebCodecs path failed, falling back to ffmpeg:', err);
+      console.warn('[export] WebCodecs path failed, falling back to ffmpeg:', decision.error);
     }
   }
 
@@ -1438,10 +1655,10 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   }
 
   let audioFile: string | null = null;
-  if (preparedAudioPromise) { // GIF 无音轨
+  if (preparedAudio) { // GIF 无音轨
     audioFile = 'audio.wav';
     const audioWriteStarted = performance.now();
-    await ffmpeg.writeFile(audioFile, new Uint8Array(await (await preparedAudioPromise).wavBlob.arrayBuffer()));
+    await ffmpeg.writeFile(audioFile, new Uint8Array(await preparedAudio.wavBlob.arrayBuffer()));
     diagnostics.setAudioEncoderPath(format === 'webm' ? 'ffmpeg-opus' : 'ffmpeg-aac');
     diagnostics.addBreakdown('audio_virtual_fs', performance.now() - audioWriteStarted);
   }
@@ -1623,9 +1840,8 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   } catch (error) {
     releaseExportResources();
     if (abortListener) opts.signal?.removeEventListener('abort', abortListener);
-    diagnostics.setPhase(opts.signal?.aborted ? 'cancelled' : 'failed');
     completeDiagnostics();
-    throw error;
+    throw normalizeExportError(error);
   }
 }
 

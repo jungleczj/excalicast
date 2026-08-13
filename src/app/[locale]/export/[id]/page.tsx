@@ -15,6 +15,7 @@ import { DubbingPanel } from '@/components/DubbingPanel';
 import { AudioRepairPanel } from '@/components/AudioRepairPanel';
 import { ProUpgradeModal } from '@/components/ProUpgradeModal';
 import { Timeline } from '@/components/editor/Timeline';
+import { RecordingImportDialog } from '@/components/editor/RecordingImportDialog';
 import { I, LogoMark } from '@/components/icons';
 import { analyzeRecordingForAutoEdit, AutoEditError, type AutoEditMode, type AutoEditProgress, type AutoEditResult } from '@/services/autoEditAnalyzer';
 import { indexedDbAutoEditCache } from '@/services/autoEditCacheStore';
@@ -35,6 +36,7 @@ import {
   updateRecordingHighlights,
   updateRecordingKeyPointMotions,
   updateRecordingSegments,
+  updateRecordingMainTrack,
   updateRecordingTitle,
 } from '@/lib/db-client';
 import { getCurrentOwnerKey } from '@/lib/ownerKey';
@@ -46,11 +48,13 @@ import type {
   EnhancedAudioTrack,
   KeyPointMotionSegment,
   LocalizedTrack,
+  MainTrackClip,
   NoiseReductionMode,
   RecordingMetadata,
   TimeSegment,
 } from '@/types/recording';
 import { normalizeSegmentSequence, isTrimmed } from '@/utils/segments';
+import { insertRecordingClip, mainTrackDuration } from '@/services/mainTrack';
 import { parseSrt } from '@/utils/srtParser';
 import { createAudioPeaksForBlob, loadOrCreateAudioPeakTrack } from '@/services/audioPeakTrack';
 import { buildLocalKeyPointMotions, migrateKeyPointMotionSegment, resolveKeyPointMotionLanguage } from '@/services/keyPointMotion';
@@ -97,6 +101,9 @@ export default function EditorRecordingPage(): JSX.Element {
   const [actionGuide, setActionGuide] = useState<string | null>(null);
   // 时间轴裁剪：保留段（源 ms）+ 播放头源时间
   const [segments, setSegments] = useState<TimeSegment[]>([]);
+  const [mainTrack, setMainTrack] = useState<MainTrackClip[]>([]);
+  const [mainTrackHydrated, setMainTrackHydrated] = useState(false);
+  const [recordingImportOpen, setRecordingImportOpen] = useState(false);
   const [autoZooms, setAutoZooms] = useState<AutoZoomSegment[]>([]);
   const [selectedAutoZoomId, setSelectedAutoZoomId] = useState<string | null>(null);
   const [highlights, setHighlights] = useState<HighlightEffectSegment[]>([]);
@@ -259,6 +266,8 @@ export default function EditorRecordingPage(): JSX.Element {
         }));
       }
       setSegments(normalizeSegmentSequence(m.segments, m.durationMs));
+      setMainTrack(m.mainTrack ?? []);
+      setMainTrackHydrated(true);
       setPlayheadMs(0);
     };
 
@@ -431,6 +440,47 @@ export default function EditorRecordingPage(): JSX.Element {
     const tid = setTimeout(() => { void updateRecordingSegments(id, trimmed ? segments : []); }, 500);
     return () => clearTimeout(tid);
   }, [segments, meta, id]);
+
+  useEffect(() => {
+    if (!meta || !mainTrackHydrated) return;
+    const next = mainTrack.length > 0 ? mainTrack : undefined;
+    setConfig((current) => (JSON.stringify(current.mainTrack) === JSON.stringify(next)
+      ? current
+      : { ...current, mainTrack: next }));
+    const timer = setTimeout(() => { void updateRecordingMainTrack(id, mainTrack); }, 500);
+    return () => clearTimeout(timer);
+  }, [id, mainTrack, mainTrackHydrated, meta]);
+
+  const handleImportRecordings = useCallback((recordings: import('@/types/recording').RecordingLibrarySummary[]) => {
+    if (!meta || recordings.length === 0) return;
+    let next = mainTrack.length > 0
+      ? mainTrack.map((clip) => ({ ...clip }))
+      : normalizeSegmentSequence(segments, meta.durationMs).map((segment, index) => ({
+          id: `clip-${id}-${index}-${Date.now().toString(36)}`,
+          recordingId: id,
+          sourceStart: segment.start,
+          sourceEnd: segment.end,
+          title: meta.title,
+        }));
+    let insertAt = mainTrack.length > 0
+      ? Math.max(0, Math.min(mainTrackDuration(next), playheadMs))
+      : Math.max(0, Math.min(mainTrackDuration(next), segments.reduce((output, segment) => (
+          playheadMs >= segment.start
+            ? output + Math.min(segment.end - segment.start, Math.max(0, playheadMs - segment.start))
+            : output
+        ), 0)));
+    for (const recording of recordings) {
+      next = insertRecordingClip(next, {
+        recordingId: recording.id,
+        durationMs: recording.durationMs,
+        title: recording.title?.trim() || (en ? `Recording ${recording.id.slice(0, 8)}` : `录制 ${recording.id.slice(0, 8)}`),
+      }, insertAt);
+      insertAt += recording.durationMs;
+    }
+    clearAutoEditUndo();
+    setMainTrack(next);
+    setPlayheadMs(Math.min(mainTrackDuration(next), insertAt));
+  }, [clearAutoEditUndo, en, id, mainTrack, meta, playheadMs, segments]);
 
   // Autozoom 段 → 同步进 config.autoZooms（预览/导出用）+ 去抖持久化。
   useEffect(() => {
@@ -869,6 +919,7 @@ export default function EditorRecordingPage(): JSX.Element {
                 metadata={meta}
                 config={config}
                 segments={segments}
+                mainTrack={mainTrack}
                 playheadMs={playheadMs}
                 onPlayheadChange={setPlayheadMs}
                 selectedAutoZoomId={selectedAutoZoomId}
@@ -882,14 +933,19 @@ export default function EditorRecordingPage(): JSX.Element {
           {/* Timeline — 主流剪辑交互：播放头 scrub + Split + 选段删除 + 边缘 Trim */}
           <div className="mt-5" data-testid="editor-timeline">
             <Timeline
-              durationMs={meta.durationMs}
+              durationMs={mainTrack.length > 0 ? mainTrackDuration(mainTrack) : meta.durationMs}
               clips={segments}
+              mainTrack={mainTrack}
+              onMainTrackChange={setMainTrack}
+              onImportRecordings={() => setRecordingImportOpen(true)}
               playheadMs={playheadMs}
               onScrub={setPlayheadMs}
               onChange={handleTimelineSegmentsChange}
               onReset={() => {
                 clearAutoEditUndo();
+                setMainTrack([]);
                 setSegments(normalizeSegmentSequence(undefined, meta.durationMs));
+                setPlayheadMs(0);
               }}
               hasAudio={meta.hasAudio}
               hasCaptions={!!meta.subtitleSrt}
@@ -967,6 +1023,7 @@ export default function EditorRecordingPage(): JSX.Element {
                 captions: en ? 'Captions' : '字幕',
                 split: en ? 'Split' : '切一刀',
                 deleteClip: en ? 'Delete' : '删片段',
+                importRecording: en ? 'Import recording' : '导入录制',
                 hint: en
                   ? 'Drag playhead/edges to scrub · Split (S) then Delete to cut any part'
                   : '拖播放头/边缘实时预览 · 切一刀(S)后删片段即可剪掉任意段',
@@ -1066,6 +1123,13 @@ export default function EditorRecordingPage(): JSX.Element {
         tier={upgradeOpen === 'max' ? 'max' : 'pro'}
         onClose={() => setUpgradeOpen(false)}
         onUpgraded={() => { setUpgradeOpen(false); void subscription.refresh(); }}
+      />
+      <RecordingImportDialog
+        open={recordingImportOpen}
+        currentRecordingId={id}
+        en={en}
+        onClose={() => setRecordingImportOpen(false)}
+        onImport={handleImportRecordings}
       />
     </Shell>
   );

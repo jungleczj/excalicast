@@ -1,5 +1,59 @@
 # Development Log
 
+## 2026-08-13 - Multi-recording main track and hybrid long-form preview
+
+### Baseline
+
+- Mandatory pre-change checkpoint: `ddc5de0` (`chore: checkpoint before multi-clip editing`).
+- Worktree: `/Users/chenzhijiang/.codex/worktrees/53c2/pro`; branch: `codex/recovered-53c2`.
+
+### User value
+
+- The Basic toolbar can import several existing library recordings in one action.
+- Imported recordings become movable, splittable, trimmable and removable main-track clips, then export as one joined file.
+- Insertions occur at the project playhead and preserve the user's selection order.
+- Long projects use a bounded lower-resolution composition budget during playback while paused seeks still render the original frame accurately.
+
+### Implementation
+
+- Added a persisted `MainTrackClip[]` project model with output-to-source time mapping and project-range effect mapping.
+- Added the recording-library multi-select dialog and main-track drag ordering to the existing Timeline.
+- Preview swaps media sources at clip boundaries and keeps one project clock; playback updates no longer recreate the animation loop on every frame.
+- Export renders clips sequentially, concatenates the compatible video segments and prepares all selected audio as one continuous 48 kHz PCM timeline before a single final audio encode.
+- Empty main tracks are persisted after reset, preventing removed imports from returning after reload.
+
+### Verification
+
+- Main-track domain, effect mapping, hybrid-preview policy and continuous multi-clip audio tests passed.
+- Recording import, persistence and Timeline zoom UI tests passed against the local editor.
+- No recording or export quality, bitrate, frame rate or resolution was reduced.
+
+## 2026-08-13 - Export failure isolation and local-heavy lock release
+
+### Baseline and diagnosis
+
+- Mandatory pre-change checkpoint: `8c138cd` (`chore: checkpoint before export failure investigation`).
+- Worktree: `/Users/chenzhijiang/.codex/worktrees/53c2/pro`; branch: `codex/recovered-53c2`.
+- Deterministic RED tests proved that completion persistence could both fail a completed export and retain the next `local_heavy` task, while codec error objects lost their message.
+- A second RED cycle proved that audio preparation was not normalized/preflighted before frame rendering and that failed tasks lost the concrete phase already reported by the Provider.
+- The recording resource gate itself does not cancel, restart, or throttle export work; recording-time IndexedDB pressure amplified the coordinator persistence defect instead.
+
+### Implementation
+
+- Media task state now settles independently of IndexedDB persistence. Local-heavy serialization covers the real runner, not task-history writes after the runner completes.
+- Error-like values are converted into real `Error` objects, preserving codec/storage messages through the Provider and task center.
+- Export audio decode/resample starts in parallel with setup, is preflighted once before frame 0, and the same resolved PCM/WAV is reused by every encoder path.
+- WebCodecs fallback now distinguishes deterministic frame/media composition failures from genuine hardware codec/decoder failures.
+- Failed task status retains the last concrete phase plus structured details/diagnostics.
+
+### Verification
+
+- Dedicated RED→GREEN regression suites: 8 tests passed.
+- Media coordinator, media pipeline, and export regressions: 76 tests passed.
+- `npm run typecheck` passed.
+- `npm run build` passed after stopping the diagnostic dev server; only the existing ONNX/Hugging Face static-analysis warnings remain.
+- No recording/export resolution, frame rate, bitrate, quality setting, or output feature was reduced.
+
 ## 2026-08-11 - Caption-synchronized semantic key-point reveals
 
 ### User value

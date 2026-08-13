@@ -60,6 +60,20 @@ type Listener = (tasks: CoordinatedMediaTask[]) => void;
 
 const clampProgress = (value: number) => Math.max(0, Math.min(1, value));
 
+function normalizeMediaTaskError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  if (typeof error === 'string' && error.trim()) return new Error(error.trim());
+  if (error && typeof error === 'object') {
+    const candidate = error as { message?: unknown; name?: unknown };
+    if (typeof candidate.message === 'string' && candidate.message.trim()) {
+      const normalized = new Error(candidate.message.trim());
+      if (typeof candidate.name === 'string' && candidate.name.trim()) normalized.name = candidate.name.trim();
+      return normalized;
+    }
+  }
+  return new Error('media_task_failed');
+}
+
 export class MediaTaskCoordinator {
   private readonly tasks = new Map<string, CoordinatedMediaTask>();
   private readonly activeByKey = new Map<string, Promise<CoordinatedMediaTask>>();
@@ -170,7 +184,7 @@ export class MediaTaskCoordinator {
       if (controller.signal.aborted) throw new DOMException('Task cancelled', 'AbortError');
       const current = this.tasks.get(task.id);
       if (current?.status === 'queued') {
-        await this.replaceTask({ ...current, status: 'running', updatedAt: this.now() }, true);
+        this.replaceTask({ ...current, status: 'running', updatedAt: this.now() });
       }
       return runner(report, controller.signal);
     };
@@ -198,19 +212,20 @@ export class MediaTaskCoordinator {
         updatedAt: this.now(),
         error: undefined,
       };
-      await this.replaceTask(completed, true);
+      this.replaceTask(completed);
       return completed;
     }).catch(async (error: unknown) => {
       const cancelled = controller.signal.aborted;
+      const normalizedError = normalizeMediaTaskError(error);
       const failed: CoordinatedMediaTask = {
         ...(this.tasks.get(task.id) ?? task),
         status: cancelled ? 'cancelled' : 'failed',
-        phase: cancelled ? 'cancelled' : 'failed',
+        phase: cancelled ? 'cancelled' : (this.tasks.get(task.id)?.phase ?? task.phase ?? 'failed'),
         updatedAt: this.now(),
-        error: cancelled ? undefined : error instanceof Error ? error.message : 'media_task_failed',
+        error: cancelled ? undefined : normalizedError.message,
       };
-      await this.replaceTask(failed, true);
-      if (!cancelled) throw error;
+      this.replaceTask(failed);
+      if (!cancelled) throw normalizedError;
       return failed;
     }).finally(() => {
       this.activeByKey.delete(activeKey);
@@ -254,7 +269,7 @@ export class MediaTaskCoordinator {
     });
   }
 
-  private replaceTask(task: CoordinatedMediaTask, awaitPersistence = false): Promise<void> | void {
+  private replaceTask(task: CoordinatedMediaTask): void {
     this.tasks.set(task.id, task);
     this.notify();
     const {
@@ -263,9 +278,12 @@ export class MediaTaskCoordinator {
       diagnostics: _diagnostics,
       ...persisted
     } = task;
-    const persistence = this.dependencies.persist(persisted);
-    if (awaitPersistence) return persistence;
-    void persistence.catch(() => undefined);
+    // Persistence is task history, not part of the media result or the
+    // local-heavy resource lock. Defer it so synchronous storage failures
+    // cannot turn an already-produced Blob into a failed export.
+    void Promise.resolve()
+      .then(() => this.dependencies.persist(persisted))
+      .catch(() => undefined);
   }
 
   private notify(): void {

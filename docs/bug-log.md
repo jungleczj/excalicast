@@ -1,5 +1,64 @@
 # Bug Log
 
+## 2026-08-13 - Long preview restarted per frame and joined audio could stutter
+
+### Symptom
+
+- Projects containing long or imported recordings became increasingly sluggish during preview playback.
+- Independently encoded audio on adjacent imported clips could introduce encoder-delay gaps at joins.
+- Clearing an imported main track could restore stale clips after a reload.
+
+### Root cause
+
+- The preview playback effect depended on the source time updated by its own animation frame, rebuilding the playback loop continuously.
+- Encoding AAC separately for every imported clip preserved per-file priming delay before container concatenation.
+- Empty main-track state was treated as “do not persist” instead of a valid cleared project state.
+
+### Fix
+
+- Keep project and source time in refs so one persistent playback clock survives frame updates.
+- Concatenate normalized 48 kHz PCM clips with a short boundary smoothing pass, then encode and mux audio once for the complete project.
+- Gate persistence on initial hydration and persist empty main-track arrays.
+
+### Status
+
+- Fixed locally with regression coverage for duration, sample count, Timeline import and reload persistence.
+
+## 2026-08-13 - Export tasks failed as `media_task_failed` and retained local-heavy locks
+
+### Symptom
+
+- Exports intermittently ended as `media_task_failed`, hiding the browser codec or storage error that actually occurred.
+- A later export could remain queued after the preceding local-heavy runner had already finished.
+- Deterministic audio preparation or frame-composition failures could enter the ffmpeg compatibility path and repeat the complete frame render before failing again.
+
+### Root cause
+
+- `MediaTaskCoordinator` awaited task-record persistence inside the media execution promise. Slow IndexedDB completion writes therefore retained the global `local_heavy` tail, and a rejected completion write converted an already-produced video Blob into a failed media task.
+- The coordinator only recognized same-realm `Error` instances; string and `{ name, message }` codec/storage rejections collapsed to `media_task_failed`.
+- `prepareExportAudio()` was first awaited inside WebCodecs after video frames had been encoded. Its rejection was also inside the broad hardware fallback catch, so deterministic input failures triggered a full software re-render.
+- Failure handling overwrote a reported `hardware_pipeline` or `fallback_encoding` phase with the generic `failed` phase.
+
+### Fix
+
+- Make task-record persistence best-effort and remove it from queued-runner startup, task completion, and the local-heavy resource-lock lifetime.
+- Normalize Error, DOM-style error objects, and string rejections before storing and rethrowing them.
+- Attach normalization to the audio preparation promise immediately, await it once before frame 0, and reuse the resolved PCM/WAV for WebCodecs, audio remux, and ffmpeg.
+- Mark deterministic frame-composition failures so they fail once; retain ffmpeg fallback for genuine hardware encoder/decoder failures.
+- Preserve the last concrete task phase and structured progress details when status changes to `failed`.
+
+### Regression coverage
+
+- A successful export remains completed when task persistence rejects.
+- Completion persistence cannot retain the next local-heavy runner.
+- Error-like codec rejections retain their real message and failure phase.
+- Audio preparation fails before frame rendering, resolves only once on success, and deterministic frame-composition failures skip software re-encoding.
+- Hardware codec and decoder failures still select the compatibility encoder.
+
+### Status
+
+- Fixed locally without changing export resolution, frame rate, bitrate, quality, or feature behavior.
+
 ## 2026-08-11 - Key-point lines appeared before their supporting captions
 
 ### Symptom

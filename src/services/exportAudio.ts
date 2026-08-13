@@ -44,6 +44,88 @@ export interface PreparedExportAudio {
   sourceTrackId?: string;
 }
 
+export function createSilentExportAudio(durationMs: number): PreparedExportAudio {
+  const totalFrames = Math.max(1, Math.round(Math.max(0, durationMs) / 1_000 * EXPORT_AUDIO_SAMPLE_RATE));
+  const samples = new Float32Array(totalFrames);
+  return {
+    samples,
+    sampleRate: EXPORT_AUDIO_SAMPLE_RATE,
+    channels: 1,
+    totalFrames,
+    durationMs: totalFrames / EXPORT_AUDIO_SAMPLE_RATE * 1_000,
+    diagnostics: {
+      sourceFrames: totalFrames,
+      outputFrames: totalFrames,
+      nonFiniteSamples: 0,
+      clippedSamples: 0,
+      peak: 0,
+    },
+    wavBlob: encodeFloat32Wav(samples, EXPORT_AUDIO_SAMPLE_RATE),
+    sourceKind: 'original',
+  };
+}
+
+/** Joins independently recorded clips before the single final audio encode. */
+export function concatenatePreparedExportAudio(
+  tracks: PreparedExportAudio[],
+  crossfadeMs = 5,
+): PreparedExportAudio {
+  if (tracks.length === 0) return createSilentExportAudio(0);
+  const totalFrames = tracks.reduce((sum, track) => sum + track.totalFrames, 0);
+  const samples = new Float32Array(Math.max(1, totalFrames));
+  const boundaries: number[] = [];
+  let offset = 0;
+  for (const track of tracks) {
+    if (offset > 0) boundaries.push(offset);
+    samples.set(track.samples, offset);
+    offset += track.totalFrames;
+  }
+
+  const radius = Math.max(0, Math.round(crossfadeMs / 1_000 * EXPORT_AUDIO_SAMPLE_RATE));
+  for (const boundary of boundaries) {
+    const count = Math.min(radius, boundary, samples.length - boundary);
+    if (count <= 0) continue;
+    const left = samples[boundary - count];
+    const right = samples[boundary + count - 1];
+    for (let index = -count; index < count; index += 1) {
+      const ratio = (index + count) / Math.max(1, count * 2 - 1);
+      samples[boundary + index] = left * Math.cos(ratio * Math.PI / 2) ** 2
+        + right * Math.sin(ratio * Math.PI / 2) ** 2;
+    }
+  }
+
+  let peak = 0;
+  let clippedSamples = 0;
+  let nonFiniteSamples = 0;
+  for (const sample of samples) {
+    if (!Number.isFinite(sample)) nonFiniteSamples += 1;
+    const magnitude = Math.abs(sample);
+    peak = Math.max(peak, magnitude);
+    if (magnitude > 1) clippedSamples += 1;
+  }
+  if (nonFiniteSamples > 0) throw new Error('export_audio_non_finite_samples');
+  if (clippedSamples > 0) throw new Error('export_audio_clipped_samples');
+
+  return {
+    samples,
+    sampleRate: EXPORT_AUDIO_SAMPLE_RATE,
+    channels: 1,
+    totalFrames: samples.length,
+    durationMs: samples.length / EXPORT_AUDIO_SAMPLE_RATE * 1_000,
+    diagnostics: {
+      sourceFrames: tracks.reduce((sum, track) => sum + track.diagnostics.sourceFrames, 0),
+      outputFrames: samples.length,
+      nonFiniteSamples,
+      clippedSamples,
+      peak,
+    },
+    wavBlob: encodeFloat32Wav(samples, EXPORT_AUDIO_SAMPLE_RATE),
+    sourceKind: tracks.every((track) => track.sourceKind === tracks[0].sourceKind)
+      ? tracks[0].sourceKind
+      : 'original',
+  };
+}
+
 const aacTimestampAt = (index: number): number => (
   Math.round(index * AAC_FRAME_SAMPLES / EXPORT_AUDIO_SAMPLE_RATE * 1_000_000)
 );

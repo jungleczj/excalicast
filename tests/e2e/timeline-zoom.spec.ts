@@ -83,12 +83,69 @@ test.beforeEach(async ({ context, page }) => {
   await expect(page.getByTestId('timeline-video-track')).toBeVisible();
 });
 
+test('imports multiple recordings from the basic toolbar into one persisted main track', async ({ page }) => {
+  await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const write = (value: unknown) => new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction('recordings', 'readwrite');
+      transaction.objectStore('recordings').put(value);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    const base = {
+      startedAt: Date.now() - 1_000,
+      hasAudio: false,
+      hasCamera: false,
+      status: 'done',
+      ownerKey: 'e2e-timeline-zoom-owner',
+      source: { kind: 'whiteboard' },
+    };
+    await write({ ...base, id: 'e2e-import-one', durationMs: 30_000, title: 'Imported lesson one' });
+    await write({ ...base, id: 'e2e-import-two', durationMs: 45_000, title: 'Imported lesson two', startedAt: Date.now() - 2_000 });
+    db.close();
+  });
+
+  const importButton = page.getByTestId('import-recordings');
+  await expect(importButton).toBeVisible();
+  await expect(importButton).toContainText('Import recording');
+  await importButton.click();
+  await expect(page.getByRole('dialog', { name: 'Import recordings' })).toBeVisible();
+  await page.getByRole('option', { name: /Imported lesson one/ }).click();
+  await page.getByRole('option', { name: /Imported lesson two/ }).click();
+  await page.getByTestId('confirm-import-recordings').click();
+
+  await expect(page.getByTestId('timeline-video-clip')).toHaveCount(3);
+  // The initial playhead is at zero, so the chosen recordings lead the
+  // original clip while preserving the user's selection order.
+  await expect(page.getByTestId('timeline-video-clip').nth(0)).toHaveAttribute('data-recording-id', 'e2e-import-one');
+  await expect(page.getByTestId('timeline-video-clip').nth(1)).toHaveAttribute('data-recording-id', 'e2e-import-two');
+  await expect(page.getByTestId('timeline-video-clip').nth(2)).toHaveAttribute('data-recording-id', recordingId);
+  await expect.poll(() => page.evaluate(async (id) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const value = await new Promise<{ mainTrack?: unknown[] } | undefined>((resolve, reject) => {
+      const request = db.transaction('recordings', 'readonly').objectStore('recordings').get(id);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return value?.mainTrack?.length ?? 0;
+  }, recordingId)).toBe(3);
+});
+
 test('timeline starts fitted and zooms its horizontal content from 1x to 32x', async ({ page }) => {
   const viewport = page.getByTestId('timeline-viewport');
   const content = page.getByTestId('timeline-content');
 
   await expect(page.getByTestId('timeline-zoom-value')).toHaveText('Fit');
-  await expect(page.getByRole('button', { name: 'Zoom out timeline' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Zoom out timeline' })).toHaveAttribute('data-availability', 'prerequisite');
   await expect(page.getByRole('button', { name: 'Fit timeline' })).toBeVisible();
   await page.getByRole('button', { name: 'Zoom in timeline' }).click();
   await expect(page.getByTestId('timeline-zoom-value')).toHaveText('2x');
@@ -123,7 +180,7 @@ test('zoom buttons anchor on the playhead and stop at 32x', async ({ page }) => 
     await page.getByRole('button', { name: 'Zoom in timeline' }).click();
   }
   await expect(page.getByTestId('timeline-zoom-value')).toHaveText('32x');
-  await expect(page.getByRole('button', { name: 'Zoom in timeline' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Zoom in timeline' })).toHaveAttribute('data-availability', 'prerequisite');
 
   await page.getByRole('button', { name: 'Fit timeline' }).click();
   await expect(page.getByTestId('timeline-zoom-value')).toHaveText('Fit');
@@ -167,12 +224,12 @@ test('scroll offset participates in scrub coordinates and only visible waveform 
   });
 
   const viewportBox = await viewport.boundingBox();
-  const trackBox = await page.getByTestId('timeline-video-track').boundingBox();
-  if (!viewportBox || !trackBox) throw new Error('timeline scrub geometry unavailable');
+  const rulerBox = await page.getByTestId('timeline-ruler').boundingBox();
+  if (!viewportBox || !rulerBox) throw new Error('timeline scrub geometry unavailable');
   const expectedMs = await viewport.evaluate((node) => (
     ((node.scrollLeft + node.clientWidth / 2) / node.scrollWidth) * 120_000
   ));
-  await page.mouse.click(viewportBox.x + viewportBox.width / 2, trackBox.y + trackBox.height / 2);
+  await page.mouse.click(viewportBox.x + viewportBox.width / 2, rulerBox.y + rulerBox.height / 2);
   const actualMs = Number(await page.getByTestId('timeline-current-time').getAttribute('data-playhead-ms'));
   const millisecondsPerPixel = await viewport.evaluate((node) => 120_000 / node.scrollWidth);
   expect(Math.abs(actualMs - expectedMs)).toBeLessThanOrEqual(millisecondsPerPixel * 2);

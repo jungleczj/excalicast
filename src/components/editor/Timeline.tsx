@@ -10,12 +10,21 @@ import type {
   AutoZoomSegment,
   HighlightEffectSegment,
   KeyPointMotionSegment,
+  MainTrackClip,
   NoiseReductionMode,
   SubtitleCue,
   TimeSegment,
 } from '@/types/recording';
 import { keptDuration, moveSegment, outputToSource, sourceToOutput, splitSegments, removeSegmentAt, trimSegmentEdge } from '@/utils/segments';
 import { migrateKeyPointMotionSegment } from '@/services/keyPointMotion';
+import {
+  mainTrackDuration,
+  moveMainTrackClip,
+  removeMainTrackClip,
+  resolveMainTrackPosition,
+  splitMainTrackClip,
+  trimMainTrackClip,
+} from '@/services/mainTrack';
 
 interface Props {
   durationMs: number;
@@ -29,6 +38,10 @@ interface Props {
   onChange: (clips: TimeSegment[]) => void;
   /** 复原为整段。 */
   onReset: () => void;
+  /** 多录制主轨。存在时播放头使用成片时间，片段内部映射到各自源录制。 */
+  mainTrack?: MainTrackClip[];
+  onMainTrackChange?: (clips: MainTrackClip[]) => void;
+  onImportRecordings?: () => void;
   /** Screen Studio 风格的独立 zoom 轨道。 */
   autoZooms?: AutoZoomSegment[];
   onAutoZoomChange?: (next: AutoZoomSegment[]) => void;
@@ -83,7 +96,7 @@ interface Props {
   captionCues?: SubtitleCue[];
   labels: {
     basic: string; advanced: string; reset: string; kept: string; mic: string; captions: string;
-    split: string; deleteClip: string; hint: string;
+    split: string; deleteClip: string; importRecording: string; hint: string;
     autoZoom: string; autoZoomHint: string; editAutoZoomScale: string;
     highlight: string; noiseReduction: string; standardNoiseReduction: string;
     enhancedNoiseReduction: string; originalAudio: string;
@@ -113,6 +126,7 @@ const TIMELINE_ZOOM_STEPS = [1, 2, 4, 8, 16, 32] as const;
  */
 export function Timeline({
   durationMs, clips, playheadMs, onScrub, onChange, onReset,
+  mainTrack, onMainTrackChange, onImportRecordings,
   autoZooms = [], onAutoZoomChange, selectedAutoZoomId, onAutoZoomSelect,
   highlights = [], onHighlightChange, selectedHighlightId, onHighlightSelect,
   keyPointMotions = [], onKeyPointMotionChange, selectedKeyPointMotionId, onKeyPointMotionSelect,
@@ -133,8 +147,11 @@ export function Timeline({
   const pendingZoomAnchorRef = useRef<{ timeMs: number; viewportX: number } | null>(null);
   const playheadMsRef = useRef(playheadMs);
   playheadMsRef.current = playheadMs;
-  const trimmed = !(clips.length === 1 && clips[0].start <= 0 && clips[0].end >= durationMs);
-  const kept = keptDuration(clips);
+  const usingMainTrack = !!mainTrack?.length && !!onMainTrackChange;
+  const trimmed = usingMainTrack
+    ? mainTrack.length > 1 || mainTrack[0].sourceStart > 0 || mainTrack[0].sourceEnd < durationMs
+    : !(clips.length === 1 && clips[0].start <= 0 && clips[0].end >= durationMs);
+  const kept = usingMainTrack ? mainTrackDuration(mainTrack) : keptDuration(clips);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [editingZoomId, setEditingZoomId] = useState<string | null>(null);
   const [timelineZoom, setTimelineZoom] = useState<number>(1);
@@ -150,7 +167,10 @@ export function Timeline({
     (outputMs: number) => (Math.max(0, Math.min(timelineDurationMs, outputMs)) / timelineDurationMs) * contentWidth,
     [contentWidth, timelineDurationMs],
   );
-  const sourcePx = useCallback((sourceMs: number) => outputPx(sourceToOutput(clips, sourceMs)), [clips, outputPx]);
+  const sourcePx = useCallback(
+    (sourceMs: number) => outputPx(usingMainTrack ? sourceMs : sourceToOutput(clips, sourceMs)),
+    [clips, outputPx, usingMainTrack],
+  );
   const clipLayouts = useMemo(() => {
     let outputStart = 0;
     return clips.map((clip, index) => {
@@ -160,6 +180,15 @@ export function Timeline({
       return layout;
     });
   }, [clips]);
+  const mainTrackLayouts = useMemo(() => {
+    let outputStart = 0;
+    return (mainTrack ?? []).map((clip, index) => {
+      const outputEnd = outputStart + Math.max(0, clip.sourceEnd - clip.sourceStart);
+      const layout = { clip, index, outputStart, outputEnd };
+      outputStart = outputEnd;
+      return layout;
+    });
+  }, [mainTrack]);
   const sourceRangeLayout = useCallback((start: number, end: number) => {
     const startPx = sourcePx(start);
     const endPx = sourcePx(end);
@@ -215,7 +244,8 @@ export function Timeline({
     const r = el.getBoundingClientRect();
     const measuredWidth = Math.max(1, el.scrollWidth);
     const ratio = Math.max(0, Math.min(1, (clientX - r.left + el.scrollLeft) / measuredWidth));
-    return Math.round(outputToSource(clips, ratio * timelineDurationMs));
+    const outputTime = ratio * timelineDurationMs;
+    return Math.round(usingMainTrack ? outputTime : outputToSource(clips, outputTime));
   };
 
   const outputAtClientX = (clientX: number): number => {
@@ -253,12 +283,22 @@ export function Timeline({
     interactionRef.current = true;
     setSelectedIdx(i);
     const base = clips.map((s) => ({ ...s }));
-    const baseEdge = side === 'start' ? base[i].start : base[i].end;
+    const mainBase = mainTrack?.map((clip) => ({ ...clip })) ?? [];
+    const baseEdge = usingMainTrack
+      ? (side === 'start' ? mainBase[i].sourceStart : mainBase[i].sourceEnd)
+      : (side === 'start' ? base[i].start : base[i].end);
     const dragOrigin = outputAtClientX(e.clientX);
     const move = (ev: MouseEvent) => {
-      const t = baseEdge + outputAtClientX(ev.clientX) - dragOrigin;
-      onChange(trimSegmentEdge(base, i, side, t));
-      onScrub(t);
+      const outputTime = outputAtClientX(ev.clientX);
+      if (usingMainTrack && onMainTrackChange) {
+        const delta = outputTime - dragOrigin;
+        onMainTrackChange(trimMainTrackClip(mainBase, i, side, baseEdge + delta));
+        onScrub(outputTime);
+      } else {
+        const t = baseEdge + outputTime - dragOrigin;
+        onChange(trimSegmentEdge(base, i, side, t));
+        onScrub(t);
+      }
     };
     const up = () => {
       finishPointerInteraction();
@@ -269,13 +309,18 @@ export function Timeline({
     window.addEventListener('mouseup', up);
   };
 
-  const doSplit = () => { onChange(splitSegments(clips, playheadMs)); setSelectedIdx(null); };
+  const doSplit = () => {
+    if (usingMainTrack && mainTrack && onMainTrackChange) onMainTrackChange(splitMainTrackClip(mainTrack, playheadMs));
+    else onChange(splitSegments(clips, playheadMs));
+    setSelectedIdx(null);
+  };
   const doDelete = () => {
     if (selectedIdx == null || !canDelete) {
       onGuide?.(labels.selectClipFirst);
       return;
     }
-    onChange(removeSegmentAt(clips, selectedIdx));
+    if (usingMainTrack && mainTrack && onMainTrackChange) onMainTrackChange(removeMainTrackClip(mainTrack, selectedIdx));
+    else onChange(removeSegmentAt(clips, selectedIdx));
     setSelectedIdx(null);
   };
 
@@ -523,6 +568,10 @@ export function Timeline({
     if (!viewport) return;
     setViewportScrollLeft(viewport.scrollLeft);
     userScrollRef.current = true;
+    if (zoomAnchorTimerRef.current) {
+      clearTimeout(zoomAnchorTimerRef.current);
+      zoomAnchorTimerRef.current = null;
+    }
     if (scrollIdleTimerRef.current) clearTimeout(scrollIdleTimerRef.current);
     scrollIdleTimerRef.current = setTimeout(() => {
       userScrollRef.current = false;
@@ -530,7 +579,8 @@ export function Timeline({
     }, 180);
   };
 
-  const canDelete = selectedIdx != null && clips.length > 1;
+  const visibleClipsCount = usingMainTrack ? (mainTrack?.length ?? 0) : clips.length;
+  const canDelete = selectedIdx != null && visibleClipsCount > 1;
 
   return (
     <div className="timeline-craft-panel">
@@ -545,6 +595,11 @@ export function Timeline({
           <button type="button" onClick={doDelete} data-availability={canDelete ? 'ready' : 'prerequisite'} className="timeline-craft-action timeline-craft-danger btn-sketch" style={{ padding: '3px 9px' }} title={`${labels.deleteClip} (Del)`}>
             <I.Trash size={11} /><span className="timeline-craft-action-label">{labels.deleteClip}</span>
           </button>
+          {onImportRecordings && (
+            <button data-testid="import-recordings" type="button" onClick={onImportRecordings} className="timeline-craft-action btn-sketch" style={{ padding: '3px 9px' }} title={labels.importRecording}>
+              <I.Library size={11} /><span className="timeline-craft-action-label">{labels.importRecording}</span>
+            </button>
+          )}
           {onAutoZoomChange && (
             <button
               data-testid="autozoom-drag-source"
@@ -757,24 +812,28 @@ export function Timeline({
           style={{ position: 'relative', width: contentWidth, minWidth: '100%' }}
         >
         {/* 标尺：拖动刮擦预览 */}
-        <div className="timeline-craft-ruler" onMouseDown={startScrub} style={{ height: 14, cursor: 'ew-resize' }} />
+        <div data-testid="timeline-ruler" className="timeline-craft-ruler" onMouseDown={startScrub} style={{ height: 14, cursor: 'ew-resize' }} />
 
         {/* Ripple timeline: clip order is the final playback/export order. */}
         <div data-testid="timeline-video-track" className="timeline-craft-track" onMouseDown={startScrub} style={{ position: 'relative', height: 30, overflow: 'hidden', cursor: 'ew-resize' }}>
-          {clipLayouts.map(({ clip: c, index: i, outputStart, outputEnd }) => {
+          {(usingMainTrack ? mainTrackLayouts : clipLayouts).map(({ clip: c, index: i, outputStart, outputEnd }) => {
             const sel = selectedIdx === i;
+            const sourceStart = 'sourceStart' in c ? c.sourceStart : c.start;
+            const sourceEnd = 'sourceEnd' in c ? c.sourceEnd : c.end;
+            const sourceRecordingId = 'recordingId' in c ? c.recordingId : undefined;
             return (
               <div
-                key={`c${i}`}
+                key={'id' in c ? c.id : `c${i}`}
                 data-testid="timeline-video-clip"
-                data-source-start={c.start}
-                data-source-end={c.end}
-                draggable={clips.length > 1}
+                data-recording-id={sourceRecordingId}
+                data-source-start={sourceStart}
+                data-source-end={sourceEnd}
+                draggable={visibleClipsCount > 1}
                 className={`timeline-craft-clip${sel ? ' is-selected' : ''}`}
                 onMouseDown={(event) => {
                   event.stopPropagation();
                   setSelectedIdx(i);
-                  onScrub(c.start);
+                  onScrub(usingMainTrack ? outputStart : sourceStart);
                 }}
                 onDragStart={(event) => {
                   event.stopPropagation();
@@ -793,14 +852,17 @@ export function Timeline({
                   event.stopPropagation();
                   const fromIndex = Number(event.dataTransfer.getData('text/plain'));
                   if (!Number.isInteger(fromIndex) || fromIndex === i) return;
-                  onChange(moveSegment(clips, fromIndex, i));
+                  if (usingMainTrack && mainTrack && onMainTrackChange) onMainTrackChange(moveMainTrackClip(mainTrack, fromIndex, i));
+                  else onChange(moveSegment(clips, fromIndex, i));
                   setSelectedIdx(i);
                 }}
                 style={{
                   position: 'absolute', top: 2, bottom: 2, left: outputPx(outputStart), width: outputPx(outputEnd) - outputPx(outputStart),
-                  cursor: clips.length > 1 ? 'grab' : 'default', overflow: 'hidden',
+                  cursor: visibleClipsCount > 1 ? 'grab' : 'default', overflow: 'hidden',
                 }}
+                title={'title' in c ? c.title : undefined}
               >
+                {'title' in c && c.title && <span className="timeline-craft-clip-title">{c.title}</span>}
                 {/* 左右 Trim 手柄 */}
                 <div className="timeline-craft-edge" onMouseDown={startEdgeDrag(i, 'start')} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, cursor: 'ew-resize', opacity: sel ? 0.9 : 0.55 }} />
                 <div className="timeline-craft-edge" onMouseDown={startEdgeDrag(i, 'end')} style={{ position: 'absolute', top: 0, bottom: 0, right: 0, cursor: 'ew-resize', opacity: sel ? 0.9 : 0.55 }} />

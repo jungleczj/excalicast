@@ -586,6 +586,29 @@ export async function updateRecordingSegments(recordingId: string, segments: Tim
   invalidateRecordingMediaCache(recordingId);
 }
 
+export async function updateRecordingMainTrack(
+  recordingId: string,
+  mainTrack: import('@/types/recording').MainTrackClip[],
+): Promise<void> {
+  const clean = mainTrack
+    .filter((clip) => (
+      typeof clip.id === 'string'
+      && typeof clip.recordingId === 'string'
+      && Number.isFinite(clip.sourceStart)
+      && Number.isFinite(clip.sourceEnd)
+      && clip.sourceEnd > clip.sourceStart
+    ))
+    .map((clip) => ({
+      id: clip.id,
+      recordingId: clip.recordingId,
+      sourceStart: Math.max(0, Math.round(clip.sourceStart)),
+      sourceEnd: Math.max(1, Math.round(clip.sourceEnd)),
+      title: clip.title?.trim() || undefined,
+    }));
+  await getClientDb().recordings.update(recordingId, { mainTrack: clean.length > 0 ? clean : undefined });
+  invalidateRecordingMediaCache(recordingId);
+}
+
 export async function updateRecordingAutoZooms(recordingId: string, autoZooms: AutoZoomSegment[]): Promise<void> {
   const clean = autoZooms
     .filter((z) => Number.isFinite(z.start) && Number.isFinite(z.end) && z.end > z.start && Number.isFinite(z.scale) && z.scale > 1)

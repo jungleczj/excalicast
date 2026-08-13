@@ -7,7 +7,7 @@ import { cameraPlacementFromEvent, projectCameraPlacement } from '@/services/cam
 import { getEnhancedAudioTrack, getLocalizedTrack, getWorkspaceShells, loadFullRecording, releaseRecordingMediaCache } from '@/lib/db-client';
 import { isUsableLocalizedTrack } from '@/lib/localizedTrack';
 import { audioSourceFingerprint } from '@/services/audioEnhancement';
-import type { AutoZoomSegment, CameraPositionEvent, EnhancedAudioTrack, ExportConfig, HighlightEffectSegment, LocalizedTrack, RecordingMetadata, ShellCanvasRect, ShellSize, TimeSegment } from '@/types/recording';
+import type { AutoZoomSegment, CameraPositionEvent, EnhancedAudioTrack, ExportConfig, HighlightEffectSegment, LocalizedTrack, MainTrackClip, RecordingMetadata, ShellCanvasRect, ShellSize, TimeSegment } from '@/types/recording';
 import { resolveExportOutputSize } from '@/types/recording';
 import { keptDuration, normalizeSegmentSequence, outputToSource, sourceToOutput } from '@/utils/segments';
 import { I } from '@/components/icons';
@@ -17,6 +17,9 @@ import { resolvePreviewRenderSize } from '@/services/previewRenderPolicy';
 import { getVideoBackgroundPreset, resolveVideoBackground } from '@/config/videoBackgrounds';
 import { useMediaTaskActions } from '@/components/providers/MediaTaskProvider';
 import { announceMediaTaskCreated } from '@/components/MediaTaskCenter';
+import { mainTrackDuration, resolveMainTrackPosition } from '@/services/mainTrack';
+import { resolveHybridPreviewMode } from '@/services/hybridPreviewPolicy';
+import { mapProjectRangeToClip } from '@/services/mainTrack';
 
 interface Props {
   recordingId: string;
@@ -24,6 +27,7 @@ interface Props {
   config: ExportConfig;
   /** 保留段（源 ms）；播放 / 读数走「成片」时间，跳过被删段。 */
   segments: TimeSegment[];
+  mainTrack?: MainTrackClip[];
   /** 受控播放头（源 ms）。 */
   playheadMs: number;
   onPlayheadChange: (srcMs: number) => void;
@@ -62,7 +66,7 @@ const resizeButtonStyle: React.CSSProperties = {
 };
 
 export function ExportPreview({
-  recordingId, metadata, config, segments, playheadMs, onPlayheadChange,
+  recordingId, metadata, config, segments, mainTrack = [], playheadMs, onPlayheadChange,
   selectedAutoZoomId = null, onAutoZoomRegionChange,
   selectedHighlightId = null, onHighlightRegionChange,
 }: Props): JSX.Element {
@@ -73,10 +77,20 @@ export function ExportPreview({
   const audioRef = useRef<HTMLAudioElement>(null);
   const cameraRef = useRef<HTMLVideoElement>(null);
   // 受控播放头（源时间）。播放/读数走「成片」输出时间（跳过被删段）。
-  const timeMs = playheadMs;
+  const projectTimeMs = playheadMs;
+  const projectTimeMsRef = useRef(projectTimeMs);
+  projectTimeMsRef.current = projectTimeMs;
+  const mainTrackPosition = useMemo(
+    () => mainTrack.length > 0 ? resolveMainTrackPosition(mainTrack, projectTimeMs) : null,
+    [mainTrack, projectTimeMs],
+  );
+  const activeRecordingId = mainTrackPosition?.recordingId ?? recordingId;
+  const timeMs = mainTrackPosition?.sourceTimeMs ?? projectTimeMs;
+  const sourceTimeMsRef = useRef(timeMs);
+  sourceTimeMsRef.current = timeMs;
   const setTimeMs = onPlayheadChange;
   const kept = useMemo(() => normalizeSegmentSequence(segments, metadata.durationMs), [segments, metadata.durationMs]);
-  const keptDur = useMemo(() => keptDuration(kept), [kept]);
+  const keptDur = useMemo(() => mainTrack.length > 0 ? mainTrackDuration(mainTrack) : keptDuration(kept), [kept, mainTrack]);
   const [rendering, setRendering] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -99,6 +113,25 @@ export function ExportPreview({
   }, [config.videoBackground]);
   const [firstShell, setFirstShell] = useState<{ shellSize: ShellSize; canvasRect: ShellCanvasRect } | null>(null);
   const [playing, setPlaying] = useState(false);
+  const [activeMetadata, setActiveMetadata] = useState<RecordingMetadata>(metadata);
+  const hybridPreviewMode = resolveHybridPreviewMode({ durationMs: keptDur, playing, preciseSeek: !playing });
+  const activeConfig = useMemo<ExportConfig>(() => {
+    if (!mainTrackPosition || mainTrack.length === 0) return config;
+    const clip = mainTrack[mainTrackPosition.clipIndex];
+    const mapRanges = <T extends { start: number; end: number }>(items: T[] | undefined): T[] | undefined => {
+      const mapped = items?.map((item) => mapProjectRangeToClip(item, clip, mainTrackPosition.outputStartMs))
+        .filter((item): item is T => !!item);
+      return mapped?.length ? mapped : undefined;
+    };
+    return {
+      ...config,
+      autoZooms: mapRanges(config.autoZooms),
+      highlights: mapRanges(config.highlights),
+      keyPointMotions: mapRanges(config.keyPointMotions),
+      localizedTrackId: activeRecordingId === recordingId ? config.localizedTrackId : undefined,
+      activeEnhancedAudioTrackId: activeRecordingId === recordingId ? config.activeEnhancedAudioTrackId : undefined,
+    };
+  }, [activeRecordingId, config, mainTrack, mainTrackPosition?.clipIndex, mainTrackPosition?.outputStartMs, recordingId]);
   const [selectionOverlaysHidden, setSelectionOverlaysHidden] = useState(false);
   const [cursorTracking, setCursorTracking] = useState<{
     progress: number;
@@ -138,11 +171,11 @@ export function ExportPreview({
   }, [config.aspectRatio]);
   const mountedRef = useRef(true);
   const renderConfigRef = useRef(config);
-  const renderRecordingIdRef = useRef(recordingId);
+  const renderRecordingIdRef = useRef(activeRecordingId);
   const renderMetadataRef = useRef(metadata);
-  renderConfigRef.current = config;
-  renderRecordingIdRef.current = recordingId;
-  renderMetadataRef.current = metadata;
+  renderConfigRef.current = activeConfig;
+  renderRecordingIdRef.current = activeRecordingId;
+  renderMetadataRef.current = activeMetadata;
   const rafRef = useRef<number | null>(null);
   const clockRef = useRef<{ perfStart: number; baseTime: number } | null>(null);
   const lastDrawAtRef = useRef<number>(0);
@@ -166,6 +199,7 @@ export function ExportPreview({
           displayWidth: visible.clientWidth,
           displayHeight: visible.clientHeight,
           devicePixelRatio: window.devicePixelRatio,
+          maxEdge: hybridPreviewMode === 'proxy' ? 960 : 1440,
         });
         await renderPreviewFrame(
           renderRecordingIdRef.current,
@@ -193,17 +227,17 @@ export function ExportPreview({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      releasePreviewResources(recordingId);
-      releaseRecordingMediaCache(recordingId);
+      releasePreviewResources(activeRecordingId);
+      releaseRecordingMediaCache(activeRecordingId);
     };
-  }, [recordingId]);
+  }, [activeRecordingId]);
 
   useEffect(() => {
-    void setPreviewPlayback(recordingId, playing, timeMs).catch(() => undefined);
-    return () => { void setPreviewPlayback(recordingId, false, timeMs).catch(() => undefined); };
+    void setPreviewPlayback(activeRecordingId, playing, timeMs).catch(() => undefined);
+    return () => { void setPreviewPlayback(activeRecordingId, false, timeMs).catch(() => undefined); };
     // timeMs intentionally captures the start position; the media clock advances afterwards.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, recordingId]);
+  }, [activeRecordingId, playing]);
 
   // 加载 audio / camera blob + 摄像头位置事件，用于预览播放
   useEffect(() => {
@@ -213,9 +247,10 @@ export function ExportPreview({
     setAudioUrl(null);
     setSourceAudioFingerprint(null);
     setCameraUrl(null);
-    Promise.all([loadFullRecording(recordingId), getWorkspaceShells(recordingId)])
+    Promise.all([loadFullRecording(activeRecordingId), getWorkspaceShells(activeRecordingId)])
       .then(([r, shells]) => {
         if (cancelled) return;
+        setActiveMetadata(r.metadata);
         if (r.audioBlob) {
           createdAudioUrl = URL.createObjectURL(r.audioBlob);
           setAudioUrl(createdAudioUrl);
@@ -236,28 +271,28 @@ export function ExportPreview({
       if (createdAudioUrl) URL.revokeObjectURL(createdAudioUrl);
       if (createdCameraUrl) URL.revokeObjectURL(createdCameraUrl);
     };
-  }, [recordingId]);
+  }, [activeRecordingId]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!config.alwaysKeepZoomedIn) {
+    if (!activeConfig.alwaysKeepZoomedIn) {
       setCursorTracking(null);
       return;
     }
-    announceMediaTaskCreated(recordingId);
+    announceMediaTaskCreated(activeRecordingId);
     void startTask({
-      recordingId,
+      recordingId: activeRecordingId,
       kind: 'cursor_analysis',
       resourceClass: 'local_heavy',
-      configSnapshot: { durationMs: metadata.durationMs },
-    }, async (report, signal) => loadFullRecording(recordingId)
+      configSnapshot: { durationMs: activeMetadata.durationMs },
+    }, async (report, signal) => loadFullRecording(activeRecordingId)
       .then(async (recording) => {
         if (cancelled || !recording.screenBlob) return;
         setCursorTracking({ progress: 0 });
         const track = await analyzeCursorFocusTrack({
-          recordingId,
+          recordingId: activeRecordingId,
           screenBlob: recording.screenBlob,
-          durationMs: metadata.durationMs,
+          durationMs: activeMetadata.durationMs,
           signal,
           onProgress: (progress) => {
             report({ phase: 'analyzing_cursor', ratio: progress });
@@ -267,26 +302,26 @@ export function ExportPreview({
         if (cancelled) return;
         setCursorTracking({ progress: 1, quality: track.quality });
         setFocusTrackRevision((revision) => revision + 1);
-        return { resultRef: `cursor-focus:${recordingId}` };
+        return { resultRef: `cursor-focus:${activeRecordingId}` };
       })
       .catch((error) => {
         if (!cancelled) setCursorTracking({ progress: 1, failed: true });
         throw error;
       })).catch(() => undefined);
     return () => { cancelled = true; };
-  }, [config.alwaysKeepZoomedIn, metadata.durationMs, recordingId, startTask]);
+  }, [activeConfig.alwaysKeepZoomedIn, activeMetadata.durationMs, activeRecordingId, startTask]);
 
   useEffect(() => {
     let cancelled = false;
     let createdAudioUrl: string | null = null;
     let createdCameraUrl: string | null = null;
-    if (!config.localizedTrackId) {
+    if (!activeConfig.localizedTrackId) {
       setLocalizedTrack(null);
       setLocalizedAudioUrl(null);
       setLocalizedCameraUrl(null);
       return;
     }
-    getLocalizedTrack(config.localizedTrackId)
+    getLocalizedTrack(activeConfig.localizedTrackId)
       .then((track) => {
         if (cancelled) return;
         if (!isUsableLocalizedTrack(track)) {
@@ -313,17 +348,17 @@ export function ExportPreview({
       if (createdAudioUrl) URL.revokeObjectURL(createdAudioUrl);
       if (createdCameraUrl) URL.revokeObjectURL(createdCameraUrl);
     };
-  }, [config.localizedTrackId]);
+  }, [activeConfig.localizedTrackId]);
 
   useEffect(() => {
     let cancelled = false;
     let createdAudioUrl: string | null = null;
-    if (!config.activeEnhancedAudioTrackId || !sourceAudioFingerprint || (localizedTrack && config.muteOriginalAudio !== false)) {
+    if (!activeConfig.activeEnhancedAudioTrackId || !sourceAudioFingerprint || (localizedTrack && activeConfig.muteOriginalAudio !== false)) {
       setEnhancedAudioTrack(null);
       setEnhancedAudioUrl(null);
       return;
     }
-    void getEnhancedAudioTrack(config.activeEnhancedAudioTrackId)
+    void getEnhancedAudioTrack(activeConfig.activeEnhancedAudioTrackId)
       .then((track) => {
         if (cancelled) return;
         if (!track || track.status !== 'ready' || track.audioBlob.size === 0 || track.sourceFingerprint !== sourceAudioFingerprint) {
@@ -345,7 +380,7 @@ export function ExportPreview({
       cancelled = true;
       if (createdAudioUrl) URL.revokeObjectURL(createdAudioUrl);
     };
-  }, [config.activeEnhancedAudioTrackId, config.muteOriginalAudio, localizedTrack, sourceAudioFingerprint]);
+  }, [activeConfig.activeEnhancedAudioTrackId, activeConfig.muteOriginalAudio, localizedTrack, sourceAudioFingerprint]);
 
   // 当前 timeMs 对应的摄像头位置（百分比）。
   // shell on 时，气泡定位用 letterboxed shell 区作为坐标系（跟导出 pipeline 一致）；
@@ -412,22 +447,22 @@ export function ExportPreview({
   const drawFrame = useCallback((t: number, force: boolean) => {
     if (!canvasRef.current) return;
     const now = performance.now();
-    const redrawInterval = metadata.source?.kind && metadata.source.kind !== 'whiteboard'
-      ? DISPLAY_REDRAW_INTERVAL_MS
+    const redrawInterval = activeMetadata.source?.kind && activeMetadata.source.kind !== 'whiteboard'
+      ? (hybridPreviewMode === 'proxy' ? 100 : DISPLAY_REDRAW_INTERVAL_MS)
       : WHITEBOARD_REDRAW_INTERVAL_MS;
     if (!force && now - lastDrawAtRef.current < redrawInterval) return;
     if (!force && Math.abs(t - lastDrawTimeMsRef.current) < redrawInterval / 2) return;
     lastDrawAtRef.current = now;
     lastDrawTimeMsRef.current = t;
     void renderRunnerRef.current?.push(t);
-  }, [recordingId, config, focusTrackRevision]);
+  }, [activeConfig, activeMetadata.source?.kind, activeRecordingId, focusTrackRevision, hybridPreviewMode]);
 
   // config 切换 或 暂停态下播放头被外部（时间轴）拖动 → 重绘该源帧。
   // 播放中由播放循环负责重绘，这里跳过避免双重绘制。
   useEffect(() => {
     if (!playing) drawFrame(timeMs, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [recordingId, config, metadata.subtitleSrt, timeMs, playing]);
+  }, [activeConfig, activeRecordingId, activeMetadata.subtitleSrt, timeMs, playing]);
 
   // 播放循环：performance.now() 主时钟 + 节流 canvas 重绘
   useEffect(() => {
@@ -438,7 +473,10 @@ export function ExportPreview({
       return;
     }
     // baseTime = 起播时刻的「成片输出时间」；循环走输出时间，映射回源时间渲染。
-    clockRef.current = { perfStart: performance.now(), baseTime: sourceToOutput(kept, timeMs) };
+    clockRef.current = {
+      perfStart: performance.now(),
+      baseTime: mainTrack.length > 0 ? projectTimeMsRef.current : sourceToOutput(kept, sourceTimeMsRef.current),
+    };
     const audio = audioRef.current;
     const camera = cameraRef.current;
     const tick = () => {
@@ -446,16 +484,21 @@ export function ExportPreview({
       if (!ref) return;
       const outT = ref.baseTime + (performance.now() - ref.perfStart);
       if (keptDur > 0 && outT >= keptDur) {
-        const endSrc = outputToSource(kept, keptDur);
-        setTimeMs(endSrc);
-        drawFrame(endSrc, true);
+        const endProject = keptDur;
+        const endSource = mainTrack.length > 0
+          ? resolveMainTrackPosition(mainTrack, endProject)?.sourceTimeMs ?? 0
+          : outputToSource(kept, endProject);
+        setTimeMs(mainTrack.length > 0 ? endProject : endSource);
+        drawFrame(endSource, true);
         setPlaying(false);
         if (audio) { try { audio.pause(); } catch { /* ignore */ } }
         if (camera) { try { camera.pause(); } catch { /* ignore */ } }
         return;
       }
-      const src = outputToSource(kept, outT);
-      setTimeMs(src);
+      const src = mainTrack.length > 0
+        ? resolveMainTrackPosition(mainTrack, outT)?.sourceTimeMs ?? 0
+        : outputToSource(kept, outT);
+      setTimeMs(mainTrack.length > 0 ? outT : src);
       drawFrame(src, false);
       const sSec = src / 1000;
       // 段内自然播放；跨被删段（src 跳变）漂移 > 0.3s 时强制 seek 对齐。
@@ -472,7 +515,7 @@ export function ExportPreview({
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, drawFrame, kept, keptDur]);
+  }, [playing, drawFrame, kept, keptDur, mainTrack]);
 
   const togglePlay = useCallback(() => {
     setPlaying((prev) => {
@@ -480,11 +523,14 @@ export function ExportPreview({
       const audio = audioRef.current;
       const camera = cameraRef.current;
       if (next) {
-        const curOut = sourceToOutput(kept, timeMs);
+        const curOut = mainTrack.length > 0 ? projectTimeMs : sourceToOutput(kept, timeMs);
         const restart = keptDur > 0 && curOut >= keptDur - 50;
-        const startSrc = restart ? outputToSource(kept, 0) : timeMs;
+        const startProject = restart ? 0 : curOut;
+        const startSrc = mainTrack.length > 0
+          ? resolveMainTrackPosition(mainTrack, startProject)?.sourceTimeMs ?? 0
+          : (restart ? outputToSource(kept, 0) : timeMs);
         if (restart) {
-          setTimeMs(startSrc);
+          setTimeMs(mainTrack.length > 0 ? startProject : startSrc);
           drawFrame(startSrc, true);
         }
         if (audio) {
@@ -502,7 +548,7 @@ export function ExportPreview({
       return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kept, keptDur, timeMs, drawFrame]);
+  }, [kept, keptDur, mainTrack, projectTimeMs, timeMs, drawFrame]);
 
   // 预览进度条：可拖刮擦（成片输出时间 → 源时间），与底部时间轴等效
   const barRef = useRef<HTMLDivElement>(null);
@@ -511,10 +557,13 @@ export function ExportPreview({
     if (!el || keptDur <= 0) return null;
     const r = el.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
-    const src = outputToSource(kept, ratio * keptDur);
-    setTimeMs(src);
+    const outputTime = ratio * keptDur;
+    const src = mainTrack.length > 0
+      ? resolveMainTrackPosition(mainTrack, outputTime)?.sourceTimeMs ?? 0
+      : outputToSource(kept, outputTime);
+    setTimeMs(mainTrack.length > 0 ? outputTime : src);
     return src;
-  }, [kept, keptDur, setTimeMs]);
+  }, [kept, keptDur, mainTrack, setTimeMs]);
   const startBarScrub = useCallback((e: React.MouseEvent) => {
     if (keptDur <= 0) return;
     e.preventDefault();
@@ -533,7 +582,10 @@ export function ExportPreview({
         try { cameraRef.current.currentTime = sec; } catch { /* ignore */ }
       }
       if (wasPlaying) {
-        clockRef.current = { perfStart: performance.now(), baseTime: sourceToOutput(kept, src) };
+        clockRef.current = {
+          perfStart: performance.now(),
+          baseTime: mainTrack.length > 0 ? playheadMs : sourceToOutput(kept, src),
+        };
       }
     };
     const initial = scrubBarToClientX(e.clientX);
@@ -552,7 +604,7 @@ export function ExportPreview({
     };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
-  }, [kept, keptDur, playing, scrubBarToClientX]);
+  }, [kept, keptDur, mainTrack.length, playheadMs, playing, scrubBarToClientX]);
 
   // scrub 由时间轴驱动（onPlayheadChange → playheadMs）；预览不再自带进度条。
   const preset = resolveExportOutputSize(config);
@@ -605,19 +657,19 @@ export function ExportPreview({
   const controlScale = Math.max(0.78, Math.min(1.35, previewBox.w / 720));
 
   // 摄像头气泡位置/尺寸由 cameraOverlayStyle 计算（events → 动态；无事件 → 右下角 18% 宽度）
-  const cameraShape = metadata.setup?.camera.shape ?? 'circle';
-  const previewAutoZoomScale = autoZoomAt(config.autoZooms, timeMs)?.scale ?? 1;
-  const activeAudioUrl = localizedTrack && config.muteOriginalAudio !== false
+  const cameraShape = activeMetadata.setup?.camera.shape ?? 'circle';
+  const previewAutoZoomScale = autoZoomAt(activeConfig.autoZooms, timeMs)?.scale ?? 1;
+  const activeAudioUrl = localizedTrack && activeConfig.muteOriginalAudio !== false
     ? localizedAudioUrl
     : (enhancedAudioUrl ?? audioUrl);
   const activeCameraUrl = localizedCameraUrl ?? cameraUrl;
   const selectedAutoZoom = useMemo(
-    () => config.autoZooms?.find((zoom) => zoom.id === selectedAutoZoomId) ?? null,
-    [config.autoZooms, selectedAutoZoomId],
+    () => activeConfig.autoZooms?.find((zoom) => zoom.id === selectedAutoZoomId) ?? null,
+    [activeConfig.autoZooms, selectedAutoZoomId],
   );
   const selectedHighlight = useMemo(
-    () => config.highlights?.find((item) => item.id === selectedHighlightId) ?? null,
-    [config.highlights, selectedHighlightId],
+    () => activeConfig.highlights?.find((item) => item.id === selectedHighlightId) ?? null,
+    [activeConfig.highlights, selectedHighlightId],
   );
 
   // 与 exportPipeline 的 zoomBounds / drawRecordingWindow 一致：框选目标永远位于实际

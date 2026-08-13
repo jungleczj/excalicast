@@ -144,3 +144,18 @@ export function trimMainTrackClip(
   return next;
 }
 
+export function mapProjectRangeToClip<T extends { start: number; end: number }>(
+  item: T,
+  clip: MainTrackClip,
+  outputStartMs: number,
+): T | null {
+  const outputEndMs = outputStartMs + clip.sourceEnd - clip.sourceStart;
+  const overlapStart = Math.max(item.start, outputStartMs);
+  const overlapEnd = Math.min(item.end, outputEndMs);
+  if (overlapEnd <= overlapStart) return null;
+  return {
+    ...item,
+    start: clip.sourceStart + overlapStart - outputStartMs,
+    end: clip.sourceStart + overlapEnd - outputStartMs,
+  };
+}
