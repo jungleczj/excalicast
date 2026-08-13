@@ -480,3 +480,33 @@ The prototype intentionally isolated all state in memory and had no connection t
 ### Status
 
 - Fixed and verified locally.
+## 2026-08-13 - Preview froze behind audio and export failed on valid peaks
+
+### Symptoms
+
+- Preview audio advanced while the canvas stayed on old frames or updated in bursts, making long recordings impractical to edit.
+- Some ratios, including 3:2, failed with `export_audio_clipped_samples` even though ratio selection does not alter audio.
+- A late browser audio-encoder failure could discard a completed hardware video pass and start a much slower full ffmpeg software export.
+
+### Root cause
+
+- Every playback tick aborted the in-flight preview composition, so a renderer slower than the 50-100ms request interval could be prevented from ever publishing a frame.
+- Playback used `performance.now()` while audio, camera, and display sources advanced on independent media clocks, and propagated the playhead through React at animation-frame frequency.
+- Audio continuity validation treated any decoded Float32 sample above `1.0` as fatal rather than applying one transparent track-level gain.
+- Audio encoding happened after all video frames and shared the same broad WebCodecs fallback classification as video failures.
+
+### Fix
+
+- Complete the active playback frame and coalesce only waiting requests; precise scrub still aborts obsolete renders.
+- Follow the audio media clock within a bounded drift window, tighten camera/display correction, throttle parent playhead publishing, and reuse large preview canvases.
+- Normalize the complete track to `-1 dBFS` only when its original peak exceeds full scale; non-finite samples remain fatal.
+- Encode audio concurrently, choose an A/V or video-only muxer before streaming the main video pass, and use audio-only remux after audio encoder failure.
+
+### Regression coverage
+
+- Added runner scheduling, audio-clock drift, peak normalization, direct-audio fallback, AAC continuity, H.264 timestamp, and real muxer coverage.
+- Full focused suite: 71 tests passed.
+
+### Status
+
+- Fixed and verified locally.

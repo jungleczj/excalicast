@@ -7,10 +7,10 @@ export class LatestTaskRunner<T> {
 
   constructor(private readonly task: (value: T, signal: AbortSignal) => Promise<void>) {}
 
-  push(value: T): Promise<void> {
+  push(value: T, options: { abortRunning?: boolean } = {}): Promise<void> {
     if (this.disposed) return Promise.reject(new DOMException('Task runner disposed', 'AbortError'));
     this.pending = value;
-    this.activeController?.abort();
+    if (options.abortRunning ?? true) this.activeController?.abort();
     const promise = new Promise<void>((resolve, reject) => {
       this.pendingWaiters.push({ resolve, reject });
     });

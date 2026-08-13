@@ -79,7 +79,7 @@ export interface ExportOptions extends ExportConfig {
   suppressAudio?: boolean;
 }
 
-export type DeterministicExportFailureStage = 'frame_composition';
+export type DeterministicExportFailureStage = 'frame_composition' | 'audio_preparation';
 
 export interface WebCodecsFailureDecision {
   action: 'fail' | 'software_reencode';
@@ -126,7 +126,7 @@ export function classifyWebCodecsFailure(error: unknown): WebCodecsFailureDecisi
     const failure = error as Partial<DeterministicExportFailure>;
     if (
       failure.exportFailureKind === 'deterministic_input'
-      && failure.stage === 'frame_composition'
+      && (failure.stage === 'frame_composition' || failure.stage === 'audio_preparation')
     ) {
       return {
         action: 'fail',
@@ -140,6 +140,10 @@ export function classifyWebCodecsFailure(error: unknown): WebCodecsFailureDecisi
 
 let _ffmpeg: FFmpeg | null = null;
 const previewDisplayCache = new Map<string, { source: DisplayFrameSource; lastTimeMs: number }>();
+const previewLayerCache = new WeakMap<HTMLCanvasElement, {
+  content: HTMLCanvasElement;
+  foreground: HTMLCanvasElement;
+}>();
 
 const previewShellCache = new Map<string, Promise<DecodedShell[]>>();
 
@@ -275,7 +279,7 @@ async function exportMainTrack(opts: ExportOptions, clips: MainTrackClip[]): Pro
     opts.onPhase?.('main_track_muxing_audio');
     opts.onProgress?.(0.96);
     const continuousAudio = concatenatePreparedExportAudio(preparedAudioTracks);
-    result = await remuxEncodedVideoWithAudio(result, continuousAudio.wavBlob, format, opts.onLog);
+    result = await remuxEncodedVideoWithAudio(result, continuousAudio.getWavBlob(), format, opts.onLog);
   }
   opts.onProgress?.(1);
   return result;
@@ -724,6 +728,27 @@ function createContentLayer(width: number, height: number): HTMLCanvasElement {
   layer.width = width;
   layer.height = height;
   return layer;
+}
+
+function getPreviewContentLayers(
+  target: HTMLCanvasElement,
+  width: number,
+  height: number,
+): { content: HTMLCanvasElement; foreground: HTMLCanvasElement } {
+  let layers = previewLayerCache.get(target);
+  if (!layers) {
+    layers = {
+      content: createContentLayer(width, height),
+      foreground: createContentLayer(width, height),
+    };
+    previewLayerCache.set(target, layers);
+  }
+  for (const layer of [layers.content, layers.foreground]) {
+    if (layer.width !== width) layer.width = width;
+    if (layer.height !== height) layer.height = height;
+    layer.getContext('2d')?.clearRect(0, 0, width, height);
+  }
+  return layers;
 }
 
 function drawZoomedContentLayer(
@@ -1445,13 +1470,15 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     return target;
   };
 
-  // Decode/resample starts in parallel with renderer setup, but must settle
-  // before either encoder renders frame 0. The resolved value is reused by
-  // WebCodecs, audio remux, and the ffmpeg compatibility path.
-  if (preparedAudioPromise) setPhase('preparing_audio');
-  const preparedAudio = preparedAudioPromise ? await preparedAudioPromise : null;
-  const reusablePreparedAudio = preparedAudio ? Promise.resolve(preparedAudio) : null;
-  if (preparedAudioPromise) setPhase('rendering_frames');
+  // Audio preparation starts with renderer setup and runs beside video composition.
+  // It must not delay frame 0; the resolved PCM is still reused by every audio path.
+  let preparedAudio: PreparedExportAudio | null = null;
+  const reusablePreparedAudio = preparedAudioPromise?.then((audio) => {
+    preparedAudio = audio;
+    return audio;
+  }).catch((error) => {
+    throw deterministicExportFailure('audio_preparation', error);
+  }) ?? null;
 
   // —— WebCodecs 硬件编码主路径：浏览器支持时启用，失败自动回退 ffmpeg ——
   // 含摄像头时尝试用 VideoDecoder+webm 解复用把摄像头帧在画布内合成；解码不可用/失败 → 回退。
@@ -1502,16 +1529,17 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       });
       diagnostics.addBreakdown('hardware_composition_and_encoding', performance.now() - hardwareStarted);
       let blob = encoded.blob;
-      if (preparedAudio && encoded.audioEncoded) {
+      if (encoded.audioEncoded) {
         diagnostics.setAudioEncoderPath(format === 'webm' ? 'webcodecs-opus' : 'webcodecs-aac');
       }
-      if (preparedAudio && !encoded.audioEncoded) {
+      if (reusablePreparedAudio && !encoded.audioEncoded) {
+        preparedAudio = await reusablePreparedAudio;
         setPhase('muxing_audio');
         setProgress(0.98);
         const muxStarted = performance.now();
         blob = await remuxEncodedVideoWithAudio(
           blob,
-          preparedAudio.wavBlob,
+          preparedAudio.getWavBlob(),
           format,
           opts.onLog,
         );
@@ -1655,10 +1683,11 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   }
 
   let audioFile: string | null = null;
+  if (reusablePreparedAudio && !preparedAudio) preparedAudio = await reusablePreparedAudio;
   if (preparedAudio) { // GIF 无音轨
     audioFile = 'audio.wav';
     const audioWriteStarted = performance.now();
-    await ffmpeg.writeFile(audioFile, new Uint8Array(await preparedAudio.wavBlob.arrayBuffer()));
+    await ffmpeg.writeFile(audioFile, new Uint8Array(await preparedAudio.getWavBlob().arrayBuffer()));
     diagnostics.setAudioEncoderPath(format === 'webm' ? 'ffmpeg-opus' : 'ffmpeg-aac');
     diagnostics.addBreakdown('audio_virtual_fs', performance.now() - audioWriteStarted);
   }
@@ -1883,14 +1912,14 @@ export async function renderPreviewFrame(
   const outputW = evenize(renderSize?.width ?? preset.width);
   const outputH = evenize(renderSize?.height ?? preset.height);
 
-  target.width = outputW;
-  target.height = outputH;
+  if (target.width !== outputW) target.width = outputW;
+  if (target.height !== outputH) target.height = outputH;
   const ctx = target.getContext('2d')!;
+  ctx.clearRect(0, 0, target.width, target.height);
   await paintVideoBackground(ctx, target.width, target.height, config.videoBackground, { signal });
   checkAborted();
-  const content = createContentLayer(target.width, target.height);
+  const { content, foreground } = getPreviewContentLayers(target, target.width, target.height);
   const contentCtx = content.getContext('2d')!;
-  const foreground = createContentLayer(target.width, target.height);
   const foregroundCtx = foreground.getContext('2d')!;
 
   const hasCamera = !!effectiveCameraBlob;

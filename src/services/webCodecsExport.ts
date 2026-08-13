@@ -80,6 +80,25 @@ interface BufferedAudioChunk {
   order: number;
 }
 
+interface BufferedMuxAudioChunk {
+  chunk: any;
+  meta: any;
+  timestamp?: number;
+}
+
+export async function settleDirectAudioEncoding<T>(
+  direct: boolean,
+  encode: () => Promise<T>,
+): Promise<{ mode: 'direct'; value: T; reason?: undefined } | { mode: 'remux'; value: null; reason?: string }> {
+  if (!direct) return { mode: 'remux', value: null };
+  try {
+    return { mode: 'direct', value: await encode() };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error || 'audio_encoder_failed');
+    return { mode: 'remux', value: null, reason };
+  }
+}
+
 /** Keep H.264 presentation order separate from the monotonic MP4 decode timeline. */
 export function createMp4VideoChunkWriter(fps: number, target: Mp4VideoChunkTarget) {
   const mapTimestamp = createMp4TimestampMapper(fps);
@@ -241,32 +260,74 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<WebCodec
     audioEncoderAvailable,
     audioConfigSupported,
   });
-  const canAudio = audioMode === 'direct';
+  const directAudio = audioMode === 'direct';
+  const audioEncoding = directAudio
+    ? preparedAudio!.then((audio) => settleDirectAudioEncoding(true, async () => {
+        const chunks: BufferedMuxAudioChunk[] = [];
+        const target = {
+          addAudioChunk: (chunk: any, meta: any, timestamp?: number) => {
+            chunks.push({ chunk, meta, timestamp });
+          },
+        };
+        await encodeAudioTrack(
+          audio,
+          isWebm ? 'opus' : 'mp4a.40.2',
+          AudioEncoderCtor,
+          AudioDataCtor,
+          target,
+          (progress) => onProgress?.(progress * 0.05),
+          signal,
+        );
+        return chunks;
+      }))
+    : Promise.resolve({ mode: 'remux' as const, value: null });
 
-  // 3) muxer（mp4-muxer / webm-muxer），音频 mp4→AAC，webm→Opus
-  const muxer: any = isWebm
+  const createMuxer = (withAudio: boolean): any => isWebm
     ? new WebmMuxer({
         target: new WebmTarget(),
         video: { codec: 'V_VP9', width, height, frameRate: fps },
-        audio: canAudio ? { codec: 'A_OPUS', numberOfChannels: 1, sampleRate: EXPORT_AUDIO_SAMPLE_RATE } : undefined,
+        audio: withAudio ? { codec: 'A_OPUS', numberOfChannels: 1, sampleRate: EXPORT_AUDIO_SAMPLE_RATE } : undefined,
       })
     : new Muxer({
         target: new ArrayBufferTarget(),
         fastStart: 'in-memory',
         video: { codec: 'avc', width, height },
-        audio: canAudio ? { codec: 'aac', numberOfChannels: 1, sampleRate: EXPORT_AUDIO_SAMPLE_RATE } : undefined,
+        audio: withAudio ? { codec: 'aac', numberOfChannels: 1, sampleRate: EXPORT_AUDIO_SAMPLE_RATE } : undefined,
       });
 
-  // 4) 视频编码
+  // 3) Video and audio encoding overlap. Only video chunks produced before audio
+  // capability settles are buffered; afterwards chunks stream straight to muxer.
+  let muxer: any = null;
+  let audioEncoded = false;
+  let writeVideoChunk: ((chunk: any, meta: any) => void) | null = null;
+  const pendingVideoChunks: Array<{ chunk: any; meta: any }> = [];
+  const initializeMuxer = (encodedAudio: Awaited<typeof audioEncoding>): void => {
+    if (muxer) return;
+    audioEncoded = encodedAudio.mode === 'direct';
+    muxer = createMuxer(audioEncoded);
+    if (encodedAudio.mode === 'direct') {
+      try {
+        for (const buffered of encodedAudio.value) {
+          if (isWebm) muxer.addAudioChunk(buffered.chunk, buffered.meta);
+          else muxer.addAudioChunk(buffered.chunk, buffered.meta, buffered.timestamp);
+        }
+      } catch {
+        audioEncoded = false;
+        muxer = createMuxer(false);
+      }
+    }
+    if (isWebm) writeVideoChunk = (chunk, meta) => muxer.addVideoChunk(chunk, meta);
+    else writeVideoChunk = createMp4VideoChunkWriter(fps, muxer);
+    for (const buffered of pendingVideoChunks) writeVideoChunk(buffered.chunk, buffered.meta);
+    pendingVideoChunks.length = 0;
+  };
+  void audioEncoding.then(initializeMuxer).catch(() => undefined);
+
   let encErr: unknown = null;
-  const writeMp4VideoChunk = createMp4VideoChunkWriter(fps, muxer);
   const videoEncoder = new VideoEncoderCtor({
     output: (chunk: any, meta: any) => {
-      if (isWebm) {
-        muxer.addVideoChunk(chunk, meta);
-        return;
-      }
-      writeMp4VideoChunk(chunk, meta);
+      if (writeVideoChunk) writeVideoChunk(chunk, meta);
+      else pendingVideoChunks.push({ chunk, meta });
     },
     error: (e: unknown) => { encErr = e; },
   });
@@ -274,7 +335,8 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<WebCodec
 
   const frameDurUs = Math.round(1_000_000 / fps);
   const keyInterval = Math.max(1, fps * 2);
-  const videoShare = canAudio ? 0.85 : 1;
+  const videoOffset = directAudio ? 0.05 : 0;
+  const videoShare = 1 - videoOffset;
   try {
     for (let i = 0; i < totalFrames; i++) {
       checkAborted();
@@ -297,7 +359,8 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<WebCodec
       }
       await drainEncoderBackpressure(videoEncoder, 8, signal);
       if (encErr) throw encErr;
-      onProgress?.(((i + 1) / totalFrames) * videoShare);
+      if (!muxer && pendingVideoChunks.length >= 64) initializeMuxer(await audioEncoding);
+      onProgress?.(videoOffset + ((i + 1) / totalFrames) * videoShare);
     }
     await drainEncoderBackpressure({ encodeQueueSize: 9, flush: () => videoEncoder.flush() }, 8, signal);
   } finally {
@@ -305,18 +368,13 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<WebCodec
   }
   if (encErr) throw encErr;
 
-  // 5) 音频编码（mp4→AAC mp4a.40.2；webm→Opus）
-  if (canAudio) {
-    const audio = await preparedAudio!;
-    await encodeAudioTrack(audio, isWebm ? 'opus' : 'mp4a.40.2', AudioEncoderCtor, AudioDataCtor, muxer,
-      (p) => onProgress?.(0.85 + p * 0.15), signal);
-  }
+  initializeMuxer(await audioEncoding);
 
   muxer.finalize();
   const { buffer } = muxer.target as { buffer: ArrayBuffer };
   return {
     blob: new Blob([buffer], { type: isWebm ? 'video/webm' : 'video/mp4' }),
-    audioEncoded: canAudio,
+    audioEncoded,
   };
 }
 

@@ -20,6 +20,7 @@ import { announceMediaTaskCreated } from '@/components/MediaTaskCenter';
 import { mainTrackDuration, resolveMainTrackPosition } from '@/services/mainTrack';
 import { resolveHybridPreviewMode } from '@/services/hybridPreviewPolicy';
 import { mapProjectRangeToClip } from '@/services/mainTrack';
+import { resolvePreviewPlaybackClock } from '@/services/previewPlaybackClock';
 
 interface Props {
   recordingId: string;
@@ -180,13 +181,18 @@ export function ExportPreview({
   const clockRef = useRef<{ perfStart: number; baseTime: number } | null>(null);
   const lastDrawAtRef = useRef<number>(0);
   const lastDrawTimeMsRef = useRef<number>(-Infinity);
+  const lastPlayheadPublishAtRef = useRef<number>(-Infinity);
+  const playingRef = useRef(playing);
+  const hybridPreviewModeRef = useRef(hybridPreviewMode);
+  playingRef.current = playing;
+  hybridPreviewModeRef.current = hybridPreviewMode;
   const renderRunnerRef = useRef<LatestTaskRunner<number> | null>(null);
   if (!renderRunnerRef.current) {
     renderRunnerRef.current = new LatestTaskRunner<number>(async (requestedTimeMs, signal) => {
       if (!mountedRef.current) return;
       const visible = canvasRef.current;
       if (!visible) return;
-      setRendering(true);
+      if (!playingRef.current) setRendering(true);
       setError(null);
       const renderCanvas = renderCanvasRef.current ?? document.createElement('canvas');
       renderCanvasRef.current = renderCanvas;
@@ -199,7 +205,7 @@ export function ExportPreview({
           displayWidth: visible.clientWidth,
           displayHeight: visible.clientHeight,
           devicePixelRatio: window.devicePixelRatio,
-          maxEdge: hybridPreviewMode === 'proxy' ? 960 : 1440,
+          maxEdge: hybridPreviewModeRef.current === 'proxy' ? 960 : 1440,
         });
         await renderPreviewFrame(
           renderRecordingIdRef.current,
@@ -211,9 +217,11 @@ export function ExportPreview({
           signal,
         );
         if (signal.aborted || !mountedRef.current || !canvasRef.current) return;
-        visible.width = renderCanvas.width;
-        visible.height = renderCanvas.height;
-        visible.getContext('2d')?.drawImage(renderCanvas, 0, 0);
+        if (visible.width !== renderCanvas.width) visible.width = renderCanvas.width;
+        if (visible.height !== renderCanvas.height) visible.height = renderCanvas.height;
+        const visibleContext = visible.getContext('2d');
+        visibleContext?.clearRect(0, 0, visible.width, visible.height);
+        visibleContext?.drawImage(renderCanvas, 0, 0);
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
         if (mountedRef.current) setError(err instanceof Error ? err.message : 'render_failed');
@@ -454,7 +462,11 @@ export function ExportPreview({
     if (!force && Math.abs(t - lastDrawTimeMsRef.current) < redrawInterval / 2) return;
     lastDrawAtRef.current = now;
     lastDrawTimeMsRef.current = t;
-    void renderRunnerRef.current?.push(t);
+    void renderRunnerRef.current?.push(t, { abortRunning: force }).catch((error: unknown) => {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+        setError(error instanceof Error ? error.message : 'render_failed');
+      }
+    });
   }, [activeConfig, activeMetadata.source?.kind, activeRecordingId, focusTrackRevision, hybridPreviewMode]);
 
   // config 切换 或 暂停态下播放头被外部（时间轴）拖动 → 重绘该源帧。
@@ -495,17 +507,28 @@ export function ExportPreview({
         if (camera) { try { camera.pause(); } catch { /* ignore */ } }
         return;
       }
-      const src = mainTrack.length > 0
+      const expectedSourceTimeMs = mainTrack.length > 0
         ? resolveMainTrackPosition(mainTrack, outT)?.sourceTimeMs ?? 0
         : outputToSource(kept, outT);
-      setTimeMs(mainTrack.length > 0 ? outT : src);
+      const audioClock = resolvePreviewPlaybackClock({
+        expectedSourceTimeMs,
+        audioCurrentTimeSeconds: audio?.currentTime ?? Number.NaN,
+        audioReady: !!audio && audio.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && mainTrack.length === 0,
+        audioPaused: audio?.paused ?? true,
+      });
+      const src = audioClock.sourceTimeMs;
+      const tickNow = performance.now();
+      if (tickNow - lastPlayheadPublishAtRef.current >= 100) {
+        lastPlayheadPublishAtRef.current = tickNow;
+        setTimeMs(mainTrack.length > 0 ? outT : src);
+      }
       drawFrame(src, false);
       const sSec = src / 1000;
-      // 段内自然播放；跨被删段（src 跳变）漂移 > 0.3s 时强制 seek 对齐。
-      if (audio && isFinite(audio.currentTime) && Math.abs(audio.currentTime - sSec) > 0.3) {
+      // 音频是普通单轨预览的媒体时钟；仅跨裁剪段或真实漂移时校正。
+      if (audio && audioClock.seekAudio) {
         try { audio.currentTime = sSec; } catch { /* ignore */ }
       }
-      if (camera && isFinite(camera.currentTime) && Math.abs(camera.currentTime - sSec) > 0.3) {
+      if (camera && isFinite(camera.currentTime) && Math.abs(camera.currentTime - sSec) > 0.18) {
         try { camera.currentTime = sSec; } catch { /* ignore */ }
       }
       rafRef.current = requestAnimationFrame(tick);

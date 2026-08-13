@@ -17,6 +17,7 @@ import {
   createMp4VideoChunkWriter,
   drainEncoderBackpressure,
   resolveWebCodecsAudioMode,
+  settleDirectAudioEncoding,
 } from '@/services/webCodecsExport';
 import { resolveVideoRateControl } from '@/services/webCodecsExport';
 import { PendingFocusRequests } from '@/services/cursorFocusTracker';
@@ -65,6 +66,7 @@ import {
   resolveMainTrackPosition,
 } from '@/services/mainTrack';
 import { resolveHybridPreviewMode } from '@/services/hybridPreviewPolicy';
+import { resolvePreviewPlaybackClock } from '@/services/previewPlaybackClock';
 import type { EnhancedAudioTrack, HighlightEffectSegment, KeyPointMotionSegment } from '@/types/recording';
 
 function createFloat32Wav(samples: Float32Array, sampleRate = 24_000): Uint8Array {
@@ -553,17 +555,21 @@ test('multiple imported clips become one continuous PCM clock before AAC encodin
 
   expect(joined.totalFrames).toBe(72_000);
   expect(joined.durationMs).toBe(1_500);
-  expect(joined.wavBlob.type).toBe('audio/wav');
+  expect(joined.getWavBlob().type).toBe('audio/wav');
   expect(joined.diagnostics.nonFiniteSamples).toBe(0);
   expect(joined.diagnostics.clippedSamples).toBe(0);
 });
 
 test('export PCM rejects clipped or non-finite derived tracks instead of delivering distortion', () => {
-  expect(() => buildExportMonoPcm({
-    channels: [Float32Array.from([0, 1.01, 0])],
+  const normalized = buildExportMonoPcm({
+    channels: [Float32Array.from([0, 1.01, -1.2, 0])],
     sampleRate: EXPORT_AUDIO_SAMPLE_RATE,
     durationMs: 1,
-  })).toThrow('export_audio_clipped_samples');
+  });
+  expect(normalized.diagnostics.originalPeak).toBeCloseTo(1.2, 6);
+  expect(normalized.diagnostics.appliedGainDb).toBeLessThan(0);
+  expect(normalized.diagnostics.clippedSamples).toBe(0);
+  expect(Math.max(...normalized.samples.map(Math.abs))).toBeCloseTo(10 ** (-1 / 20), 6);
   expect(() => buildExportMonoPcm({
     channels: [Float32Array.from([0, Number.NaN, 0])],
     sampleRate: EXPORT_AUDIO_SAMPLE_RATE,
@@ -827,6 +833,57 @@ test('preview rendering aborts obsolete work when a newer frame is requested', a
 
   expect(aborted).toEqual([100]);
   expect(completed).toEqual([300]);
+});
+
+test('preview playback completes the active render and only coalesces waiting frames', async () => {
+  const started: number[] = [];
+  const finished: number[] = [];
+  const aborted: number[] = [];
+  let releaseFirst: (() => void) | undefined;
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+  const runner = new LatestTaskRunner<number>(async (timeMs, signal) => {
+    started.push(timeMs);
+    signal.addEventListener('abort', () => aborted.push(timeMs), { once: true });
+    if (timeMs === 100) await firstGate;
+    finished.push(timeMs);
+  });
+
+  const first = runner.push(100, { abortRunning: false });
+  const skipped = runner.push(200, { abortRunning: false });
+  const latest = runner.push(300, { abortRunning: false });
+  releaseFirst?.();
+  await Promise.all([first, skipped, latest]);
+
+  expect(aborted).toEqual([]);
+  expect(started).toEqual([100, 300]);
+  expect(finished).toEqual([100, 300]);
+});
+
+test('preview video follows the audio media clock while drift remains recoverable', () => {
+  expect(resolvePreviewPlaybackClock({
+    expectedSourceTimeMs: 10_000,
+    audioCurrentTimeSeconds: 9.92,
+    audioReady: true,
+    audioPaused: false,
+  })).toEqual({ sourceTimeMs: 9_920, seekAudio: false });
+
+  expect(resolvePreviewPlaybackClock({
+    expectedSourceTimeMs: 10_000,
+    audioCurrentTimeSeconds: 9.1,
+    audioReady: true,
+    audioPaused: false,
+  })).toEqual({ sourceTimeMs: 10_000, seekAudio: true });
+});
+
+test('a direct audio encoder failure falls back to audio-only remux without re-rendering video', async () => {
+  const result = await settleDirectAudioEncoding(true, async () => {
+    throw new DOMException('AAC encoder reclaimed', 'EncodingError');
+  });
+
+  expect(result.mode).toBe('remux');
+  expect(result.value).toBeNull();
+  expect(result.reason).toContain('AAC encoder reclaimed');
 });
 
 test('camera placement preserves a bottom-right edge anchor across output ratios', () => {

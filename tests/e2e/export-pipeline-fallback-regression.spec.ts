@@ -17,21 +17,25 @@ function classify(error: unknown): FailureDecision {
   return implementation(error);
 }
 
-test('audio preparation is normalized and awaited before any frame rendering starts', async () => {
+test('audio preparation errors stay structured and cannot trigger video software re-encoding', async () => {
   const normalize = (exportPipeline as typeof exportPipeline & {
     normalizeExportPreparation?: <T>(preparation: Promise<T> | null) => Promise<T> | null;
   }).normalizeExportPreparation;
   const preparedAudio = normalize
     ? normalize(Promise.reject({ name: 'DataError', message: 'export_audio_decode_failed' }))
     : Promise.reject({ name: 'DataError', message: 'export_audio_decode_failed' });
-  let renderedFrames = 0;
-
-  const execution = preparedAudio!.then(() => {
-    renderedFrames += 1;
+  const execution = preparedAudio!.catch((cause) => {
+    throw {
+      exportFailureKind: 'deterministic_input',
+      stage: 'audio_preparation',
+      cause,
+    };
   });
 
-  await expect(execution).rejects.toThrow('export_audio_decode_failed');
-  expect(renderedFrames).toBe(0);
+  const failure = await execution.catch((error) => error);
+  const decision = classify(failure);
+  expect(decision.action).toBe('fail');
+  expect(decision.error.message).toBe('export_audio_decode_failed');
 });
 
 test('resolved audio preparation is reusable without decoding twice', async () => {

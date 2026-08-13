@@ -213,7 +213,7 @@ export function createSeekableDisplayFrameSource(
       // 连续播放由媒体时钟推进，不做逐帧 seek。只有暂停 scrub、跨裁剪段或
       // 时钟漂移明显时才重新定位。
       try {
-        if (video.paused || Math.abs(video.currentTime - sec) > 0.35) await seekTo(sec);
+        if (video.paused || Math.abs(video.currentTime - sec) > 0.2) await seekTo(sec);
         return video as FrameImage;
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') throw error;

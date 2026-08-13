@@ -376,3 +376,29 @@
 - Audio domain and dubbing regression suites cover callback reordering, missing AAC frames, source-kind parity, silence retention, clipping rejection, clip reordering, and dubbing edge fades.
 - Real Chromium round-trip covers `Float32 WAV -> prepared PCM -> AAC -> H.264 MP4 -> decoded PCM` and verifies 48 kHz mono output, bounded duration error, and no internal silence gap.
 - Type checking and production build are required before the feature commit.
+## 2026-08-13 - Realtime preview clock and single-pass export recovery
+
+### Baseline
+
+- Mandatory pre-change baseline: `0a2fe71` (`feat: add multi-recording timeline and stabilize export tasks`).
+- Worktree: `/Users/chenzhijiang/.codex/worktrees/53c2/pro`.
+- Branch: `codex/recovered-53c2`.
+
+### Product behavior
+
+- Preview playback now follows the active audio media clock and coalesces delayed frames instead of repeatedly cancelling the frame currently being composed.
+- Long recordings update the editor playhead at preview cadence rather than forcing a full React render on every animation frame.
+- Export audio that exceeds digital full scale is transparently peak-normalized to `-1 dBFS`; aspect-ratio changes no longer expose a false clipping failure.
+- AAC or Opus encoder failure keeps the hardware-rendered video and performs audio-only compatibility remuxing instead of re-rendering every video frame in software.
+
+### Implementation
+
+- Added `resolvePreviewPlaybackClock()` and separate seek-versus-playback scheduling semantics to `LatestTaskRunner`.
+- Reused preview content and foreground canvases to reduce large per-frame allocations and garbage collection.
+- Audio preparation runs alongside frame composition, and Float WAV creation is lazy unless ffmpeg actually needs it.
+- Direct audio encoding settles before muxer selection; video chunks stream into the selected muxer with a bounded 64-chunk startup buffer.
+
+### Verification
+
+- TypeScript check passed with incremental output disabled.
+- 71 media and export fallback regression tests passed in Chromium.

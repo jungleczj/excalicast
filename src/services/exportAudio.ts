@@ -30,6 +30,8 @@ export interface PreparedExportAudioDiagnostics {
   nonFiniteSamples: number;
   clippedSamples: number;
   peak: number;
+  originalPeak: number;
+  appliedGainDb: number;
 }
 
 export interface PreparedExportAudio {
@@ -39,7 +41,7 @@ export interface PreparedExportAudio {
   totalFrames: number;
   durationMs: number;
   diagnostics: PreparedExportAudioDiagnostics;
-  wavBlob: Blob;
+  getWavBlob: () => Blob;
   sourceKind: 'original' | 'enhanced' | 'repair' | 'dubbing';
   sourceTrackId?: string;
 }
@@ -59,8 +61,10 @@ export function createSilentExportAudio(durationMs: number): PreparedExportAudio
       nonFiniteSamples: 0,
       clippedSamples: 0,
       peak: 0,
+      originalPeak: 0,
+      appliedGainDb: 0,
     },
-    wavBlob: encodeFloat32Wav(samples, EXPORT_AUDIO_SAMPLE_RATE),
+    getWavBlob: lazyWavBlob(samples),
     sourceKind: 'original',
   };
 }
@@ -94,17 +98,7 @@ export function concatenatePreparedExportAudio(
     }
   }
 
-  let peak = 0;
-  let clippedSamples = 0;
-  let nonFiniteSamples = 0;
-  for (const sample of samples) {
-    if (!Number.isFinite(sample)) nonFiniteSamples += 1;
-    const magnitude = Math.abs(sample);
-    peak = Math.max(peak, magnitude);
-    if (magnitude > 1) clippedSamples += 1;
-  }
-  if (nonFiniteSamples > 0) throw new Error('export_audio_non_finite_samples');
-  if (clippedSamples > 0) throw new Error('export_audio_clipped_samples');
+  const level = normalizeExportPeak(samples);
 
   return {
     samples,
@@ -115,11 +109,13 @@ export function concatenatePreparedExportAudio(
     diagnostics: {
       sourceFrames: tracks.reduce((sum, track) => sum + track.diagnostics.sourceFrames, 0),
       outputFrames: samples.length,
-      nonFiniteSamples,
-      clippedSamples,
-      peak,
+      nonFiniteSamples: level.nonFiniteSamples,
+      clippedSamples: level.clippedSamples,
+      peak: level.peak,
+      originalPeak: level.originalPeak,
+      appliedGainDb: level.appliedGainDb,
     },
-    wavBlob: encodeFloat32Wav(samples, EXPORT_AUDIO_SAMPLE_RATE),
+    getWavBlob: lazyWavBlob(samples),
     sourceKind: tracks.every((track) => track.sourceKind === tracks[0].sourceKind)
       ? tracks[0].sourceKind
       : 'original',
@@ -176,6 +172,50 @@ export function validateProcessedAudioFrameCount(
     || Math.abs(Math.round(inputFrames) - Math.round(outputFrames)) > Math.max(0, toleranceFrames)) {
     throw new Error('processed_audio_frame_count_mismatch');
   }
+}
+
+const EXPORT_AUDIO_TARGET_PEAK = 10 ** (-1 / 20);
+
+function normalizeExportPeak(samples: Float32Array): Pick<PreparedExportAudioDiagnostics,
+  'nonFiniteSamples' | 'clippedSamples' | 'peak' | 'originalPeak' | 'appliedGainDb'> {
+  let nonFiniteSamples = 0;
+  let originalPeak = 0;
+  for (const sample of samples) {
+    if (!Number.isFinite(sample)) {
+      nonFiniteSamples += 1;
+      continue;
+    }
+    originalPeak = Math.max(originalPeak, Math.abs(sample));
+  }
+  if (nonFiniteSamples > 0) throw new Error('export_audio_non_finite_samples');
+
+  const gain = originalPeak > 1 ? EXPORT_AUDIO_TARGET_PEAK / originalPeak : 1;
+  if (gain < 1) {
+    for (let index = 0; index < samples.length; index += 1) samples[index] *= gain;
+  }
+
+  let peak = 0;
+  let clippedSamples = 0;
+  for (const sample of samples) {
+    const magnitude = Math.abs(sample);
+    peak = Math.max(peak, magnitude);
+    if (magnitude > 1) clippedSamples += 1;
+  }
+  return {
+    nonFiniteSamples,
+    clippedSamples,
+    peak,
+    originalPeak,
+    appliedGainDb: gain < 1 ? 20 * Math.log10(gain) : 0,
+  };
+}
+
+function lazyWavBlob(samples: Float32Array): () => Blob {
+  let cached: Blob | null = null;
+  return () => {
+    cached ??= encodeFloat32Wav(samples, EXPORT_AUDIO_SAMPLE_RATE);
+    return cached;
+  };
 }
 
 function downmixMono(channels: Float32Array[]): Float32Array {
@@ -246,17 +286,7 @@ export function buildExportMonoPcm(input: {
   const source = downmixMono(input.channels);
   const samples = splicePcm(source, input.segments, input.sampleRate);
   smoothCutBoundaries(samples, input.segments, input.sampleRate, input.crossfadeMs ?? 5);
-  let nonFiniteSamples = 0;
-  let clippedSamples = 0;
-  let peak = 0;
-  for (const sample of samples) {
-    if (!Number.isFinite(sample)) nonFiniteSamples += 1;
-    const magnitude = Math.abs(sample);
-    peak = Math.max(peak, magnitude);
-    if (magnitude > 1) clippedSamples += 1;
-  }
-  if (nonFiniteSamples > 0) throw new Error('export_audio_non_finite_samples');
-  if (clippedSamples > 0) throw new Error('export_audio_clipped_samples');
+  const level = normalizeExportPeak(samples);
   const prepared: PreparedExportAudio = {
     samples,
     sampleRate: EXPORT_AUDIO_SAMPLE_RATE,
@@ -266,11 +296,13 @@ export function buildExportMonoPcm(input: {
     diagnostics: {
       sourceFrames: source.length,
       outputFrames: samples.length,
-      nonFiniteSamples,
-      clippedSamples,
-      peak,
+      nonFiniteSamples: level.nonFiniteSamples,
+      clippedSamples: level.clippedSamples,
+      peak: level.peak,
+      originalPeak: level.originalPeak,
+      appliedGainDb: level.appliedGainDb,
     },
-    wavBlob: encodeFloat32Wav(samples, EXPORT_AUDIO_SAMPLE_RATE),
+    getWavBlob: lazyWavBlob(samples),
     sourceKind: input.sourceKind ?? 'original',
     sourceTrackId: input.sourceTrackId,
   };
