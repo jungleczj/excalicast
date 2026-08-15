@@ -26,6 +26,7 @@ import { useMediaTaskActions } from '@/components/providers/MediaTaskProvider';
 import { useSubscription } from '@/hooks/useSubscription';
 import {
   deleteRecording,
+  getClientDb,
   getRecording,
   getEnhancedAudioTrack,
   loadRecordingMediaTracks,
@@ -76,6 +77,21 @@ const DEFAULT_CONFIG: ExportConfig = {
   fps: 15,
   withWatermark: true,
 };
+
+const FINALIZE_POLL_INTERVAL_MS = 250;
+const FINALIZE_MAX_WAIT_MS = 30_000;
+const RECORDING_LOAD_TIMEOUT_MS = 8_000;
+
+/** 给单个异步读取加超时，避免 IndexedDB 卡死时导出页永远停在加载态。 */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('load_timeout')), timeoutMs);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
 
 type Tab = 'export' | 'captions' | 'dubbing' | 'outline' | 'handout';
 
@@ -218,6 +234,7 @@ export default function EditorRecordingPage(): JSX.Element {
     if (!id) return;
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const loadStartedAt = Date.now();
 
     const applyRecording = (m: RecordingMetadata) => {
       setMeta(m);
@@ -273,8 +290,8 @@ export default function EditorRecordingPage(): JSX.Element {
 
     const load = async () => {
       try {
-        const ownerKey = await getCurrentOwnerKey();
-        const m = await getRecording(id, ownerKey);
+        const ownerKey = await withTimeout(getCurrentOwnerKey(), RECORDING_LOAD_TIMEOUT_MS);
+        const m = await withTimeout(getRecording(id, ownerKey), RECORDING_LOAD_TIMEOUT_MS);
         if (cancelled) return;
         if (!m) {
           setFinalizing(false);
@@ -287,14 +304,42 @@ export default function EditorRecordingPage(): JSX.Element {
           return;
         }
         if (m.status !== 'done' && m.status !== 'interrupted') {
+          // 录制仍在 recording/finalizing。正常数百毫秒内落定；超过上限说明收尾被卡住。
+          // 本地把这条录制标记为 interrupted 后照常打开编辑器，避免用户永远停在加载态。
+          if (Date.now() - loadStartedAt >= FINALIZE_MAX_WAIT_MS) {
+            const recovered: RecordingMetadata = {
+              ...m,
+              status: 'interrupted',
+              interruptionRequestedAt: undefined,
+              warnings: Array.from(new Set([...(m.warnings ?? []), 'finalization_timed_out'])),
+            };
+            await getClientDb().recordings.update(id, {
+              status: recovered.status,
+              interruptionRequestedAt: recovered.interruptionRequestedAt,
+              warnings: recovered.warnings,
+            }).catch(() => undefined);
+            if (!cancelled) applyRecording(recovered);
+            return;
+          }
           setMeta(null);
           setFinalizing(true);
-          retryTimer = setTimeout(load, 250);
+          retryTimer = setTimeout(load, FINALIZE_POLL_INTERVAL_MS);
           return;
         }
         applyRecording(m);
       } catch (err) {
-        if (!cancelled) setLoadError(err instanceof Error ? err.message : 'load_failed');
+        if (cancelled) return;
+        // 单次读取超时/偶发失败：在预算内继续重试，而不是立刻报错或无限转圈。
+        if (Date.now() - loadStartedAt < FINALIZE_MAX_WAIT_MS) {
+          setFinalizing(true);
+          retryTimer = setTimeout(load, FINALIZE_POLL_INTERVAL_MS);
+          return;
+        }
+        setFinalizing(false);
+        const message = err instanceof Error ? err.message : 'load_failed';
+        setLoadError(message === 'load_timeout'
+          ? (en ? 'This recording is taking too long to load.' : '加载该录制超时，请重试。')
+          : message);
       }
     };
 

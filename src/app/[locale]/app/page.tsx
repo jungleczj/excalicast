@@ -72,8 +72,10 @@ function usesFullscreenCountdownSource(source: RecordingSetupConfig['source'] | 
   return source?.kind === 'window' || source?.kind === 'desktop' || source?.kind === 'selected_area';
 }
 
-function exportHrefForRecording(recordingId: string, locale: string): string {
-  return `/${locale}/export/${recordingId}`;
+function exportHrefForRecording(recordingId: string): string {
+  // next-intl 的 useRouter().push/replace 会自动补 locale 前缀（localePrefix: 'always'）。
+  // 这里必须传「未加前缀」的路径，否则会双写前缀成 /en/en/export/...，导致跳不到导出页。
+  return `/export/${recordingId}`;
 }
 
 function waitForAnimationFrame(): Promise<void> {
@@ -921,7 +923,7 @@ export default function HomePage(): JSX.Element {
     setHasAudio(false);
     setAudioMuted(false);
     setCameraMuted(false);
-    const exportHref = exportHrefForRecording(recordingId, locale);
+    const exportHref = exportHrefForRecording(recordingId);
     const ensureExportRoute = () => {
       if (!window.location.pathname.includes(`/export/${recordingId}`)) {
         router.replace(exportHref);
@@ -964,7 +966,7 @@ export default function HomePage(): JSX.Element {
     }).finally(() => {
       stoppingRef.current = false;
     });
-  }, [router, locale, t, setupConfig, customOutput, clearDisplayStream, closeDesktopControls]);
+  }, [router, t, setupConfig, customOutput, clearDisplayStream, closeDesktopControls]);
 
   useEffect(() => {
     const onPipUserClosed = () => {

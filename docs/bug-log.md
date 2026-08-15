@@ -1,5 +1,25 @@
 # Bug Log
 
+## 2026-08-15 - Stop 后跳不到导出页，导出页停在 Loading recording
+
+### Symptom
+
+- 停止录制后无法进入导出页，页面一直显示 `Loading recording…`（或 `Finishing recording…`）。
+
+### Root cause
+
+- `exportHrefForRecording` 返回了已带 locale 前缀的路径（如 `/en/export/<id>`），但 next-intl 的 `useRouter().push/replace` 在 `localePrefix: 'always'` 下会自动再加一次 locale 前缀，实际跳转到 `/en/en/export/<id>`（双前缀），无法匹配 `/[locale]/export/[id]` 路由。
+- 导出页加载逻辑对 `recording/finalizing` 状态无限轮询、对 IndexedDB 读取无超时，一旦收尾卡住就永远停在加载态。
+
+### Fix
+
+- `exportHrefForRecording` 改为返回未加前缀的 `/export/<id>`，交给 next-intl 统一补前缀。
+- 导出页加载增加：单次读取超时（8s）、总等待上限（30s），超限后把该录制本地标记为 `interrupted` 并照常打开编辑器；读取偶发失败在预算内重试而不是立即报错。
+
+### Status
+
+- Fixed locally; typecheck + media-lifecycle domain tests passed.
+
 ## 2026-08-13 - Long preview restarted per frame and joined audio could stutter
 
 ### Symptom
