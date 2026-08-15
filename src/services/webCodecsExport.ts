@@ -484,17 +484,18 @@ async function encodeAudioTrack(
       if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
       if (err) throw err;
       const n = Math.min(block, total - off);
-    // f32-planar：各声道顺序排布
-    const planar = new Float32Array(n * channels);
-    for (let c = 0; c < channels; c++) planar.set(chData[c].subarray(off, off + n), c * n);
-    const ad = new AudioDataCtor({
-      format: 'f32-planar',
-      sampleRate,
-      numberOfFrames: n,
-      numberOfChannels: channels,
-      timestamp: Math.round((off / sampleRate) * 1_000_000),
-      data: planar,
-    });
+      // AAC-LC 编码器要求输入按 1024 帧对齐。最后一块不足 1024 时用静音补齐，
+      // 否则 WebCodecs 会拒绝非整数帧块或输出尾部错位，导致导出音频卡顿/回退。
+      const planar = new Float32Array(block * channels);
+      for (let c = 0; c < channels; c++) planar.set(chData[c].subarray(off, off + n), c * block);
+      const ad = new AudioDataCtor({
+        format: 'f32-planar',
+        sampleRate,
+        numberOfFrames: block,
+        numberOfChannels: channels,
+        timestamp: Math.round((off / sampleRate) * 1_000_000),
+        data: planar,
+      });
       audioEncoder.encode(ad);
       ad.close();
       await drainEncoderBackpressure(audioEncoder, 16, signal);

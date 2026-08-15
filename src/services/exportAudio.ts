@@ -1,6 +1,7 @@
 'use client';
 
 import type { TimeSegment } from '@/types/recording';
+import { StreamingCubicResampler } from '@/services/audioResample';
 
 export const EXPORT_AUDIO_SAMPLE_RATE = 48_000;
 export const EXPORT_AUDIO_BITRATE = 160_000;
@@ -334,6 +335,70 @@ export function encodeFloat32Wav(samples: Float32Array, sampleRate = EXPORT_AUDI
   return new Blob([header, pcm.buffer], { type: 'audio/wav' });
 }
 
+interface DecodedExportMono {
+  samples: Float32Array;
+  sampleRate: number;
+  durationMs: number;
+}
+
+/** 用 Mediabunny 解码音频并重采样到统一的 48kHz 单声道 PCM。
+ *  与降噪/修复/波形生成同源，避免 decodeAudioData 对 MediaRecorder 分片录制的
+ *  Opus WebM 解码时在 pre-skip / Cluster 边界产生可闻间隙。 */
+async function decodeExportMono(blob: Blob, signal?: AbortSignal): Promise<DecodedExportMono> {
+  const { ALL_FORMATS, AudioSampleSink, BlobSource, Input } = await import('mediabunny');
+  const input = new Input({
+    source: new BlobSource(blob, { maxCacheSize: 4 * 1024 * 1024, useStreamReader: true }),
+    formats: ALL_FORMATS,
+  });
+  try {
+    const track = await input.getPrimaryAudioTrack();
+    if (!track) throw new Error('export_audio_missing_track');
+    const sink = new AudioSampleSink(track);
+    let resampler: StreamingCubicResampler | null = null;
+    let sourceSampleRate: number | null = null;
+    const parts: Float32Array[] = [];
+    for await (const sample of sink.samples()) {
+      try {
+        if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
+        const mono = new Float32Array(sample.numberOfFrames);
+        for (let channel = 0; channel < sample.numberOfChannels; channel += 1) {
+          const plane = new Float32Array(sample.numberOfFrames);
+          sample.copyTo(plane, { planeIndex: channel, format: 'f32-planar' });
+          for (let index = 0; index < mono.length; index += 1) mono[index] += plane[index] / sample.numberOfChannels;
+        }
+        if (!resampler) {
+          sourceSampleRate = sample.sampleRate;
+          resampler = new StreamingCubicResampler(sample.sampleRate, EXPORT_AUDIO_SAMPLE_RATE);
+        }
+        if (sample.sampleRate !== sourceSampleRate) throw new Error('export_audio_sample_rate_changed');
+        const resampled = resampler.push(mono);
+        if (resampled.length > 0) parts.push(resampled);
+      } finally {
+        sample.close();
+      }
+    }
+    if (!resampler) throw new Error('export_audio_empty');
+    const tail = resampler.flush();
+    if (tail.length > 0) parts.push(tail);
+
+    const totalFrames = parts.reduce((sum, part) => sum + part.length, 0);
+    if (totalFrames === 0) throw new Error('export_audio_empty');
+    const samples = new Float32Array(totalFrames);
+    let offset = 0;
+    for (const part of parts) {
+      samples.set(part, offset);
+      offset += part.length;
+    }
+    return {
+      samples,
+      sampleRate: EXPORT_AUDIO_SAMPLE_RATE,
+      durationMs: totalFrames / EXPORT_AUDIO_SAMPLE_RATE * 1_000,
+    };
+  } finally {
+    input.dispose();
+  }
+}
+
 export async function prepareExportAudio(input: {
   blob: Blob;
   segments?: TimeSegment[];
@@ -342,24 +407,13 @@ export async function prepareExportAudio(input: {
   signal?: AbortSignal;
 }): Promise<PreparedExportAudio> {
   if (input.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
-  const AudioContextCtor = globalThis.AudioContext
-    ?? (globalThis as typeof globalThis & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-  if (!AudioContextCtor) throw new Error('export_audio_decode_unsupported');
-  const context = new AudioContextCtor({ sampleRate: EXPORT_AUDIO_SAMPLE_RATE });
   try {
-    const decoded = await context.decodeAudioData(await input.blob.arrayBuffer());
+    const decoded = await decodeExportMono(input.blob, input.signal);
     if (input.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
-    if (decoded.sampleRate !== EXPORT_AUDIO_SAMPLE_RATE) {
-      throw new Error(`export_audio_resample_failed:${decoded.sampleRate}`);
-    }
-    const channels: Float32Array[] = [];
-    for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) {
-      channels.push(decoded.getChannelData(channel));
-    }
     return buildExportMonoPcm({
-      channels,
+      channels: [decoded.samples],
       sampleRate: decoded.sampleRate,
-      durationMs: decoded.duration * 1_000,
+      durationMs: decoded.durationMs,
       segments: input.segments,
       sourceKind: input.sourceKind,
       sourceTrackId: input.sourceTrackId,
@@ -368,7 +422,5 @@ export async function prepareExportAudio(input: {
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
     if (error instanceof Error && error.message.startsWith('export_audio_')) throw error;
     throw new Error('export_audio_decode_failed', { cause: error });
-  } finally {
-    await context.close().catch(() => undefined);
   }
 }

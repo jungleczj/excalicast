@@ -53,7 +53,8 @@ import {
 } from '@/services/keyPointMotion';
 import { buildKeyPointMotionPrompt } from '@/services/keyPointMotionPrompt';
 import { parseKeyPointMotionResponse } from '@/services/keyPointMotionSchema';
-import { StreamingCubicResampler, resolveEnhancedAudioSelection } from '@/services/audioEnhancement';
+import { resolveEnhancedAudioSelection } from '@/services/audioEnhancement';
+import { StreamingCubicResampler } from '@/services/audioResample';
 import { projectHighlightAperture } from '@/services/editorEffectsRenderer';
 import { assembleTimedPcm16Wav, hasAudiblePcm16Audio, parsePcm16Wav } from '@/lib/dubbingAudio';
 import { moveSegment, normalizeSegmentSequence, outputToSource, sourceToOutput } from '@/utils/segments';

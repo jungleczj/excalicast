@@ -1,5 +1,26 @@
 # Bug Log
 
+## 2026-08-15 - 预览正常但导出音频明显卡顿
+
+### Symptom
+
+- 预览时音频正常，但导出的 MP4 音频明显卡顿/断续。
+
+### Root cause
+
+- WebCodecs AAC 编码把最后一块（不足 1024 帧）直接喂给 AudioEncoder；AAC-LC 要求按 1024 帧对齐，非整数帧块会被拒绝或输出错位，导致编码失败回退到 ffmpeg remux，或产生时间戳错位。
+- 导出音频用 `AudioContext.decodeAudioData` 解码 MediaRecorder 分片录制的 Opus WebM，pre-skip / Cluster 边界的处理与预览（<audio> 流式解码）不一致，可能产生可闻间隙。
+
+### Fix
+
+- `encodeAudioTrack` 把最后一块静音补齐到 1024 帧，保证每个 AudioData 都是完整的 AAC 帧。
+- 导出解码改用 Mediabunny（与降噪/修复/波形同源）+ 有状态三次插值重采样到 48kHz 单声道，替换 `decodeAudioData`。
+- 提取 `StreamingCubicResampler` 到共享模块 `audioResample.ts`。
+
+### Status
+
+- Fixed locally; typecheck + 67 media-pipeline + 13 audio/dubbing tests passed.
+
 ## 2026-08-15 - 弱网/断网下录制启动被卡住
 
 ### Symptom
