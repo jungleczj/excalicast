@@ -1,5 +1,23 @@
 # Bug Log
 
+## 2026-08-15 - 弱网/断网下录制启动被卡住
+
+### Symptom
+
+- 录制过程中（尤其是网络非常卡顿甚至没有网络时），点击开始录制后长时间无响应，录制无法启动。
+
+### Root cause
+
+- `getCurrentOwnerKey()` 用 `supabase.auth.getSession()` 取 ownerKey，注释假设它「只读本地存储、无网络」。实际上当 access token 临近/已过期时，`getSession()` 会发起一次网络刷新 token（`_callRefreshToken`）；弱网/断网下该请求会长时间挂起，`startRecording()` 卡在 `await getCurrentOwnerKey()`。
+
+### Fix
+
+- 给 `getSession()` 加 2s 超时；超时/失败时优先复用最近一次成功解析出的登录 user id，避免把登录用户的录制误归到 guest，最后才回退 guest id。
+
+### Status
+
+- Fixed locally; typecheck passed.
+
 ## 2026-08-15 - Stop 后跳不到导出页，导出页停在 Loading recording
 
 ### Symptom
