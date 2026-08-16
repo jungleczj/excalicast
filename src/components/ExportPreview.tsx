@@ -73,6 +73,7 @@ export function ExportPreview({
 }: Props): JSX.Element {
   const t = useTranslations('exportPreview');
   const { startTask } = useMediaTaskActions();
+  const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const renderCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -179,6 +180,8 @@ export function ExportPreview({
   renderMetadataRef.current = activeMetadata;
   const rafRef = useRef<number | null>(null);
   const clockRef = useRef<{ perfStart: number; baseTime: number } | null>(null);
+  const barScrubbingRef = useRef(false);
+  const barScrubPositionRef = useRef<{ outputTimeMs: number; sourceTimeMs: number } | null>(null);
   const lastDrawAtRef = useRef<number>(0);
   const lastDrawTimeMsRef = useRef<number>(-Infinity);
   const lastPlayheadPublishAtRef = useRef<number>(-Infinity);
@@ -222,6 +225,7 @@ export function ExportPreview({
         const visibleContext = visible.getContext('2d');
         visibleContext?.clearRect(0, 0, visible.width, visible.height);
         visibleContext?.drawImage(renderCanvas, 0, 0);
+        stageRef.current?.setAttribute('data-rendered-time-ms', String(Math.round(requestedTimeMs)));
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
         if (mountedRef.current) setError(err instanceof Error ? err.message : 'render_failed');
@@ -241,7 +245,7 @@ export function ExportPreview({
   }, [activeRecordingId]);
 
   useEffect(() => {
-    void setPreviewPlayback(activeRecordingId, playing, timeMs).catch(() => undefined);
+    void setPreviewPlayback(activeRecordingId, playing && !barScrubbingRef.current, timeMs).catch(() => undefined);
     return () => { void setPreviewPlayback(activeRecordingId, false, timeMs).catch(() => undefined); };
     // timeMs intentionally captures the start position; the media clock advances afterwards.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -469,10 +473,10 @@ export function ExportPreview({
     });
   }, [activeConfig, activeMetadata.source?.kind, activeRecordingId, focusTrackRevision, hybridPreviewMode]);
 
-  // config 切换 或 暂停态下播放头被外部（时间轴）拖动 → 重绘该源帧。
-  // 播放中由播放循环负责重绘，这里跳过避免双重绘制。
+  // config 切换、暂停态或进度条刮擦时立即重绘。刮擦期间播放时钟被冻结，
+  // 因此每次 pointer move 都必须由受控播放头变化驱动真实源帧 seek。
   useEffect(() => {
-    if (!playing) drawFrame(timeMs, true);
+    if (!playing || barScrubbingRef.current) drawFrame(timeMs, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeConfig, activeRecordingId, activeMetadata.subtitleSrt, timeMs, playing]);
 
@@ -494,6 +498,10 @@ export function ExportPreview({
     const tick = () => {
       const ref = clockRef.current;
       if (!ref) return;
+      if (barScrubbingRef.current) {
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
       const outT = ref.baseTime + (performance.now() - ref.perfStart);
       if (keptDur > 0 && outT >= keptDur) {
         const endProject = keptDur;
@@ -575,59 +583,69 @@ export function ExportPreview({
 
   // 预览进度条：可拖刮擦（成片输出时间 → 源时间），与底部时间轴等效
   const barRef = useRef<HTMLDivElement>(null);
-  const scrubBarToClientX = useCallback((clientX: number): number | null => {
+  const scrubBarToClientX = useCallback((clientX: number): { outputTimeMs: number; sourceTimeMs: number } | null => {
     const el = barRef.current;
     if (!el || keptDur <= 0) return null;
     const r = el.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
-    const outputTime = ratio * keptDur;
-    const src = mainTrack.length > 0
-      ? resolveMainTrackPosition(mainTrack, outputTime)?.sourceTimeMs ?? 0
-      : outputToSource(kept, outputTime);
-    setTimeMs(mainTrack.length > 0 ? outputTime : src);
-    return src;
+    const outputTimeMs = ratio * keptDur;
+    const sourceTimeMs = mainTrack.length > 0
+      ? resolveMainTrackPosition(mainTrack, outputTimeMs)?.sourceTimeMs ?? 0
+      : outputToSource(kept, outputTimeMs);
+    setTimeMs(mainTrack.length > 0 ? outputTimeMs : sourceTimeMs);
+    return { outputTimeMs, sourceTimeMs };
   }, [kept, keptDur, mainTrack, setTimeMs]);
-  const startBarScrub = useCallback((e: React.MouseEvent) => {
+  const startBarScrub = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (keptDur <= 0) return;
     e.preventDefault();
     e.stopPropagation();
     const wasPlaying = playing;
-    if (!wasPlaying) {
-      if (audioRef.current) audioRef.current.pause();
-      if (cameraRef.current) cameraRef.current.pause();
-    }
-    const syncMedia = (src: number) => {
-      const sec = src / 1000;
+    barScrubbingRef.current = true;
+    audioRef.current?.pause();
+    cameraRef.current?.pause();
+    void setPreviewPlayback(activeRecordingId, false, timeMs).catch(() => undefined);
+
+    const syncMedia = (position: { outputTimeMs: number; sourceTimeMs: number }) => {
+      barScrubPositionRef.current = position;
+      const sec = position.sourceTimeMs / 1000;
       if (audioRef.current) {
         try { audioRef.current.currentTime = sec; } catch { /* ignore */ }
       }
       if (cameraRef.current) {
         try { cameraRef.current.currentTime = sec; } catch { /* ignore */ }
       }
-      if (wasPlaying) {
-        clockRef.current = {
-          perfStart: performance.now(),
-          baseTime: mainTrack.length > 0 ? playheadMs : sourceToOutput(kept, src),
-        };
-      }
     };
     const initial = scrubBarToClientX(e.clientX);
     if (initial !== null) syncMedia(initial);
-    const move = (ev: MouseEvent) => {
-      const src = scrubBarToClientX(ev.clientX);
-      if (src !== null) syncMedia(src);
+    const move = (ev: PointerEvent) => {
+      const position = scrubBarToClientX(ev.clientX);
+      if (position !== null) syncMedia(position);
     };
     const up = () => {
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', up);
-      if (wasPlaying) {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      const finalPosition = barScrubPositionRef.current;
+      barScrubbingRef.current = false;
+      if (wasPlaying && finalPosition) {
+        clockRef.current = {
+          perfStart: performance.now(),
+          baseTime: finalPosition.outputTimeMs,
+        };
+        void setPreviewPlayback(
+          renderRecordingIdRef.current,
+          true,
+          finalPosition.sourceTimeMs,
+        ).catch(() => undefined);
         void audioRef.current?.play().catch(() => { /* ignore */ });
         void cameraRef.current?.play().catch(() => { /* ignore */ });
       }
+      barScrubPositionRef.current = null;
     };
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
-  }, [kept, keptDur, mainTrack.length, playheadMs, playing, scrubBarToClientX]);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up, { once: true });
+    window.addEventListener('pointercancel', up, { once: true });
+  }, [activeRecordingId, keptDur, playing, scrubBarToClientX, timeMs]);
 
   // scrub 由时间轴驱动（onPlayheadChange → playheadMs）；预览不再自带进度条。
   const preset = resolveExportOutputSize(config);
@@ -852,6 +870,7 @@ export function ExportPreview({
         style={{ height: previewBox.h + 16 }}
       >
       <div
+        ref={stageRef}
         data-testid="export-preview-stage"
         data-autozoom-scale={previewAutoZoomScale.toFixed(3)}
         data-has-subtitles={metadata.subtitleSrt ? 'true' : 'false'}
@@ -1119,9 +1138,9 @@ export function ExportPreview({
             <div
               data-testid="export-preview-progress-scrubber"
               ref={barRef}
-              onMouseDown={startBarScrub}
+              onPointerDown={startBarScrub}
               className="flex flex-1 items-center"
-              style={{ minWidth: 0, height: 16 * controlScale, cursor: keptDur > 0 ? 'ew-resize' : 'default' }}
+              style={{ minWidth: 0, height: 16 * controlScale, cursor: keptDur > 0 ? 'ew-resize' : 'default', touchAction: 'none' }}
             >
               <div className="w-full" style={{ height: 4 * controlScale, background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden', pointerEvents: 'none' }}>
                 <div style={{ height: '100%', width: `${keptDur > 0 ? Math.min(100, (sourceToOutput(kept, timeMs) / keptDur) * 100) : 0}%`, background: 'var(--hi)' }} />

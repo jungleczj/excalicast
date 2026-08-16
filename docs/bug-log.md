@@ -146,6 +146,36 @@ A chapter drawer could appear near the start of a broad chapter range and immedi
 
 - Fixed and verified locally.
 
+## 2026-08-16 - Preview progress dragging did not update frames during playback
+
+### Symptom
+
+Dragging the preview progress bar while the video was playing moved the time value briefly, but the canvas stayed on an older frame or jumped back to the pre-drag playback position.
+
+### Root cause
+
+- The original playback clock continued advancing while the user dragged the progress bar.
+- Playback-mode state changes intentionally skipped precise frame rendering, so controlled playhead updates did not force a seek.
+- Audio and camera elements continued playing while repeated `currentTime` assignments competed with their media clocks.
+- Playback resumed from a stale React `playheadMs` closure instead of the final drag position.
+
+### Fix
+
+- Freeze the playback clock and pause media elements for the duration of a progress-bar drag.
+- Resolve and retain both project-output time and source-media time for every pointer position.
+- Force the latest source frame to render while dragging, then restart all clocks from the final resolved position.
+- Use pointer events so the same behavior works across mouse, pen, and touch input.
+
+### Regression coverage
+
+- A real whiteboard frame is rendered before playback begins.
+- The E2E verifies the dragged frame is published while the pointer remains down and does not drift back after 250ms.
+- The E2E verifies playback remains active and advances after pointer release.
+
+### Status
+
+- Fixed and verified locally.
+
 ## 2026-08-13 - Exported MP4 audio stuttered while preview audio was smooth
 
 ### Symptom

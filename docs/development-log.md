@@ -402,3 +402,29 @@
 
 - TypeScript check passed with incremental output disabled.
 - 71 media and export fallback regression tests passed in Chromium.
+
+## 2026-08-16 - Realtime preview scrubbing during playback
+
+### Baseline
+
+- Mandatory pre-change checkpoint: `f618802` (`chore: checkpoint before realtime preview scrubbing`).
+- Worktree: `/Users/chenzhijiang/.codex/worktrees/53c2/fix-loading-recording`.
+- Branch: `fix/loading-recording`.
+
+### Product behavior
+
+- The preview progress bar remains directly draggable while playback is running.
+- Holding the pointer freezes the old playback clock and renders each newly requested source time instead of letting playback pull the playhead back.
+- Releasing the pointer resumes audio, camera, display playback, and the project clock from the final dragged position.
+- Pointer events support mouse, pen, and touch scrubbing through the same interaction path.
+
+### Implementation
+
+- Added an explicit preview-bar scrubbing session with separate output and source timestamps.
+- Paused media clocks during the interaction while preserving the visible playing state.
+- Precise scrub requests abort obsolete frame composition and publish only the latest completed frame.
+- Added a rendered-frame timestamp diagnostic on the preview stage for end-to-end verification.
+
+### Verification
+
+- The editor E2E holds the pointer at 75%, verifies the playhead and rendered frame remain at that position, then verifies playback advances after release.

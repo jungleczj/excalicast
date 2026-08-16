@@ -1429,24 +1429,62 @@ test('autozoom preview frames can be hidden without removing the zoom target', a
   await expect(preview).toHaveAttribute('data-autozoom-region', regionValue ?? '');
 });
 
-test('preview progress scrubber remains draggable while playback is running', async ({ page }) => {
+test('preview progress scrubber renders the dragged frame before playback resumes', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.evaluate(async (id) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('excalicast');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('snapshots', 'readwrite');
+      tx.objectStore('snapshots').add({
+        recordingId: id,
+        timestamp: 0,
+        elements: [{
+          type: 'rectangle', id: 'scrub-fixture', x: 180, y: 120, width: 320, height: 180, angle: 0,
+          strokeColor: '#111111', backgroundColor: '#a5d8ff', fillStyle: 'solid', strokeWidth: 3,
+          strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], frameId: null, roundness: null,
+          seed: 1, version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: 1,
+          link: null, locked: false,
+        }],
+        appState: {
+          viewBackgroundColor: '#ffffff', scrollX: 0, scrollY: 0, zoom: { value: 1 },
+          width: 1280, height: 720, offsetLeft: 0, offsetTop: 0,
+        },
+      });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, recordingId);
+  await page.reload();
+
   const preview = page.getByTestId('export-preview-stage');
   const play = page.getByTestId('export-preview-play-toggle');
   const scrubber = page.getByTestId('export-preview-progress-scrubber');
+  const playhead = page.getByTestId('timeline-current-time');
+  await expect(preview).toHaveAttribute('data-rendered-time-ms', /\d+/, { timeout: 20_000 });
 
   await play.click();
   await expect(play).toHaveAttribute('aria-label', 'Pause');
-  const before = await preview.getAttribute('data-autozoom-scale');
   const box = await scrubber.boundingBox();
   if (!box) throw new Error('preview progress scrubber was not measured');
   await page.mouse.move(box.x + box.width * 0.2, box.y + box.height / 2);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.75, box.y + box.height / 2);
+
+  await expect.poll(async () => Number(await playhead.getAttribute('data-playhead-ms'))).toBeGreaterThan(8_800);
+  await expect.poll(async () => Number(await preview.getAttribute('data-rendered-time-ms'))).toBeGreaterThan(8_800);
+  await page.waitForTimeout(250);
+  expect(Number(await playhead.getAttribute('data-playhead-ms'))).toBeGreaterThan(8_800);
+
   await page.mouse.up();
 
   await expect(play).toHaveAttribute('aria-label', 'Pause');
-  await expect.poll(async () => page.getByTestId('export-preview-play-toggle').getAttribute('aria-label')).toBe('Pause');
-  expect(await preview.getAttribute('data-autozoom-scale')).toBe(before);
+  const resumedAt = Number(await playhead.getAttribute('data-playhead-ms'));
+  await expect.poll(async () => Number(await playhead.getAttribute('data-playhead-ms'))).toBeGreaterThan(resumedAt + 80);
 });
 
 test('autozoom keeps the video background at its original scale in the export preview', async ({ page }) => {
