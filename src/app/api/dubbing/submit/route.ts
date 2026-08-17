@@ -13,6 +13,7 @@ import {
   mediaJobFailureStatus,
   reportMediaJobFailure,
 } from '@/lib/mediaJobDiagnostics';
+import type { AzureEnglishVoice, VoiceRegister } from '@/services/voiceProfile';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -55,6 +56,15 @@ export async function POST(req: Request): Promise<NextResponse> {
     if (body.targetLang !== 'en') throw new Error('unsupported_target_language');
     if (typeof body.sourceAudioHash !== 'string' || !body.sourceAudioHash) throw new Error('missing_source_audio_hash');
     const sourceAudioHash = body.sourceAudioHash;
+    const allowedVoices = new Set<AzureEnglishVoice>([
+      'en-US-AndrewMultilingualNeural',
+      'en-US-AvaMultilingualNeural',
+    ]);
+    const voiceName = String(body.voiceName ?? '') as AzureEnglishVoice;
+    if (!allowedVoices.has(voiceName)) throw new Error('unsupported_dubbing_voice');
+    const voiceRegister = String(body.voiceRegister ?? 'uncertain') as VoiceRegister;
+    if (!['masculine', 'feminine', 'uncertain'].includes(voiceRegister)) throw new Error('invalid_voice_register');
+    const voiceConfidence = Math.max(0, Math.min(1, Number(body.voiceConfidence) || 0));
     if (!localMock && !isOwnedPrivateMediaPath(user.id, parsed.assetPath, parsed.recordingId, 'dubbing')) throw new Error('forbidden_asset_path');
     if (parsed.cameraAssetPath && !isOwnedPrivateMediaPath(user.id, parsed.cameraAssetPath, parsed.recordingId, 'dubbing')) throw new Error('forbidden_camera_asset_path');
     const now = Date.now();
@@ -74,6 +84,7 @@ export async function POST(req: Request): Promise<NextResponse> {
           await createDubbingJob({
             id: jobId, userId: user.id, recordingId: parsed.recordingId, targetLang: 'en',
             sourceAudioHash, sourceSrt,
+            voiceName, voiceRegister, voiceConfidence,
             status: 'pending', createdAt: now, updatedAt: now,
             audioAssetPath: parsed.assetPath || undefined,
             audioType: parsed.mimeType,

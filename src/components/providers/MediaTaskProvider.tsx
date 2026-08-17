@@ -105,7 +105,7 @@ function resumeRecoveredRemoteTask(task: CoordinatedMediaTask): void {
   ) {
     const remoteJobId = task.checkpoint.remoteJobId;
     const sourceAudioHash = task.checkpoint.sourceAudioHash;
-    void coordinator.startTask({ recordingId: task.recordingId, kind: 'dubbing', resourceClass: 'local_heavy' }, async (report, signal) => {
+    void coordinator.startTask({ recordingId: task.recordingId, kind: 'dubbing', resourceClass: 'network' }, async (report, signal) => {
       const { resumeEnglishDubbingTrack } = await import('@/services/dubbingClient');
       const track = await resumeEnglishDubbingTrack({
         recordingId: task.recordingId,

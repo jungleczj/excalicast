@@ -23,14 +23,16 @@ export async function generateDubbingTranslation(sourceSrt: string): Promise<Dub
     timeoutMs: 60_000,
     model,
     systemPrompt: [
-      'Translate only the spoken text in this SRT into concise natural English.',
+      'Translate only the spoken text in this SRT into concise, conversational English suitable for natural voice dubbing.',
       'Preserve every cue number and timestamp exactly.',
+      'Keep each cue short enough to speak within its original time range without rushing.',
+      'Use punctuation to preserve natural pauses, emphasis, and sentence rhythm.',
       'Return valid SRT only, without markdown or commentary.',
     ].join(' '),
     prompt: sourceSrt,
   });
   return {
     translatedSrt: cleanTranslatedSrt(result.text),
-    provider: `${model}+kokoro-local`,
+    provider: model,
   };
 }

@@ -30,6 +30,11 @@ export interface DubbingJob {
   lipSyncCameraType?: string;
   lipSync?: DubbingLipSyncStatus;
   provider?: string;
+  voiceName?: string;
+  voiceRegister?: 'masculine' | 'feminine' | 'uncertain';
+  voiceConfidence?: number;
+  billableCharacters?: number;
+  synthesisChunkCount?: number;
   error?: string;
 }
 
@@ -78,11 +83,27 @@ function localDb(): Database.Database {
       lip_sync_camera_type TEXT,
       lip_sync TEXT,
       provider TEXT,
+      voice_name TEXT,
+      voice_register TEXT,
+      voice_confidence REAL,
+      billable_characters INTEGER,
+      synthesis_chunk_count INTEGER,
       error TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )
   `);
+  const columns = new Set((sqlite.prepare('PRAGMA table_info(dubbing_jobs)').all() as Array<{ name: string }>).map((row) => row.name));
+  const additions: Array<[string, string]> = [
+    ['voice_name', 'TEXT'],
+    ['voice_register', 'TEXT'],
+    ['voice_confidence', 'REAL'],
+    ['billable_characters', 'INTEGER'],
+    ['synthesis_chunk_count', 'INTEGER'],
+  ];
+  for (const [name, type] of additions) {
+    if (!columns.has(name)) sqlite.exec(`ALTER TABLE dubbing_jobs ADD COLUMN ${name} ${type}`);
+  }
   return sqlite;
 }
 
@@ -94,6 +115,8 @@ type StoredRow = {
   translated_srt: string | null; dubbed_audio_path: string | null; dubbed_audio_type: string | null;
   lip_sync_camera_path: string | null; lip_sync_camera_type: string | null;
   lip_sync: DubbingLipSyncStatus | null; provider: string | null; error: string | null;
+  voice_name: string | null; voice_register: 'masculine' | 'feminine' | 'uncertain' | null;
+  voice_confidence: number | null; billable_characters: number | null; synthesis_chunk_count: number | null;
   created_at: string | number; updated_at: string | number;
 };
 
@@ -110,6 +133,11 @@ function fromRow(row: StoredRow | null | undefined): DubbingJob | undefined {
     dubbedAudioPath: row.dubbed_audio_path ?? undefined, dubbedAudioType: row.dubbed_audio_type ?? undefined,
     lipSyncCameraPath: row.lip_sync_camera_path ?? undefined, lipSyncCameraType: row.lip_sync_camera_type ?? undefined,
     lipSync: row.lip_sync ?? undefined, provider: row.provider ?? undefined, error: row.error ?? undefined,
+    voiceName: row.voice_name ?? undefined,
+    voiceRegister: row.voice_register ?? undefined,
+    voiceConfidence: row.voice_confidence ?? undefined,
+    billableCharacters: row.billable_characters ?? undefined,
+    synthesisChunkCount: row.synthesis_chunk_count ?? undefined,
   };
 }
 
@@ -123,6 +151,11 @@ function toRow(job: DubbingJob): StoredRow {
     dubbed_audio_path: job.dubbedAudioPath ?? null, dubbed_audio_type: job.dubbedAudioType ?? null,
     lip_sync_camera_path: job.lipSyncCameraPath ?? null, lip_sync_camera_type: job.lipSyncCameraType ?? null,
     lip_sync: job.lipSync ?? null, provider: job.provider ?? null, error: job.error ?? null,
+    voice_name: job.voiceName ?? null,
+    voice_register: job.voiceRegister ?? null,
+    voice_confidence: job.voiceConfidence ?? null,
+    billable_characters: job.billableCharacters ?? null,
+    synthesis_chunk_count: job.synthesisChunkCount ?? null,
     created_at: job.createdAt, updated_at: job.updatedAt,
   };
 }

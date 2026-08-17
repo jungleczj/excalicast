@@ -428,3 +428,31 @@
 ### Verification
 
 - The editor E2E holds the pointer at 75%, verifies the playhead and rendered frame remain at that position, then verifies playback advances after release.
+
+## 2026-08-17 - Automatic English voice selection with Azure Speech F0
+
+### Baseline
+
+- Mandatory pre-change checkpoint: `62df4e4` (`chore: checkpoint before azure dubbing`).
+- Worktree: `/Users/chenzhijiang/.codex/worktrees/53c2/fix-loading-recording`.
+- Branch: `fix/loading-recording`.
+
+### Product behavior
+
+- English dubbing analyzes a bounded local sample of the original microphone track and automatically selects a lower or higher English neural voice.
+- Users can override automatic selection with explicit Male or Female controls before generation.
+- DeepSeek continues to translate timestamped SRT; Azure Speech receives only translated English text and never receives the original recording.
+- Azure Speech F0 is preferred when configured. Missing credentials preserve the quantized browser-local Kokoro fallback.
+- Voice choice, local profile, billable character count, and synthesis chunk count persist with the durable job and localized track.
+
+### Implementation
+
+- Added a local autocorrelation analyzer capped at 12 seconds and 160 analysis frames.
+- Added Andrew/Ava voice mapping, escaped SSML, bounded speaking-rate fitting, sequential phrase synthesis, subtitle-timeline WAV assembly, and transient 429/5xx retries.
+- Shortened synthesis chunks to natural phrase windows and updated the translation prompt for spoken rhythm and cue duration.
+- Classified Azure dubbing as a network task and added the Supabase migration plus Azure deployment variables.
+
+### Verification
+
+- Voice mapping, manual override, Blob decoding, SSML safety, Azure retry, timeline assembly, Kokoro fallback, and cancellation tests pass.
+- Type checking, the 17-test dubbing suite, production build, Max gating, and generated-track preview/export activation pass.

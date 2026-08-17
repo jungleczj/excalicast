@@ -1,13 +1,19 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { I } from '@/components/icons';
-import { listLocalizedTracks, setActiveLocalizedTrack } from '@/lib/db-client';
+import { listLocalizedTracks, loadRecordingMediaTracks, setActiveLocalizedTrack } from '@/lib/db-client';
 import { isUsableLocalizedTrack } from '@/lib/localizedTrack';
 import { createEnglishDubbingTrack } from '@/services/dubbingClient';
 import type { LocalizedTrack, RecordingMetadata } from '@/types/recording';
 import { useMediaTasks } from '@/components/providers/MediaTaskProvider';
 import { announceMediaTaskCreated, openMediaTaskCenter } from '@/components/MediaTaskCenter';
+import {
+  analyzeVoiceProfileFromBlob,
+  resolveAzureVoiceChoice,
+  type DubbingVoiceChoice,
+  type VoiceProfile,
+} from '@/services/voiceProfile';
 
 interface Props {
   recordingId: string;
@@ -42,6 +48,10 @@ export function DubbingPanel({
   const [tracks, setTracks] = useState<LocalizedTrack[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [legacyTrackCount, setLegacyTrackCount] = useState(0);
+  const [voiceProfile, setVoiceProfile] = useState<VoiceProfile | null>(null);
+  const [voiceChoice, setVoiceChoice] = useState<DubbingVoiceChoice>('auto');
+  const [analyzingVoice, setAnalyzingVoice] = useState(false);
+  const voiceAnalysisRef = useRef<Promise<VoiceProfile> | null>(null);
   const { tasks, startTask } = useMediaTasks();
   const currentTask = tasks.find((task) => task.recordingId === recordingId && task.kind === 'dubbing');
   const busy = currentTask?.status === 'queued' || currentTask?.status === 'running';
@@ -75,6 +85,39 @@ export function DubbingPanel({
     return () => { cancelled = true; };
   }, [activeTrackId, onTrackSelect, recordingId]);
 
+  useEffect(() => {
+    if (!metadata.hasAudio) return;
+    const controller = new AbortController();
+    setAnalyzingVoice(true);
+    const analysis = loadRecordingMediaTracks(recordingId, ['audio'])
+      .then(({ audioBlob }) => {
+        if (!audioBlob) throw new Error('voice_profile_audio_missing');
+        return analyzeVoiceProfileFromBlob(audioBlob, { signal: controller.signal });
+      });
+    voiceAnalysisRef.current = analysis;
+    analysis
+      .then((profile) => setVoiceProfile(profile))
+      .catch((analysisError) => {
+        if (!(analysisError instanceof DOMException && analysisError.name === 'AbortError')) {
+          setVoiceProfile(null);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setAnalyzingVoice(false);
+        if (voiceAnalysisRef.current === analysis) voiceAnalysisRef.current = null;
+      });
+    return () => controller.abort();
+  }, [metadata.hasAudio, recordingId]);
+
+  const effectiveVoiceProfile = useMemo<VoiceProfile>(() => voiceProfile ?? {
+    register: 'uncertain',
+    confidence: 0,
+    medianPitchHz: null,
+    pitchRangeHz: 0,
+    voicedFrameRatio: 0,
+    analyzedDurationMs: 0,
+    analyzerVersion: 'voice-profile-v1',
+  }, [voiceProfile]);
   const generate = useCallback(async () => {
     if (busy) {
       openMediaTaskCenter(recordingId);
@@ -89,18 +132,24 @@ export function DubbingPanel({
       return;
     }
     setError(null);
+    const taskVoiceProfile = voiceChoice === 'auto' && voiceAnalysisRef.current
+      ? await voiceAnalysisRef.current.catch(() => effectiveVoiceProfile)
+      : effectiveVoiceProfile;
+    const taskVoiceName = resolveAzureVoiceChoice(taskVoiceProfile, voiceChoice);
     const resultHolder: { track?: LocalizedTrack } = {};
     announceMediaTaskCreated(recordingId, document.activeElement);
     try {
       await startTask({
         recordingId,
         kind: 'dubbing',
-        resourceClass: 'local_heavy',
-        configSnapshot: { targetLang: 'en', subtitleRevision: metadata.subtitleSrt.length },
+        resourceClass: 'network',
+        configSnapshot: { targetLang: 'en', subtitleRevision: metadata.subtitleSrt.length, voiceName: taskVoiceName },
       }, async (report, signal) => {
         const track = await createEnglishDubbingTrack({
           recordingId,
           sourceSrt: metadata.subtitleSrt,
+          voiceName: taskVoiceName,
+          voiceProfile: taskVoiceProfile,
           signal,
           persistTask: false,
           onCheckpoint: (checkpoint) => report({ phase: 'translating', ratio: 0.08, checkpoint }),
@@ -120,7 +169,7 @@ export function DubbingPanel({
         setError(err instanceof Error ? err.message : 'dubbing_failed');
       }
     }
-  }, [busy, currentTask?.checkpoint, en, metadata.hasAudio, metadata.subtitleSrt, onTrackReady, recordingId, refreshTracks, startTask]);
+  }, [busy, currentTask?.checkpoint, effectiveVoiceProfile, en, metadata.hasAudio, metadata.subtitleSrt, onTrackReady, recordingId, refreshTracks, startTask, voiceChoice]);
 
   const selectTrack = useCallback(async (track: LocalizedTrack | null) => {
     await setActiveLocalizedTrack(recordingId, track?.id);
@@ -156,10 +205,56 @@ export function DubbingPanel({
           </span>
         </div>
 
+        <div className="mt-5" style={{ borderTop: '1px solid rgba(24,25,26,.08)', paddingTop: 14 }}>
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <span style={{ color: 'var(--ink-2)', fontSize: 12, fontWeight: 680 }}>
+              {en ? 'English voice' : '英文声音'}
+            </span>
+            <span style={{ color: 'var(--ink-3)', fontSize: 11 }}>
+              {analyzingVoice
+                ? (en ? 'Analyzing original voice…' : '正在分析原声…')
+                : voiceProfile?.register === 'masculine'
+                  ? (en ? 'Lower voice detected' : '检测到偏低沉声线')
+                  : voiceProfile?.register === 'feminine'
+                    ? (en ? 'Higher voice detected' : '检测到偏明亮声线')
+                    : (en ? 'Using neutral fallback' : '使用自然默认声线')}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-2" role="group" aria-label={en ? 'English voice selection' : '英文声音选择'}>
+            {([
+              ['auto', en ? 'Auto' : '自动'],
+              ['masculine', en ? 'Male' : '男声'],
+              ['feminine', en ? 'Female' : '女声'],
+            ] as const).map(([value, label]) => {
+              const selected = voiceChoice === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setVoiceChoice(value)}
+                  style={{
+                    minHeight: 34,
+                    border: `1px solid ${selected ? 'var(--ink)' : 'rgba(24,25,26,.12)'}`,
+                    borderRadius: 9,
+                    background: selected ? 'var(--ink)' : 'var(--paper)',
+                    color: selected ? 'var(--paper)' : 'var(--ink-2)',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    fontWeight: 680,
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <button
             type="button"
             onClick={generate}
-            className="mt-5 flex w-full items-center justify-center gap-2 transition"
+            className="mt-4 flex w-full items-center justify-center gap-2 transition"
             style={{
               minHeight: 48,
               border: '1.4px solid var(--ink)',

@@ -218,6 +218,15 @@ export interface LocalizedTrack {
   sampleRate?: number;
   channelCount?: number;
   totalFrames?: number;
+  voiceName?: string;
+  voiceProfile?: {
+    register: 'masculine' | 'feminine' | 'uncertain';
+    confidence: number;
+    medianPitchHz: number | null;
+    analyzerVersion: string;
+  };
+  billableCharacters?: number;
+  synthesisChunkCount?: number;
   /** lip-sync 后的人像气泡视频；没有摄像头或服务不可用时为空。 */
   cameraBlob?: Blob;
   /** skipped 表示没有摄像头或未配置 lip-sync；failed 表示不阻塞英文音轨。 */

@@ -12,6 +12,7 @@ import { parseMediaJobResponse } from '@/services/mediaJobClient';
 import { shouldUseMediaJobMocks } from '@/services/mediaJobMode';
 import { removePrivateJobAssets, uploadPrivateJobAsset } from '@/services/privateMediaUpload';
 import { parsePcm16Wav } from '@/lib/dubbingAudio';
+import type { AzureEnglishVoice, VoiceProfile } from '@/services/voiceProfile';
 
 interface SubmitResponse { jobId: string }
 
@@ -20,6 +21,10 @@ interface StatusResponse {
   srtUrl?: string;
   lipSync?: 'done' | 'skipped' | 'failed';
   provider?: string;
+  audioUrl?: string;
+  voiceName?: string;
+  billableCharacters?: number;
+  synthesisChunkCount?: number;
   error?: string;
 }
 
@@ -136,6 +141,14 @@ async function fetchRequiredText(url: string, signal?: AbortSignal): Promise<str
   return text;
 }
 
+async function fetchRequiredBlob(url: string, signal?: AbortSignal): Promise<Blob> {
+  const res = await fetch(url, { cache: 'no-store', signal });
+  if (!res.ok) throw new Error(`asset_fetch_failed_${res.status}`);
+  const blob = await res.blob();
+  if (blob.size < 44) throw new Error('dubbing_audio_too_small');
+  return blob;
+}
+
 function mapKokoroProgress(value: KokoroDubbingProgress): DubbingProgress {
   const base = value.stage === 'model' ? 0.35 : value.stage === 'synthesis' ? 0.58 : 0.94;
   const span = value.stage === 'model' ? 0.23 : value.stage === 'synthesis' ? 0.36 : 0.04;
@@ -152,6 +165,7 @@ async function finishEnglishDubbingTrack(params: {
   recordingId: string;
   jobId: string;
   sourceAudioHash: string;
+  voiceProfile?: VoiceProfile;
   options?: DubbingOptions;
 }): Promise<LocalizedTrack> {
   const options = params.options ?? {};
@@ -161,7 +175,10 @@ async function finishEnglishDubbingTrack(params: {
     if (!status.srtUrl) throw new Error('missing_translated_subtitles');
     const translatedSrt = await fetchRequiredText(status.srtUrl, options.signal);
     let lastPersistedAt = 0;
-    const audioBlob = await generateKokoroDubbingAudio(translatedSrt, {
+    const audioBlob = status.audioUrl
+      ? await fetchRequiredBlob(status.audioUrl, options.signal)
+      : await generateKokoroDubbingAudio(translatedSrt, {
+      voice: status.voiceName === 'en-US-AndrewMultilingualNeural' ? 'am_adam' : 'af_heart',
       signal: options.signal,
       onProgress: (localProgress) => {
         const progress = mapKokoroProgress(localProgress);
@@ -197,6 +214,15 @@ async function finishEnglishDubbingTrack(params: {
       sampleRate: audioInfo.sampleRate,
       channelCount: audioInfo.channels,
       totalFrames: Math.floor(audioInfo.samples.length / audioInfo.channels),
+      voiceName: status.voiceName,
+      voiceProfile: params.voiceProfile ? {
+        register: params.voiceProfile.register,
+        confidence: params.voiceProfile.confidence,
+        medianPitchHz: params.voiceProfile.medianPitchHz,
+        analyzerVersion: params.voiceProfile.analyzerVersion,
+      } : undefined,
+      billableCharacters: status.billableCharacters,
+      synthesisChunkCount: status.synthesisChunkCount,
       lipSync: 'skipped',
     };
     await saveLocalizedTrack(track, true);
@@ -239,6 +265,8 @@ export async function resumeEnglishDubbingTrack(params: {
 export async function createEnglishDubbingTrack(params: {
   recordingId: string;
   sourceSrt?: string | null;
+  voiceName: AzureEnglishVoice;
+  voiceProfile?: VoiceProfile;
 } & DubbingOptions): Promise<LocalizedTrack> {
   const sourceSrt = params.sourceSrt?.trim();
   if (!sourceSrt) throw new Error('dubbing_subtitles_required');
@@ -270,6 +298,9 @@ export async function createEnglishDubbingTrack(params: {
         targetLang: 'en',
         sourceAudioHash,
         sourceSrt,
+        voiceName: params.voiceName,
+        voiceRegister: params.voiceProfile?.register ?? 'uncertain',
+        voiceConfidence: params.voiceProfile?.confidence ?? 0,
         localMock,
         ...(proofAsset ? {
           assetPath: proofAsset.path,
@@ -294,6 +325,7 @@ export async function createEnglishDubbingTrack(params: {
       recordingId: params.recordingId,
       jobId,
       sourceAudioHash,
+      voiceProfile: params.voiceProfile,
       options: params,
     });
   } catch (error) {

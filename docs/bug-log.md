@@ -146,6 +146,35 @@ A chapter drawer could appear near the start of a broad chapter range and immedi
 
 - Fixed and verified locally.
 
+## 2026-08-17 - English dubbing ignored the source voice and sounded fragmented
+
+### Symptoms
+
+- Every English version used the same default female Kokoro voice, even for recordings with a clearly lower masculine voice.
+- Long synthesized phrases could sound rushed, uneven, or synthetic.
+- Short-lived TTS throttling failed the complete dubbing job immediately.
+
+### Root cause
+
+- The dubbing contract stored no source voice profile or explicit voice choice.
+- The local fallback used a hard-coded `af_heart` voice and broad chunk limits.
+- Translation prompts did not preserve spoken rhythm, and the provider had no transient retry policy.
+
+### Fix
+
+- Analyze pitch locally and map it to Azure Andrew or Ava, with an explicit user override.
+- Generate short timestamp-aligned phrases with bounded speaking-rate adjustment and natural-pause translation guidance.
+- Persist voice and usage diagnostics, retry transient Azure failures, validate returned WAV audio, and preserve Kokoro as an audible fallback.
+
+### Privacy and failure behavior
+
+- Original audio remains on device during analysis and is never uploaded to Azure Speech.
+- Azure receives translated English text only. A failure cannot create a silent successful track.
+
+### Status
+
+- Fixed and verified locally with type checking, production build, 17 dubbing regressions, and focused editor E2E.
+
 ## 2026-08-16 - Preview progress dragging did not update frames during playback
 
 ### Symptom

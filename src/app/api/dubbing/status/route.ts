@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import {
   getDubbingJob,
+  saveLocalDubbingAsset,
   updateDubbingJob,
 } from '@/lib/dubbingStore';
 import { generateDubbingTranslation } from '@/services/dubbingProviders';
@@ -12,6 +13,7 @@ import {
   mediaJobFailureStatus,
   reportMediaJobFailure,
 } from '@/lib/mediaJobDiagnostics';
+import { synthesizeAzureDubbing } from '@/services/azureSpeechProvider';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,6 +24,10 @@ interface DubbingStatusResponse {
   srtUrl?: string;
   lipSync?: 'done' | 'skipped' | 'failed';
   provider?: string;
+  audioUrl?: string;
+  voiceName?: string;
+  billableCharacters?: number;
+  synthesisChunkCount?: number;
   error?: string;
 }
 
@@ -48,8 +54,12 @@ export async function GET(req: Request): Promise<NextResponse> {
     return NextResponse.json({
       status: 'done',
       srtUrl: resultUrl(req, jobId, 'subtitles.srt'),
+      audioUrl: job.dubbedAudioPath ? resultUrl(req, jobId, 'audio.wav') : undefined,
       lipSync: job.lipSync ?? 'skipped',
       provider: job.provider,
+      voiceName: job.voiceName,
+      billableCharacters: job.billableCharacters,
+      synthesisChunkCount: job.synthesisChunkCount,
     });
   }
   if (job.status === 'failed') return NextResponse.json({ status: 'failed', error: job.error ?? 'unknown' });
@@ -70,19 +80,60 @@ export async function GET(req: Request): Promise<NextResponse> {
     if (job.audioAssetPath || job.cameraAssetPath) admin = createSupabaseAdminClient();
     stage = 'external_service';
     const result = await generateDubbingTranslation(job.sourceSrt ?? '');
+    let dubbedAudioPath: string | undefined;
+    let dubbedAudioType: string | undefined;
+    let provider = `${result.provider}+kokoro-local`;
+    let billableCharacters: number | undefined;
+    let synthesisChunkCount: number | undefined;
+    const azureKey = process.env.AZURE_SPEECH_KEY;
+    const azureRegion = process.env.AZURE_SPEECH_REGION;
+    if (azureKey && azureRegion && job.voiceName) {
+      const synthesized = await synthesizeAzureDubbing({
+        translatedSrt: result.translatedSrt,
+        voice: job.voiceName as 'en-US-AndrewMultilingualNeural' | 'en-US-AvaMultilingualNeural',
+        subscriptionKey: azureKey,
+        region: azureRegion,
+      });
+      dubbedAudioType = 'audio/wav';
+      provider = `${result.provider}+${synthesized.provider}`;
+      billableCharacters = synthesized.billableCharacters;
+      synthesisChunkCount = synthesized.chunkCount;
+      if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+        admin ??= createSupabaseAdminClient();
+        dubbedAudioPath = `${user.id}/${job.recordingId}/jobs/dubbing/${jobId}-audio.wav`;
+        const audioBuffer = new ArrayBuffer(synthesized.audioBytes.byteLength);
+        new Uint8Array(audioBuffer).set(synthesized.audioBytes);
+        const { error: uploadError } = await admin.storage.from('recordings').upload(
+          dubbedAudioPath,
+          new Blob([audioBuffer], { type: dubbedAudioType }),
+          { contentType: dubbedAudioType, cacheControl: '0', upsert: true },
+        );
+        if (uploadError) throw uploadError;
+      } else {
+        dubbedAudioPath = await saveLocalDubbingAsset(jobId, 'audio.wav', synthesized.audioBytes);
+      }
+    }
     stage = 'database';
     const done = await updateDubbingJob(jobId, user.id, {
       status: 'done',
       translatedSrt: result.translatedSrt,
+      dubbedAudioPath,
+      dubbedAudioType,
       lipSync: 'skipped',
-      provider: result.provider,
+      provider,
+      billableCharacters,
+      synthesisChunkCount,
     });
     await removeSources();
     return NextResponse.json({
       status: 'done',
       srtUrl: resultUrl(req, jobId, 'subtitles.srt'),
+      audioUrl: done?.dubbedAudioPath ? resultUrl(req, jobId, 'audio.wav') : undefined,
       lipSync: done?.lipSync ?? 'skipped',
       provider: done?.provider,
+      voiceName: done?.voiceName,
+      billableCharacters: done?.billableCharacters,
+      synthesisChunkCount: done?.synthesisChunkCount,
     });
   } catch (error) {
     const failure = mediaJobFailurePayload(error, stage);

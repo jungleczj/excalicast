@@ -24,9 +24,9 @@ export function splitDubbingSrt(
   srt: string,
   options: { maxCharacters?: number; maxSpanMs?: number; maxGapMs?: number } = {},
 ): DubbingSpeechChunk[] {
-  const maxCharacters = options.maxCharacters ?? 900;
-  const maxSpanMs = options.maxSpanMs ?? 45_000;
-  const maxGapMs = options.maxGapMs ?? 2_500;
+  const maxCharacters = options.maxCharacters ?? 220;
+  const maxSpanMs = options.maxSpanMs ?? 10_000;
+  const maxGapMs = options.maxGapMs ?? 750;
   const cues = srt.trim().split(/\r?\n\s*\r?\n/).flatMap((block) => {
     const lines = block.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
     const timingIndex = lines.findIndex((line) => line.includes('-->'));

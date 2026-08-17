@@ -10,6 +10,16 @@ import {
 import { isUsableLocalizedTrack } from '@/lib/localizedTrack';
 import { generateKokoroDubbingAudio, type KokoroDubbingWorkerLike } from '@/services/kokoroDubbingClient';
 import { shouldUseMediaJobMocks } from '@/services/mediaJobMode';
+import {
+  analyzeVoiceProfile,
+  analyzeVoiceProfileFromBlob,
+  resolveAzureVoice,
+  resolveAzureVoiceChoice,
+} from '@/services/voiceProfile';
+import {
+  buildAzureSpeechSsml,
+  synthesizeAzureDubbing,
+} from '@/services/azureSpeechProvider';
 
 function makeToneWav(durationMs: number, frequency = 330): Uint8Array {
   const sampleRate = 16_000;
@@ -58,6 +68,129 @@ test('long dubbing text is split on subtitle timing instead of becoming one shor
     expect.objectContaining({ startMs: 0, endMs: 3_000 }),
     expect.objectContaining({ startMs: 64_000, endMs: 68_000 }),
   ]);
+});
+
+test('default dubbing chunks stay within natural phrase-sized timing windows', () => {
+  const srt = [
+    '1',
+    '00:00:00,000 --> 00:00:04,000',
+    'First complete idea.',
+    '',
+    '2',
+    '00:00:04,300 --> 00:00:08,000',
+    'Second complete idea.',
+    '',
+    '3',
+    '00:00:08,300 --> 00:00:13,000',
+    'Third complete idea.',
+    '',
+  ].join('\n');
+
+  const chunks = splitDubbingSrt(srt);
+
+  expect(chunks).toHaveLength(2);
+  expect(chunks[0]).toEqual(expect.objectContaining({ startMs: 0, endMs: 8_000 }));
+  expect(chunks[1]).toEqual(expect.objectContaining({ startMs: 8_300, endMs: 13_000 }));
+});
+
+test('voice profile maps low and high speech registers to different Azure voices', () => {
+  const sampleRate = 16_000;
+  const tone = (frequency: number) => Float32Array.from(
+    { length: sampleRate * 3 },
+    (_value, index) => Math.sin(index / sampleRate * Math.PI * 2 * frequency) * 0.3,
+  );
+
+  const lower = analyzeVoiceProfile(tone(118), sampleRate);
+  const higher = analyzeVoiceProfile(tone(225), sampleRate);
+
+  expect(lower.register).toBe('masculine');
+  expect(resolveAzureVoice(lower)).toBe('en-US-AndrewMultilingualNeural');
+  expect(higher.register).toBe('feminine');
+  expect(resolveAzureVoice(higher)).toBe('en-US-AvaMultilingualNeural');
+  expect(lower.confidence).toBeGreaterThan(0.5);
+  expect(higher.confidence).toBeGreaterThan(0.5);
+});
+
+test('manual voice choice overrides automatic voice analysis', () => {
+  const masculine = { register: 'masculine' as const };
+
+  expect(resolveAzureVoiceChoice(masculine, 'auto')).toBe('en-US-AndrewMultilingualNeural');
+  expect(resolveAzureVoiceChoice(masculine, 'feminine')).toBe('en-US-AvaMultilingualNeural');
+  expect(resolveAzureVoiceChoice({ register: 'uncertain' }, 'auto')).toBe('en-US-AvaMultilingualNeural');
+});
+
+test('voice profile can be analyzed from a recorded audio blob without uploading it', async () => {
+  const wav = makeToneWav(3_000, 120);
+  const profile = await analyzeVoiceProfileFromBlob(new Blob([wav.buffer as ArrayBuffer], { type: 'audio/wav' }));
+
+  expect(profile.register).toBe('masculine');
+  expect(profile.analyzedDurationMs).toBeGreaterThan(2_900);
+});
+
+test('Azure SSML escapes translated text and bounds duration fitting rate', () => {
+  const ssml = buildAzureSpeechSsml({
+    text: 'Look <here> & continue.',
+    voice: 'en-US-AndrewMultilingualNeural',
+    sourceDurationMs: 2_000,
+    estimatedDurationMs: 3_000,
+  });
+
+  expect(ssml).toContain('en-US-AndrewMultilingualNeural');
+  expect(ssml).toContain('Look &lt;here&gt; &amp; continue.');
+  expect(ssml).toContain('rate="+15%"');
+});
+
+test('Azure dubbing assembles audible phrase results on the subtitle timeline', async () => {
+  const calls: string[] = [];
+  const result = await synthesizeAzureDubbing({
+    translatedSrt: [
+      '1',
+      '00:00:00,000 --> 00:00:03,000',
+      'Welcome to the lesson.',
+      '',
+      '2',
+      '00:00:09,000 --> 00:00:12,000',
+      'Now continue with the example.',
+      '',
+    ].join('\n'),
+    voice: 'en-US-AvaMultilingualNeural',
+    subscriptionKey: 'test-key',
+    region: 'eastus',
+    fetchImpl: async (_input, init) => {
+      calls.push(String(init?.body));
+      return new Response(makeToneWav(1_200).buffer as ArrayBuffer, {
+        status: 200,
+        headers: { 'Content-Type': 'audio/wav' },
+      });
+    },
+  });
+
+  expect(calls).toHaveLength(2);
+  expect(result.billableCharacters).toBeGreaterThan(20);
+  expect(result.voice).toBe('en-US-AvaMultilingualNeural');
+  const parsed = parsePcm16Wav(result.audioBytes);
+  expect(parsed.durationMs).toBeGreaterThanOrEqual(12_000);
+  const late = parsed.samples.slice(parsed.sampleRate * 9, parsed.sampleRate * 10);
+  expect(Array.from(late).some((sample) => Math.abs(sample) > 1_000)).toBe(true);
+});
+
+test('Azure dubbing retries transient throttling without duplicating timeline chunks', async () => {
+  let attempts = 0;
+  const result = await synthesizeAzureDubbing({
+    translatedSrt: ['1', '00:00:00,000 --> 00:00:02,000', 'Try again naturally.', ''].join('\n'),
+    voice: 'en-US-AndrewMultilingualNeural',
+    subscriptionKey: 'test-key',
+    region: 'eastus',
+    retryBaseDelayMs: 0,
+    fetchImpl: async () => {
+      attempts += 1;
+      if (attempts === 1) return new Response('busy', { status: 429 });
+      return new Response(makeToneWav(900).buffer as ArrayBuffer, { status: 200 });
+    },
+  });
+
+  expect(attempts).toBe(2);
+  expect(result.chunkCount).toBe(1);
 });
 
 test('dubbed wav keeps audible speech at each subtitle position', () => {
@@ -155,6 +288,17 @@ test('server dubbing provider only translates SRT and never manufactures audio',
   expect(source).not.toContain('makeMockWav');
   expect(source).not.toContain('audioBytes');
   expect(source).not.toContain('OPENAI_API_KEY');
+});
+
+test('dubbing job persists Azure voice choice and exposes synthesized audio to the client', () => {
+  const submit = fs.readFileSync(path.join(process.cwd(), 'src/app/api/dubbing/submit/route.ts'), 'utf8');
+  const status = fs.readFileSync(path.join(process.cwd(), 'src/app/api/dubbing/status/route.ts'), 'utf8');
+  const client = fs.readFileSync(path.join(process.cwd(), 'src/services/dubbingClient.ts'), 'utf8');
+
+  expect(submit).toContain('voiceName');
+  expect(status).toContain('synthesizeAzureDubbing');
+  expect(status).toContain("'audio.wav'");
+  expect(client).toContain('status.audioUrl');
 });
 
 test('Kokoro uses quantized weights with WebGPU first and WASM fallback', () => {
