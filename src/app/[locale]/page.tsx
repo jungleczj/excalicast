@@ -710,10 +710,12 @@ function CraftFooter({ t }: { t: ReturnType<typeof useTranslations> }): JSX.Elem
           </div>
           <div>
             <h3>{t('craft.footer.learn')}</h3>
-            <Link href="/use-cases/record-edit-publish-whiteboard-video">{t('craft.footer.workflow')}</Link>
+            <Link href="/use-cases">{t('footer.useCases')}</Link>
+            <Link href="/compare">{t('footer.compare')}</Link>
+            <Link href="/blog">{t('footer.blog')}</Link>
             <Link href="/compare/excalicast-vs-excalicord">{t('craft.footer.excalicord')}</Link>
-            <Link href="/compare/excalicast-vs-excalidraw">{t('craft.footer.excalidraw')}</Link>
-            <Link href="/blog/one-recording-every-aspect-ratio">{t('craft.footer.formats')}</Link>
+            <Link href="/use-cases/whiteboard-recording-tool">{t('craft.footer.whiteboardTool')}</Link>
+            <Link href="/use-cases/record-excalidraw-to-video">{t('craft.footer.excalidraw')}</Link>
           </div>
           <div>
             <h3>{t('craft.footer.company')}</h3>
