@@ -1,5 +1,27 @@
 # Bug Log
 
+## 2026-08-18 - Bing comparison pages flagged indexing and metadata issues
+
+### Symptom
+
+- Bing URL Inspection reported `/en/compare/excalicast-vs-loom` as known but not indexable due to quality/indexation issues.
+- Bing SEO report flagged `/en/compare/excalicast-vs-screen-studio` for an overlong title and unstable meta description length.
+
+### Root cause
+
+- The Screen Studio comparison used a 78-character English title and 174-character description, exceeding conservative Bing-facing snippet limits.
+- The Loom comparison metadata was within a common title range, but the page lacked visible GEO quality fields such as direct answer, best-fit guidance, sourced facts, and verified-at metadata, making the page weaker for indexation than newer comparison pages.
+
+### Fix
+
+- Shortened English titles and descriptions for the Loom and Screen Studio comparison pages into stable ranges.
+- Added direct answer, fit guidance, verified facts, public sources, `verifiedAt`, and a whiteboard-video CTA to the Loom comparison page.
+- Added a regression test to keep these Bing-facing comparison titles and descriptions inside stable limits.
+
+### Status
+
+- Fixed locally; `npx playwright test tests/e2e/seo-routes.spec.ts`, `npm run build`, and `npm run typecheck` passed. Existing `seo-pages` home-link check still fails because `/zh` does not currently expose the expected `excalicast-vs-excalidraw` footer link on this branch.
+
 ## 2026-08-18 - edge-tts 上传后生产编译失败
 
 ### Symptom

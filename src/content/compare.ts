@@ -41,16 +41,65 @@ export const COMPARE_ENTRIES: CompareEntry[] = [
     slug: 'excalicast-vs-loom',
     competitor: 'Loom',
     title: {
-      en: 'Excalicast vs Loom: a whiteboard recorder alternative',
+      en: 'Excalicast vs Loom: whiteboard video recorder',
       zh: 'Excalicast vs Loom：白板录制工具替代方案',
     },
     description: {
-      en: 'Loom records screen pixels; Excalicast records the whiteboard operation stream and exports one take to 16:9, 9:16, 1:1, and 4:5. Compare features and pricing.',
+      en: 'Compare Loom and Excalicast for whiteboard videos, local recording, subtitles, and multi-ratio MP4 export from one take.',
       zh: 'Loom 录制屏幕像素，Excalicast 录制白板操作事件流，一次录制导出 16:9 / 9:16 / 1:1 / 4:5。对比功能与定价。',
     },
     intro: {
       en: 'Excalicast is a browser-based whiteboard recorder and a Loom alternative for whiteboard explainers: instead of capturing screen pixels, it records the Excalidraw operation stream plus microphone audio, so recordings are never affected by window occlusion or minimization and the same take exports to multiple aspect ratios.',
       zh: 'Excalicast 是一款浏览器白板录制工具，也是白板讲解场景下的 Loom 替代方案：它采集的是 Excalidraw 操作事件流 + 麦克风音频，而非屏幕像素，因此录制完全不受窗口遮挡或最小化影响，同一段录制可导出多种比例。',
+    },
+    directAnswer: {
+      en: 'Loom is a general screen recorder. Excalicast is better for whiteboard videos when you need local recording, clean diagram capture, subtitles, and multi-ratio export.',
+      zh: 'Loom 是通用屏幕录制工具。需要本地录制、清晰图解采集、字幕和多比例导出白板视频时，Excalicast 更合适。',
+    },
+    bestFor: [
+      {
+        en: 'Loom fits quick screen-share updates, async team messages, and general app walkthroughs.',
+        zh: 'Loom 适合快速屏幕分享、异步团队消息和通用应用演示。',
+      },
+      {
+        en: 'Excalicast fits whiteboard lessons, Excalidraw-style diagram explainers, and publish-ready teaching videos.',
+        zh: 'Excalicast 适合白板课程、类似 Excalidraw 的图解讲解，以及可发布的教学视频。',
+      },
+    ],
+    notBestFor: [
+      {
+        en: 'Loom is not optimized for one-take whiteboard videos that need several social aspect ratios from the same source.',
+        zh: 'Loom 不专门面向同一白板录制一键导出多种社媒比例的工作流。',
+      },
+      {
+        en: 'Excalicast is not a full team video-messaging workspace like Loom.',
+        zh: 'Excalicast 不是 Loom 那样完整的团队视频消息工作区。',
+      },
+    ],
+    facts: [
+      {
+        label: { en: 'Excalicast primary workflow', zh: 'Excalicast 主要流程' },
+        value: {
+          en: 'Record a whiteboard, tab, window, desktop, or selected area, then edit and export MP4 in the browser.',
+          zh: '录制白板、标签页、窗口、桌面或选区，然后在浏览器内编辑并导出 MP4。',
+        },
+      },
+      {
+        label: { en: 'Loom public positioning', zh: 'Loom 公开定位' },
+        value: {
+          en: 'Loom publicly positions itself around screen recording and async video messaging.',
+          zh: 'Loom 公开定位围绕屏幕录制和异步视频消息。',
+        },
+      },
+    ],
+    sources: [
+      { label: { en: 'Loom official website', zh: 'Loom 官网' }, url: 'https://www.loom.com/' },
+      { label: { en: 'Excalicast pricing and product page', zh: 'Excalicast 产品与定价页' }, url: 'https://excalicast.cc/en/pricing' },
+    ],
+    verifiedAt: '2026-08-18',
+    ctaPreset: {
+      label: { en: 'Record a whiteboard video', zh: '免费录制白板视频' },
+      href: '/app?intent=whiteboard-video',
     },
     rows: [
       {
@@ -323,11 +372,11 @@ export const COMPARE_ENTRIES: CompareEntry[] = [
     slug: 'excalicast-vs-screen-studio',
     competitor: 'Screen Studio',
     title: {
-      en: 'Excalicast vs Screen Studio: whiteboard explainer vs polished screen recording',
+      en: 'Excalicast vs Screen Studio: whiteboard videos',
       zh: 'Excalicast vs Screen Studio：白板讲解 vs 精致录屏',
     },
     description: {
-      en: 'Screen Studio is a Mac app for polished screen recordings with auto-zoom. Excalicast records a whiteboard via the operation stream and exports multiple ratios in the browser.',
+      en: 'Compare Screen Studio and Excalicast for whiteboard videos, auto zoom, browser editing, and multi-ratio MP4 export.',
       zh: 'Screen Studio 是 Mac 上做精致录屏（自动缩放）的应用。Excalicast 通过操作流录制白板，在浏览器内导出多比例。',
     },
     intro: {

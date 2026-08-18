@@ -80,6 +80,16 @@ test('comparison cluster and end-to-end pillar page expose GEO fields', () => {
   expect(pillar?.ctaPreset?.href).toBe('/app?source=whiteboard');
 });
 
+test('Bing-facing comparison metadata stays within stable length ranges', () => {
+  for (const slug of ['excalicast-vs-loom', 'excalicast-vs-screen-studio']) {
+    const entry = COMPARE_ENTRIES.find((item) => item.slug === slug);
+    expect(entry, `${slug} must exist`).toBeTruthy();
+    expect(entry?.title.en.length, `${slug} English title`).toBeLessThanOrEqual(60);
+    expect(entry?.description.en.length, `${slug} English description`).toBeGreaterThanOrEqual(90);
+    expect(entry?.description.en.length, `${slug} English description`).toBeLessThanOrEqual(145);
+  }
+});
+
 test('organic acquisition events form a content-to-recording funnel', () => {
   for (const event of [
     'organic_landing_view',
