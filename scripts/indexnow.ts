@@ -26,7 +26,7 @@ const KEY = 'e0db09f0b1ee71fc3abbf04e5909381f';
 const ENDPOINT = 'https://api.indexnow.org/indexnow';
 
 /** Locale-prefixed marketing/legal paths (path '' = the locale landing page). */
-const STATIC_PATHS = ['', '/terms', '/privacy', '/refund'];
+const STATIC_PATHS = ['', '/pricing', '/terms', '/privacy', '/refund'];
 
 function buildUrlList(): string[] {
   const paths = [...STATIC_PATHS, ...allContentRoutes().map((r) => r.path)];
