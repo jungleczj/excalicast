@@ -44,6 +44,19 @@ export async function GET(): Promise<Response> {
   distribution. Excalicast does not claim to upload directly to third-party
   social platforms.
 
+## Brand & logo
+- Product name: **Excalicast**
+- Logo (SVG): ${SITE_URL}/brand/excalicast-logo.svg
+- Icon (512×512 PNG): ${SITE_URL}/icon.png
+
+## Topics covered (query clusters)
+- English: whiteboard recorder, record whiteboard to video, Excalidraw
+  recorder, screen recording alternative, online video editor, Loom
+  alternative, record whiteboard lecture, math tutorial recording, YouTube
+  Shorts / TikTok whiteboard explainer.
+- 中文: 白板录制、白板录视频、在线录屏、屏幕录制工具、Excalidraw 录屏、
+  网课录制、教学录屏、画板讲解录制、多比例导出、16:9 导出到抖音。
+
 ## Pricing
 - **Free**: unlimited recording + watermarked MP4 export. No account.
 - **One-time (${oneTime} per recording)**: watermark-free export. No account.

@@ -1,8 +1,8 @@
 {
   "landing": {
     "meta": {
-      "title": "Excalicast — 一站式录制内容工作台",
-      "description": "从白板录制、剪辑、字幕、多平台导出到云端归档，一次讲解沉淀为可复用的内容资产。"
+      "title": "Excalicast — 白板录制工具：录屏、剪辑、多比例视频导出",
+      "description": "白板录视频与在线录屏工具：录制 Excalidraw 画板讲解、剪辑、字幕、多平台导出 16:9 / 9:16 / 1:1，免费无需注册。"
     },
     "craft": {
       "nav": {

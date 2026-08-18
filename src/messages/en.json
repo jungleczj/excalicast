@@ -1,8 +1,8 @@
 {
   "landing": {
     "meta": {
-      "title": "Excalicast — One workspace for recorded content",
-      "description": "Record, edit, caption, export for multiple platforms, and archive every explanation as a reusable content asset."
+      "title": "Excalicast — Whiteboard Recorder & Online Screen Recorder",
+      "description": "Record whiteboards & Excalidraw canvases (not screen pixels), edit, caption, and export MP4 in 16:9, 9:16, 1:1 — free, no sign-up."
     },
     "craft": {
       "nav": {
