@@ -2,7 +2,7 @@ import type { JSX } from 'react';
 import { setRequestLocale } from 'next-intl/server';
 import { pageMetadata } from '@/lib/seo/meta';
 import { ContentShell } from '@/components/content/ContentShell';
-import { PageTitle, Lead } from '@/components/content/ContentPieces';
+import { PageTitle, Lead, HubLinks } from '@/components/content/ContentPieces';
 import { EntryList } from '@/components/content/EntryList';
 import { COMPARE_ENTRIES, pick } from '@/content';
 
@@ -43,6 +43,7 @@ export default async function CompareIndex({ params }: Props): Promise<JSX.Eleme
           meta: `Excalicast vs ${e.competitor}`,
         }))}
       />
+      <HubLinks locale={locale} current="compare" />
     </ContentShell>
   );
 }

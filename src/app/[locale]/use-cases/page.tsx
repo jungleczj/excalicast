@@ -2,7 +2,7 @@ import type { JSX } from 'react';
 import { setRequestLocale } from 'next-intl/server';
 import { pageMetadata } from '@/lib/seo/meta';
 import { ContentShell } from '@/components/content/ContentShell';
-import { PageTitle, Lead } from '@/components/content/ContentPieces';
+import { PageTitle, Lead, HubLinks } from '@/components/content/ContentPieces';
 import { EntryList } from '@/components/content/EntryList';
 import { USE_CASE_ENTRIES, pick } from '@/content';
 
@@ -42,6 +42,7 @@ export default async function UseCaseIndex({ params }: Props): Promise<JSX.Eleme
           description: pick(e.description, locale),
         }))}
       />
+      <HubLinks locale={locale} current="use-case" />
     </ContentShell>
   );
 }

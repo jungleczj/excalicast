@@ -318,3 +318,30 @@ export function CompareTable({
     </div>
   );
 }
+
+/**
+ * Cross-links between the three content hubs (compare / use-cases / blog).
+ * Rendered at the bottom of each hub index page so crawlers can traverse the
+ * full hub-and-spoke graph from any hub.
+ */
+export async function HubLinks({
+  locale,
+  current,
+}: {
+  locale: string;
+  current: 'compare' | 'use-case' | 'blog';
+}): Promise<JSX.Element> {
+  const t = await getTranslations({ locale, namespace: 'landing' });
+  const hubs = [
+    { type: 'use-case' as const, href: '/use-cases', label: t('footer.useCases') },
+    { type: 'compare' as const, href: '/compare', label: t('footer.compare') },
+    { type: 'blog' as const, href: '/blog', label: t('footer.blog') },
+  ].filter((h) => h.type !== current);
+  return (
+    <nav className="content-craft-hub-links" aria-label="Related sections" style={{ marginTop: 44, display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+      {hubs.map((h) => (
+        <Link key={h.href} href={h.href} className="btn-sketch">{h.label}</Link>
+      ))}
+    </nav>
+  );
+}

@@ -2,7 +2,7 @@ import type { JSX } from 'react';
 import { setRequestLocale } from 'next-intl/server';
 import { pageMetadata } from '@/lib/seo/meta';
 import { ContentShell } from '@/components/content/ContentShell';
-import { PageTitle, Lead } from '@/components/content/ContentPieces';
+import { PageTitle, Lead, HubLinks } from '@/components/content/ContentPieces';
 import { EntryList } from '@/components/content/EntryList';
 import { BLOG_ENTRIES, pick } from '@/content';
 
@@ -44,6 +44,7 @@ export default async function BlogIndex({ params }: Props): Promise<JSX.Element>
           meta: e.date,
         }))}
       />
+      <HubLinks locale={locale} current="blog" />
     </ContentShell>
   );
 }

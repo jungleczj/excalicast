@@ -22,6 +22,13 @@ export async function ContentShell({
   children: ReactNode;
 }): Promise<JSX.Element> {
   const t = await getTranslations({ locale, namespace: 'landing' });
+  const hub = contentType
+    ? contentType === 'compare'
+      ? { href: '/compare', label: t('footer.compare') }
+      : contentType === 'use-case'
+        ? { href: '/use-cases', label: t('footer.useCases') }
+        : { href: '/blog', label: t('footer.blog') }
+    : null;
   return (
     <div className="app-craft-screen content-craft-page flex h-full flex-col" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
       {contentType && slug ? <ContentPageTracker type={contentType} slug={slug} /> : null}
@@ -57,6 +64,13 @@ export async function ContentShell({
           className="content-craft-article mx-auto px-6 py-12 sm:px-8 sm:py-16"
           style={{ maxWidth: 860, lineHeight: 1.6 }}
         >
+          {hub ? (
+            <nav aria-label="Breadcrumb" style={{ fontFamily: 'var(--font-mono)', fontSize: 13, marginBottom: 24 }}>
+              <Link href="/" style={{ color: 'var(--ink-3)', textDecoration: 'underline' }}>{t('footer.home')}</Link>
+              <span style={{ color: 'var(--ink-3)', margin: '0 8px' }}>/</span>
+              <Link href={hub.href} style={{ color: 'var(--ink-3)', textDecoration: 'underline' }}>{hub.label}</Link>
+            </nav>
+          ) : null}
           {children}
         </article>
 
