@@ -1,9 +1,10 @@
 # PRD：白板录制工具
-**版本**：v0.9.1
+**版本**：v0.9.2
 **状态**：开发中
 **作者**：—
-**最后更新**：2026-08-11
-**变更**：v0.9.1 - 导出页新增统一任务中心：所有媒体任务只在顶部最右侧展示进度；本地重任务串行、网络任务并行；导出使用启动时快照且不阻断预览和编辑；工具栏固定两行，不可用操作改为点击后付费或前置步骤引导；任务完成支持声音提醒。详见「## 十一」最新一条。
+**最后更新**：2026-08-18
+**变更**：v0.9.2 - SEO 关键词扩量：首页标题补「白板录制 / Whiteboard Recorder」关键词，llms.txt 增品牌 logo 与中英文关键词簇，use-cases 新增 5 个中文流量词长尾页（白板录视频工具 / 在线录屏 / Excalidraw 录屏 / 网课录屏 / 免费免注册录屏）。详见「## 十一」最新一条。
+**历史变更**：v0.9.1 - 导出页新增统一任务中心：所有媒体任务只在顶部最右侧展示进度；本地重任务串行、网络任务并行；导出使用启动时快照且不阻断预览和编辑；工具栏固定两行，不可用操作改为点击后付费或前置步骤引导；任务完成支持声音提醒。详见「## 十一」最新一条。
 **历史变更**：v0.9.0 - Admin Analytics Dashboard 升级为完整商业化漏斗后台：支持曝光/CTR、首次 CTA→录制→完成→导出→checkout→付费漏斗、每步转化/流失/停留时长，以及日期/语言/入口页/内容类型/录制源/支付提供商筛选；埋点入库增加敏感 props 过滤，Supabase 迁移补筛选索引。详见「## 十一」最新一条。
 **历史变更**：v0.8.9 - Paddle 主支付接入改为服务端 Transaction：`payment_config.is_active` 仍是唯一支付路由来源；Paddle/Creem 并存但不自动故障切换；新增 checkout attempt、provider-neutral subscriptions、webhook 幂等/occurred_at 时序、Price ID 权益推导与 admin 原子切换审计。详见「## 十一」最新一条。
 **历史变更**：v0.8.8 - 顶层录制条 Document PiP 改为点击触发的自适应收起/展开并显式处理浏览器最小窗口限制；导出页新增 Max「Dubbing/翻译配音」Tab，录后生成英文 SRT/配音/可选口型人像并作为本地非破坏性资产参与预览与导出。详见「## 十一」最新一条。
@@ -1073,6 +1074,7 @@ Excalicast 落地页以 Craft.do 当前官网首页为硬参考进行重构，�
 
 ### 11.2 变更记录（按时间倒序）
 
+- **2026-08-18｜SEO 关键词扩量（+5 场景页）+ 首页标题白板关键词 + llms.txt 品牌/关键词**：① 首页标题/描述关键词化：zh「Excalicast — 白板录制工具：录屏、剪辑、多比例视频导出」、en「Excalicast — Whiteboard Recorder & Online Screen Recorder」，`landing.meta.{title,description}` 单一来源，首页/OpenGraph/Twitter/`SoftwareApplication` schema 同步生效；② `src/app/llms.txt/route.ts` 增「Brand & logo」（SVG + icon.png）与「Topics covered」中英文关键词簇；③ `src/content/use-cases.ts` 新增 5 个中文流量词长尾页：`whiteboard-recording-tool`（白板录视频工具）、`online-screen-recorder`（在线录屏）、`record-excalidraw-to-video`（Excalidraw 录屏）、`record-online-course-screen`（网课录屏）、`free-screen-recorder-no-signup`（免费免注册录屏），双语完整（directAnswer + steps + FAQ + related 内链），`[slug]` 模板、`generateStaticParams`、sitemap、hreflang、FAQ JSON-LD 全自动收录，零路由改动。涉及 `src/content/use-cases.ts`、`src/messages/{en,zh}.json`、`src/app/llms.txt/route.ts`。
 - **2026-08-11｜内容要点动效按字幕语义同步**：① `KeyPointMotionSegment` 升级为 schema v3，标题和每条要点持久化独立的 cue 证据、`revealAtMs` 和匹配来源；② DeepSeek 为每行返回最早完整表达该语义的 `anchorCueIndex`，本地再用精确/部分文本匹配校正，无原词时将语义锨点限制在 cue 开始后 80–320ms；③ 抽屉仅提前首行 150ms 入场，后续各行等到自己的字幕时刻才以 70ms 词间隔、260ms 上浮动画逐词显示；④ v1/v2 录制自动迁移，Timeline 整体拖动同步移动行时刻，预览、seek、WebCodecs 与 ffmpeg 共用确定性时间函数。
 - **2026-08-11｜导出编辑栏清晰度、任务保留与片段换序**：① 两行工具栏固定显示“图标 + 文字”，增加“基础功能 / 高级功能”同宽分组列，首控件左对齐；缩放、适合窗口和保留时长移到轨道上方独立右侧控制带；复原与撤销统一使用 Undo 图标；底部提示和当前时间降为下拉列表同级字号。② 完成任务在任务清单精确保留 3 秒。③ H.264 MP4 写入统一分离 PTS/DTS，按编码输出顺序生成单调 DTS，并以 composition offset 保留 B 帧展示时序，覆盖 `441179 → 394739` 回归。④ Split 后片段支持拖拽换序；`segments` 数组顺序成为预览、音频拼接和最终导出顺序，持久化与加载不再按源时间自动排序或合并分割边界。
 - **2026-08-11｜导出工具栏与统一任务中心**：① 顶栏会员标签后增加统一任务入口与红色待办计数，面板按右侧设置栏实时尺寸向左展开，不覆盖预览、工具栏或 Timeline；② `export/asr/dubbing/cursor_analysis/audio_peaks/auto_edit/noise_reduction/key_point_motion` 共用任务协调器，保存阶段、进度、ETA、checkpoint 和结果引用；本地读取/解码/分析/编码任务串行，网络任务可并行；③ 导出启动时深拷贝配置、片段、字幕、音轨和效果引用，导出期间继续允许播放、seek、切换背景和编辑，后续修改只作用于下一次导出；④ 清除预览遮罩、工具栏百分比、字幕上传块、配音进度条和光标分析胶囊，任务中心成为唯一进度来源；⑤ 工具栏固定为两行，不再用禁用变灰表达套餐或前置条件，点击后打开付费、切换字幕步骤、显示具体引导或定位运行任务；⑥ ASR/配音远程 checkpoint 刷新后恢复，纯本地中断任务暂停待重试；任务完成播放可关闭的合并提示音。涉及 `MediaTaskCenter.tsx`、`MediaTaskProvider.tsx`、`mediaTask{Domain,Coordinator}.ts`、`Timeline.tsx`、`AutoEditControl.tsx`、`Export{Panel,Preview}.tsx`、`SubtitlePanel.tsx`、`DubbingPanel.tsx`、`export/[id]/page.tsx` 及 E2E。

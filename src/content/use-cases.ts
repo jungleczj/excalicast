@@ -634,6 +634,361 @@ export const USE_CASE_ENTRIES: UseCaseEntry[] = [
     ],
     updatedAt: '2026-07-30',
   },
+  {
+    slug: 'whiteboard-recording-tool',
+    title: {
+      en: 'Whiteboard recording tool: record and export whiteboard videos online',
+      zh: '白板录视频工具：在线录制白板讲解并导出 MP4',
+    },
+    description: {
+      en: 'Record a whiteboard online with synced voice and export MP4 in 16:9, 9:16, 1:1 or 4:5. No install, no sign-up, watermarked export is free.',
+      zh: '在线录制白板讲解并同步语音，导出 16:9 / 9:16 / 1:1 / 4:5 的 MP4。免安装、免注册，带水印导出免费。',
+    },
+    intro: {
+      en: 'A whiteboard recording tool lets you draw on a digital canvas while speaking, then turn the session into a video. Excalicast captures the whiteboard operation stream plus your microphone (not screen pixels) and exports a clean MP4 in multiple aspect ratios from a single recording.',
+      zh: '白板录视频工具让你边在数字画板上书写边讲解，再把整段会话变成视频。Excalicast 采集白板操作事件流 + 麦克风（而非屏幕像素），从一次录制导出多种比例、始终干净的 MP4。',
+    },
+    directAnswer: {
+      en: 'Excalicast is a browser-based whiteboard recording tool. Open the app, pick an aspect ratio, draw and narrate, then export an MP4 in 16:9, 9:16, 1:1 or 4:5 — free watermarked export, no sign-up.',
+      zh: 'Excalicast 是一款浏览器白板录视频工具：打开应用、选好画幅比例、边画边说，再导出 16:9 / 9:16 / 1:1 / 4:5 的 MP4。带水印导出免费，无需注册。',
+    },
+    steps: [
+      {
+        title: { en: 'Open the recorder', zh: '打开录制器' },
+        body: {
+          en: 'Open Excalicast in Chrome or Edge. No download or account is needed to start.',
+          zh: '在 Chrome 或 Edge 里打开 Excalicast。开始录制无需下载或注册。',
+        },
+      },
+      {
+        title: { en: 'Pick an aspect ratio', zh: '选择画幅比例' },
+        body: {
+          en: 'Choose 16:9 for YouTube, 9:16 for Shorts/TikTok, or 1:1 — a crop frame shows exactly what will be in the video.',
+          zh: '横屏选 16:9（YouTube），竖屏选 9:16（Shorts/抖音），或选 1:1——裁切框会精确显示视频范围。',
+        },
+      },
+      {
+        title: { en: 'Draw and narrate', zh: '边画边说' },
+        body: {
+          en: 'Press record and explain on the whiteboard. The operation stream keeps strokes crisp; your voice is captured on a synced audio track.',
+          zh: '点击录制，在白板上讲解。操作流让笔迹始终清晰，语音同步录进音轨。',
+        },
+      },
+      {
+        title: { en: 'Export the MP4', zh: '导出 MP4' },
+        body: {
+          en: 'Stop and export. The video renders locally in your browser via ffmpeg.wasm; the watermarked export is free.',
+          zh: '停止并导出。视频通过 ffmpeg.wasm 在浏览器本地渲染，带水印导出免费。',
+        },
+      },
+    ],
+    faqs: [
+      {
+        q: { en: 'Do I need to install software to record a whiteboard?', zh: '录白板需要安装软件吗？' },
+        a: {
+          en: 'No. Excalicast runs in the browser (Chrome/Edge). Recording and watermarked MP4 export work without installing anything or signing up.',
+          zh: '不需要。Excalicast 在浏览器（Chrome/Edge）里运行，录制和带水印 MP4 导出无需安装或注册。',
+        },
+      },
+      {
+        q: { en: 'Can one recording become both landscape and vertical?', zh: '一段录制能同时导出横屏和竖屏吗？' },
+        a: {
+          en: 'Yes. A single recording re-renders to 16:9, 9:16, 1:1, and 4:5 without re-recording, so you can publish to YouTube and TikTok from one take.',
+          zh: '可以。同一段录制可重渲染成 16:9 / 9:16 / 1:1 / 4:5，无需重录，一次录制即可发布到 YouTube 和抖音。',
+        },
+      },
+    ],
+    related: [
+      { type: 'use-case', slug: 'record-edit-publish-whiteboard-video' },
+      { type: 'use-case', slug: 'record-whiteboard-lecture' },
+      { type: 'use-case', slug: 'free-screen-recorder-no-signup' },
+    ],
+    updatedAt: '2026-07-30',
+  },
+  {
+    slug: 'online-screen-recorder',
+    title: {
+      en: 'Online screen recorder: record screen, window & whiteboard without install',
+      zh: '在线录屏工具：免安装录制屏幕、窗口与白板',
+    },
+    description: {
+      en: 'Record your screen, a window, a tab, or the whiteboard in the browser and export MP4. No download required, watermarked export free, no sign-up.',
+      zh: '在浏览器里录制屏幕、窗口、标签页或白板并导出 MP4。无需下载，带水印导出免费、免注册。',
+    },
+    intro: {
+      en: 'An online screen recorder runs in the browser without installing software. Excalicast records the whiteboard, the current tab, an app window, or the desktop, keeps the recording local-first, and exports MP4 in the aspect ratio each platform needs.',
+      zh: '在线录屏工具无需安装软件即可在浏览器里运行。Excalicast 可录制白板、当前标签页、应用窗口或桌面，录制本地优先，并按各平台所需比例导出 MP4。',
+    },
+    directAnswer: {
+      en: 'Excalicast is an online screen recorder that runs in Chrome/Edge with no install. Choose the whiteboard, a tab, a window, or the desktop, record with voice, then export MP4 in multiple aspect ratios — free with a watermark, no account.',
+      zh: 'Excalicast 是一款无需安装的在线录屏工具，在 Chrome/Edge 中运行。选择白板、标签页、窗口或桌面，带语音录制，再导出多种比例的 MP4——带水印免费、无需账号。',
+    },
+    steps: [
+      {
+        title: { en: 'Choose the source', zh: '选择录制来源' },
+        body: {
+          en: 'Pick the whiteboard, the current tab, a specific app window, or the entire desktop — only what the explanation needs.',
+          zh: '选择白板、当前标签页、指定应用窗口或整个桌面——只选讲解真正需要的内容。',
+        },
+      },
+      {
+        title: { en: 'Set the frame', zh: '设定画幅' },
+        body: {
+          en: 'Choose 16:9, 9:16, 1:1, or a custom size so the crop matches where you will publish.',
+          zh: '选择 16:9、9:16、1:1 或自定义尺寸，让裁切范围匹配你的发布渠道。',
+        },
+      },
+      {
+        title: { en: 'Record and narrate', zh: '录制并讲解' },
+        body: {
+          en: 'Start recording and explain out loud. Mic audio stays aligned with what happens on screen.',
+          zh: '开始录制并出声讲解。麦克风音频与屏幕动作保持对齐。',
+        },
+      },
+      {
+        title: { en: 'Export MP4', zh: '导出 MP4' },
+        body: {
+          en: 'Stop and export. Rendering happens locally in the browser; the watermarked export is free.',
+          zh: '停止并导出。渲染在浏览器本地完成，带水印导出免费。',
+        },
+      },
+    ],
+    faqs: [
+      {
+        q: { en: 'Does online recording use up local disk space?', zh: '在线录屏会占用本地磁盘吗？' },
+        a: {
+          en: 'Recordings live in the browser (IndexedDB) and the MP4 renders locally, so nothing is uploaded unless you choose a cloud feature.',
+          zh: '录制存放在浏览器（IndexedDB），MP4 本地渲染，除非你主动使用云功能，否则不会上传。',
+        },
+      },
+      {
+        q: { en: 'Can I combine whiteboard and screen recording?', zh: '白板和录屏可以一起吗？' },
+        a: {
+          en: 'Yes. Excalicast captures the whiteboard as an operation stream and can also record a tab, window, or desktop, then exports them through the same editing and rendering workflow.',
+          zh: '可以。Excalicast 以操作流采集白板，也能录制标签页、窗口或桌面，再用同一套剪辑与渲染流程导出。',
+        },
+      },
+    ],
+    related: [
+      { type: 'use-case', slug: 'record-excalidraw-to-video' },
+      { type: 'use-case', slug: 'free-screen-recorder-no-signup' },
+      { type: 'compare', slug: 'excalicast-vs-screen-recording' },
+    ],
+    updatedAt: '2026-07-30',
+  },
+  {
+    slug: 'record-excalidraw-to-video',
+    title: {
+      en: 'How to record Excalidraw to video: export your canvas as MP4',
+      zh: 'Excalidraw 怎么录视频：把 Excalidraw 画板导出成 MP4',
+    },
+    description: {
+      en: 'Record an Excalidraw canvas as a video with synced voice and export MP4 in any aspect ratio. No screen recorder, no re-drawing, no sign-up.',
+      zh: '把 Excalidraw 画板录成带同步语音的视频，导出任意比例的 MP4。无需录屏软件、无需重画、免注册。',
+    },
+    intro: {
+      en: 'Excalidraw itself does not record video. Excalicast adds recording to Excalidraw: it captures the canvas operation stream and your microphone, then exports an MP4, so a single drawing session becomes a narrated video you can publish to YouTube or Shorts.',
+      zh: 'Excalidraw 本身不能录视频。Excalicast 为 Excalidraw 补上录制能力：采集画板操作流 + 麦克风，再导出 MP4，让一次绘图会话变成可发布到 YouTube 或短视频的讲解视频。',
+    },
+    directAnswer: {
+      en: 'To record Excalidraw as video, use Excalicast: draw on the Excalidraw canvas while it captures your strokes and voice, then export an MP4 in 16:9, 9:16, 1:1 or 4:5. Excalidraw alone has no built-in video recorder.',
+      zh: '要把 Excalidraw 录成视频，用 Excalicast：在 Excalidraw 画板上绘图，它同步采集你的笔迹与语音，再导出 16:9 / 9:16 / 1:1 / 4:5 的 MP4。Excalidraw 自身没有内置录像功能。',
+    },
+    steps: [
+      {
+        title: { en: 'Open the Excalicast canvas', zh: '打开 Excalicast 画板' },
+        body: {
+          en: 'Launch the app in your browser. The canvas is an Excalidraw board with recording added on top.',
+          zh: '在浏览器里打开应用。画板就是在 Excalidraw 基础上叠加了录制能力。',
+        },
+      },
+      {
+        title: { en: 'Draw and narrate', zh: '绘图并口述' },
+        body: {
+          en: 'Record while you sketch the diagram. Strokes are captured as events, so they stay crisp at any export resolution.',
+          zh: '边画图边录制。笔迹以事件形式采集，在任意导出分辨率下都保持清晰。',
+        },
+      },
+      {
+        title: { en: 'Choose the export ratio', zh: '选择导出比例' },
+        body: {
+          en: 'Pick 16:9 for a long video or 9:16 for Shorts/TikTok — the same session can render to both.',
+          zh: '长视频选 16:9，Shorts/抖音选 9:16——同一段会话可同时渲染成两者。',
+        },
+      },
+      {
+        title: { en: 'Export MP4', zh: '导出 MP4' },
+        body: {
+          en: 'Render the video locally in the browser and download it. Watermarked export is free; a one-time unlock removes it.',
+          zh: '在浏览器本地渲染并下载视频。带水印导出免费，单次解锁可去水印。',
+        },
+      },
+    ],
+    faqs: [
+      {
+        q: { en: 'Can Excalidraw export video on its own?', zh: 'Excalidraw 本身能导出视频吗？' },
+        a: {
+          en: 'No. Excalidraw exports images and its native format, not narrated video. Excalicast adds recording so the same canvas becomes an MP4.',
+          zh: '不能。Excalidraw 导出的是图片和自有格式，不是带旁白的视频。Excalicast 补上录制能力，让同一个画板变成 MP4。',
+        },
+      },
+      {
+        q: { en: 'Will other windows appear in the recording?', zh: '录 Excalidraw 会录到别的窗口吗？' },
+        a: {
+          en: 'No. Because Excalicast captures the canvas operation stream rather than screen pixels, overlapping windows and notifications never appear in the final video.',
+          zh: '不会。因为 Excalicast 采集的是画板操作流而非屏幕像素，遮挡窗口和通知绝不会出现在最终视频里。',
+        },
+      },
+    ],
+    related: [
+      { type: 'use-case', slug: 'whiteboard-recording-tool' },
+      { type: 'compare', slug: 'excalicast-vs-excalidraw' },
+      { type: 'blog', slug: 'record-whiteboard-without-screen-recording' },
+    ],
+    updatedAt: '2026-07-30',
+  },
+  {
+    slug: 'record-online-course-screen',
+    title: {
+      en: 'Record online course & teaching videos from your screen or whiteboard',
+      zh: '网课录屏与教学录屏：把课件讲解录成课程视频',
+    },
+    description: {
+      en: 'Record online course lessons with voice, whiteboard, and optional subtitles, then export MP4 for your teaching platform. No screen-recording software needed.',
+      zh: '带语音、白板与可选字幕录制网课，按教学平台所需比例导出 MP4。无需录屏软件。',
+    },
+    intro: {
+      en: 'Teaching videos need clean visuals and clear voice. Excalicast records your whiteboard, a tab, a window, or the desktop with synced microphone audio, and on Pro adds auto subtitles (Alibaba Qwen ASR), so a lesson becomes a captioned MP4 ready for your course platform.',
+      zh: '教学视频需要干净的画面和清晰的语音。Excalicast 采集白板、标签页、窗口或桌面并同步麦克风，Pro 档还可加自动字幕（阿里千问 ASR），让一节课变成带字幕、可直接上教学平台的 MP4。',
+    },
+    directAnswer: {
+      en: 'To record an online course, teach on the Excalicast whiteboard or record a tab/window with voice, then export a narrated MP4 — Pro adds auto subtitles. No screen-recording software or account is needed to start.',
+      zh: '录网课：在 Excalicast 白板上授课或录制标签页/窗口并同步语音，再导出带旁白的 MP4——Pro 档可加自动字幕。开始录制无需录屏软件或账号。',
+    },
+    steps: [
+      {
+        title: { en: 'Prepare the lesson', zh: '准备课件' },
+        body: {
+          en: 'Lay out the lesson structure on the whiteboard or open the tab/window you will demonstrate.',
+          zh: '在白板上布置课程结构，或打开你要演示的标签页/窗口。',
+        },
+      },
+      {
+        title: { en: 'Choose the aspect ratio', zh: '选择画幅比例' },
+        body: {
+          en: 'Pick 16:9 for course platforms or 9:16 for short recap clips — the same recording can render to both.',
+          zh: '课程平台选 16:9，短视频回顾选 9:16——同一段录制可渲染成两者。',
+        },
+      },
+      {
+        title: { en: 'Teach and record', zh: '授课并录制' },
+        body: {
+          en: 'Explain while recording. Enable the camera bubble if you want a talking-head presence.',
+          zh: '边讲边录。想要出镜可开启人像气泡。',
+        },
+      },
+      {
+        title: { en: 'Add subtitles and export', zh: '加字幕并导出' },
+        body: {
+          en: 'On Pro, generate subtitles (Alibaba Qwen ASR), then export the MP4 in your platform’s ratio.',
+          zh: '在 Pro 档生成字幕（阿里千问 ASR），再按平台比例导出 MP4。',
+        },
+      },
+    ],
+    faqs: [
+      {
+        q: { en: 'Can I add captions to teaching videos?', zh: '教学视频能加字幕吗？' },
+        a: {
+          en: 'Yes. On the Pro plan Excalicast generates subtitles with Alibaba Qwen ASR (Chinese & English), downloadable as SRT or burned into the MP4.',
+          zh: '可以。Pro 档用阿里千问 ASR 生成字幕（中英文），可下载 SRT 或烧录进 MP4。',
+        },
+      },
+      {
+        q: { en: 'Can I record a slides or PPT window?', zh: '能录制课件或 PPT 的窗口吗？' },
+        a: {
+          en: 'Yes. Choose the window source and record the slides with your voice, or switch to the whiteboard for handwritten derivations — both export through the same workflow.',
+          zh: '可以。选择窗口来源录制课件并同步语音，或切到白板手写推导——两者都走同一套导出流程。',
+        },
+      },
+    ],
+    related: [
+      { type: 'use-case', slug: 'record-online-course-lesson' },
+      { type: 'use-case', slug: 'record-whiteboard-lecture' },
+      { type: 'use-case', slug: 'add-subtitles-to-whiteboard-video' },
+    ],
+    updatedAt: '2026-07-30',
+  },
+  {
+    slug: 'free-screen-recorder-no-signup',
+    title: {
+      en: 'Free screen recorder with no sign-up: record online and export MP4',
+      zh: '免费录屏工具（免注册）：在线录制并导出带水印 MP4',
+    },
+    description: {
+      en: 'Record your whiteboard, screen, or window for free with no account, then export a watermarked MP4. A one-time payment removes the watermark.',
+      zh: '免费、免注册录制白板、屏幕或窗口，导出带水印 MP4。单次付费即可去水印。',
+    },
+    intro: {
+      en: 'Excalicast is a free screen recorder with no sign-up: open the app in your browser, record the whiteboard or a display source with voice, and export a watermarked MP4. A one-time per-recording payment removes the watermark, and Pro/Max add subtitles, cloud backup and share links.',
+      zh: 'Excalicast 是一款免费、免注册的录屏工具：在浏览器里打开应用，带语音录制白板或显示源，导出带水印 MP4。按录制单次付费可去水印，Pro/Max 额外提供字幕、云备份与分享链接。',
+    },
+    directAnswer: {
+      en: 'Excalicast is free to record with no sign-up: record the whiteboard, tab, window, or desktop with voice and export a watermarked MP4. A one-time payment removes the watermark for a recording; Pro/Max add subtitles, backup, and share links.',
+      zh: 'Excalicast 免费且免注册：带语音录制白板、标签页、窗口或桌面，导出带水印 MP4。单次付费可为某段录制去水印；Pro/Max 提供字幕、备份与分享链接。',
+    },
+    steps: [
+      {
+        title: { en: 'Open the app (no sign-up)', zh: '打开应用（无需注册）' },
+        body: {
+          en: 'Go to excalicast.cc and open the recorder. No account is needed to start recording.',
+          zh: '访问 excalicast.cc 打开录制器。开始录制无需账号。',
+        },
+      },
+      {
+        title: { en: 'Choose a source and record', zh: '选择来源并录制' },
+        body: {
+          en: 'Pick the whiteboard, tab, window, or desktop and record with voice for as long as you need.',
+          zh: '选择白板、标签页、窗口或桌面，带语音录制任意时长。',
+        },
+      },
+      {
+        title: { en: 'Export a watermarked MP4', zh: '导出带水印 MP4' },
+        body: {
+          en: 'Render and download the video locally. The free export carries a small watermark.',
+          zh: '在本地渲染并下载视频。免费导出带一个小水印。',
+        },
+      },
+      {
+        title: { en: 'Optionally remove the watermark', zh: '可选去水印' },
+        body: {
+          en: 'A one-time per-recording payment lifts the watermark without a subscription or account.',
+          zh: '按录制单次付费即可去水印，无需订阅或账号。',
+        },
+      },
+    ],
+    faqs: [
+      {
+        q: { en: 'Is there a time limit on free recording?', zh: '免费录制有时间限制吗？' },
+        a: {
+          en: 'The free tier records and exports watermarked MP4 without a sign-up. Watermark-free export, subtitles, cloud backup, and share links depend on the one-time, Pro, or Max entitlements.',
+          zh: '免费档可免注册录制并导出带水印 MP4。去水印、字幕、云备份和分享链接取决于单次、Pro 或 Max 权益。',
+        },
+      },
+      {
+        q: { en: 'Do I need an account to remove the watermark?', zh: '去水印需要注册吗？' },
+        a: {
+          en: 'No. Watermark-free export is a one-time per-recording payment that does not require an account or subscription.',
+          zh: '不需要。无水印导出是按录制单次付费，无需账号或订阅。',
+        },
+      },
+    ],
+    related: [
+      { type: 'use-case', slug: 'whiteboard-recording-tool' },
+      { type: 'use-case', slug: 'online-screen-recorder' },
+      { type: 'use-case', slug: 'record-whiteboard-lecture' },
+    ],
+    updatedAt: '2026-07-30',
+  },
 ];
 
 export function getUseCaseEntry(slug: string): UseCaseEntry | undefined {
