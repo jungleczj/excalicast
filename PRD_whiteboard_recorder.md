@@ -1,9 +1,10 @@
 # PRD：白板录制工具
-**版本**：v0.9.2
+**版本**：v0.9.3
 **状态**：开发中
 **作者**：—
 **最后更新**：2026-08-18
-**变更**：v0.9.2 - SEO 关键词扩量：首页标题补「白板录制 / Whiteboard Recorder」关键词，llms.txt 增品牌 logo 与中英文关键词簇，use-cases 新增 5 个中文流量词长尾页（白板录视频工具 / 在线录屏 / Excalidraw 录屏 / 网课录屏 / 免费免注册录屏）。详见「## 十一」最新一条。
+**变更**：v0.9.3 - 翻译配音语音合成新增 edge-tts 作为主用（微软 Edge 免费神经 TTS，无需 key，本地生成 Sec-MS-GEC token + WebSocket 直连），失败自动回退 Azure Speech（已配置时）再回退浏览器本地 Kokoro。详见「## 十一」最新一条。
+**历史变更**：v0.9.2 - SEO 关键词扩量：首页标题补「白板录制 / Whiteboard Recorder」关键词，llms.txt 增品牌 logo 与中英文关键词簇，use-cases 新增 5 个中文流量词长尾页（白板录视频工具 / 在线录屏 / Excalidraw 录屏 / 网课录屏 / 免费免注册录屏）。详见「## 十一」最新一条。
 **历史变更**：v0.9.1 - 导出页新增统一任务中心：所有媒体任务只在顶部最右侧展示进度；本地重任务串行、网络任务并行；导出使用启动时快照且不阻断预览和编辑；工具栏固定两行，不可用操作改为点击后付费或前置步骤引导；任务完成支持声音提醒。详见「## 十一」最新一条。
 **历史变更**：v0.9.0 - Admin Analytics Dashboard 升级为完整商业化漏斗后台：支持曝光/CTR、首次 CTA→录制→完成→导出→checkout→付费漏斗、每步转化/流失/停留时长，以及日期/语言/入口页/内容类型/录制源/支付提供商筛选；埋点入库增加敏感 props 过滤，Supabase 迁移补筛选索引。详见「## 十一」最新一条。
 **历史变更**：v0.8.9 - Paddle 主支付接入改为服务端 Transaction：`payment_config.is_active` 仍是唯一支付路由来源；Paddle/Creem 并存但不自动故障切换；新增 checkout attempt、provider-neutral subscriptions、webhook 幂等/occurred_at 时序、Price ID 权益推导与 admin 原子切换审计。详见「## 十一」最新一条。
@@ -1074,6 +1075,7 @@ Excalicast 落地页以 Craft.do 当前官网首页为硬参考进行重构，�
 
 ### 11.2 变更记录（按时间倒序）
 
+- **2026-08-18｜翻译配音语音合成新增 edge-tts 主用**：① 新增 `src/services/edgeTtsProvider.ts`（server-only，依赖 `ws`）——复刻 edge-tts 7.x 协议：`Sec-MS-GEC` 令牌本地 SHA256 生成（Windows-file-time 5 分钟桶 + TrustedClientToken，无需 token 接口），WebSocket 直连 `speech.platform.bing.com` 合成 `audio-24khz-48kbitrate-mono-mp3`，再用 `mediabunny` 解码 MP3→PCM WAV 后复用 `assembleTimedPcm16Wav` 逐字幕 chunk 拼接（带 rate 控制，对齐 Azure 行为）；② `status/route.ts` 合成链改为 **edge-tts 主用 → Azure Speech 回退（已配置）→ Kokoro 本地兜底**，抽取 `persistAudio` 复用上传/本地落盘；③ 导出 `encodePcm16Wav`、`package.json` 新增 `ws`/`@types/ws`、`.env.local.example` 更新配音说明。注：edge-tts 端点仅支持 MP3（riff/raw PCM 返回空），故走 mediabunny 服务端解码。涉及 `src/services/edgeTtsProvider.ts`、`src/app/api/dubbing/status/route.ts`、`src/lib/dubbingAudio.ts`、`package.json`、`.env.local.example`。
 - **2026-08-18｜SEO 关键词扩量（+5 场景页）+ 首页标题白板关键词 + llms.txt 品牌/关键词**：① 首页标题/描述关键词化：zh「Excalicast — 白板录制工具：录屏、剪辑、多比例视频导出」、en「Excalicast — Whiteboard Recorder & Online Screen Recorder」，`landing.meta.{title,description}` 单一来源，首页/OpenGraph/Twitter/`SoftwareApplication` schema 同步生效；② `src/app/llms.txt/route.ts` 增「Brand & logo」（SVG + icon.png）与「Topics covered」中英文关键词簇；③ `src/content/use-cases.ts` 新增 5 个中文流量词长尾页：`whiteboard-recording-tool`（白板录视频工具）、`online-screen-recorder`（在线录屏）、`record-excalidraw-to-video`（Excalidraw 录屏）、`record-online-course-screen`（网课录屏）、`free-screen-recorder-no-signup`（免费免注册录屏），双语完整（directAnswer + steps + FAQ + related 内链），`[slug]` 模板、`generateStaticParams`、sitemap、hreflang、FAQ JSON-LD 全自动收录，零路由改动。涉及 `src/content/use-cases.ts`、`src/messages/{en,zh}.json`、`src/app/llms.txt/route.ts`。
 - **2026-08-11｜内容要点动效按字幕语义同步**：① `KeyPointMotionSegment` 升级为 schema v3，标题和每条要点持久化独立的 cue 证据、`revealAtMs` 和匹配来源；② DeepSeek 为每行返回最早完整表达该语义的 `anchorCueIndex`，本地再用精确/部分文本匹配校正，无原词时将语义锨点限制在 cue 开始后 80–320ms；③ 抽屉仅提前首行 150ms 入场，后续各行等到自己的字幕时刻才以 70ms 词间隔、260ms 上浮动画逐词显示；④ v1/v2 录制自动迁移，Timeline 整体拖动同步移动行时刻，预览、seek、WebCodecs 与 ffmpeg 共用确定性时间函数。
 - **2026-08-11｜导出编辑栏清晰度、任务保留与片段换序**：① 两行工具栏固定显示“图标 + 文字”，增加“基础功能 / 高级功能”同宽分组列，首控件左对齐；缩放、适合窗口和保留时长移到轨道上方独立右侧控制带；复原与撤销统一使用 Undo 图标；底部提示和当前时间降为下拉列表同级字号。② 完成任务在任务清单精确保留 3 秒。③ H.264 MP4 写入统一分离 PTS/DTS，按编码输出顺序生成单调 DTS，并以 composition offset 保留 B 帧展示时序，覆盖 `441179 → 394739` 回归。④ Split 后片段支持拖拽换序；`segments` 数组顺序成为预览、音频拼接和最终导出顺序，持久化与加载不再按源时间自动排序或合并分割边界。

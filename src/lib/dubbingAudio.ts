@@ -125,7 +125,7 @@ export function parsePcm16Wav(bytes: Uint8Array): ParsedPcm16Wav {
   };
 }
 
-function encodePcm16Wav(samples: Int16Array, sampleRate: number, channels: number): Uint8Array {
+export function encodePcm16Wav(samples: Int16Array, sampleRate: number, channels: number): Uint8Array {
   const bytes = new Uint8Array(44 + samples.byteLength);
   const view = new DataView(bytes.buffer);
   const writeAscii = (offset: number, value: string) => {

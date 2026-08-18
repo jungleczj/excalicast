@@ -44,7 +44,8 @@
     "tus-js-client": "^4.3.1",
     "uuid": "^10.0.0",
     "vosk-browser": "^0.0.8",
-    "webm-muxer": "^5.1.4"
+    "webm-muxer": "^5.1.4",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
@@ -53,6 +54,7 @@
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
     "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.5.12",
     "autoprefixer": "^10.4.20",
     "playwright": "^1.59.1",
     "postcss": "^8.4.47",

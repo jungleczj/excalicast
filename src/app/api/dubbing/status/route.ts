@@ -14,6 +14,8 @@ import {
   reportMediaJobFailure,
 } from '@/lib/mediaJobDiagnostics';
 import { synthesizeAzureDubbing } from '@/services/azureSpeechProvider';
+import { synthesizeEdgeTtsDubbing } from '@/services/edgeTtsProvider';
+import type { AzureEnglishVoice } from '@/services/voiceProfile';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -85,24 +87,14 @@ export async function GET(req: Request): Promise<NextResponse> {
     let provider = `${result.provider}+kokoro-local`;
     let billableCharacters: number | undefined;
     let synthesisChunkCount: number | undefined;
-    const azureKey = process.env.AZURE_SPEECH_KEY;
-    const azureRegion = process.env.AZURE_SPEECH_REGION;
-    if (azureKey && azureRegion && job.voiceName) {
-      const synthesized = await synthesizeAzureDubbing({
-        translatedSrt: result.translatedSrt,
-        voice: job.voiceName as 'en-US-AndrewMultilingualNeural' | 'en-US-AvaMultilingualNeural',
-        subscriptionKey: azureKey,
-        region: azureRegion,
-      });
+
+    const persistAudio = async (audioBytes: Uint8Array) => {
       dubbedAudioType = 'audio/wav';
-      provider = `${result.provider}+${synthesized.provider}`;
-      billableCharacters = synthesized.billableCharacters;
-      synthesisChunkCount = synthesized.chunkCount;
       if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
         admin ??= createSupabaseAdminClient();
         dubbedAudioPath = `${user.id}/${job.recordingId}/jobs/dubbing/${jobId}-audio.wav`;
-        const audioBuffer = new ArrayBuffer(synthesized.audioBytes.byteLength);
-        new Uint8Array(audioBuffer).set(synthesized.audioBytes);
+        const audioBuffer = new ArrayBuffer(audioBytes.byteLength);
+        new Uint8Array(audioBuffer).set(audioBytes);
         const { error: uploadError } = await admin.storage.from('recordings').upload(
           dubbedAudioPath,
           new Blob([audioBuffer], { type: dubbedAudioType }),
@@ -110,7 +102,38 @@ export async function GET(req: Request): Promise<NextResponse> {
         );
         if (uploadError) throw uploadError;
       } else {
-        dubbedAudioPath = await saveLocalDubbingAsset(jobId, 'audio.wav', synthesized.audioBytes);
+        dubbedAudioPath = await saveLocalDubbingAsset(jobId, 'audio.wav', audioBytes);
+      }
+    };
+
+    // 主用 edge-tts（免费、无需 key）；失败时回退 Azure Speech（如已配置）；
+    // 两者都不可用则保持 provider=kokoro-local，由客户端本地合成兜底。
+    if (job.voiceName) {
+      try {
+        const synthesized = await synthesizeEdgeTtsDubbing({
+          translatedSrt: result.translatedSrt,
+          voice: job.voiceName as AzureEnglishVoice,
+        });
+        provider = `${result.provider}+${synthesized.provider}`;
+        billableCharacters = synthesized.billableCharacters;
+        synthesisChunkCount = synthesized.chunkCount;
+        await persistAudio(synthesized.audioBytes);
+      } catch (edgeTtsError) {
+        reportMediaJobFailure('dubbing.edge_tts', mediaJobFailurePayload(edgeTtsError, 'external_service'));
+        const azureKey = process.env.AZURE_SPEECH_KEY;
+        const azureRegion = process.env.AZURE_SPEECH_REGION;
+        if (azureKey && azureRegion) {
+          const synthesized = await synthesizeAzureDubbing({
+            translatedSrt: result.translatedSrt,
+            voice: job.voiceName as AzureEnglishVoice,
+            subscriptionKey: azureKey,
+            region: azureRegion,
+          });
+          provider = `${result.provider}+${synthesized.provider}`;
+          billableCharacters = synthesized.billableCharacters;
+          synthesisChunkCount = synthesized.chunkCount;
+          await persistAudio(synthesized.audioBytes);
+        }
       }
     }
     stage = 'database';
