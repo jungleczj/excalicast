@@ -209,8 +209,9 @@ function synthesizeChunk(
 
 async function decodeMp3ToWav(mp3: Uint8Array): Promise<Uint8Array> {
   const { ALL_FORMATS, AudioSampleSink, BlobSource, Input } = await import('mediabunny');
+  const mp3BlobPart = new Uint8Array(mp3);
   const input = new Input({
-    source: new BlobSource(new Blob([mp3], { type: 'audio/mpeg' })),
+    source: new BlobSource(new Blob([mp3BlobPart], { type: 'audio/mpeg' })),
     formats: ALL_FORMATS,
   });
   let sampleRate = 0;

@@ -1,5 +1,24 @@
 # Bug Log
 
+## 2026-08-18 - edge-tts 上传后生产编译失败
+
+### Symptom
+
+- `edge-tts` 配音接入推送/上传后，生产构建在 `src/services/edgeTtsProvider.ts` 的 MP3 解码入口失败。
+
+### Root cause
+
+- `Buffer.concat()` 返回的字节在 TypeScript 中可表现为 `Uint8Array<ArrayBufferLike>`；直接传给 `new Blob([mp3])` 时，DOM `BlobPart` 类型要求 `ArrayBuffer` backed view，不能接受潜在 `SharedArrayBuffer` backed view。
+
+### Fix
+
+- 在创建 `Blob` 前复制为普通 `Uint8Array`，保持运行时音频数据不变，并让生产构建类型检查通过。
+- 同步补齐 `ws` / `@types/ws` lockfile 条目，避免干净环境安装后缺少 edge-tts WebSocket 依赖。
+
+### Status
+
+- Fixed locally; `npm run build`, `npm run typecheck`, and `npx playwright test tests/e2e/dubbing-audio.spec.ts` passed.
+
 ## 2026-08-15 - 预览正常但导出音频明显卡顿
 
 ### Symptom
