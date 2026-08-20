@@ -403,6 +403,34 @@
 - TypeScript check passed with incremental output disabled.
 - 71 media and export fallback regression tests passed in Chromium.
 
+## 2026-08-20 - Durable, readable English dubbing
+
+### Baseline
+
+- Mandatory pre-change checkpoint: `8e10be7` (`chore: checkpoint before dubbing quality and performance fix`).
+- Worktree: `/Users/chenzhijiang/.codex/worktrees/53c2/fix-loading-recording`.
+- Branch: `fix/loading-recording`.
+
+### Product behavior
+
+- Edge TTS and Azure Speech now keep adjacent phrases readable when synthesized speech exceeds the source cue window.
+- Dense translated phrases use a bounded natural speed increase rather than being mixed with the following phrase.
+- Translation survives a function restart and is not repeated when synthesis resumes.
+- Long synthesis keeps its durable claim alive as chunks complete.
+
+### Implementation
+
+- Centralized English speech-rate estimation in the dubbing audio domain.
+- Changed timeline assembly to stable chronological placement with non-overlapping PCM ranges and short edge fades.
+- Split the server job into persisted translation and synthesis stages without adding a new database column.
+- Added a narrow `touchDubbingJob()` update so progress heartbeats do not rewrite the complete job row.
+
+### Verification
+
+- Type checking passed.
+- Production build passed with only the existing ONNX/Kokoro bundler warnings.
+- 35 focused dubbing and durable media-job regression tests passed.
+
 ## 2026-08-16 - Realtime preview scrubbing during playback
 
 ### Baseline

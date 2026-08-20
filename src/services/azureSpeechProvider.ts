@@ -1,5 +1,6 @@
 import {
   assembleTimedPcm16Wav,
+  computeNaturalSpeechRatePercent,
   parsePcm16Wav,
   splitDubbingSrt,
 } from '@/lib/dubbingAudio';
@@ -20,6 +21,7 @@ interface AzureDubbingInput {
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
   retryBaseDelayMs?: number;
+  onProgress?: (completedChunks: number, totalChunks: number) => void | Promise<void>;
 }
 
 export interface AzureDubbingResult {
@@ -39,16 +41,10 @@ function escapeXml(value: string): string {
     .replaceAll("'", '&apos;');
 }
 
-function estimateEnglishDurationMs(text: string): number {
-  const words = text.trim().split(/\s+/).filter(Boolean).length;
-  const punctuationPauses = (text.match(/[,.!?;:]/g) ?? []).length * 120;
-  return Math.max(500, words / 150 * 60_000 + punctuationPauses);
-}
-
 export function buildAzureSpeechSsml(input: AzureSsmlInput): string {
-  const estimated = input.estimatedDurationMs ?? estimateEnglishDurationMs(input.text);
-  const ratio = estimated / Math.max(500, input.sourceDurationMs);
-  const percent = Math.max(-12, Math.min(15, Math.round((ratio - 1) * 100)));
+  const percent = input.estimatedDurationMs === undefined
+    ? computeNaturalSpeechRatePercent(input.text, input.sourceDurationMs)
+    : Math.max(-10, Math.min(35, Math.round((input.estimatedDurationMs / Math.max(500, input.sourceDurationMs) - 1) * 100)));
   const rate = percent >= 0 ? `+${percent}%` : `${percent}%`;
   return [
     '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US">',
@@ -128,6 +124,7 @@ export async function synthesizeAzureDubbing(input: AzureDubbingInput): Promise<
     parsePcm16Wav(wav);
     entries.push({ startMs: chunk.startMs, wav });
     billableCharacters += chunk.text.length;
+    await input.onProgress?.(entries.length, chunks.length);
   }
   const minimumDurationMs = Math.max(...chunks.map((chunk) => chunk.endMs));
   return {

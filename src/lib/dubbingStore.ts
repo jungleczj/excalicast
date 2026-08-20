@@ -213,6 +213,21 @@ export async function updateDubbingJob(id: string, userId: string, patch: Partia
   return next;
 }
 
+export async function touchDubbingJob(id: string, userId: string): Promise<void> {
+  const updatedAt = Date.now();
+  if (useSupabase()) {
+    const { error } = await supabaseAdmin()
+      .from('dubbing_jobs')
+      .update({ updated_at: new Date(updatedAt).toISOString() })
+      .eq('id', id)
+      .eq('user_id', userId);
+    if (error) throw dubbingStoreError('touch_dubbing_job', error);
+    return;
+  }
+  localDb().prepare('UPDATE dubbing_jobs SET updated_at = ? WHERE id = ? AND user_id = ?')
+    .run(updatedAt, id, userId);
+}
+
 export async function saveLocalDubbingAsset(jobId: string, name: string, bytes: Uint8Array): Promise<string> {
   await fsPromises.mkdir(RESULT_DIR, { recursive: true });
   const safe = name.replace(/[^a-z0-9_.-]/gi, '_');

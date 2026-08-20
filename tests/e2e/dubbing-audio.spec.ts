@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   assembleTimedPcm16Wav,
+  computeNaturalSpeechRatePercent,
   hasAudiblePcm16Audio,
   parsePcm16Wav,
   splitDubbingSrt,
@@ -21,6 +22,7 @@ import {
   synthesizeAzureDubbing,
 } from '@/services/azureSpeechProvider';
 import { mapWithConcurrency } from '@/utils/asyncPool';
+import { resolveDubbingJobStep } from '@/services/dubbingJobState';
 
 function makeToneWav(durationMs: number, frequency = 330): Uint8Array {
   const sampleRate = 16_000;
@@ -51,6 +53,18 @@ function makeToneWav(durationMs: number, frequency = 330): Uint8Array {
   return bytes;
 }
 
+function makeConstantWav(durationMs: number, amplitude: number): Uint8Array {
+  const sampleRate = 16_000;
+  const samples = new Int16Array(Math.round(sampleRate * durationMs / 1000));
+  samples.fill(amplitude);
+  const bytes = makeToneWav(durationMs);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let index = 0; index < samples.length; index += 1) {
+    view.setInt16(44 + index * 2, samples[index], true);
+  }
+  return bytes;
+}
+
 test('bounded async pool preserves output order while limiting concurrent TTS chunks', async () => {
   let active = 0;
   let peak = 0;
@@ -64,6 +78,15 @@ test('bounded async pool preserves output order while limiting concurrent TTS ch
 
   expect(peak).toBe(2);
   expect(values).toEqual(['chunk-0', 'chunk-1', 'chunk-2', 'chunk-3', 'chunk-4']);
+});
+
+test('durable dubbing resumes from the persisted translation instead of repeating it', () => {
+  const now = 100_000;
+
+  expect(resolveDubbingJobStep({ status: 'pending', updatedAt: 0 }, now)).toBe('translate');
+  expect(resolveDubbingJobStep({ status: 'pending', updatedAt: 0, translatedSrt: 'translated' }, now)).toBe('synthesize');
+  expect(resolveDubbingJobStep({ status: 'running', updatedAt: now - 5_000, translatedSrt: 'translated' }, now)).toBe('wait');
+  expect(resolveDubbingJobStep({ status: 'running', updatedAt: now - 130_000, translatedSrt: 'translated' }, now)).toBe('synthesize');
 });
 
 test('long dubbing text is split on subtitle timing instead of becoming one short audio clip', () => {
@@ -107,6 +130,15 @@ test('default dubbing chunks stay within natural phrase-sized timing windows', (
   expect(chunks).toHaveLength(2);
   expect(chunks[0]).toEqual(expect.objectContaining({ startMs: 0, endMs: 8_000 }));
   expect(chunks[1]).toEqual(expect.objectContaining({ startMs: 8_300, endMs: 13_000 }));
+});
+
+test('dense translated speech uses a bounded but useful speaking-rate increase', () => {
+  const denseText = 'This concise explanation still contains enough words to exceed a very short subtitle cue.';
+
+  const percent = computeNaturalSpeechRatePercent(denseText, 2_500);
+
+  expect(percent).toBeGreaterThan(15);
+  expect(percent).toBeLessThanOrEqual(35);
 });
 
 test('voice profile maps low and high speech registers to different Azure voices', () => {
@@ -153,7 +185,7 @@ test('Azure SSML escapes translated text and bounds duration fitting rate', () =
 
   expect(ssml).toContain('en-US-AndrewMultilingualNeural');
   expect(ssml).toContain('Look &lt;here&gt; &amp; continue.');
-  expect(ssml).toContain('rate="+15%"');
+  expect(ssml).toContain('rate="+35%"');
 });
 
 test('Azure dubbing assembles audible phrase results on the subtitle timeline', async () => {
@@ -235,6 +267,18 @@ test('dubbed speech chunks use short edge fades without changing timeline length
   expect(Math.abs(parsed.samples[start])).toBeLessThanOrEqual(1);
   expect(Math.max(...parsed.samples.slice(middleStart, middleEnd).map(Math.abs))).toBeGreaterThan(1_000);
   expect(Math.abs(parsed.samples[end])).toBeLessThan(200);
+});
+
+test('overlong dubbing chunks are sequenced instead of mixed into unreadable speech', () => {
+  const output = assembleTimedPcm16Wav([
+    { startMs: 0, wav: makeConstantWav(1_000, 7_000) },
+    { startMs: 600, wav: makeConstantWav(1_000, -7_000) },
+  ]);
+  const parsed = parsePcm16Wav(output);
+
+  expect(parsed.durationMs).toBe(2_000);
+  expect(parsed.samples[Math.round(parsed.sampleRate * 0.8)]).toBeGreaterThan(6_000);
+  expect(parsed.samples[Math.round(parsed.sampleRate * 1.2)]).toBeLessThan(-6_000);
 });
 
 test('localhost uses real media jobs unless mocks are explicitly enabled', () => {

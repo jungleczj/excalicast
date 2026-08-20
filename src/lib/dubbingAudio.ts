@@ -11,6 +11,14 @@ export interface ParsedPcm16Wav {
   durationMs: number;
 }
 
+export function computeNaturalSpeechRatePercent(text: string, sourceDurationMs: number): number {
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  const punctuationPauses = (text.match(/[,.!?;:]/g) ?? []).length * 120;
+  const estimatedDurationMs = Math.max(500, words / 150 * 60_000 + punctuationPauses);
+  const ratio = estimatedDurationMs / Math.max(500, sourceDurationMs);
+  return Math.max(-10, Math.min(35, Math.round((ratio - 1) * 100)));
+}
+
 function parseSrtTimestamp(value: string): number {
   const match = value.trim().match(/^(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})$/);
   if (!match) throw new Error('invalid_dubbing_srt_timestamp');
@@ -153,21 +161,30 @@ export function assembleTimedPcm16Wav(
   minimumDurationMs = 0,
 ): Uint8Array {
   if (entries.length === 0) throw new Error('dubbing_audio_missing_chunks');
-  const parsed = entries.map((entry) => ({ ...entry, audio: parsePcm16Wav(entry.wav) }));
+  const parsed = entries
+    .map((entry) => ({ ...entry, audio: parsePcm16Wav(entry.wav) }))
+    .sort((a, b) => a.startMs - b.startMs);
   const { sampleRate, channels } = parsed[0].audio;
   for (const entry of parsed) {
     if (entry.audio.sampleRate !== sampleRate || entry.audio.channels !== channels) {
       throw new Error('dubbing_audio_format_mismatch');
     }
   }
-  const lastSample = parsed.reduce((maximum, entry) => {
-    const start = Math.max(0, Math.round(entry.startMs / 1000 * sampleRate)) * channels;
-    return Math.max(maximum, start + entry.audio.samples.length);
-  }, Math.ceil(minimumDurationMs / 1000 * sampleRate) * channels);
-  const output = new Int16Array(lastSample);
-  for (const entry of parsed) {
-    const start = Math.max(0, Math.round(entry.startMs / 1000 * sampleRate)) * channels;
+  let nextAvailableFrame = 0;
+  const placements = parsed.map((entry) => {
+    const desiredStartFrame = Math.max(0, Math.round(entry.startMs / 1000 * sampleRate));
+    const startFrame = Math.max(desiredStartFrame, nextAvailableFrame);
     const frameCount = Math.floor(entry.audio.samples.length / channels);
+    nextAvailableFrame = startFrame + frameCount;
+    return { ...entry, start: startFrame * channels, frameCount };
+  });
+  const lastSample = Math.max(
+    nextAvailableFrame * channels,
+    Math.ceil(minimumDurationMs / 1000 * sampleRate) * channels,
+  );
+  const output = new Int16Array(lastSample);
+  for (const entry of placements) {
+    const { start, frameCount } = entry;
     const fadeFrames = Math.min(Math.round(sampleRate * 0.005), Math.floor(frameCount / 2));
     for (let index = 0; index < entry.audio.samples.length && start + index < output.length; index += 1) {
       const frame = Math.floor(index / channels);
@@ -179,8 +196,7 @@ export function assembleTimedPcm16Wav(
         ? Math.sin((Math.max(0, framesFromEnd) / fadeFrames) * Math.PI / 2)
         : 1;
       const sample = Math.round(entry.audio.samples[index] * Math.min(fadeIn, fadeOut));
-      const mixed = output[start + index] + sample;
-      output[start + index] = Math.max(-32_768, Math.min(32_767, mixed));
+      output[start + index] = sample;
     }
   }
   return encodePcm16Wav(output, sampleRate, channels);

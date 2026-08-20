@@ -4,6 +4,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import WebSocket from 'ws';
 import {
   assembleTimedPcm16Wav,
+  computeNaturalSpeechRatePercent,
   encodePcm16Wav,
   splitDubbingSrt,
 } from '@/lib/dubbingAudio';
@@ -36,6 +37,7 @@ interface EdgeTtsDubbingInput {
   translatedSrt: string;
   voice: AzureEnglishVoice;
   signal?: AbortSignal;
+  onProgress?: (completedChunks: number, totalChunks: number) => void | Promise<void>;
 }
 
 export interface EdgeTtsDubbingResult {
@@ -80,17 +82,8 @@ function escapeXml(value: string): string {
     .replaceAll("'", '&apos;');
 }
 
-function estimateEnglishDurationMs(text: string): number {
-  const words = text.trim().split(/\s+/).filter(Boolean).length;
-  const punctuationPauses = (text.match(/[,.!?;:]/g) ?? []).length * 120;
-  return Math.max(500, words / 150 * 60_000 + punctuationPauses);
-}
-
-/** Mirror Azure's rate calculation so each chunk's speech fits its source time window. */
 function computeRate(text: string, sourceDurationMs: number): string {
-  const estimated = estimateEnglishDurationMs(text);
-  const ratio = estimated / Math.max(500, sourceDurationMs);
-  const percent = Math.max(-12, Math.min(15, Math.round((ratio - 1) * 100)));
+  const percent = computeNaturalSpeechRatePercent(text, sourceDurationMs);
   return percent >= 0 ? `+${percent}%` : `${percent}%`;
 }
 
@@ -260,6 +253,7 @@ export async function synthesizeEdgeTtsDubbing(
   input: EdgeTtsDubbingInput,
 ): Promise<EdgeTtsDubbingResult> {
   const chunks = splitDubbingSrt(input.translatedSrt);
+  let completedChunks = 0;
   // WebSocket setup + MP3 decode is mostly network/codec wait. A small bounded
   // pool avoids one round-trip per subtitle chunk becoming fully serial while
   // keeping memory and Edge endpoint pressure predictable for long recordings.
@@ -268,6 +262,8 @@ export async function synthesizeEdgeTtsDubbing(
     const rate = computeRate(chunk.text, Math.max(500, chunk.endMs - chunk.startMs));
     const mp3 = await synthesizeChunk(input.voice, chunk.text, rate, input.signal);
     const wav = await decodeMp3ToWav(mp3);
+    completedChunks += 1;
+    await input.onProgress?.(completedChunks, chunks.length);
     return { startMs: chunk.startMs, wav, characters: chunk.text.length };
   });
   const entries = synthesized.map(({ startMs, wav }) => ({ startMs, wav }));

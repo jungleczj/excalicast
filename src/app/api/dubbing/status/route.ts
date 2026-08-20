@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import {
   getDubbingJob,
   saveLocalDubbingAsset,
+  touchDubbingJob,
   updateDubbingJob,
 } from '@/lib/dubbingStore';
 import { generateDubbingTranslation } from '@/services/dubbingProviders';
@@ -16,6 +17,7 @@ import {
 import { synthesizeAzureDubbing } from '@/services/azureSpeechProvider';
 import { synthesizeEdgeTtsDubbing } from '@/services/edgeTtsProvider';
 import type { AzureEnglishVoice } from '@/services/voiceProfile';
+import { resolveDubbingJobStep } from '@/services/dubbingJobState';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -65,9 +67,8 @@ export async function GET(req: Request): Promise<NextResponse> {
     });
   }
   if (job.status === 'failed') return NextResponse.json({ status: 'failed', error: job.error ?? 'unknown' });
-  // A previous function may have died after claiming the job. Recent claims
-  // remain single-flight; stale claims are recoverable on the next poll.
-  if (job.status === 'running' && Date.now() - job.updatedAt < 120_000) {
+  const step = resolveDubbingJobStep(job);
+  if (step === 'wait') {
     return NextResponse.json({ status: 'running' });
   }
 
@@ -81,12 +82,31 @@ export async function GET(req: Request): Promise<NextResponse> {
     await updateDubbingJob(jobId, user.id, { status: 'running' });
     if (job.audioAssetPath || job.cameraAssetPath) admin = createSupabaseAdminClient();
     stage = 'external_service';
-    const result = await generateDubbingTranslation(job.sourceSrt ?? '');
+    if (step === 'translate') {
+      const translation = await generateDubbingTranslation(job.sourceSrt ?? '');
+      await updateDubbingJob(jobId, user.id, {
+        status: 'pending',
+        translatedSrt: translation.translatedSrt,
+        provider: translation.provider,
+      });
+      return NextResponse.json({ status: 'pending', provider: translation.provider });
+    }
+
+    const translatedSrt = job.translatedSrt?.trim();
+    if (!translatedSrt) throw new Error('translated_subtitles_empty');
     let dubbedAudioPath: string | undefined;
     let dubbedAudioType: string | undefined;
-    let provider = `${result.provider}+kokoro-local`;
+    const translationProvider = job.provider?.split('+')[0] || 'deepseek-v4-flash';
+    let provider = `${translationProvider}+kokoro-local`;
     let billableCharacters: number | undefined;
     let synthesisChunkCount: number | undefined;
+    let lastHeartbeatAt = 0;
+    const heartbeat = async (completedChunks: number, totalChunks: number) => {
+      const now = Date.now();
+      if (completedChunks < totalChunks && now - lastHeartbeatAt < 20_000) return;
+      lastHeartbeatAt = now;
+      await touchDubbingJob(jobId, user.id);
+    };
 
     const persistAudio = async (audioBytes: Uint8Array) => {
       dubbedAudioType = 'audio/wav';
@@ -111,10 +131,11 @@ export async function GET(req: Request): Promise<NextResponse> {
     if (job.voiceName) {
       try {
         const synthesized = await synthesizeEdgeTtsDubbing({
-          translatedSrt: result.translatedSrt,
+          translatedSrt,
           voice: job.voiceName as AzureEnglishVoice,
+          onProgress: heartbeat,
         });
-        provider = `${result.provider}+${synthesized.provider}`;
+        provider = `${translationProvider}+${synthesized.provider}`;
         billableCharacters = synthesized.billableCharacters;
         synthesisChunkCount = synthesized.chunkCount;
         await persistAudio(synthesized.audioBytes);
@@ -124,12 +145,13 @@ export async function GET(req: Request): Promise<NextResponse> {
         const azureRegion = process.env.AZURE_SPEECH_REGION;
         if (azureKey && azureRegion) {
           const synthesized = await synthesizeAzureDubbing({
-            translatedSrt: result.translatedSrt,
+            translatedSrt,
             voice: job.voiceName as AzureEnglishVoice,
             subscriptionKey: azureKey,
             region: azureRegion,
+            onProgress: heartbeat,
           });
-          provider = `${result.provider}+${synthesized.provider}`;
+          provider = `${translationProvider}+${synthesized.provider}`;
           billableCharacters = synthesized.billableCharacters;
           synthesisChunkCount = synthesized.chunkCount;
           await persistAudio(synthesized.audioBytes);
@@ -139,7 +161,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     stage = 'database';
     const done = await updateDubbingJob(jobId, user.id, {
       status: 'done',
-      translatedSrt: result.translatedSrt,
+      translatedSrt,
       dubbedAudioPath,
       dubbedAudioType,
       lipSync: 'skipped',

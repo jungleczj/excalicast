@@ -187,6 +187,36 @@ A chapter drawer could appear near the start of a broad chapter range and immedi
 
 - Fixed and verified locally.
 
+## 2026-08-20 - English dubbing became slow and unintelligible
+
+### Symptoms
+
+- English dubbing could take several minutes and sometimes restart work after a long-running request.
+- Generated speech sounded like overlapping, unreadable voices even though the WAV contained audible samples.
+
+### Root cause
+
+- Neural TTS output was allowed to exceed its subtitle window while the assembler mixed the next phrase at its original timestamp. Dense translations therefore produced simultaneous speech.
+- Speaking-rate fitting was capped at `+15%`, which was too small for concise English translated into short subtitle cues.
+- Translation and synthesis ran as one non-resumable status request. The 120-second claim had no synthesis heartbeat, so a later poll could reclaim and duplicate a still-running job.
+
+### Fix
+
+- Sequence overlong speech chunks after the previous chunk instead of mixing their PCM samples.
+- Raise bounded natural speech fitting to at most `+35%` for both Edge TTS and Azure Speech.
+- Persist translated SRT as a durable stage before synthesis and resume directly from it.
+- Refresh the durable job lease as TTS chunks complete, preventing duplicate synthesis.
+
+### Regression coverage
+
+- Tests prove dense English can exceed the old `+15%` limit without exceeding `+35%`.
+- Tests prove overlapping timeline chunks are serialized and remain individually audible.
+- Tests prove stale jobs with persisted translation resume synthesis without translating again.
+
+### Status
+
+- Fixed and verified locally with type checking, production build, and 35 focused dubbing/media-job tests.
+
 ## 2026-08-17 - English dubbing ignored the source voice and sounded fragmented
 
 ### Symptoms
