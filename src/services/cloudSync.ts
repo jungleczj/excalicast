@@ -8,6 +8,7 @@ import {
   saveSubtitleSrt,
   thumbnailDataUrlToBlob,
 } from '@/lib/db-client';
+import { uploadSupabaseStorageObject } from '@/services/supabaseStorageUpload';
 import type {
   AudioChunk,
   BinaryFileEntry,
@@ -60,19 +61,21 @@ async function uploadObject(
   body: Blob | string,
   contentType: string,
 ): Promise<number> {
-  const supabase = createClient();
   const path = pathFor(userId, recordingId, name);
   const blob = typeof body === 'string'
     ? new Blob([body], { type: contentType })
     : body;
-  const { error } = await supabase.storage
-    .from(BUCKET)
-    .upload(path, blob, {
+  try {
+    await uploadSupabaseStorageObject({
+      bucket: BUCKET,
+      path,
+      blob,
       cacheControl: '3600',
       upsert: true,
-      contentType,
     });
-  if (error) throw new Error(`upload_${name}: ${error.message}`);
+  } catch (error) {
+    throw new Error(`upload_${name}: ${error instanceof Error ? error.message : 'unknown'}`);
+  }
   return blob.size;
 }
 

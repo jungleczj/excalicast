@@ -19,6 +19,35 @@ test('repair migration keeps subtitle ownership on auth.users uuid', () => {
   expect(sql).not.toMatch(/auth\.uid\(\)\)::text\s*=\s*user_id/i);
 });
 
+test('latest repair migration adds dubbing voice fields, durable handout jobs, and a large recording bucket limit', () => {
+  const sql = fs.readFileSync(
+    path.join(process.cwd(), 'supabase/migrations/20260818130000_background_handout_jobs.sql'),
+    'utf8',
+  );
+
+  expect(sql).toMatch(/alter table public\.dubbing_jobs[\s\S]*?add column if not exists voice_name text/i);
+  expect(sql).toMatch(/create table if not exists public\.handout_jobs/i);
+  expect(sql).toMatch(/update storage\.buckets[\s\S]*?file_size_limit\s*=\s*1073741824/i);
+  expect(sql).toMatch(/notify pgrst, 'reload schema'/i);
+});
+
+test('handout generation is submitted as a durable background job instead of running DeepSeek in the request', () => {
+  const submit = fs.readFileSync(path.join(process.cwd(), 'src/app/api/handout/submit/route.ts'), 'utf8');
+  const status = fs.readFileSync(path.join(process.cwd(), 'src/app/api/handout/status/route.ts'), 'utf8');
+  const legacyGenerate = fs.readFileSync(path.join(process.cwd(), 'src/app/api/handout/generate/route.ts'), 'utf8');
+
+  expect(submit).toContain('waitUntil');
+  expect(submit).toContain('createHandoutJob');
+  expect(status).toContain('getHandoutJob');
+  expect(legacyGenerate).not.toContain('deepseekChat');
+});
+
+test('cloud recording uploads select resumable transfer for large camera objects', () => {
+  const cloudSync = fs.readFileSync(path.join(process.cwd(), 'src/services/cloudSync.ts'), 'utf8');
+  expect(cloudSync).toContain('uploadSupabaseStorageObject');
+  expect(cloudSync).not.toMatch(/\.from\(BUCKET\)\s*\n\s*\.upload\(path, blob/);
+});
+
 test('missing dubbing_jobs table is reported as a retryable database migration failure', async () => {
   const failure = mediaJobFailurePayload({
     code: 'PGRST205',

@@ -7,6 +7,9 @@ import { I } from '@/components/icons';
 import { uploadRecording } from '@/services/cloudSync';
 import { renderPreviewFrame } from '@/services/exportPipeline';
 import { trackEvent } from '@/lib/analytics/track';
+import { useMediaTasks } from '@/components/providers/MediaTaskProvider';
+import { announceMediaTaskCreated, openMediaTaskCenter } from '@/components/MediaTaskCenter';
+import { HandoutClientError, pollHandoutJob, submitHandoutJob } from '@/services/handoutClient';
 import type { ExportConfig } from '@/types/recording';
 
 interface Chapter {
@@ -48,10 +51,27 @@ function fmtTime(ms: number): string {
 const KEYFRAME_W = 640;
 const KEYFRAME_JPEG_Q = 0.8;
 
+async function waitForPoll(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) throw new DOMException('Task cancelled', 'AbortError');
+  await new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      signal.removeEventListener('abort', abort);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, ms);
+    const abort = () => {
+      window.clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
+      reject(new DOMException('Task cancelled', 'AbortError'));
+    };
+    signal.addEventListener('abort', abort, { once: true });
+  });
+}
+
 export function HandoutPanel({ recordingId, config, onJumpToTime, view = 'handout' }: Props): JSX.Element {
   const t = useTranslations('exportPanel');
   const [data, setData] = useState<HandoutResponse | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [needsCloud, setNeedsCloud] = useState(false);
@@ -61,21 +81,39 @@ export function HandoutPanel({ recordingId, config, onJumpToTime, view = 'handou
   const [keyframeImgs, setKeyframeImgs] = useState<Record<number, string>>({});
   const [renderingShots, setRenderingShots] = useState(false);
   const renderTokenRef = useRef(0);
+  const { tasks, startTask } = useMediaTasks();
+  const currentTask = tasks.find((task) => task.recordingId === recordingId && task.kind === 'handout');
+  const busy = submitting || currentTask?.status === 'queued' || currentTask?.status === 'running';
 
-  // 初次加载：看看是否已有讲义
+  const loadHandout = useCallback(async (): Promise<void> => {
+    const response = await fetch(`/api/handout/${encodeURIComponent(recordingId)}`, { cache: 'no-store' });
+    if (response.status === 404) {
+      setData(null);
+      return;
+    }
+    if (!response.ok) throw new Error(`load ${response.status}`);
+    setData(await response.json() as HandoutResponse);
+  }, [recordingId]);
+
+  // 初次加载，并接收离开当前 Tab 后由后台任务完成的通知。
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/handout/${encodeURIComponent(recordingId)}`)
-      .then(async (r) => {
-        if (cancelled) return;
-        if (r.status === 404) { setData(null); return; }
-        if (!r.ok) { setError(`load ${r.status}`); return; }
-        const json = (await r.json()) as HandoutResponse;
-        setData(json);
-      })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : 'load_failed'); });
-    return () => { cancelled = true; };
-  }, [recordingId]);
+    const refresh = () => {
+      void loadHandout().catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'load_failed');
+      });
+    };
+    const onReady = (event: Event) => {
+      const detail = (event as CustomEvent<{ recordingId?: string }>).detail;
+      if (detail?.recordingId === recordingId) refresh();
+    };
+    refresh();
+    window.addEventListener('excalicast:handout-ready', onReady);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('excalicast:handout-ready', onReady);
+    };
+  }, [loadHandout, recordingId]);
 
   const chapters: Chapter[] = (() => {
     if (!data) return [];
@@ -128,31 +166,50 @@ export function HandoutPanel({ recordingId, config, onJumpToTime, view = 'handou
   }, [data, withImages, recordingId]);
 
   const handleGenerate = async () => {
-    setBusy(true);
+    if (busy) {
+      openMediaTaskCenter(recordingId);
+      return;
+    }
+    setSubmitting(true);
     setError(null);
+    announceMediaTaskCreated(recordingId, document.activeElement);
     try {
-      const res = await fetch('/api/handout/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recordingId }),
+      await startTask({
+        recordingId,
+        kind: 'handout',
+        resourceClass: 'network',
+        configSnapshot: { output: ['outline', 'handout'] },
+      }, async (report, signal) => {
+        const { jobId } = await submitHandoutJob(recordingId, signal);
+        report({ phase: 'queued', ratio: 0.1, checkpoint: { remoteJobId: jobId } });
+        for (let attempt = 0; attempt < 240; attempt += 1) {
+          const status = await pollHandoutJob(jobId, signal);
+          if (status.status === 'failed') throw new Error(status.error ?? 'handout_generation_failed');
+          if (status.status === 'done') {
+            report({ phase: 'saving', ratio: 0.98, checkpoint: { remoteJobId: jobId } });
+            window.dispatchEvent(new CustomEvent('excalicast:handout-ready', { detail: { recordingId } }));
+            return { resultRef: `handout:${recordingId}` };
+          }
+          report({
+            phase: status.status === 'pending' ? 'queued' : 'generating',
+            ratio: status.status === 'pending' ? 0.15 : 0.65,
+            checkpoint: { remoteJobId: jobId },
+          });
+          await waitForPoll(2_500, signal);
+        }
+        throw new Error('handout_timeout');
       });
-      const j = (await res.json().catch(() => ({}))) as HandoutResponse & {
-        error?: string; message?: string; chapters?: Chapter[]; title?: string; keyframes?: Keyframe[];
-      };
-      if (!res.ok) {
-        setNeedsCloud(j.error === 'cloud_recording_required');
-        setError(j.message ?? j.error ?? `${res.status}`);
-        return;
-      }
       setNeedsCloud(false);
-      const outline = j.outline ?? { title: j.title, chapters: j.chapters ?? [], keyframes: j.keyframes ?? [] };
       setKeyframeImgs({});
-      setData({ outline, markdown: j.markdown, model: j.model, generatedAt: Date.now() });
+      await loadHandout();
       trackEvent('handout_generate', { recordingId });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'unknown');
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        setNeedsCloud(err instanceof HandoutClientError && err.code === 'cloud_recording_required');
+        setError(err instanceof Error ? err.message : 'unknown');
+      }
     } finally {
-      setBusy(false);
+      setSubmitting(false);
     }
   };
 

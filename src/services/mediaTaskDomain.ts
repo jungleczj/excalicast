@@ -2,6 +2,7 @@ export type MediaTaskKind =
   | 'export'
   | 'asr'
   | 'dubbing'
+  | 'handout'
   | 'cursor_analysis'
   | 'audio_peaks'
   | 'auto_edit'

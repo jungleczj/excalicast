@@ -47,6 +47,7 @@ function kindLabel(kind: MediaTaskKind, en: boolean): string {
     export: ['Export video', '导出视频'],
     asr: ['Generate captions', '生成字幕'],
     dubbing: ['Generate dubbing', '生成配音'],
+    handout: ['Generate outline & handout', '生成大纲与讲义'],
     cursor_analysis: ['Track focus', '分析聚焦'],
     audio_peaks: ['Build waveform', '生成波形'],
     auto_edit: ['Apply ChatCut', '应用 ChatCut'],

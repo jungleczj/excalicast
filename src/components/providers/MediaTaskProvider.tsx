@@ -122,6 +122,29 @@ function resumeRecoveredRemoteTask(task: CoordinatedMediaTask): void {
       window.dispatchEvent(new CustomEvent('excalicast:dubbing-ready', { detail: { recordingId: task.recordingId, track } }));
       return { resultRef: track.id };
     }).catch(() => undefined);
+    return;
+  }
+  if (task.kind === 'handout' && typeof task.checkpoint?.remoteJobId === 'string') {
+    const remoteJobId = task.checkpoint.remoteJobId;
+    void coordinator.startTask({ recordingId: task.recordingId, kind: 'handout', resourceClass: 'network' }, async (report, signal) => {
+      const { pollHandoutJob } = await import('@/services/handoutClient');
+      for (let attempt = 0; attempt < 240; attempt += 1) {
+        const result = await pollHandoutJob(remoteJobId, signal);
+        if (result.status === 'failed') throw new Error(result.error ?? 'handout_generation_failed');
+        if (result.status === 'done') {
+          report({ phase: 'saving', ratio: 0.98, checkpoint: { remoteJobId } });
+          window.dispatchEvent(new CustomEvent('excalicast:handout-ready', { detail: { recordingId: task.recordingId } }));
+          return { resultRef: `handout:${task.recordingId}` };
+        }
+        report({
+          phase: result.status === 'pending' ? 'queued' : 'generating',
+          ratio: result.status === 'pending' ? 0.12 : 0.62,
+          checkpoint: { remoteJobId },
+        });
+        await waitForRemoteTask(2_500, signal);
+      }
+      throw new Error('handout_timeout');
+    }).catch(() => undefined);
   }
 }
 
