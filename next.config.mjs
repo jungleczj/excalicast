@@ -6,7 +6,7 @@ const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ['better-sqlite3'],
+    serverComponentsExternalPackages: ['better-sqlite3', 'ws'],
   },
   // Note: previous versions set COOP=same-origin + COEP=require-corp/credentialless
   // to enable SharedArrayBuffer for ffmpeg.wasm. That was unnecessary —
@@ -39,7 +39,10 @@ const nextConfig = {
     if (isServer) {
       config.externals = [
         ...(config.externals ?? []),
-        { 'better-sqlite3': 'commonjs better-sqlite3' },
+        {
+          'better-sqlite3': 'commonjs better-sqlite3',
+          'ws': 'commonjs ws',
+        },
       ];
     }
     return config;

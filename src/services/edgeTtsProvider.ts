@@ -8,6 +8,7 @@ import {
   splitDubbingSrt,
 } from '@/lib/dubbingAudio';
 import type { AzureEnglishVoice } from '@/services/voiceProfile';
+import { mapWithConcurrency } from '@/utils/asyncPool';
 
 /**
  * Edge TTS provider — Microsoft Edge's free neural text-to-speech endpoint
@@ -29,6 +30,7 @@ const WSS_URL = `wss://speech.platform.bing.com/consumer/speech/synthesize/reada
 const ORIGIN = 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0';
 const WIN_EPOCH_SECONDS = 11644473600;
+const EDGE_TTS_CONCURRENCY = 4;
 
 interface EdgeTtsDubbingInput {
   translatedSrt: string;
@@ -258,16 +260,18 @@ export async function synthesizeEdgeTtsDubbing(
   input: EdgeTtsDubbingInput,
 ): Promise<EdgeTtsDubbingResult> {
   const chunks = splitDubbingSrt(input.translatedSrt);
-  const entries: Array<{ startMs: number; wav: Uint8Array }> = [];
-  let billableCharacters = 0;
-  for (const chunk of chunks) {
+  // WebSocket setup + MP3 decode is mostly network/codec wait. A small bounded
+  // pool avoids one round-trip per subtitle chunk becoming fully serial while
+  // keeping memory and Edge endpoint pressure predictable for long recordings.
+  const synthesized = await mapWithConcurrency(chunks, EDGE_TTS_CONCURRENCY, async (chunk) => {
     if (input.signal?.aborted) throw new DOMException('Dubbing cancelled', 'AbortError');
     const rate = computeRate(chunk.text, Math.max(500, chunk.endMs - chunk.startMs));
     const mp3 = await synthesizeChunk(input.voice, chunk.text, rate, input.signal);
     const wav = await decodeMp3ToWav(mp3);
-    entries.push({ startMs: chunk.startMs, wav });
-    billableCharacters += chunk.text.length;
-  }
+    return { startMs: chunk.startMs, wav, characters: chunk.text.length };
+  });
+  const entries = synthesized.map(({ startMs, wav }) => ({ startMs, wav }));
+  const billableCharacters = synthesized.reduce((total, chunk) => total + chunk.characters, 0);
   const minimumDurationMs = Math.max(...chunks.map((chunk) => chunk.endMs));
   return {
     audioBytes: assembleTimedPcm16Wav(entries, minimumDurationMs),

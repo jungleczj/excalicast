@@ -20,6 +20,7 @@ import {
   buildAzureSpeechSsml,
   synthesizeAzureDubbing,
 } from '@/services/azureSpeechProvider';
+import { mapWithConcurrency } from '@/utils/asyncPool';
 
 function makeToneWav(durationMs: number, frequency = 330): Uint8Array {
   const sampleRate = 16_000;
@@ -49,6 +50,21 @@ function makeToneWav(durationMs: number, frequency = 330): Uint8Array {
   new Int16Array(bytes.buffer, 44).set(pcm);
   return bytes;
 }
+
+test('bounded async pool preserves output order while limiting concurrent TTS chunks', async () => {
+  let active = 0;
+  let peak = 0;
+  const values = await mapWithConcurrency([30, 5, 20, 1, 10], 2, async (delay, index) => {
+    active += 1;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    active -= 1;
+    return `chunk-${index}`;
+  });
+
+  expect(peak).toBe(2);
+  expect(values).toEqual(['chunk-0', 'chunk-1', 'chunk-2', 'chunk-3', 'chunk-4']);
+});
 
 test('long dubbing text is split on subtitle timing instead of becoming one short audio clip', () => {
   const srt = [

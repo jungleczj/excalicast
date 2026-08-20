@@ -19,6 +19,11 @@ test('repair migration keeps subtitle ownership on auth.users uuid', () => {
   expect(sql).not.toMatch(/auth\.uid\(\)\)::text\s*=\s*user_id/i);
 });
 
+test('production server keeps ws external so Edge TTS does not lose its mask implementation', () => {
+  const config = fs.readFileSync(path.join(process.cwd(), 'next.config.mjs'), 'utf8');
+  expect(config).toMatch(/['"]ws['"]\s*:\s*['"]commonjs ws['"]/);
+});
+
 test('latest repair migration adds dubbing voice fields, durable handout jobs, and a large recording bucket limit', () => {
   const sql = fs.readFileSync(
     path.join(process.cwd(), 'supabase/migrations/20260818130000_background_handout_jobs.sql'),
