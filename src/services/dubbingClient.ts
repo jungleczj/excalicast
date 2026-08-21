@@ -14,7 +14,7 @@ import { removePrivateJobAssets, uploadPrivateJobAsset } from '@/services/privat
 import { parsePcm16Wav } from '@/lib/dubbingAudio';
 import type { AzureEnglishVoice, VoiceProfile } from '@/services/voiceProfile';
 
-interface SubmitResponse { jobId: string }
+interface SubmitResponse { jobId: string; reused?: boolean }
 
 interface StatusResponse {
   status: 'pending' | 'running' | 'done' | 'failed';
@@ -25,6 +25,13 @@ interface StatusResponse {
   voiceName?: string;
   billableCharacters?: number;
   synthesisChunkCount?: number;
+  phase?: 'translating' | 'synthesizing' | 'decoding' | 'assembling' | 'uploading' | 'saving';
+  totalChunks?: number;
+  completedChunks?: number;
+  elapsedMs?: number;
+  etaMs?: number;
+  decoder?: string;
+  fallbackReason?: string;
   error?: string;
 }
 
@@ -40,13 +47,14 @@ export interface DubbingProgress {
 
 interface DubbingOptions {
   signal?: AbortSignal;
+  allowLocalFallback?: boolean;
   onProgress?: (progress: DubbingProgress) => void;
   onCheckpoint?: (checkpoint: { remoteJobId: string; sourceAudioHash: string }) => void;
   persistTask?: boolean;
 }
 
 const POLL_INTERVAL_MS = 1200;
-const POLL_TIMEOUT_MS = 5 * 60_000;
+const POLL_TIMEOUT_MS = 20 * 60_000;
 
 async function wait(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) throw new DOMException('Dubbing cancelled', 'AbortError');
@@ -114,18 +122,49 @@ async function pollDubbingJob(
 ): Promise<StatusResponse> {
   const started = Date.now();
   while (Date.now() - started < POLL_TIMEOUT_MS) {
-    const res = await fetch(`/api/dubbing/status?jobId=${encodeURIComponent(jobId)}`, {
+    const processResponse = await fetch('/api/dubbing/process', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobId }),
       cache: 'no-store',
       signal: options.signal,
     });
-    const status = await parseMediaJobResponse<StatusResponse>(res);
-    if (status.status === 'done') return status;
+    const processStatus = await parseMediaJobResponse<StatusResponse>(processResponse);
+    if (processStatus.status === 'done') {
+      const statusResponse = await fetch(`/api/dubbing/status?jobId=${encodeURIComponent(jobId)}`, {
+        cache: 'no-store', signal: options.signal,
+      });
+      return parseMediaJobResponse<StatusResponse>(statusResponse);
+    }
+    const status = processStatus;
     if (status.status === 'failed') throw new Error(status.error ?? 'dubbing_failed');
-    const progress = status.status === 'running' ? 0.3 : 0.15;
-    options.onProgress?.({ stage: 'translating', progress });
+    const chunkRatio = status.totalChunks && status.totalChunks > 0
+      ? (status.completedChunks ?? 0) / status.totalChunks
+      : 0;
+    const stage: DubbingProgressStage = status.phase === 'synthesizing'
+      ? 'synthesis'
+      : status.phase === 'decoding' || status.phase === 'assembling'
+        ? 'assembling'
+        : status.phase === 'uploading' || status.phase === 'saving'
+          ? 'saving'
+          : 'translating';
+    const progress = stage === 'translating'
+      ? 0.12
+      : stage === 'synthesis'
+        ? 0.2 + chunkRatio * 0.65
+        : stage === 'assembling'
+          ? 0.9
+          : 0.97;
+    options.onProgress?.({
+      stage,
+      progress,
+      completedChunks: status.completedChunks,
+      totalChunks: status.totalChunks,
+    });
     if (options.persistTask !== false) {
       await persistDubbingTask({
-        recordingId, jobId, sourceAudioHash, status: 'running', progress, stage: 'translating',
+        recordingId, jobId, sourceAudioHash, status: 'running', progress, stage,
+        completedChunks: status.completedChunks, totalChunks: status.totalChunks,
       });
     }
     await wait(POLL_INTERVAL_MS, options.signal);
@@ -175,6 +214,9 @@ async function finishEnglishDubbingTrack(params: {
     if (!status.srtUrl) throw new Error('missing_translated_subtitles');
     const translatedSrt = await fetchRequiredText(status.srtUrl, options.signal);
     let lastPersistedAt = 0;
+    if (!status.audioUrl && options.allowLocalFallback !== true) {
+      throw new Error('dubbing_local_fallback_required');
+    }
     const audioBlob = status.audioUrl
       ? await fetchRequiredBlob(status.audioUrl, options.signal)
       : await generateKokoroDubbingAudio(translatedSrt, {
@@ -309,7 +351,11 @@ export async function createEnglishDubbingTrack(params: {
         } : {}),
       }),
     });
-    const { jobId } = await parseMediaJobResponse<SubmitResponse>(submit);
+    const { jobId, reused } = await parseMediaJobResponse<SubmitResponse>(submit);
+    if (reused && proofAsset) {
+      await removePrivateJobAssets([proofAsset.path]);
+      proofAsset = null;
+    }
     params.onCheckpoint?.({ remoteJobId: jobId, sourceAudioHash });
     if (params.persistTask !== false) {
       await persistDubbingTask({

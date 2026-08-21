@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getUserSubscription } from '@/lib/db';
-import { createDubbingJob, getDubbingJob } from '@/lib/dubbingStore';
+import { createDubbingJob, findReusableDubbingJob, getDubbingJob } from '@/lib/dubbingStore';
 import { TIER_PERMISSIONS } from '@/types/user';
 import { isOwnedPrivateMediaPath, parseMediaSubmitPayload } from '@/lib/privateMedia';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
@@ -67,6 +67,9 @@ export async function POST(req: Request): Promise<NextResponse> {
     const voiceConfidence = Math.max(0, Math.min(1, Number(body.voiceConfidence) || 0));
     if (!localMock && !isOwnedPrivateMediaPath(user.id, parsed.assetPath, parsed.recordingId, 'dubbing')) throw new Error('forbidden_asset_path');
     if (parsed.cameraAssetPath && !isOwnedPrivateMediaPath(user.id, parsed.cameraAssetPath, parsed.recordingId, 'dubbing')) throw new Error('forbidden_camera_asset_path');
+    const sourceSrtHash = createHash('sha256').update(sourceSrt).digest('hex');
+    const reusable = await findReusableDubbingJob(user.id, sourceAudioHash, sourceSrtHash, voiceName);
+    if (reusable) return NextResponse.json({ jobId: reusable.id, reused: true });
     const now = Date.now();
     const jobId = randomUUID();
     let admin: ReturnType<typeof createSupabaseAdminClient> | undefined;
@@ -83,7 +86,7 @@ export async function POST(req: Request): Promise<NextResponse> {
         createJob: async () => {
           await createDubbingJob({
             id: jobId, userId: user.id, recordingId: parsed.recordingId, targetLang: 'en',
-            sourceAudioHash, sourceSrt,
+            sourceAudioHash, sourceSrt, sourceSrtHash,
             voiceName, voiceRegister, voiceConfidence,
             status: 'pending', createdAt: now, updatedAt: now,
             audioAssetPath: parsed.assetPath || undefined,

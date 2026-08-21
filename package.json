@@ -38,6 +38,7 @@
     "marked": "^14.1.4",
     "mediabunny": "^1.52.2",
     "mp4-muxer": "^5.2.2",
+    "mpg123-decoder": "^1.0.3",
     "next": "^14.2.15",
     "next-intl": "^3.26.5",
     "react": "^18.3.1",

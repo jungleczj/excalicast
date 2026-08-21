@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { I } from '@/components/icons';
 import { listLocalizedTracks, loadRecordingMediaTracks, setActiveLocalizedTrack } from '@/lib/db-client';
 import { isUsableLocalizedTrack } from '@/lib/localizedTrack';
-import { createEnglishDubbingTrack } from '@/services/dubbingClient';
+import { createEnglishDubbingTrack, resumeEnglishDubbingTrack } from '@/services/dubbingClient';
 import type { LocalizedTrack, RecordingMetadata } from '@/types/recording';
 import { useMediaTasks } from '@/components/providers/MediaTaskProvider';
 import { announceMediaTaskCreated, openMediaTaskCenter } from '@/components/MediaTaskCenter';
@@ -51,6 +51,7 @@ export function DubbingPanel({
   const [voiceProfile, setVoiceProfile] = useState<VoiceProfile | null>(null);
   const [voiceChoice, setVoiceChoice] = useState<DubbingVoiceChoice>('auto');
   const [analyzingVoice, setAnalyzingVoice] = useState(false);
+  const [fallbackCheckpoint, setFallbackCheckpoint] = useState<{ remoteJobId: string; sourceAudioHash: string } | null>(null);
   const voiceAnalysisRef = useRef<Promise<VoiceProfile> | null>(null);
   const { tasks, startTask } = useMediaTasks();
   const currentTask = tasks.find((task) => task.recordingId === recordingId && task.kind === 'dubbing');
@@ -152,7 +153,10 @@ export function DubbingPanel({
           voiceProfile: taskVoiceProfile,
           signal,
           persistTask: false,
-          onCheckpoint: (checkpoint) => report({ phase: 'translating', ratio: 0.08, checkpoint }),
+          onCheckpoint: (checkpoint) => {
+            setFallbackCheckpoint(checkpoint);
+            report({ phase: 'translating', ratio: 0.08, checkpoint });
+          },
           onProgress: (progress) => report({
             phase: progress.stage,
             ratio: progress.progress,
@@ -170,6 +174,41 @@ export function DubbingPanel({
       }
     }
   }, [busy, currentTask?.checkpoint, effectiveVoiceProfile, en, metadata.hasAudio, metadata.subtitleSrt, onTrackReady, recordingId, refreshTracks, startTask, voiceChoice]);
+
+  const useLocalFallback = useCallback(async () => {
+    const remoteJobId = fallbackCheckpoint?.remoteJobId ?? currentTask?.checkpoint?.remoteJobId;
+    const sourceAudioHash = fallbackCheckpoint?.sourceAudioHash ?? currentTask?.checkpoint?.sourceAudioHash;
+    if (typeof remoteJobId !== 'string' || typeof sourceAudioHash !== 'string') {
+      setError(en ? 'The resumable dubbing checkpoint is missing.' : '缺少可恢复的配音任务信息，请重新生成。');
+      return;
+    }
+    setError(null);
+    const resultHolder: { track?: LocalizedTrack } = {};
+    await startTask({
+      recordingId,
+      kind: 'dubbing',
+      resourceClass: 'local_heavy',
+      configSnapshot: { targetLang: 'en', provider: 'kokoro-local', remoteJobId },
+    }, async (report, signal) => {
+      const track = await resumeEnglishDubbingTrack({
+        recordingId,
+        jobId: remoteJobId,
+        sourceAudioHash,
+        allowLocalFallback: true,
+        signal,
+        persistTask: false,
+        onProgress: (progress) => report({
+          phase: progress.stage,
+          ratio: progress.progress,
+          checkpoint: { remoteJobId, sourceAudioHash },
+        }),
+      });
+      resultHolder.track = track;
+      return { resultRef: track.id };
+    });
+    await refreshTracks();
+    if (resultHolder.track) onTrackReady(resultHolder.track);
+  }, [currentTask?.checkpoint, en, fallbackCheckpoint, onTrackReady, recordingId, refreshTracks, startTask]);
 
   const selectTrack = useCallback(async (track: LocalizedTrack | null) => {
     await setActiveLocalizedTrack(recordingId, track?.id);
@@ -282,9 +321,28 @@ export function DubbingPanel({
         )}
 
         {error && (
-          <p className="mt-3" style={{ color: 'var(--rec)', fontSize: 12, lineHeight: 1.5 }}>
-            {en ? `Dubbing failed: ${error}` : `配音生成失败：${error}`}
-          </p>
+          <div className="mt-3">
+            <p style={{ color: 'var(--rec)', fontSize: 12, lineHeight: 1.5 }}>
+              {error === 'dubbing_local_fallback_required'
+                ? (en ? 'Free Edge speech is temporarily unavailable.' : '免费 Edge 配音暂时不可用。')
+                : (en ? `Dubbing failed: ${error}` : `配音生成失败：${error}`)}
+            </p>
+            {error === 'dubbing_local_fallback_required' && (
+              <button
+                type="button"
+                onClick={() => void useLocalFallback().catch((fallbackError) => {
+                  setError(fallbackError instanceof Error ? fallbackError.message : 'local_dubbing_failed');
+                })}
+                style={{
+                  marginTop: 8, minHeight: 34, border: '1px solid rgba(24,25,26,.14)', borderRadius: 9,
+                  background: 'var(--paper)', color: 'var(--ink)', padding: '0 12px', cursor: 'pointer',
+                  fontSize: 12, fontWeight: 680,
+                }}
+              >
+                {en ? 'Use local model instead' : '改用本地模型'}
+              </button>
+            )}
+          </div>
         )}
       </section>
 

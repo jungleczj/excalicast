@@ -5,11 +5,11 @@ import WebSocket from 'ws';
 import {
   assembleTimedPcm16Wav,
   computeNaturalSpeechRatePercent,
-  encodePcm16Wav,
   splitDubbingSrt,
 } from '@/lib/dubbingAudio';
 import type { AzureEnglishVoice } from '@/services/voiceProfile';
 import { mapWithConcurrency } from '@/utils/asyncPool';
+import { decodeEdgeMp3ToPcm16Wav } from '@/services/edgeMp3Decoder';
 
 /**
  * Edge TTS provider — Microsoft Edge's free neural text-to-speech endpoint
@@ -31,13 +31,29 @@ const WSS_URL = `wss://speech.platform.bing.com/consumer/speech/synthesize/reada
 const ORIGIN = 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0';
 const WIN_EPOCH_SECONDS = 11644473600;
-const EDGE_TTS_CONCURRENCY = 4;
+const EDGE_TTS_CONCURRENCY = 6;
+const EDGE_TTS_MAX_ATTEMPTS = 2;
 
 interface EdgeTtsDubbingInput {
   translatedSrt: string;
   voice: AzureEnglishVoice;
   signal?: AbortSignal;
   onProgress?: (completedChunks: number, totalChunks: number) => void | Promise<void>;
+}
+
+export interface EdgeTtsPlannedChunk {
+  index: number;
+  startMs: number;
+  endMs: number;
+  text: string;
+  textHash: string;
+  rate: string;
+}
+
+export interface SynthesizedEdgeTtsChunk extends EdgeTtsPlannedChunk {
+  mp3: Uint8Array;
+  wav: Uint8Array;
+  durationMs: number;
 }
 
 export interface EdgeTtsDubbingResult {
@@ -85,6 +101,15 @@ function escapeXml(value: string): string {
 function computeRate(text: string, sourceDurationMs: number): string {
   const percent = computeNaturalSpeechRatePercent(text, sourceDurationMs);
   return percent >= 0 ? `+${percent}%` : `${percent}%`;
+}
+
+export function planEdgeTtsChunks(translatedSrt: string): EdgeTtsPlannedChunk[] {
+  return splitDubbingSrt(translatedSrt).map((chunk, index) => ({
+    ...chunk,
+    index,
+    textHash: createHash('sha256').update(`edge-tts-v2\0${chunk.text}`).digest('hex'),
+    rate: computeRate(chunk.text, Math.max(500, chunk.endMs - chunk.startMs)),
+  }));
 }
 
 interface EdgeMessage {
@@ -166,6 +191,16 @@ function synthesizeChunk(
           return;
         }
         const headerLength = buffer.readUInt16BE(0);
+        if (headerLength + 2 > buffer.length) {
+          settled = true;
+          clearTimeout(timeout);
+          signal?.removeEventListener('abort', onAbort);
+          ws.terminate();
+          reject(new Error('edge_tts_invalid_binary_header'));
+          return;
+        }
+        const headers = buffer.subarray(2, headerLength + 2).toString('utf8').toLowerCase();
+        if (!headers.includes('path:audio')) return;
         const body = buffer.subarray(headerLength + 2);
         if (body.length > 0) chunks.push(body);
         return;
@@ -202,66 +237,72 @@ function synthesizeChunk(
   });
 }
 
-async function decodeMp3ToWav(mp3: Uint8Array): Promise<Uint8Array> {
-  const { ALL_FORMATS, AudioSampleSink, BlobSource, Input } = await import('mediabunny');
-  const mp3BlobPart = new Uint8Array(mp3);
-  const input = new Input({
-    source: new BlobSource(new Blob([mp3BlobPart], { type: 'audio/mpeg' })),
-    formats: ALL_FORMATS,
+function isTransientEdgeError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /timeout|closed_before_audio|ECONN|ENOTFOUND|429|502|503|504|WebSocket/i.test(message);
+}
+
+function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new DOMException('Dubbing cancelled', 'AbortError'));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }, delayMs);
+    const abort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('Dubbing cancelled', 'AbortError'));
+    };
+    signal?.addEventListener('abort', abort, { once: true });
   });
-  let sampleRate = 0;
-  const parts: Float32Array[] = [];
-  let totalFrames = 0;
-  try {
-    const track = await input.getPrimaryAudioTrack();
-    if (!track) throw new Error('edge_tts_decode_no_track');
-    const sink = new AudioSampleSink(track);
-    for await (const sample of sink.samples()) {
-      try {
-        if (!sampleRate) sampleRate = sample.sampleRate;
-        const mono = new Float32Array(sample.numberOfFrames);
-        for (let channel = 0; channel < sample.numberOfChannels; channel += 1) {
-          const plane = new Float32Array(sample.numberOfFrames);
-          sample.copyTo(plane, { planeIndex: channel, format: 'f32-planar' });
-          for (let index = 0; index < sample.numberOfFrames; index += 1) {
-            mono[index] += plane[index] / sample.numberOfChannels;
-          }
-        }
-        parts.push(mono);
-        totalFrames += mono.length;
-      } finally {
-        sample.close();
-      }
+}
+
+async function synthesizeChunkWithRetry(
+  voice: string,
+  text: string,
+  rate: string,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  for (let attempt = 1; attempt <= EDGE_TTS_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await synthesizeChunk(voice, text, rate, signal);
+    } catch (error) {
+      if (attempt === EDGE_TTS_MAX_ATTEMPTS || !isTransientEdgeError(error)) throw error;
+      await waitForRetry(500 * 2 ** (attempt - 1), signal);
     }
-  } finally {
-    input.dispose();
   }
-  if (!sampleRate || totalFrames === 0) throw new Error('edge_tts_decode_empty');
-  const int16 = new Int16Array(totalFrames);
-  let offset = 0;
-  for (const part of parts) {
-    for (let index = 0; index < part.length; index += 1) {
-      const clamped = Math.max(-1, Math.min(1, part[index]));
-      int16[offset + index] = Math.round(clamped < 0 ? clamped * 32_768 : clamped * 32_767);
-    }
-    offset += part.length;
-  }
-  return encodePcm16Wav(int16, sampleRate, 1);
+  throw new Error('edge_tts_retry_exhausted');
+}
+
+export async function synthesizeEdgeTtsChunk(
+  chunk: EdgeTtsPlannedChunk,
+  voice: AzureEnglishVoice,
+  signal?: AbortSignal,
+): Promise<SynthesizedEdgeTtsChunk> {
+  const mp3 = await synthesizeChunkWithRetry(voice, chunk.text, chunk.rate, signal);
+  const decoded = await decodeEdgeMp3ToPcm16Wav(mp3);
+  return { ...chunk, mp3, wav: decoded.wav, durationMs: decoded.durationMs };
+}
+
+export async function decodeCachedEdgeTtsChunk(
+  chunk: EdgeTtsPlannedChunk,
+  mp3: Uint8Array,
+): Promise<SynthesizedEdgeTtsChunk> {
+  const decoded = await decodeEdgeMp3ToPcm16Wav(mp3);
+  return { ...chunk, mp3, wav: decoded.wav, durationMs: decoded.durationMs };
 }
 
 export async function synthesizeEdgeTtsDubbing(
   input: EdgeTtsDubbingInput,
 ): Promise<EdgeTtsDubbingResult> {
-  const chunks = splitDubbingSrt(input.translatedSrt);
+  const chunks = planEdgeTtsChunks(input.translatedSrt);
   let completedChunks = 0;
   // WebSocket setup + MP3 decode is mostly network/codec wait. A small bounded
   // pool avoids one round-trip per subtitle chunk becoming fully serial while
   // keeping memory and Edge endpoint pressure predictable for long recordings.
   const synthesized = await mapWithConcurrency(chunks, EDGE_TTS_CONCURRENCY, async (chunk) => {
     if (input.signal?.aborted) throw new DOMException('Dubbing cancelled', 'AbortError');
-    const rate = computeRate(chunk.text, Math.max(500, chunk.endMs - chunk.startMs));
-    const mp3 = await synthesizeChunk(input.voice, chunk.text, rate, input.signal);
-    const wav = await decodeMp3ToWav(mp3);
+    const { wav } = await synthesizeEdgeTtsChunk(chunk, input.voice, input.signal);
     completedChunks += 1;
     await input.onProgress?.(completedChunks, chunks.length);
     return { startMs: chunk.startMs, wav, characters: chunk.text.length };

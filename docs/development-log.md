@@ -484,3 +484,31 @@
 
 - Voice mapping, manual override, Blob decoding, SSML safety, Azure retry, timeline assembly, Kokoro fallback, and cancellation tests pass.
 - Type checking, the 17-test dubbing suite, production build, Max gating, and generated-track preview/export activation pass.
+## 2026-08-20 - Durable free Edge dubbing pipeline
+
+### Baseline
+
+- Mandatory pre-change checkpoint: `7df71c0` (`chore: checkpoint before dubbing pipeline repair`).
+- Worktree: `/Users/chenzhijiang/.codex/worktrees/53c2/fix-loading-recording`.
+- Branch: `fix/loading-recording`.
+
+### Product behavior
+
+- Free English dubbing continues to use DeepSeek translation and Edge neural voices.
+- Ten-minute transcripts are grouped into bounded 20-30 second speech requests instead of dozens of short WebSocket sessions.
+- Translation, synthesis, decode, assembly, upload, and save stages now report real chunk progress.
+- Refreshes and transient failures resume from private MP3 chunks; identical recording, subtitle, and voice requests reuse verified work.
+- Edge failure no longer silently starts Kokoro. The user receives an explicit local-model fallback action.
+
+### Implementation
+
+- Replaced server-side Mediabunny MP3 decoding with Node-compatible `mpg123-decoder` WASM and strict PCM quality gates.
+- Added durable `dubbing_job_chunks`, per-job phase diagnostics, bounded six-chunk processing, adaptive three-way retry batches, and private Storage chunk caching.
+- Split side-effect-free status reads from bounded processing requests.
+- Added real Edge MP3 and ffmpeg-reference WAV fixtures to detect decoder distortion.
+
+### Verification
+
+- Type checking passed.
+- Production build passed.
+- 26 focused dubbing tests passed, including real MP3 decode correlation, truncation rejection, long transcript grouping, and read-only polling.

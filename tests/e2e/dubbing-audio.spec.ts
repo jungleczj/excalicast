@@ -23,6 +23,7 @@ import {
 } from '@/services/azureSpeechProvider';
 import { mapWithConcurrency } from '@/utils/asyncPool';
 import { resolveDubbingJobStep } from '@/services/dubbingJobState';
+import { decodeEdgeMp3ToPcm16Wav } from '@/services/edgeMp3Decoder';
 
 function makeToneWav(durationMs: number, frequency = 330): Uint8Array {
   const sampleRate = 16_000;
@@ -80,6 +81,43 @@ test('bounded async pool preserves output order while limiting concurrent TTS ch
   expect(values).toEqual(['chunk-0', 'chunk-1', 'chunk-2', 'chunk-3', 'chunk-4']);
 });
 
+test('real Edge MP3 decodes to clean mono PCM in the Node runtime', async () => {
+  const mp3 = new Uint8Array(fs.readFileSync(path.join(process.cwd(), 'tests/fixtures/edge-tts-clear-speech.mp3')));
+
+  const decoded = await decodeEdgeMp3ToPcm16Wav(mp3);
+  const parsed = parsePcm16Wav(decoded.wav);
+
+  expect(decoded.decodeErrors).toEqual([]);
+  expect(parsed.sampleRate).toBe(24_000);
+  expect(parsed.channels).toBe(1);
+  expect(parsed.durationMs).toBeGreaterThan(5_500);
+  expect(parsed.durationMs).toBeLessThan(5_800);
+  expect(Math.abs(decoded.durationMs - decoded.encodedDurationMs)).toBeLessThanOrEqual(48);
+  expect(decoded.metrics.peak).toBeGreaterThan(0.4);
+  expect(decoded.metrics.clippedSampleRatio).toBeLessThan(0.001);
+  expect(Math.abs(decoded.metrics.dcOffset)).toBeLessThan(0.02);
+
+  const reference = parsePcm16Wav(new Uint8Array(fs.readFileSync(
+    path.join(process.cwd(), 'tests/fixtures/edge-tts-clear-speech-reference.wav'),
+  )));
+  const length = Math.min(parsed.samples.length, reference.samples.length);
+  let dot = 0;
+  let decodedEnergy = 0;
+  let referenceEnergy = 0;
+  for (let index = 0; index < length; index += 1) {
+    dot += parsed.samples[index] * reference.samples[index];
+    decodedEnergy += parsed.samples[index] ** 2;
+    referenceEnergy += reference.samples[index] ** 2;
+  }
+  const correlation = dot / Math.sqrt(decodedEnergy * referenceEnergy);
+  expect(correlation).toBeGreaterThan(0.999);
+});
+
+test('truncated Edge MP3 is rejected instead of becoming a ready dubbing track', async () => {
+  const mp3 = new Uint8Array(fs.readFileSync(path.join(process.cwd(), 'tests/fixtures/edge-tts-clear-speech.mp3')));
+  await expect(decodeEdgeMp3ToPcm16Wav(mp3.slice(0, 180))).rejects.toThrow(/edge_tts/);
+});
+
 test('durable dubbing resumes from the persisted translation instead of repeating it', () => {
   const now = 100_000;
 
@@ -109,7 +147,7 @@ test('long dubbing text is split on subtitle timing instead of becoming one shor
   ]);
 });
 
-test('default dubbing chunks stay within natural phrase-sized timing windows', () => {
+test('default dubbing chunks reduce TTS round trips while preserving nearby subtitle timing', () => {
   const srt = [
     '1',
     '00:00:00,000 --> 00:00:04,000',
@@ -127,9 +165,46 @@ test('default dubbing chunks stay within natural phrase-sized timing windows', (
 
   const chunks = splitDubbingSrt(srt);
 
+  expect(chunks).toHaveLength(1);
+  expect(chunks[0]).toEqual(expect.objectContaining({ startMs: 0, endMs: 13_000 }));
+});
+
+test('default dubbing chunks preserve meaningful pauses longer than 1.2 seconds', () => {
+  const chunks = splitDubbingSrt([
+    '1',
+    '00:00:00,000 --> 00:00:04,000',
+    'Finish the first idea.',
+    '',
+    '2',
+    '00:00:05,300 --> 00:00:09,000',
+    'Start the next idea after a pause.',
+    '',
+  ].join('\n'));
+
   expect(chunks).toHaveLength(2);
-  expect(chunks[0]).toEqual(expect.objectContaining({ startMs: 0, endMs: 8_000 }));
-  expect(chunks[1]).toEqual(expect.objectContaining({ startMs: 8_300, endMs: 13_000 }));
+});
+
+test('ten minutes of nearby subtitle cues are grouped into a bounded number of Edge requests', () => {
+  const blocks = Array.from({ length: 120 }, (_value, index) => {
+    const startSeconds = index * 5;
+    const endSeconds = startSeconds + 4;
+    const stamp = (seconds: number) => `00:${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')},000`;
+    return `${index + 1}\n${stamp(startSeconds)} --> ${stamp(endSeconds)}\nA concise translated sentence for this part.`;
+  });
+
+  const chunks = splitDubbingSrt(blocks.join('\n\n'));
+
+  expect(chunks.length).toBeLessThanOrEqual(24);
+  expect(chunks.every((chunk) => chunk.endMs - chunk.startMs <= 30_000)).toBe(true);
+});
+
+test('dubbing status polling is read-only and processing uses the bounded process endpoint', () => {
+  const statusRoute = fs.readFileSync(path.join(process.cwd(), 'src/app/api/dubbing/status/route.ts'), 'utf8');
+  const client = fs.readFileSync(path.join(process.cwd(), 'src/services/dubbingClient.ts'), 'utf8');
+
+  expect(statusRoute).not.toContain('synthesizeEdgeTtsDubbing');
+  expect(statusRoute).not.toContain('generateDubbingTranslation');
+  expect(client).toContain("fetch('/api/dubbing/process'");
 });
 
 test('dense translated speech uses a bounded but useful speaking-rate increase', () => {
@@ -350,13 +425,15 @@ test('server dubbing provider only translates SRT and never manufactures audio',
   expect(source).not.toContain('OPENAI_API_KEY');
 });
 
-test('dubbing job persists Azure voice choice and exposes synthesized audio to the client', () => {
+test('dubbing job persists voice choice and exposes verified Edge audio to the client', () => {
   const submit = fs.readFileSync(path.join(process.cwd(), 'src/app/api/dubbing/submit/route.ts'), 'utf8');
   const status = fs.readFileSync(path.join(process.cwd(), 'src/app/api/dubbing/status/route.ts'), 'utf8');
+  const processRoute = fs.readFileSync(path.join(process.cwd(), 'src/app/api/dubbing/process/route.ts'), 'utf8');
   const client = fs.readFileSync(path.join(process.cwd(), 'src/services/dubbingClient.ts'), 'utf8');
 
   expect(submit).toContain('voiceName');
-  expect(status).toContain('synthesizeAzureDubbing');
+  expect(processRoute).toContain('synthesizeEdgeTtsChunk');
+  expect(processRoute).toContain("decoder: 'mpg123-wasm'");
   expect(status).toContain("'audio.wav'");
   expect(client).toContain('status.audioUrl');
 });

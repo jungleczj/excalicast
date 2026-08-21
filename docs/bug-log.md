@@ -699,3 +699,36 @@ The prototype intentionally isolated all state in memory and had no connection t
 ### Status
 
 - Fixed and verified locally.
+## 2026-08-20 - English dubbing was slow and sounded like electronic noise
+
+### Symptom
+
+- A ten-minute recording could take 10-20 minutes to dub.
+- The generated English audio was electronically distorted and not intelligible.
+- The task stayed near its initial progress because server synthesis stages were reported as translation.
+
+### Root cause
+
+- Edge returned a valid 24 kHz mono MP3, but the Vercel Node runtime cannot use Mediabunny's browser `AudioSampleSink` decoder.
+- Every Edge synthesis attempt therefore failed after the network work had completed and silently fell back to browser Kokoro.
+- Subtitles were split into approximately ten-second chunks, creating excessive WebSocket handshakes and independent decoder initialization.
+- A failed chunk discarded all previously completed synthesis because only the final WAV was durable.
+- Existing tests asserted that audio was non-empty, but never compared a real Edge decode with a trusted waveform.
+
+### Fix
+
+- Decode MP3 with `mpg123-decoder` WASM, filter WebSocket packets by `Path:audio`, and reject invalid, silent, clipped, or biased PCM.
+- Persist each successful MP3 chunk and resume only unfinished chunks.
+- Group nearby subtitle cues into 30-second/800-character bounds, use six-way synthesis, and reduce concurrent work to three after failures.
+- Make status polling read-only and expose explicit local fallback instead of silently switching providers.
+
+### Regression coverage
+
+- A real Edge MP3 must correlate above `0.999` with the ffmpeg reference decode.
+- Truncated MP3 cannot become a ready track.
+- Ten minutes of nearby cues produce at most 24 requests.
+- Status code contains no translation or synthesis side effects.
+
+### Status
+
+- Fixed and verified locally; production migration must be applied before deployment.
