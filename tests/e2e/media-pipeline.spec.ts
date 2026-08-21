@@ -68,7 +68,34 @@ import {
 } from '@/services/mainTrack';
 import { resolveHybridPreviewMode } from '@/services/hybridPreviewPolicy';
 import { resolvePreviewPlaybackClock } from '@/services/previewPlaybackClock';
-import type { EnhancedAudioTrack, HighlightEffectSegment, KeyPointMotionSegment } from '@/types/recording';
+import { resolveLocalizedEditingVariant } from '@/services/localizedEditingVariant';
+import type { EnhancedAudioTrack, HighlightEffectSegment, KeyPointMotionSegment, LocalizedTrack } from '@/types/recording';
+
+test('localized editing variants preserve source captions and key points when returning from English', () => {
+  const sourceMotion = { id: 'source-motion' } as KeyPointMotionSegment;
+  const englishMotion = { id: 'english-motion' } as KeyPointMotionSegment;
+  const metadata = {
+    subtitleSrt: '1\n00:00:00,000 --> 00:00:01,000\n中文内容\n',
+    keyPointMotions: [sourceMotion],
+  };
+  const track = {
+    id: 'localized-en',
+    translatedSrt: '1\n00:00:00,000 --> 00:00:01,000\nEnglish content\n',
+    keyPointMotions: [englishMotion],
+  } as LocalizedTrack;
+
+  expect(resolveLocalizedEditingVariant(metadata, track)).toMatchObject({
+    language: 'en',
+    localizedTrackId: 'localized-en',
+    keyPointMotions: [englishMotion],
+  });
+  expect(resolveLocalizedEditingVariant(metadata, null)).toEqual({
+    language: 'source',
+    localizedTrackId: null,
+    subtitleSrt: metadata.subtitleSrt,
+    keyPointMotions: [sourceMotion],
+  });
+});
 
 function createFloat32Wav(samples: Float32Array, sampleRate = 24_000): Uint8Array {
   const bytes = new Uint8Array(44 + samples.byteLength);

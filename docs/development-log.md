@@ -512,3 +512,23 @@
 - Type checking passed.
 - Production build passed.
 - 26 focused dubbing tests passed, including real MP3 decode correlation, truncation rejection, long transcript grouping, and read-only polling.
+
+## 2026-08-21 - Reversible source and English editing variants
+
+### Baseline
+
+- Mandatory pre-change checkpoint: `d44c7b8` (`chore: checkpoint before localized editing variants`).
+- Worktree: `/Users/chenzhijiang/.codex/worktrees/53c2/fix-loading-recording`.
+- Branch: `fix/loading-recording`.
+
+### Product behavior
+
+- Each English dubbing track owns its translated subtitles and English key-point motions.
+- Restoring the original audio immediately restores the original Chinese subtitles and Chinese key-point motions without regeneration.
+- Re-selecting a previously generated English track restores that track's saved English editing assets.
+
+### Implementation
+
+- Added optional key-point motions to localized tracks while keeping source-language motions on recording metadata.
+- The editor resolves captions, generation language, timeline motions, preview, and export from the active language variant.
+- Key-point edits persist to the active variant instead of overwriting the source-language track.

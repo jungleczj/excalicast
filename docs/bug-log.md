@@ -732,3 +732,25 @@ The prototype intentionally isolated all state in memory and had no connection t
 ### Status
 
 - Fixed and verified locally; production migration must be applied before deployment.
+
+## 2026-08-21 - English key points overwrote the Chinese editing context
+
+### Symptom
+
+- Generating English key-point motions replaced the recording's only key-point track.
+- Returning to the original audio did not restore the existing Chinese motions, and generation still read Chinese captions while English dubbing was active.
+
+### Root cause
+
+- Recording metadata had a single language-agnostic `keyPointMotions` field.
+- The export page always derived generation cues from `metadata.subtitleSrt`, independent of the selected localized track.
+
+### Fix
+
+- Store English motions with their localized track and preserve Chinese motions on recording metadata.
+- Atomically switch the active subtitle and motion variant when selecting or restoring a dubbing track.
+- Persist edits and generated results to the active language owner.
+
+### Regression coverage
+
+- Verify English selection returns English captions/motions and restoring source returns the original Chinese captions/motions unchanged.

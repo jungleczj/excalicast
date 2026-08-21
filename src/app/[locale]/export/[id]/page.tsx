@@ -28,6 +28,7 @@ import {
   deleteRecording,
   getClientDb,
   getRecording,
+  getLocalizedTrack,
   getEnhancedAudioTrack,
   loadRecordingMediaTracks,
   saveEnhancedAudioTrack,
@@ -36,6 +37,7 @@ import {
   updateRecordingAutoZooms,
   updateRecordingHighlights,
   updateRecordingKeyPointMotions,
+  updateLocalizedTrackKeyPointMotions,
   updateRecordingSegments,
   updateRecordingMainTrack,
   updateRecordingTitle,
@@ -60,6 +62,7 @@ import { parseSrt } from '@/utils/srtParser';
 import { createAudioPeaksForBlob, loadOrCreateAudioPeakTrack } from '@/services/audioPeakTrack';
 import { buildLocalKeyPointMotions, migrateKeyPointMotionSegment, resolveKeyPointMotionLanguage } from '@/services/keyPointMotion';
 import { generateKeyPointMotions } from '@/services/keyPointMotionClient';
+import { resolveLocalizedEditingVariant } from '@/services/localizedEditingVariant';
 import { analyzeAudioRepairSource, audioSourceFingerprint, createEnhancedAudioTrack } from '@/services/audioEnhancement';
 import {
   AUDIO_REPAIR_PRESETS,
@@ -125,6 +128,8 @@ export default function EditorRecordingPage(): JSX.Element {
   const [highlights, setHighlights] = useState<HighlightEffectSegment[]>([]);
   const [selectedHighlightId, setSelectedHighlightId] = useState<string | null>(null);
   const [keyPointMotions, setKeyPointMotions] = useState<KeyPointMotionSegment[]>([]);
+  const [activeLocalizedTrack, setActiveLocalizedTrackState] = useState<LocalizedTrack | null>(null);
+  const [keyPointVariantTrackId, setKeyPointVariantTrackId] = useState<string | null>(null);
   const [selectedKeyPointMotionId, setSelectedKeyPointMotionId] = useState<string | null>(null);
   const [keyPointGenerationPhase, setKeyPointGenerationPhase] = useState<'idle' | 'generating' | 'ready' | 'failed'>('idle');
   const [keyPointGenerationSource, setKeyPointGenerationSource] = useState<'deepseek' | 'local' | null>(null);
@@ -147,7 +152,8 @@ export default function EditorRecordingPage(): JSX.Element {
   const [autoEditPreviousSegments, setAutoEditPreviousSegments] = useState<TimeSegment[] | null>(null);
   const [playheadMs, setPlayheadMs] = useState(0);
   const [audioPeaks, setAudioPeaks] = useState<number[]>([]);
-  const captionCues = useMemo(() => parseSrt(meta?.subtitleSrt ?? ''), [meta?.subtitleSrt]);
+  const activeSubtitleSrt = activeLocalizedTrack?.translatedSrt ?? meta?.subtitleSrt ?? '';
+  const captionCues = useMemo(() => parseSrt(activeSubtitleSrt), [activeSubtitleSrt]);
   const showActionGuide = useCallback((message: string) => {
     setActionGuide(message);
     window.setTimeout(() => setActionGuide((current) => current === message ? null : current), 3_200);
@@ -548,9 +554,22 @@ export default function EditorRecordingPage(): JSX.Element {
     if (!meta) return;
     const next = keyPointMotions.length > 0 ? keyPointMotions : undefined;
     setConfig((current) => (JSON.stringify(current.keyPointMotions) === JSON.stringify(next) ? current : { ...current, keyPointMotions: next }));
-    const timer = setTimeout(() => { void updateRecordingKeyPointMotions(id, keyPointMotions); }, 500);
+    const timer = setTimeout(() => {
+      if (keyPointVariantTrackId) {
+        setActiveLocalizedTrackState((current) => current?.id === keyPointVariantTrackId
+          ? { ...current, keyPointMotions }
+          : current);
+        void updateLocalizedTrackKeyPointMotions(keyPointVariantTrackId, keyPointMotions);
+      } else {
+        setMeta((current) => {
+          if (!current || JSON.stringify(current.keyPointMotions ?? []) === JSON.stringify(keyPointMotions)) return current;
+          return { ...current, keyPointMotions: keyPointMotions.length > 0 ? keyPointMotions : undefined };
+        });
+        void updateRecordingKeyPointMotions(id, keyPointMotions);
+      }
+    }, 500);
     return () => clearTimeout(timer);
-  }, [id, keyPointMotions, meta]);
+  }, [id, keyPointMotions, keyPointVariantTrackId, meta]);
 
   // 预览框选直接更新时间轴同一段的中心点/倍率；随后现有去抖持久化会把这组
   // 参数写入 recording，因此最终导出与预览使用完全相同的目标区域。
@@ -563,7 +582,7 @@ export default function EditorRecordingPage(): JSX.Element {
   }, []);
 
   const handleGenerateKeyPointMotions = useCallback(async () => {
-    if (!meta?.subtitleSrt || captionCues.length === 0) return;
+    if (!meta || !activeSubtitleSrt || captionCues.length === 0) return;
     if (keyPointMotions.length > 0 && !window.confirm(en
       ? 'Replace the existing key point motion track with this new version?'
       : '是否用新版本替换现有的内容要点动效轨道？')) return;
@@ -598,7 +617,8 @@ export default function EditorRecordingPage(): JSX.Element {
         }
         if (generated.length === 0) throw new Error('no_key_points');
         report({ phase: generationSource === 'local' ? 'local_fallback' : 'saving', ratio: 0.9 });
-        await updateRecordingKeyPointMotions(id, generated);
+        if (keyPointVariantTrackId) await updateLocalizedTrackKeyPointMotions(keyPointVariantTrackId, generated);
+        else await updateRecordingKeyPointMotions(id, generated);
         return { resultRef: `key-points:${id}:${generationSource}` };
       });
       setKeyPointMotions(generated);
@@ -610,7 +630,7 @@ export default function EditorRecordingPage(): JSX.Element {
       setKeyPointGenerationError(error instanceof Error ? error.message : 'key_point_generation_failed');
       setKeyPointGenerationPhase('failed');
     }
-  }, [captionCues, en, id, keyPointMotions.length, locale, meta, startTask]);
+  }, [activeSubtitleSrt, captionCues, en, id, keyPointMotions.length, keyPointVariantTrackId, locale, meta, startTask]);
 
   const activateEnhancedTrack = useCallback(async (track: EnhancedAudioTrack) => {
     await setActiveEnhancedAudioTrack(id, track.id);
@@ -787,19 +807,47 @@ export default function EditorRecordingPage(): JSX.Element {
     if (meta?.hasAudio) void loadOrCreateAudioPeakTrack(id, 4).then((track) => setAudioPeaks(track?.peaks ?? []));
   }, [cancelTask, findTask, id, meta?.hasAudio]);
 
+  const applyLocalizedEditingTrack = useCallback((track: LocalizedTrack | null) => {
+    const variant = resolveLocalizedEditingVariant(meta ?? {}, track);
+    setActiveLocalizedTrackState(track);
+    setKeyPointVariantTrackId(variant.localizedTrackId);
+    setKeyPointMotions(variant.keyPointMotions.map((segment) => migrateKeyPointMotionSegment(segment, parseSrt(variant.subtitleSrt))));
+    setSelectedKeyPointMotionId(variant.keyPointMotions[0]?.id ?? null);
+  }, [meta]);
+
   const handleLocalizedTrackReady = useCallback((track: LocalizedTrack) => {
+    applyLocalizedEditingTrack(track);
     setMeta((current) => current ? { ...current, localizedTrackId: track.id } : current);
     setConfig((current) => ({ ...current, localizedTrackId: track.id, muteOriginalAudio: true }));
-  }, []);
+  }, [applyLocalizedEditingTrack]);
 
   const handleLocalizedTrackSelect = useCallback((track: LocalizedTrack | null) => {
+    if (track) {
+      void getLocalizedTrack(track.id).then((freshTrack) => {
+        applyLocalizedEditingTrack(freshTrack ?? track);
+      });
+    } else applyLocalizedEditingTrack(null);
     setMeta((current) => current ? { ...current, localizedTrackId: track?.id } : current);
     setConfig((current) => {
       if (track) return { ...current, localizedTrackId: track.id, muteOriginalAudio: true };
       const { localizedTrackId: _localizedTrackId, muteOriginalAudio: _muteOriginalAudio, ...rest } = current;
       return rest;
     });
-  }, []);
+  }, [applyLocalizedEditingTrack]);
+
+  useEffect(() => {
+    const trackId = config.localizedTrackId ?? meta?.localizedTrackId;
+    if (!trackId) {
+      if (activeLocalizedTrack) handleLocalizedTrackSelect(null);
+      return;
+    }
+    if (activeLocalizedTrack?.id === trackId) return;
+    let cancelled = false;
+    void getLocalizedTrack(trackId).then((track) => {
+      if (!cancelled) applyLocalizedEditingTrack(track ?? null);
+    });
+    return () => { cancelled = true; };
+  }, [activeLocalizedTrack, applyLocalizedEditingTrack, config.localizedTrackId, meta?.localizedTrackId]);
 
   useEffect(() => {
     const subtitleSaved = (event: Event) => {

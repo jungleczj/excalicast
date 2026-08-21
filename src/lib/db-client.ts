@@ -662,8 +662,8 @@ export async function updateRecordingHighlights(recordingId: string, highlights:
   await getClientDb().recordings.update(recordingId, { highlights: clean.length > 0 ? clean : undefined });
 }
 
-export async function updateRecordingKeyPointMotions(recordingId: string, motions: KeyPointMotionSegment[]): Promise<void> {
-  const clean = motions
+function cleanKeyPointMotions(motions: KeyPointMotionSegment[]): KeyPointMotionSegment[] {
+  return motions
     .filter((item) => Number.isFinite(item.start) && Number.isFinite(item.end) && item.end > item.start)
     .map((item) => ({
       ...item,
@@ -693,7 +693,16 @@ export async function updateRecordingKeyPointMotions(recordingId: string, motion
     }))
     .filter((item) => item.title.length > 0)
     .sort((a, b) => a.start - b.start);
+}
+
+export async function updateRecordingKeyPointMotions(recordingId: string, motions: KeyPointMotionSegment[]): Promise<void> {
+  const clean = cleanKeyPointMotions(motions);
   await getClientDb().recordings.update(recordingId, { keyPointMotions: clean.length > 0 ? clean : undefined });
+}
+
+export async function updateLocalizedTrackKeyPointMotions(trackId: string, motions: KeyPointMotionSegment[]): Promise<void> {
+  const clean = cleanKeyPointMotions(motions);
+  await getClientDb().localizedTracks.update(trackId, { keyPointMotions: clean.length > 0 ? clean : undefined });
 }
 
 export async function saveSubtitleSrt(recordingId: string, srt: string): Promise<void> {

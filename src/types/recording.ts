@@ -214,6 +214,8 @@ export interface LocalizedTrack {
   provider: string;
   sourceAudioHash: string;
   translatedSrt: string;
+  /** This language version's key-point motion track. The source-language track stays on RecordingMetadata. */
+  keyPointMotions?: KeyPointMotionSegment[];
   audioBlob: Blob;
   sampleRate?: number;
   channelCount?: number;
