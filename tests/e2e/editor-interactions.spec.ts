@@ -1120,6 +1120,11 @@ test('generated English dubbing becomes the preview and export audio track', asy
     contentType: 'application/json',
     body: JSON.stringify({ jobId: 'mock-dubbing-job' }),
   }));
+  await page.route('**/api/dubbing/process', async (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ status: 'done', phase: 'saving' }),
+  }));
   await page.route('**/api/dubbing/status?**', async (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -1138,6 +1143,20 @@ test('generated English dubbing becomes the preview and export audio track', asy
     ]);
     await route.fulfill({ status: 200, contentType: 'audio/wav', body: Buffer.from(wav) });
   });
+  await page.route('**/api/key-points/generate', async (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      source: 'deepseek',
+      model: 'deepseek-v4-flash',
+      motions: [{
+        id: 'kp-english-auto', start: 0, end: 2_800, kind: 'chapter_drawer', title: 'English summary',
+        bullets: ['Narrated version'], placement: 'right', sourceCueStart: 1, sourceCueEnd: 1,
+        transition: { enterMs: 280, exitMs: 420, easing: 'easeInOutCubic' }, enabled: true,
+        generationSource: 'deepseek', schemaVersion: 3,
+      }],
+    }),
+  }));
 
   await page.evaluate(async (id) => {
     const sampleRate = 8_000;
@@ -1192,6 +1211,7 @@ test('generated English dubbing becomes the preview and export audio track', asy
   await expect(page.getByTestId('dubbing-active-track')).toContainText('English');
   await expect(page.getByTestId('export-preview-stage')).toHaveAttribute('data-localized-track', /localized-/);
   await expect(page.getByTestId('export-preview-audio')).toHaveAttribute('data-localized-audio', 'true');
+  await expect(page.getByTestId('keypoint-motion-segment')).toContainText('English summary');
   await page.getByRole('button', { name: 'Export' }).click();
   await expect(page.getByTestId('export-panel-localized-note')).toContainText('English dubbed audio');
 });

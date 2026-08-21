@@ -22,7 +22,7 @@ export async function GET(_req: Request, { params }: Params): Promise<NextRespon
   if (!job) return NextResponse.json({ error: 'job_not_found' }, { status: 404 });
   if (job.status !== 'done') return NextResponse.json({ error: 'job_not_done' }, { status: 409 });
   if (params.asset === 'subtitles.srt') {
-    return new NextResponse(job.translatedSrt ?? '', {
+    return new NextResponse(job.localizedSrt ?? job.translatedSrt ?? '', {
       headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },
     });
   }

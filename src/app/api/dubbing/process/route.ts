@@ -21,6 +21,12 @@ import {
 } from '@/services/edgeTtsProvider';
 import type { AzureEnglishVoice } from '@/services/voiceProfile';
 import { assembleTimedPcm16Wav, hasAudiblePcm16Audio } from '@/lib/dubbingAudio';
+import {
+  buildLocalizedTimingMap,
+  localizedTimelineDuration,
+  mapSrtToLocalizedTimeline,
+  parseSpeechRatePercent,
+} from '@/services/dubbingTiming';
 import { mapWithConcurrency } from '@/utils/asyncPool';
 import { mediaJobFailurePayload, mediaJobFailureStatus, reportMediaJobFailure } from '@/lib/mediaJobDiagnostics';
 
@@ -53,7 +59,7 @@ async function initializeChunks(job: NonNullable<Awaited<ReturnType<typeof getDu
   })));
   const now = Date.now();
   await ensureDubbingJobChunks(planned.map((chunk) => {
-    const cached = reusable.get(`${chunk.textHash}:${job.voiceName!}:${chunk.rate}`);
+    const cached = reusable.get(`${chunk.textHash}:${job.voiceName!}`);
     return {
       id: `${job.id}:${chunk.index}`, jobId: job.id, userId, index: chunk.index,
       startMs: chunk.startMs, endMs: chunk.endMs, text: chunk.text, textHash: chunk.textHash,
@@ -127,7 +133,8 @@ export async function POST(req: Request): Promise<NextResponse> {
             mp3Path = await saveLocalDubbingAsset(job!.id, `chunk-${chunk.index}.mp3`, synthesized.mp3);
           }
           await updateDubbingJobChunk(chunk.id, user.id, {
-            status: 'done', mp3Path, durationMs: Math.round(synthesized.durationMs), error: undefined,
+            status: 'done', mp3Path, durationMs: Math.round(synthesized.durationMs),
+            speechRate: synthesized.rate, error: undefined,
           });
         } catch (error) {
           await updateDubbingJobChunk(chunk.id, user.id, {
@@ -174,9 +181,16 @@ export async function POST(req: Request): Promise<NextResponse> {
       return decodeCachedEdgeTtsChunk(plannedForRow(chunk), mp3);
     });
     await updateDubbingJob(job.id, user.id, { status: 'running', phase: 'assembling' });
-    const minimumDurationMs = Math.max(...chunks.map((chunk) => chunk.endMs));
+    const timingMap = buildLocalizedTimingMap(decoded.map((chunk) => ({
+      sourceStartMs: chunk.startMs,
+      sourceEndMs: chunk.endMs,
+      audioDurationMs: chunk.durationMs,
+      speechRatePercent: parseSpeechRatePercent(chunk.rate),
+    })));
+    const localizedSrt = mapSrtToLocalizedTimeline(job.translatedSrt ?? '', timingMap);
+    const minimumDurationMs = localizedTimelineDuration(timingMap);
     const audioBytes = assembleTimedPcm16Wav(
-      decoded.map((chunk) => ({ startMs: chunk.startMs, wav: chunk.wav })),
+      decoded.map((chunk, index) => ({ startMs: timingMap[index].audioStartMs, wav: chunk.wav })),
       minimumDurationMs,
     );
     if (!hasAudiblePcm16Audio(audioBytes)) throw new Error('dubbing_audio_quality_gate_failed');
@@ -197,6 +211,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     }
     job = (await updateDubbingJob(job.id, user.id, {
       status: 'done', phase: 'saving', dubbedAudioPath, dubbedAudioType: 'audio/wav', lipSync: 'skipped',
+      localizedSrt, timingMap,
       provider: `${job.provider?.split('+')[0] ?? 'deepseek-v4-flash'}+edge-tts`,
       billableCharacters: chunks.reduce((total, chunk) => total + chunk.text.length, 0),
       synthesisChunkCount: chunks.length, completedChunks: chunks.length, totalChunks: chunks.length,

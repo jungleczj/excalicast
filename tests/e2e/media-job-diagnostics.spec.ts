@@ -24,6 +24,17 @@ test('production server keeps ws external so Edge TTS does not lose its mask imp
   expect(config).toMatch(/['"]ws['"]\s*:\s*['"]commonjs ws['"]/);
 });
 
+test('adaptive dubbing migration persists localized captions and source-to-output timing', () => {
+  const sql = fs.readFileSync(
+    path.join(process.cwd(), 'supabase/migrations/20260821120000_adaptive_dubbing_timeline.sql'),
+    'utf8',
+  );
+
+  expect(sql).toMatch(/add column if not exists localized_srt text/i);
+  expect(sql).toMatch(/add column if not exists timing_map jsonb/i);
+  expect(sql).toMatch(/notify pgrst, 'reload schema'/i);
+});
+
 test('latest repair migration adds dubbing voice fields, durable handout jobs, and a large recording bucket limit', () => {
   const sql = fs.readFileSync(
     path.join(process.cwd(), 'supabase/migrations/20260818130000_background_handout_jobs.sql'),

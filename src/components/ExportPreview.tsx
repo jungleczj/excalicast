@@ -21,6 +21,12 @@ import { mainTrackDuration, resolveMainTrackPosition } from '@/services/mainTrac
 import { resolveHybridPreviewMode } from '@/services/hybridPreviewPolicy';
 import { mapProjectRangeToClip } from '@/services/mainTrack';
 import { resolvePreviewPlaybackClock } from '@/services/previewPlaybackClock';
+import {
+  localizedTimelineDuration,
+  localizedToSourceTime,
+  mapSourceSegmentsToLocalized,
+  sourceToLocalizedTime,
+} from '@/services/dubbingTiming';
 
 interface Props {
   recordingId: string;
@@ -92,13 +98,26 @@ export function ExportPreview({
   sourceTimeMsRef.current = timeMs;
   const setTimeMs = onPlayheadChange;
   const kept = useMemo(() => normalizeSegmentSequence(segments, metadata.durationMs), [segments, metadata.durationMs]);
-  const keptDur = useMemo(() => mainTrack.length > 0 ? mainTrackDuration(mainTrack) : keptDuration(kept), [kept, mainTrack]);
+  const baseKeptDur = useMemo(() => mainTrack.length > 0 ? mainTrackDuration(mainTrack) : keptDuration(kept), [kept, mainTrack]);
   const [rendering, setRendering] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [sourceAudioFingerprint, setSourceAudioFingerprint] = useState<string | null>(null);
   const [cameraUrl, setCameraUrl] = useState<string | null>(null);
   const [localizedTrack, setLocalizedTrack] = useState<LocalizedTrack | null>(null);
+  const localizedTimingMap = useMemo(
+    () => mainTrack.length === 0 && localizedTrack && activeRecordingId === recordingId
+      ? (localizedTrack.timingMap ?? [])
+      : [],
+    [activeRecordingId, localizedTrack, mainTrack.length, recordingId],
+  );
+  const presentationKept = useMemo(
+    () => localizedTimingMap.length > 0 ? mapSourceSegmentsToLocalized(kept, localizedTimingMap) : kept,
+    [kept, localizedTimingMap],
+  );
+  const keptDur = useMemo(() => localizedTimingMap.length > 0
+    ? (segments.length > 0 ? keptDuration(presentationKept) : localizedTimelineDuration(localizedTimingMap))
+    : baseKeptDur, [baseKeptDur, localizedTimingMap, presentationKept, segments.length]);
   const [localizedAudioUrl, setLocalizedAudioUrl] = useState<string | null>(null);
   const [localizedCameraUrl, setLocalizedCameraUrl] = useState<string | null>(null);
   const [enhancedAudioTrack, setEnhancedAudioTrack] = useState<EnhancedAudioTrack | null>(null);
@@ -175,9 +194,11 @@ export function ExportPreview({
   const renderConfigRef = useRef(config);
   const renderRecordingIdRef = useRef(activeRecordingId);
   const renderMetadataRef = useRef(metadata);
+  const localizedTimingMapRef = useRef(localizedTimingMap);
   renderConfigRef.current = activeConfig;
   renderRecordingIdRef.current = activeRecordingId;
   renderMetadataRef.current = activeMetadata;
+  localizedTimingMapRef.current = localizedTimingMap;
   const rafRef = useRef<number | null>(null);
   const clockRef = useRef<{ perfStart: number; baseTime: number } | null>(null);
   const barScrubbingRef = useRef(false);
@@ -218,6 +239,9 @@ export function ExportPreview({
           renderMetadataRef.current,
           renderSize,
           signal,
+          localizedTimingMapRef.current.length > 0
+            ? sourceToLocalizedTime(localizedTimingMapRef.current, requestedTimeMs)
+            : requestedTimeMs,
         );
         if (signal.aborted || !mountedRef.current || !canvasRef.current) return;
         if (visible.width !== renderCanvas.width) visible.width = renderCanvas.width;
@@ -478,7 +502,7 @@ export function ExportPreview({
   useEffect(() => {
     if (!playing || barScrubbingRef.current) drawFrame(timeMs, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeConfig, activeRecordingId, activeMetadata.subtitleSrt, timeMs, playing]);
+  }, [activeConfig, activeRecordingId, activeMetadata.subtitleSrt, localizedTimingMap, timeMs, playing]);
 
   // 播放循环：performance.now() 主时钟 + 节流 canvas 重绘
   useEffect(() => {
@@ -491,7 +515,14 @@ export function ExportPreview({
     // baseTime = 起播时刻的「成片输出时间」；循环走输出时间，映射回源时间渲染。
     clockRef.current = {
       perfStart: performance.now(),
-      baseTime: mainTrack.length > 0 ? projectTimeMsRef.current : sourceToOutput(kept, sourceTimeMsRef.current),
+      baseTime: mainTrack.length > 0
+        ? projectTimeMsRef.current
+        : sourceToOutput(
+          presentationKept,
+          localizedTimingMap.length > 0
+            ? sourceToLocalizedTime(localizedTimingMap, sourceTimeMsRef.current)
+            : sourceTimeMsRef.current,
+        ),
     };
     const audio = audioRef.current;
     const camera = cameraRef.current;
@@ -505,9 +536,12 @@ export function ExportPreview({
       const outT = ref.baseTime + (performance.now() - ref.perfStart);
       if (keptDur > 0 && outT >= keptDur) {
         const endProject = keptDur;
-        const endSource = mainTrack.length > 0
+        const endPresentation = mainTrack.length > 0
           ? resolveMainTrackPosition(mainTrack, endProject)?.sourceTimeMs ?? 0
-          : outputToSource(kept, endProject);
+          : outputToSource(presentationKept, endProject);
+        const endSource = localizedTimingMap.length > 0
+          ? localizedToSourceTime(localizedTimingMap, endPresentation)
+          : endPresentation;
         setTimeMs(mainTrack.length > 0 ? endProject : endSource);
         drawFrame(endSource, true);
         setPlaying(false);
@@ -515,29 +549,33 @@ export function ExportPreview({
         if (camera) { try { camera.pause(); } catch { /* ignore */ } }
         return;
       }
-      const expectedSourceTimeMs = mainTrack.length > 0
+      const expectedPresentationTimeMs = mainTrack.length > 0
         ? resolveMainTrackPosition(mainTrack, outT)?.sourceTimeMs ?? 0
-        : outputToSource(kept, outT);
+        : outputToSource(presentationKept, outT);
       const audioClock = resolvePreviewPlaybackClock({
-        expectedSourceTimeMs,
+        expectedSourceTimeMs: expectedPresentationTimeMs,
         audioCurrentTimeSeconds: audio?.currentTime ?? Number.NaN,
         audioReady: !!audio && audio.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && mainTrack.length === 0,
         audioPaused: audio?.paused ?? true,
       });
-      const src = audioClock.sourceTimeMs;
+      const presentationTimeMs = audioClock.sourceTimeMs;
+      const src = localizedTimingMap.length > 0
+        ? localizedToSourceTime(localizedTimingMap, presentationTimeMs)
+        : presentationTimeMs;
       const tickNow = performance.now();
       if (tickNow - lastPlayheadPublishAtRef.current >= 100) {
         lastPlayheadPublishAtRef.current = tickNow;
         setTimeMs(mainTrack.length > 0 ? outT : src);
       }
       drawFrame(src, false);
-      const sSec = src / 1000;
+      const audioSec = presentationTimeMs / 1000;
+      const sourceSec = src / 1000;
       // 音频是普通单轨预览的媒体时钟；仅跨裁剪段或真实漂移时校正。
       if (audio && audioClock.seekAudio) {
-        try { audio.currentTime = sSec; } catch { /* ignore */ }
+        try { audio.currentTime = audioSec; } catch { /* ignore */ }
       }
-      if (camera && isFinite(camera.currentTime) && Math.abs(camera.currentTime - sSec) > 0.18) {
-        try { camera.currentTime = sSec; } catch { /* ignore */ }
+      if (camera && isFinite(camera.currentTime) && Math.abs(camera.currentTime - sourceSec) > 0.18) {
+        try { camera.currentTime = sourceSec; } catch { /* ignore */ }
       }
       rafRef.current = requestAnimationFrame(tick);
     };
@@ -546,7 +584,7 @@ export function ExportPreview({
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playing, drawFrame, kept, keptDur, mainTrack]);
+  }, [playing, drawFrame, keptDur, localizedTimingMap, mainTrack, presentationKept]);
 
   const togglePlay = useCallback(() => {
     setPlaying((prev) => {
@@ -554,18 +592,28 @@ export function ExportPreview({
       const audio = audioRef.current;
       const camera = cameraRef.current;
       if (next) {
-        const curOut = mainTrack.length > 0 ? projectTimeMs : sourceToOutput(kept, timeMs);
+        const curPresentation = localizedTimingMap.length > 0
+          ? sourceToLocalizedTime(localizedTimingMap, timeMs)
+          : timeMs;
+        const curOut = mainTrack.length > 0 ? projectTimeMs : sourceToOutput(presentationKept, curPresentation);
         const restart = keptDur > 0 && curOut >= keptDur - 50;
         const startProject = restart ? 0 : curOut;
         const startSrc = mainTrack.length > 0
           ? resolveMainTrackPosition(mainTrack, startProject)?.sourceTimeMs ?? 0
-          : (restart ? outputToSource(kept, 0) : timeMs);
+          : (restart
+              ? localizedTimingMap.length > 0
+                ? localizedToSourceTime(localizedTimingMap, outputToSource(presentationKept, 0))
+                : outputToSource(presentationKept, 0)
+              : timeMs);
+        const startPresentation = localizedTimingMap.length > 0
+          ? sourceToLocalizedTime(localizedTimingMap, startSrc)
+          : startSrc;
         if (restart) {
           setTimeMs(mainTrack.length > 0 ? startProject : startSrc);
           drawFrame(startSrc, true);
         }
         if (audio) {
-          try { audio.currentTime = startSrc / 1000; } catch { /* ignore */ }
+          try { audio.currentTime = startPresentation / 1000; } catch { /* ignore */ }
           void audio.play().catch(() => { /* ignore */ });
         }
         if (camera) {
@@ -579,7 +627,7 @@ export function ExportPreview({
       return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kept, keptDur, mainTrack, projectTimeMs, timeMs, drawFrame]);
+  }, [keptDur, localizedTimingMap, mainTrack, presentationKept, projectTimeMs, timeMs, drawFrame]);
 
   // 预览进度条：可拖刮擦（成片输出时间 → 源时间），与底部时间轴等效
   const barRef = useRef<HTMLDivElement>(null);
@@ -589,12 +637,15 @@ export function ExportPreview({
     const r = el.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
     const outputTimeMs = ratio * keptDur;
-    const sourceTimeMs = mainTrack.length > 0
+    const presentationTimeMs = mainTrack.length > 0
       ? resolveMainTrackPosition(mainTrack, outputTimeMs)?.sourceTimeMs ?? 0
-      : outputToSource(kept, outputTimeMs);
+      : outputToSource(presentationKept, outputTimeMs);
+    const sourceTimeMs = localizedTimingMap.length > 0
+      ? localizedToSourceTime(localizedTimingMap, presentationTimeMs)
+      : presentationTimeMs;
     setTimeMs(mainTrack.length > 0 ? outputTimeMs : sourceTimeMs);
     return { outputTimeMs, sourceTimeMs };
-  }, [kept, keptDur, mainTrack, setTimeMs]);
+  }, [keptDur, localizedTimingMap, mainTrack, presentationKept, setTimeMs]);
   const startBarScrub = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (keptDur <= 0) return;
     e.preventDefault();
@@ -607,12 +658,14 @@ export function ExportPreview({
 
     const syncMedia = (position: { outputTimeMs: number; sourceTimeMs: number }) => {
       barScrubPositionRef.current = position;
-      const sec = position.sourceTimeMs / 1000;
+      const presentationTimeMs = localizedTimingMap.length > 0
+        ? sourceToLocalizedTime(localizedTimingMap, position.sourceTimeMs)
+        : position.sourceTimeMs;
       if (audioRef.current) {
-        try { audioRef.current.currentTime = sec; } catch { /* ignore */ }
+        try { audioRef.current.currentTime = presentationTimeMs / 1000; } catch { /* ignore */ }
       }
       if (cameraRef.current) {
-        try { cameraRef.current.currentTime = sec; } catch { /* ignore */ }
+        try { cameraRef.current.currentTime = position.sourceTimeMs / 1000; } catch { /* ignore */ }
       }
     };
     const initial = scrubBarToClientX(e.clientX);
@@ -645,7 +698,7 @@ export function ExportPreview({
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up, { once: true });
     window.addEventListener('pointercancel', up, { once: true });
-  }, [activeRecordingId, keptDur, playing, scrubBarToClientX, timeMs]);
+  }, [activeRecordingId, keptDur, localizedTimingMap, playing, scrubBarToClientX, timeMs]);
 
   // scrub 由时间轴驱动（onPlayheadChange → playheadMs）；预览不再自带进度条。
   const preset = resolveExportOutputSize(config);
@@ -1143,7 +1196,10 @@ export function ExportPreview({
               style={{ minWidth: 0, height: 16 * controlScale, cursor: keptDur > 0 ? 'ew-resize' : 'default', touchAction: 'none' }}
             >
               <div className="w-full" style={{ height: 4 * controlScale, background: 'rgba(255,255,255,0.25)', borderRadius: 999, overflow: 'hidden', pointerEvents: 'none' }}>
-                <div style={{ height: '100%', width: `${keptDur > 0 ? Math.min(100, (sourceToOutput(kept, timeMs) / keptDur) * 100) : 0}%`, background: 'var(--hi)' }} />
+                <div style={{ height: '100%', width: `${keptDur > 0 ? Math.min(100, (sourceToOutput(
+                  presentationKept,
+                  localizedTimingMap.length > 0 ? sourceToLocalizedTime(localizedTimingMap, timeMs) : timeMs,
+                ) / keptDur) * 100) : 0}%`, background: 'var(--hi)' }} />
               </div>
             </div>
             <span

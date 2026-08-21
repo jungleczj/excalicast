@@ -64,6 +64,11 @@ import {
   type PreparedExportAudio,
 } from '@/services/exportAudio';
 import { mapProjectRangeToClip, normalizeMainTrack } from '@/services/mainTrack';
+import {
+  localizedTimelineDuration,
+  localizedToSourceTime,
+  mapSourceSegmentsToLocalized,
+} from '@/services/dubbingTiming';
 
 export interface ExportOptions extends ExportConfig {
   recordingId: string;
@@ -225,14 +230,20 @@ async function exportMainTrack(opts: ExportOptions, clips: MainTrackClip[]): Pro
     const metadata = await getRecording(clip.recordingId);
     if (!metadata) throw new Error(`main_track_recording_missing:${clip.recordingId}`);
     const clipDurationMs = clip.sourceEnd - clip.sourceStart;
+    let clipOutputDurationMs = clipDurationMs;
     if ((opts.format ?? 'mp4') !== 'gif') {
       const media = await loadFullRecording(clip.recordingId);
       let sourceAudio = media.audioBlob;
       let sourceKind: PreparedExportAudio['sourceKind'] = 'original';
       let sourceTrackId: string | undefined;
+      let audioSegments: TimeSegment[] = [{ start: clip.sourceStart, end: clip.sourceEnd }];
       if (clip.recordingId === opts.recordingId) {
         const localized = opts.localizedTrackId ? await getLocalizedTrack(opts.localizedTrackId) : undefined;
         const useLocalized = isUsableLocalizedTrack(localized) && opts.muteOriginalAudio !== false;
+        if (useLocalized && localized.timingMap?.length) {
+          audioSegments = mapSourceSegmentsToLocalized(audioSegments, localized.timingMap);
+          clipOutputDurationMs = keptDuration(audioSegments);
+        }
         const enhanced = !useLocalized && opts.activeEnhancedAudioTrackId
           ? await getEnhancedAudioTrack(opts.activeEnhancedAudioTrackId)
           : undefined;
@@ -251,12 +262,12 @@ async function exportMainTrack(opts: ExportOptions, clips: MainTrackClip[]): Pro
       preparedAudioTracks.push(sourceAudio
         ? await prepareExportAudio({
           blob: sourceAudio,
-          segments: [{ start: clip.sourceStart, end: clip.sourceEnd }],
+          segments: audioSegments,
           sourceKind,
           sourceTrackId,
           signal: opts.signal,
         })
-        : createSilentExportAudio(clipDurationMs));
+        : createSilentExportAudio(clipOutputDurationMs));
     }
     const segmentOptions = mapProjectEffectsToClip(opts, clip, outputStartMs);
     rendered.push(await exportRecording({
@@ -270,7 +281,7 @@ async function exportMainTrack(opts: ExportOptions, clips: MainTrackClip[]): Pro
       onProgressDetails: undefined,
       onDiagnostics: undefined,
     }));
-    outputStartMs += clipDurationMs;
+    outputStartMs += clipOutputDurationMs;
   }
   opts.onPhase?.('main_track_joining');
   const format = opts.format ?? 'mp4';
@@ -1020,7 +1031,14 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 输出时间从 0 连续起算，每帧源时间 = outputToSource(kept, 输出时间)。
   const kept = normalizeSegmentSequence(opts.segments, durationMs);
   const trimmed = isTrimmed(kept, durationMs);
-  const outDurationMs = trimmed ? keptDuration(kept) : durationMs;
+  const localizedTimingMap = useLocalizedTrack ? (localizedTrack.timingMap ?? []) : [];
+  const localizedDurationMs = localizedTimelineDuration(localizedTimingMap);
+  const presentationKept = localizedTimingMap.length > 0
+    ? mapSourceSegmentsToLocalized(kept, localizedTimingMap)
+    : kept;
+  const outDurationMs = localizedTimingMap.length > 0
+    ? (trimmed ? keptDuration(presentationKept) : localizedDurationMs)
+    : (trimmed ? keptDuration(kept) : durationMs);
   const totalFrames = Math.max(1, Math.round((outDurationMs / 1000) * fps));
   diagnostics.setTotalFrames(totalFrames);
   const audioSourceKind = useLocalizedTrack
@@ -1037,7 +1055,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     : effectiveAudioBlob
       ? prepareExportAudio({
         blob: effectiveAudioBlob,
-        segments: trimmed ? kept : undefined,
+        segments: trimmed ? presentationKept : undefined,
         sourceKind: audioSourceKind,
         sourceTrackId: useLocalizedTrack ? localizedTrack.id : enhancedSelection.track?.id,
         signal: opts.signal,
@@ -1215,15 +1233,19 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 单帧时变输入（便宜，可在去重前算）
   const frameInputs = (i: number) => {
     // 输出时间（成片，从 0 连续）→ 源时间（裁剪映射）。不裁时即 i/fps*1000。
-    const t = trimmed ? outputToSource(kept, (i / fps) * 1000) : (i / fps) * 1000;
+    const outputTimeMs = (i / fps) * 1000;
+    const presentationTimeMs = trimmed ? outputToSource(presentationKept, outputTimeMs) : outputTimeMs;
+    const t = localizedTimingMap.length > 0
+      ? localizedToSourceTime(localizedTimingMap, presentationTimeMs)
+      : presentationTimeMs;
     const snap = snapshotAt(snapshots, t);
     const shellAtTframe = useShell ? (shellAt(decodedShells, t) as DecodedShell | null) : null;
-    const cueAtT = cues.length > 0 ? cueAt(cues, t) : null;
+    const cueAtT = cues.length > 0 ? cueAt(cues, presentationTimeMs) : null;
     const animatedEffectActive = !!opts.highlights?.some((item) => t >= item.start && t < item.end)
-      || !!opts.keyPointMotions?.some((item) => item.enabled && t >= item.start && t < item.end);
-    const effectSig = animatedEffectActive ? `fx@${Math.round(t)}` : 'fx-none';
-    const sig = `${snap?.timestamp ?? -1}|${shellAtTframe?.timestamp ?? -1}|${cueAtT ? `${cueAtT.startMs}-${cueAtT.endMs}#${subtitlePageAt(cueAtT, t)}` : -1}|${effectSig}`;
-    return { t, snap, shellAtTframe, sig };
+      || !!opts.keyPointMotions?.some((item) => item.enabled && presentationTimeMs >= item.start && presentationTimeMs < item.end);
+    const effectSig = animatedEffectActive ? `fx@${Math.round(t)}:${Math.round(presentationTimeMs)}` : 'fx-none';
+    const sig = `${snap?.timestamp ?? -1}|${shellAtTframe?.timestamp ?? -1}|${cueAtT ? `${cueAtT.startMs}-${cueAtT.endMs}#${subtitlePageAt(cueAtT, presentationTimeMs)}` : -1}|${effectSig}`;
+    return { t, presentationTimeMs, snap, shellAtTframe, sig };
   };
 
   // 合成一帧到独立 canvas（场景+外壳+水印+字幕），含基帧缓存。ffmpeg / WebCodecs 两路径共用。
@@ -1231,7 +1253,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     if (canReuseFinalFrame && inp.sig === lastFinalSig && lastFinalCanvas) {
       return lastFinalCanvas;
     }
-    const { t, snap, shellAtTframe } = inp;
+    const { t, presentationTimeMs, snap, shellAtTframe } = inp;
     const target = frameTarget;
     const targetCtx = resetLayer(target);
     const backgroundStarted = performance.now();
@@ -1279,14 +1301,14 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       }
 
       const keyPointStarted = performance.now();
-      drawKeyPointMotion(foregroundCtx, opts.keyPointMotions, t, zoomBounds, {
+      drawKeyPointMotion(foregroundCtx, opts.keyPointMotions, presentationTimeMs, zoomBounds, {
         reserveRight: !!effectiveCameraBlob,
       });
       diagnostics.addBreakdown('keypoint_composition', performance.now() - keyPointStarted);
 
       if (cues.length > 0) {
         const subtitleStarted = performance.now();
-        drawSubtitle(foregroundCtx, foreground.width, foreground.height, cues, t, {
+        drawSubtitle(foregroundCtx, foreground.width, foreground.height, cues, presentationTimeMs, {
           reservedRightFraction: effectiveCameraBlob ? 0.3 : 0,
         });
         diagnostics.addBreakdown('subtitle_composition', performance.now() - subtitleStarted);
@@ -1886,6 +1908,7 @@ export async function renderPreviewFrame(
   metadataOverride?: RecordingMetadata,
   renderSize?: { width: number; height: number },
   signal?: AbortSignal,
+  presentationTimeMs = timeMs,
 ): Promise<void> {
   const checkAborted = () => {
     if (signal?.aborted) throw new DOMException('Preview render superseded', 'AbortError');
@@ -1931,9 +1954,9 @@ export async function renderPreviewFrame(
     const activeZoom = autoZoomAt(config.autoZooms, timeMs);
     drawZoomedContentLayer(foregroundCtx, content, activeZoom, zoomBounds);
     drawHighlightEffect(foregroundCtx, config.highlights, timeMs, zoomBounds, activeZoom);
-    drawKeyPointMotion(foregroundCtx, config.keyPointMotions, timeMs, zoomBounds, { reserveRight: hasCamera });
+    drawKeyPointMotion(foregroundCtx, config.keyPointMotions, presentationTimeMs, zoomBounds, { reserveRight: hasCamera });
     if (cues.length > 0) {
-      drawSubtitle(foregroundCtx, foreground.width, foreground.height, cues, timeMs, {
+      drawSubtitle(foregroundCtx, foreground.width, foreground.height, cues, presentationTimeMs, {
         reservedRightFraction: hasCamera ? 0.3 : 0,
       });
     }

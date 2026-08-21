@@ -40,6 +40,8 @@ export async function GET(req: Request): Promise<NextResponse> {
       voiceName: job.voiceName,
       billableCharacters: job.billableCharacters,
       synthesisChunkCount: job.synthesisChunkCount,
+      timingMap: job.timingMap,
+      durationMs: job.timingMap?.at(-1)?.outputEndMs,
       phase: job.phase,
       totalChunks: job.totalChunks,
       completedChunks: job.completedChunks,

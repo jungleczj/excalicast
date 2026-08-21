@@ -205,6 +205,18 @@ export interface ScreenChunk {
 
 export type LocalizedTrackStatus = 'ready' | 'failed';
 
+export interface LocalizedTimingSegment {
+  sourceStartMs: number;
+  sourceEndMs: number;
+  outputStartMs: number;
+  outputEndMs: number;
+  audioStartMs: number;
+  audioEndMs: number;
+  speechRatePercent: number;
+  videoRate: number;
+  strategy: 'natural' | 'trim_silence' | 'slow_video';
+}
+
 export interface LocalizedTrack {
   id: string;
   recordingId: string;
@@ -214,6 +226,9 @@ export interface LocalizedTrack {
   provider: string;
   sourceAudioHash: string;
   translatedSrt: string;
+  /** Maps the localized output clock back to the original recording without altering the source project. */
+  timingMap?: LocalizedTimingSegment[];
+  durationMs?: number;
   /** This language version's key-point motion track. The source-language track stays on RecordingMetadata. */
   keyPointMotions?: KeyPointMotionSegment[];
   audioBlob: Blob;

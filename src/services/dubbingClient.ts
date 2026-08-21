@@ -6,7 +6,7 @@ import {
   saveLocalizedTrack,
   saveMediaTask,
 } from '@/lib/db-client';
-import type { LocalizedTrack } from '@/types/recording';
+import type { LocalizedTimingSegment, LocalizedTrack } from '@/types/recording';
 import { generateKokoroDubbingAudio, type KokoroDubbingProgress } from '@/services/kokoroDubbingClient';
 import { parseMediaJobResponse } from '@/services/mediaJobClient';
 import { shouldUseMediaJobMocks } from '@/services/mediaJobMode';
@@ -25,6 +25,8 @@ interface StatusResponse {
   voiceName?: string;
   billableCharacters?: number;
   synthesisChunkCount?: number;
+  timingMap?: LocalizedTimingSegment[];
+  durationMs?: number;
   phase?: 'translating' | 'synthesizing' | 'decoding' | 'assembling' | 'uploading' | 'saving';
   totalChunks?: number;
   completedChunks?: number;
@@ -252,6 +254,8 @@ async function finishEnglishDubbingTrack(params: {
       provider: status.provider ?? 'deepseek-v4-flash+kokoro-local',
       sourceAudioHash: params.sourceAudioHash,
       translatedSrt,
+      timingMap: status.timingMap,
+      durationMs: status.durationMs ?? audioInfo.durationMs,
       audioBlob,
       sampleRate: audioInfo.sampleRate,
       channelCount: audioInfo.channels,

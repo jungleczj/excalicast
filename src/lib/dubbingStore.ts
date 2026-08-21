@@ -5,6 +5,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
+import type { LocalizedTimingSegment } from '@/types/recording';
 
 export type DubbingJobStatus = 'pending' | 'running' | 'done' | 'failed';
 export type DubbingLipSyncStatus = 'done' | 'skipped' | 'failed';
@@ -27,6 +28,8 @@ export interface DubbingJob {
   cameraAssetPath?: string;
   cameraType?: string;
   translatedSrt?: string;
+  localizedSrt?: string;
+  timingMap?: LocalizedTimingSegment[];
   dubbedAudioPath?: string;
   dubbedAudioType?: string;
   lipSyncCameraPath?: string;
@@ -108,6 +111,8 @@ function localDb(): Database.Database {
       camera_asset_path TEXT,
       camera_type TEXT,
       translated_srt TEXT,
+      localized_srt TEXT,
+      timing_map TEXT,
       dubbed_audio_path TEXT,
       dubbed_audio_type TEXT,
       lip_sync_camera_path TEXT,
@@ -134,6 +139,8 @@ function localDb(): Database.Database {
   const columns = new Set((sqlite.prepare('PRAGMA table_info(dubbing_jobs)').all() as Array<{ name: string }>).map((row) => row.name));
   const additions: Array<[string, string]> = [
     ['voice_name', 'TEXT'],
+    ['localized_srt', 'TEXT'],
+    ['timing_map', 'TEXT'],
     ['source_srt_hash', 'TEXT'],
     ['voice_register', 'TEXT'],
     ['voice_confidence', 'REAL'],
@@ -181,7 +188,8 @@ type StoredRow = {
   source_audio_hash: string; source_srt: string | null; source_srt_hash: string | null; status: DubbingJobStatus;
   audio_asset_path: string | null; audio_type: string | null;
   camera_asset_path: string | null; camera_type: string | null;
-  translated_srt: string | null; dubbed_audio_path: string | null; dubbed_audio_type: string | null;
+  translated_srt: string | null; localized_srt: string | null; timing_map: string | LocalizedTimingSegment[] | null;
+  dubbed_audio_path: string | null; dubbed_audio_type: string | null;
   lip_sync_camera_path: string | null; lip_sync_camera_type: string | null;
   lip_sync: DubbingLipSyncStatus | null; provider: string | null; error: string | null;
   voice_name: string | null; voice_register: 'masculine' | 'feminine' | 'uncertain' | null;
@@ -202,6 +210,10 @@ function fromRow(row: StoredRow | null | undefined): DubbingJob | undefined {
     audioAssetPath: row.audio_asset_path ?? undefined, audioType: row.audio_type ?? undefined,
     cameraAssetPath: row.camera_asset_path ?? undefined, cameraType: row.camera_type ?? undefined,
     translatedSrt: row.translated_srt ?? undefined,
+    localizedSrt: row.localized_srt ?? undefined,
+    timingMap: typeof row.timing_map === 'string'
+      ? JSON.parse(row.timing_map) as LocalizedTimingSegment[]
+      : row.timing_map ?? undefined,
     dubbedAudioPath: row.dubbed_audio_path ?? undefined, dubbedAudioType: row.dubbed_audio_type ?? undefined,
     lipSyncCameraPath: row.lip_sync_camera_path ?? undefined, lipSyncCameraType: row.lip_sync_camera_type ?? undefined,
     lipSync: row.lip_sync ?? undefined, provider: row.provider ?? undefined, error: row.error ?? undefined,
@@ -228,6 +240,8 @@ function toRow(job: DubbingJob): StoredRow {
     audio_asset_path: job.audioAssetPath ?? null, audio_type: job.audioType ?? null,
     camera_asset_path: job.cameraAssetPath ?? null, camera_type: job.cameraType ?? null,
     translated_srt: job.translatedSrt ?? null,
+    localized_srt: job.localizedSrt ?? null,
+    timing_map: job.timingMap ?? null,
     dubbed_audio_path: job.dubbedAudioPath ?? null, dubbed_audio_type: job.dubbedAudioType ?? null,
     lip_sync_camera_path: job.lipSyncCameraPath ?? null, lip_sync_camera_type: job.lipSyncCameraType ?? null,
     lip_sync: job.lipSync ?? null, provider: job.provider ?? null, error: job.error ?? null,
@@ -264,7 +278,7 @@ export async function createDubbingJob(job: DubbingJob): Promise<void> {
   }
   const keys = Object.keys(row);
   localDb().prepare(`INSERT INTO dubbing_jobs (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`)
-    .run(...keys.map((key) => row[key as keyof StoredRow]));
+    .run(...keys.map((key) => key === 'timing_map' && row.timing_map ? JSON.stringify(row.timing_map) : row[key as keyof StoredRow]));
 }
 
 export async function getDubbingJob(id: string, userId: string): Promise<DubbingJob | undefined> {
@@ -317,7 +331,7 @@ export async function updateDubbingJob(id: string, userId: string, patch: Partia
     if (error) throw dubbingStoreError('update_dubbing_job', error);
   } else {
     localDb().prepare(`UPDATE dubbing_jobs SET ${mutable.map(([key]) => `${key} = ?`).join(',')} WHERE id = ? AND user_id = ?`)
-      .run(...mutable.map(([, value]) => value), id, userId);
+      .run(...mutable.map(([key, value]) => key === 'timing_map' && value ? JSON.stringify(value) : value), id, userId);
   }
   return next;
 }
@@ -404,8 +418,8 @@ export async function findReusableDubbingJobChunks(
   userId: string,
   keys: Array<{ textHash: string; voiceName: string; speechRate: string }>,
 ): Promise<Map<string, DubbingJobChunk>> {
-  const cacheKey = (value: { textHash: string; voiceName: string; speechRate: string }) =>
-    `${value.textHash}:${value.voiceName}:${value.speechRate}`;
+  const cacheKey = (value: { textHash: string; voiceName: string }) =>
+    `${value.textHash}:${value.voiceName}`;
   if (keys.length === 0) return new Map();
   let rows: StoredChunkRow[];
   if (useSupabase()) {
@@ -433,10 +447,10 @@ export async function findReusableDubbingJobChunks(
 export async function updateDubbingJobChunk(
   id: string,
   userId: string,
-  patch: Partial<Pick<DubbingJobChunk, 'status' | 'attemptCount' | 'mp3Path' | 'durationMs' | 'error'>>,
+  patch: Partial<Pick<DubbingJobChunk, 'status' | 'attemptCount' | 'mp3Path' | 'durationMs' | 'speechRate' | 'error'>>,
 ): Promise<void> {
   const mapping: Record<string, string> = {
-    status: 'status', attemptCount: 'attempt_count', mp3Path: 'mp3_path', durationMs: 'duration_ms', error: 'error',
+    status: 'status', attemptCount: 'attempt_count', mp3Path: 'mp3_path', durationMs: 'duration_ms', speechRate: 'speech_rate', error: 'error',
   };
   const now = Date.now();
   const body = Object.fromEntries(Object.entries(patch).map(([key, value]) => [mapping[key], value ?? null]));

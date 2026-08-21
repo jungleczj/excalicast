@@ -16,7 +16,7 @@ export function computeNaturalSpeechRatePercent(text: string, sourceDurationMs: 
   const punctuationPauses = (text.match(/[,.!?;:]/g) ?? []).length * 120;
   const estimatedDurationMs = Math.max(500, words / 150 * 60_000 + punctuationPauses);
   const ratio = estimatedDurationMs / Math.max(500, sourceDurationMs);
-  return Math.max(-10, Math.min(35, Math.round((ratio - 1) * 100)));
+  return Math.max(-10, Math.min(15, Math.round((ratio - 1) * 100)));
 }
 
 function parseSrtTimestamp(value: string): number {

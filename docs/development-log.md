@@ -1,5 +1,40 @@
 # Development Log
 
+## 2026-08-21 - Adaptive English dubbing timeline and localized key-point motion
+
+### Baseline
+
+- Mandatory pre-change checkpoint: `ffe174d` (`chore: checkpoint before adaptive dubbing timeline`).
+- Worktree: `/Users/chenzhijiang/.codex/worktrees/53c2/fix-loading-recording`; branch: `fix/loading-recording`.
+
+### User value
+
+- English speech is fitted with a natural `0.9x-1.15x` speaking-rate range using the measured TTS duration, not a text estimate alone.
+- Short English phrases remove excess source pauses while retaining a 150ms breath; long phrases receive a local video-time window instead of clipped or overlapping speech.
+- English captions and generated key-point motion use the localized presentation clock. Returning to the source version restores the existing Chinese captions and Chinese key points without regeneration.
+
+### Implementation
+
+- Added a persisted source-to-localized timing map with separate source, presentation, and audio clocks.
+- Edge TTS performs one bounded adaptive re-synthesis when real audio duration requires a meaningful rate correction.
+- Dubbing assembly retimes the translated SRT and places each verified WAV chunk on the localized timeline.
+- TTS chunk cache fingerprints include translated text, target duration, and voice, so the final adaptive-rate MP3 is reusable without crossing incompatible timing windows.
+- Preview and export map localized presentation time back to original video/camera frames while captions and key-point animation stay on the English clock.
+- A newly generated English track automatically creates and persists English key-point motion from its retimed English captions; source-language assets remain on recording metadata.
+
+### Compatibility
+
+- Legacy localized tracks without a timing map retain the previous one-to-one timeline.
+- Added a Supabase migration for `localized_srt` and `timing_map`; local SQLite adds the same fields lazily.
+- The existing non-destructive source recording, source captions, source key points, and source audio remain unchanged.
+
+### Verification
+
+- `npx tsc --noEmit --incremental false` passed.
+- 113 dubbing, media-pipeline, media-task, and migration tests passed.
+- The focused editor E2E passed with English dubbing active in preview/export and an automatically generated English key-point segment.
+- `npm run build` passed; only the existing ONNX/Kokoro/mpg123 static dependency warnings remain.
+
 ## 2026-08-13 - Multi-recording main track and hybrid long-form preview
 
 ### Baseline

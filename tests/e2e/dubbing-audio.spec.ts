@@ -24,6 +24,14 @@ import {
 import { mapWithConcurrency } from '@/utils/asyncPool';
 import { resolveDubbingJobStep } from '@/services/dubbingJobState';
 import { decodeEdgeMp3ToPcm16Wav } from '@/services/edgeMp3Decoder';
+import {
+  buildLocalizedTimingMap,
+  edgeTtsCacheFingerprintMaterial,
+  mapSrtToLocalizedTimeline,
+  localizedToSourceTime,
+  resolveAdaptiveSpeechRatePercent,
+  sourceToLocalizedTime,
+} from '@/services/dubbingTiming';
 
 function makeToneWav(durationMs: number, frequency = 330): Uint8Array {
   const sampleRate = 16_000;
@@ -207,13 +215,83 @@ test('dubbing status polling is read-only and processing uses the bounded proces
   expect(client).toContain("fetch('/api/dubbing/process'");
 });
 
-test('dense translated speech uses a bounded but useful speaking-rate increase', () => {
+test('dense translated speech stays within the natural adaptive rate ceiling', () => {
   const denseText = 'This concise explanation still contains enough words to exceed a very short subtitle cue.';
 
   const percent = computeNaturalSpeechRatePercent(denseText, 2_500);
 
-  expect(percent).toBeGreaterThan(15);
-  expect(percent).toBeLessThanOrEqual(35);
+  expect(percent).toBeGreaterThan(0);
+  expect(percent).toBeLessThanOrEqual(15);
+});
+
+test('adaptive dubbing rate stays natural while correcting measured speech duration', () => {
+  expect(resolveAdaptiveSpeechRatePercent({
+    currentRatePercent: 0,
+    actualDurationMs: 4_000,
+    targetDurationMs: 3_000,
+  })).toBe(15);
+  expect(resolveAdaptiveSpeechRatePercent({
+    currentRatePercent: 10,
+    actualDurationMs: 2_000,
+    targetDurationMs: 3_000,
+  })).toBe(-10);
+  expect(resolveAdaptiveSpeechRatePercent({
+    currentRatePercent: 8,
+    actualDurationMs: 3_050,
+    targetDurationMs: 3_000,
+  })).toBe(8);
+});
+
+test('Edge TTS cache fingerprints separate identical text with different timing windows', () => {
+  const shortWindow = edgeTtsCacheFingerprintMaterial('The same translated sentence.', 2_000);
+  const longWindow = edgeTtsCacheFingerprintMaterial('The same translated sentence.', 5_000);
+
+  expect(shortWindow).not.toBe(longWindow);
+});
+
+test('localized timing removes excess silence and slows video only when speech needs more room', () => {
+  const map = buildLocalizedTimingMap([
+    { sourceStartMs: 0, sourceEndMs: 4_000, audioDurationMs: 2_400, speechRatePercent: -10 },
+    { sourceStartMs: 6_000, sourceEndMs: 9_000, audioDurationMs: 3_600, speechRatePercent: 15 },
+  ]);
+
+  expect(map).toHaveLength(2);
+  expect(map[0]).toMatchObject({
+    sourceStartMs: 0,
+    sourceEndMs: 2_550,
+    outputStartMs: 0,
+    outputEndMs: 2_550,
+    strategy: 'trim_silence',
+  });
+  expect(map[1]).toMatchObject({
+    sourceStartMs: 6_000,
+    sourceEndMs: 9_000,
+    outputStartMs: 2_700,
+    outputEndMs: 6_300,
+    strategy: 'slow_video',
+  });
+  expect(localizedToSourceTime(map, 4_500)).toBeCloseTo(7_500, 0);
+  expect(sourceToLocalizedTime(map, 7_500)).toBeCloseTo(4_500, 0);
+});
+
+test('translated captions are retimed onto the adaptive English timeline', () => {
+  const map = buildLocalizedTimingMap([
+    { sourceStartMs: 0, sourceEndMs: 4_000, audioDurationMs: 2_400, speechRatePercent: -10 },
+    { sourceStartMs: 6_000, sourceEndMs: 9_000, audioDurationMs: 3_600, speechRatePercent: 15 },
+  ]);
+  const retimed = mapSrtToLocalizedTimeline([
+    '1',
+    '00:00:00,000 --> 00:00:04,000',
+    'First English point.',
+    '',
+    '2',
+    '00:00:06,000 --> 00:00:09,000',
+    'Second English point.',
+    '',
+  ].join('\n'), map);
+
+  expect(retimed).toContain('00:00:00,000 --> 00:00:02,550');
+  expect(retimed).toContain('00:00:02,700 --> 00:00:06,300');
 });
 
 test('voice profile maps low and high speech registers to different Azure voices', () => {

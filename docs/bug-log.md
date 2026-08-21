@@ -1,5 +1,30 @@
 # Bug Log
 
+## 2026-08-21 - English dubbing duration drifted from video, captions and key points
+
+### Symptom
+
+- English TTS could finish substantially earlier or later than the original spoken section.
+- Short speech left long blank pauses; long speech overlapped later content or drifted from the video.
+- Preview treated the English audio clock as the original video clock, while English captions and key points still used source timestamps.
+
+### Root cause
+
+- Speaking rate was selected only from estimated word count and allowed an unnatural `+35%`; the measured MP3 duration never corrected that estimate.
+- The assembled English WAV, source video, translated SRT, and key-point track shared one timestamp domain even though localization changes duration.
+- Language variants stored their captions and audio separately but had no persisted source-to-output time map.
+
+### Fix
+
+- Added measured-duration rate correction bounded to `-10%..+15%` and one optional Edge TTS re-synthesis.
+- Added a localized timing map that trims excess pauses, preserves a short breath, and locally retimes source video when speech is longer.
+- Retimed English SRT and English key points to presentation time while video/camera decoding continues on source time.
+- Kept Chinese captions and Chinese key points untouched so source-language restore is immediate.
+
+### Status
+
+- Fixed. RED/GREEN domain coverage verifies adaptive rate, silence trimming, local video retiming, bidirectional clock mapping, and SRT retiming; the focused editor E2E verifies English audio and English key-point activation.
+
 ## 2026-08-18 - Bing comparison pages flagged indexing and metadata issues
 
 ### Symptom

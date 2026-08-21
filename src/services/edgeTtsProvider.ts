@@ -10,6 +10,12 @@ import {
 import type { AzureEnglishVoice } from '@/services/voiceProfile';
 import { mapWithConcurrency } from '@/utils/asyncPool';
 import { decodeEdgeMp3ToPcm16Wav } from '@/services/edgeMp3Decoder';
+import {
+  edgeTtsCacheFingerprintMaterial,
+  formatSpeechRatePercent,
+  parseSpeechRatePercent,
+  resolveAdaptiveSpeechRatePercent,
+} from '@/services/dubbingTiming';
 
 /**
  * Edge TTS provider — Microsoft Edge's free neural text-to-speech endpoint
@@ -107,7 +113,9 @@ export function planEdgeTtsChunks(translatedSrt: string): EdgeTtsPlannedChunk[] 
   return splitDubbingSrt(translatedSrt).map((chunk, index) => ({
     ...chunk,
     index,
-    textHash: createHash('sha256').update(`edge-tts-v2\0${chunk.text}`).digest('hex'),
+    textHash: createHash('sha256')
+      .update(edgeTtsCacheFingerprintMaterial(chunk.text, chunk.endMs - chunk.startMs))
+      .digest('hex'),
     rate: computeRate(chunk.text, Math.max(500, chunk.endMs - chunk.startMs)),
   }));
 }
@@ -279,9 +287,21 @@ export async function synthesizeEdgeTtsChunk(
   voice: AzureEnglishVoice,
   signal?: AbortSignal,
 ): Promise<SynthesizedEdgeTtsChunk> {
-  const mp3 = await synthesizeChunkWithRetry(voice, chunk.text, chunk.rate, signal);
-  const decoded = await decodeEdgeMp3ToPcm16Wav(mp3);
-  return { ...chunk, mp3, wav: decoded.wav, durationMs: decoded.durationMs };
+  let rate = chunk.rate;
+  let mp3 = await synthesizeChunkWithRetry(voice, chunk.text, rate, signal);
+  let decoded = await decodeEdgeMp3ToPcm16Wav(mp3);
+  const adaptiveRate = resolveAdaptiveSpeechRatePercent({
+    currentRatePercent: parseSpeechRatePercent(rate),
+    actualDurationMs: decoded.durationMs,
+    targetDurationMs: Math.max(500, chunk.endMs - chunk.startMs),
+  });
+  const nextRate = formatSpeechRatePercent(adaptiveRate);
+  if (nextRate !== rate) {
+    rate = nextRate;
+    mp3 = await synthesizeChunkWithRetry(voice, chunk.text, rate, signal);
+    decoded = await decodeEdgeMp3ToPcm16Wav(mp3);
+  }
+  return { ...chunk, rate, mp3, wav: decoded.wav, durationMs: decoded.durationMs };
 }
 
 export async function decodeCachedEdgeTtsChunk(

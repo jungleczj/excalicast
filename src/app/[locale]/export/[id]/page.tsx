@@ -129,6 +129,8 @@ export default function EditorRecordingPage(): JSX.Element {
   const [selectedHighlightId, setSelectedHighlightId] = useState<string | null>(null);
   const [keyPointMotions, setKeyPointMotions] = useState<KeyPointMotionSegment[]>([]);
   const [activeLocalizedTrack, setActiveLocalizedTrackState] = useState<LocalizedTrack | null>(null);
+  const activeLocalizedTrackIdRef = useRef<string | null>(null);
+  activeLocalizedTrackIdRef.current = activeLocalizedTrack?.id ?? null;
   const [keyPointVariantTrackId, setKeyPointVariantTrackId] = useState<string | null>(null);
   const [selectedKeyPointMotionId, setSelectedKeyPointMotionId] = useState<string | null>(null);
   const [keyPointGenerationPhase, setKeyPointGenerationPhase] = useState<'idle' | 'generating' | 'ready' | 'failed'>('idle');
@@ -809,17 +811,63 @@ export default function EditorRecordingPage(): JSX.Element {
 
   const applyLocalizedEditingTrack = useCallback((track: LocalizedTrack | null) => {
     const variant = resolveLocalizedEditingVariant(meta ?? {}, track);
+    activeLocalizedTrackIdRef.current = track?.id ?? null;
     setActiveLocalizedTrackState(track);
     setKeyPointVariantTrackId(variant.localizedTrackId);
     setKeyPointMotions(variant.keyPointMotions.map((segment) => migrateKeyPointMotionSegment(segment, parseSrt(variant.subtitleSrt))));
     setSelectedKeyPointMotionId(variant.keyPointMotions[0]?.id ?? null);
   }, [meta]);
 
+  const generateEnglishKeyPointsForTrack = useCallback(async (track: LocalizedTrack): Promise<void> => {
+    if (track.keyPointMotions?.length) return;
+    const cues = parseSrt(track.translatedSrt);
+    if (cues.length === 0) return;
+    let motions: KeyPointMotionSegment[] = [];
+    let generationSource: 'deepseek' | 'local' = 'deepseek';
+    try {
+      await startTask({
+        recordingId: id,
+        kind: 'key_point_motion',
+        resourceClass: 'network',
+        configSnapshot: { language: 'en', cueCount: cues.length, localizedTrackId: track.id },
+      }, async (report, signal) => {
+        report({ phase: 'preparing_english_key_points', ratio: 0.05 });
+        try {
+          const result = await generateKeyPointMotions({
+            cues,
+            durationMs: track.durationMs ?? meta?.durationMs ?? 0,
+            languageHint: 'en',
+            signal,
+          });
+          motions = result.motions;
+        } catch (error) {
+          if (signal.aborted) throw error;
+          generationSource = 'local';
+          motions = buildLocalKeyPointMotions(cues, track.durationMs ?? meta?.durationMs ?? 0, 'en');
+        }
+        if (motions.length === 0) throw new Error('no_english_key_points');
+        report({ phase: generationSource === 'local' ? 'local_fallback' : 'saving', ratio: 0.9 });
+        await updateLocalizedTrackKeyPointMotions(track.id, motions);
+        return { resultRef: `key-points:${id}:en:${generationSource}` };
+      });
+      if (activeLocalizedTrackIdRef.current === track.id) {
+        setActiveLocalizedTrackState((current) => current?.id === track.id ? { ...current, keyPointMotions: motions } : current);
+        setKeyPointMotions(motions.map((segment) => migrateKeyPointMotionSegment(segment, cues)));
+        setSelectedKeyPointMotionId(motions[0]?.id ?? null);
+      }
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) {
+        setKeyPointGenerationError(error instanceof Error ? error.message : 'english_key_point_generation_failed');
+      }
+    }
+  }, [id, meta?.durationMs, startTask]);
+
   const handleLocalizedTrackReady = useCallback((track: LocalizedTrack) => {
     applyLocalizedEditingTrack(track);
     setMeta((current) => current ? { ...current, localizedTrackId: track.id } : current);
     setConfig((current) => ({ ...current, localizedTrackId: track.id, muteOriginalAudio: true }));
-  }, [applyLocalizedEditingTrack]);
+    void generateEnglishKeyPointsForTrack(track);
+  }, [applyLocalizedEditingTrack, generateEnglishKeyPointsForTrack]);
 
   const handleLocalizedTrackSelect = useCallback((track: LocalizedTrack | null) => {
     if (track) {
