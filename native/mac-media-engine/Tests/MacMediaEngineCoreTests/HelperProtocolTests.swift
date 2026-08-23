@@ -144,6 +144,16 @@ struct MacMediaEngineContractTests {
         let temporaryRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("excalicast-contract-\(UUID().uuidString)", isDirectory: true)
         let store = try SegmentedRecordingStore(root: temporaryRoot, recordingId: "recording-1")
+        let captureMetadata = RecordingCaptureMetadata(
+            screen: CaptureRequest(width: 2_560, height: 1_440, framesPerSecond: 30, codec: .h264),
+            camera: CaptureRequest(width: 1_280, height: 720, framesPerSecond: 24, codec: .h264),
+            capturesSystemAudio: true,
+            capturesMicrophone: true,
+            hardwareEncodingConfirmed: true,
+            initialAvailableBytes: 100 * 1_024 * 1_024 * 1_024,
+            finalPressure: nil
+        )
+        try store.configureCapture(captureMetadata)
         try store.appendFinalizedSegment(track: .screen, index: 0, data: Data([1, 2, 3]), startUs: 0, durationUs: 2_000_000)
         try store.appendFinalizedSegment(track: .microphone, index: 0, data: Data([4, 5]), startUs: 0, durationUs: 2_000_000)
         let storePressure = store.pressureSnapshot()
@@ -153,6 +163,8 @@ struct MacMediaEngineContractTests {
         try expect(recovered.state == .interrupted, "unfinished project recovers as interrupted")
         try expect(recovered.tracks[.screen]?.count == 1, "screen segment recovered")
         try expect(recovered.tracks[.microphone]?.count == 1, "audio segment recovered")
+        try expect(recovered.capture?.camera?.width == 1_280, "camera configuration survives recovery")
+        try expect(recovered.capture?.capturesSystemAudio == true, "system audio intent survives recovery")
 
         let orphanStaging = try store.makeStagingSegmentURL(track: .screen, index: 99)
         try Data([9, 9, 9]).write(to: orphanStaging)

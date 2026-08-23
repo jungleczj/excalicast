@@ -121,6 +121,15 @@ export interface NativeRecordingManifest {
   recordingId: string;
   state: 'recording' | 'finalizing' | 'ready' | 'interrupted' | 'error';
   tracks: Record<string, NativeRecordingSegment[]>;
+  capture?: {
+    screen: NativeCaptureConfiguration;
+    camera?: NativeCaptureConfiguration;
+    capturesSystemAudio: boolean;
+    capturesMicrophone: boolean;
+    hardwareEncodingConfirmed: boolean;
+    initialAvailableBytes: number;
+    finalPressure?: NativeCapturePressure;
+  };
 }
 
 export interface NativeHelperHandshake {

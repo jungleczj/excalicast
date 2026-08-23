@@ -52,6 +52,15 @@ final class NativeCaptureSession: @unchecked Sendable {
             root: configuration.projectRoot,
             recordingId: configuration.recordingId
         )
+        try store.configureCapture(RecordingCaptureMetadata(
+            screen: report.effective,
+            camera: configuration.captureCamera ? configuration.cameraRequest : nil,
+            capturesSystemAudio: configuration.captureSystemAudio,
+            capturesMicrophone: configuration.captureMicrophone,
+            hardwareEncodingConfirmed: report.hardwareEncodingConfirmed,
+            initialAvailableBytes: availableBytes,
+            finalPressure: nil
+        ))
         let hostTime = CMClockGetTime(CMClockGetHostTimeClock())
             .convertScale(1_000_000, method: .roundTowardZero)
             .value
@@ -95,10 +104,18 @@ final class NativeCaptureSession: @unchecked Sendable {
     }
 
     func stop(interrupted: Bool = false) async throws {
+        let finalMediaPressure = screen?.pressureSnapshot()
         var firstError: Error?
         do { try camera?.stop() } catch { firstError = error }
         do { try microphone?.stop() } catch { if firstError == nil { firstError = error } }
         do { try await screen?.stop() } catch { if firstError == nil { firstError = error } }
+        if let finalMediaPressure, let store {
+            let finalPressure = finalMediaPressure.enriched(
+                availableDiskBytes: currentAvailableDiskBytes(),
+                store: store.pressureSnapshot()
+            )
+            try? store.updateFinalPressure(finalPressure)
+        }
         if firstError == nil, !interrupted {
             do { try store?.finalize(requiredTracks: [.screen]) }
             catch { firstError = error }

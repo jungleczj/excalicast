@@ -38,24 +38,28 @@ public struct RecoverableRecordingManifest: Codable, Sendable {
     public let recordingId: String
     public var state: RecordingStoreState
     public var tracks: [RecordingTrackKind: [FinalizedSegment]]
+    public var capture: RecordingCaptureMetadata?
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion
         case recordingId
         case state
         case tracks
+        case capture
     }
 
     public init(
         schemaVersion: Int,
         recordingId: String,
         state: RecordingStoreState,
-        tracks: [RecordingTrackKind: [FinalizedSegment]]
+        tracks: [RecordingTrackKind: [FinalizedSegment]],
+        capture: RecordingCaptureMetadata? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.recordingId = recordingId
         self.state = state
         self.tracks = tracks
+        self.capture = capture
     }
 
     public init(from decoder: Decoder) throws {
@@ -63,6 +67,7 @@ public struct RecoverableRecordingManifest: Codable, Sendable {
         schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
         recordingId = try container.decode(String.self, forKey: .recordingId)
         state = try container.decode(RecordingStoreState.self, forKey: .state)
+        capture = try container.decodeIfPresent(RecordingCaptureMetadata.self, forKey: .capture)
         do {
             let stringTracks = try container.decode([String: [FinalizedSegment]].self, forKey: .tracks)
             tracks = Dictionary(uniqueKeysWithValues: stringTracks.compactMap { key, value in
@@ -86,6 +91,7 @@ public struct RecoverableRecordingManifest: Codable, Sendable {
         try container.encode(schemaVersion, forKey: .schemaVersion)
         try container.encode(recordingId, forKey: .recordingId)
         try container.encode(state, forKey: .state)
+        try container.encodeIfPresent(capture, forKey: .capture)
         let stringTracks = Dictionary(uniqueKeysWithValues: tracks.map { ($0.key.rawValue, $0.value) })
         try container.encode(stringTracks, forKey: .tracks)
     }
@@ -110,7 +116,8 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
             schemaVersion: 1,
             recordingId: recordingId,
             state: .recording,
-            tracks: Dictionary(uniqueKeysWithValues: RecordingTrackKind.allCases.map { ($0, []) })
+            tracks: Dictionary(uniqueKeysWithValues: RecordingTrackKind.allCases.map { ($0, []) }),
+            capture: nil
         )
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -220,6 +227,21 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
             throw RecordingStoreError.missingRequiredTrack(track)
         }
         manifest.state = .ready
+        try checkpointUnlocked()
+    }
+
+    public func configureCapture(_ metadata: RecordingCaptureMetadata) throws {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        manifest.capture = metadata
+        try checkpointUnlocked()
+    }
+
+    public func updateFinalPressure(_ pressure: CapturePressureSnapshot) throws {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard let capture = manifest.capture else { return }
+        manifest.capture = capture.withFinalPressure(pressure)
         try checkpointUnlocked()
     }
 
