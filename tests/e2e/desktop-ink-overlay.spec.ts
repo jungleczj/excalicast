@@ -28,7 +28,7 @@ test('full-board mode paints its independent translucent background', async ({ p
           return {
             engine: 'excalidraw', toolSurface: 'full', mode: 'full-board',
             backgroundOpacity: 0.45, inkOpacity: 0.72, pointerPolicy: 'draw',
-            visible: true, recordingActive: false,
+            visible: true, recordingActive: false, recordingId: null, paused: false,
           };
         },
         subscribe() { return () => undefined; },
@@ -55,13 +55,13 @@ test('desktop workspace can open the native ink overlay without changing browser
             return {
               engine: 'excalidraw', toolSurface: 'full', mode: 'ink',
               backgroundOpacity: 0, inkOpacity: 1, pointerPolicy: 'pass-through',
-              visible: false,
+              visible: false, recordingActive: false, recordingId: null, paused: false,
             };
           }
           return {
             engine: 'excalidraw', toolSurface: 'full', mode: 'full-board',
             backgroundOpacity: 0.9, inkOpacity: 1, pointerPolicy: 'draw',
-            visible: true,
+            visible: true, recordingActive: false, recordingId: null, paused: false,
           };
         },
         subscribe() { return () => undefined; },

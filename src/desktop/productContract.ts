@@ -85,6 +85,14 @@ export interface DesktopInkSettings extends DesktopInkSettingsInput {
   toolSurface: 'full';
 }
 
+export interface DesktopInkRuntimeState extends DesktopInkSettings {
+  visible: boolean;
+  windowID?: number;
+  recordingActive: boolean;
+  recordingId: string | null;
+  paused: boolean;
+}
+
 function clampOpacity(value: number): number {
   if (!Number.isFinite(value)) return 1;
   return Math.min(1, Math.max(0, value));

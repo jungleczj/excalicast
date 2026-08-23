@@ -76,6 +76,7 @@ let activeNativeCapture: {
   nextInkEventIndex: number;
   pausedTotalMs: number;
   pauseStartedUnixMs: number | null;
+  pausePending: boolean;
 } | null = null;
 let inkEventCommitTail: Promise<void> = Promise.resolve();
 let inputTelemetryCommitTail: Promise<void> = Promise.resolve();
@@ -202,18 +203,20 @@ function registerDesktopIpc(): void {
     const active = activeNativeCapture;
     if (!active) throw new Error('desktop_ink_recording_inactive');
     if (active.pauseStartedUnixMs !== null) return { committed: false, reason: 'capture_paused' };
-    const batch = createNativeInkEventBatch(
-      payload,
-      active.startedUnixMs,
-      active.nextInkEventIndex,
-      active.pausedTotalMs,
-    );
-    active.nextInkEventIndex += 1;
     const helper = await requireNativeHelper();
-    const commit = inkEventCommitTail.then(() => helper.appendInkEvents(batch));
-    inkEventCommitTail = commit.catch(() => undefined);
-    await commit;
-    return { committed: true, index: batch.index };
+    const commit = inkEventCommitTail.then(async () => {
+      const batch = createNativeInkEventBatch(
+        payload,
+        active.startedUnixMs,
+        active.nextInkEventIndex,
+        active.pausedTotalMs,
+      );
+      await helper.appendInkEvents(batch);
+      active.nextInkEventIndex += 1;
+      return batch.index;
+    });
+    inkEventCommitTail = commit.then(() => undefined, () => undefined);
+    return { committed: true, index: await commit };
   });
   handleDesktopIpc(DESKTOP_IPC_CHANNELS.inputTelemetryAppend, async (_event, payload: unknown) => {
     const active = activeNativeCapture;
@@ -266,6 +269,7 @@ function registerDesktopIpc(): void {
       nextInkEventIndex: 0,
       pausedTotalMs: 0,
       pauseStartedUnixMs: null,
+      pausePending: false,
     };
     inkEventCommitTail = Promise.resolve();
     inputTelemetryCommitTail = Promise.resolve();
@@ -286,14 +290,24 @@ function registerDesktopIpc(): void {
   });
   handleDesktopIpc(DESKTOP_IPC_CHANNELS.capturePause, async () => {
     if (!activeNativeCapture) throw new Error('native_capture_inactive');
-    await requestInkWindowFlush();
-    await inkEventCommitTail;
-    await inputTelemetryCommitTail;
-    const state = await (await requireNativeHelper()).pauseCapture();
-    if (activeNativeCapture.pauseStartedUnixMs === null) {
-      activeNativeCapture.pauseStartedUnixMs = Date.now();
+    activeNativeCapture.pausePending = true;
+    broadcastInkSettings();
+    try {
+      await requestInkWindowFlush();
+      await inkEventCommitTail;
+      await inputTelemetryCommitTail;
+      const state = await (await requireNativeHelper()).pauseCapture();
+      if (activeNativeCapture.pauseStartedUnixMs === null) {
+        activeNativeCapture.pauseStartedUnixMs = Date.now();
+      }
+      activeNativeCapture.pausePending = false;
+      broadcastInkSettings();
+      return { state };
+    } catch (error) {
+      activeNativeCapture.pausePending = false;
+      broadcastInkSettings();
+      throw error;
     }
-    return { state };
   });
   handleDesktopIpc(DESKTOP_IPC_CHANNELS.captureResume, async () => {
     if (!activeNativeCapture) throw new Error('native_capture_inactive');
@@ -301,6 +315,8 @@ function registerDesktopIpc(): void {
     const pausedAt = activeNativeCapture.pauseStartedUnixMs;
     if (pausedAt !== null) activeNativeCapture.pausedTotalMs += Date.now() - pausedAt;
     activeNativeCapture.pauseStartedUnixMs = null;
+    activeNativeCapture.pausePending = false;
+    broadcastInkSettings();
     return { state };
   });
   handleDesktopIpc(DESKTOP_IPC_CHANNELS.captureSetMicrophoneMuted, async (_event, payload: unknown) => {
@@ -522,14 +538,17 @@ function desktopInkState(): DesktopInkSettings & {
   visible: boolean;
   windowID?: number;
   recordingActive: boolean;
-  recordingId?: string;
+  recordingId: string | null;
+  paused: boolean;
 } {
   return {
     ...inkSettings,
     visible: inkWindow?.isDestroyed() === false && inkWindow.isVisible(),
     windowID: privateOverlayWindowIDs()[0],
     recordingActive: activeNativeCapture !== null,
-    recordingId: activeNativeCapture?.recordingId,
+    recordingId: activeNativeCapture?.recordingId ?? null,
+    paused: activeNativeCapture !== null
+      && (activeNativeCapture.pausePending || activeNativeCapture.pauseStartedUnixMs !== null),
   };
 }
 

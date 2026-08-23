@@ -5,20 +5,23 @@ import Whiteboard, { type WhiteboardChangeFn } from '@/components/Whiteboard';
 import {
   DESKTOP_IPC_CHANNELS,
   normalizeDesktopInkSettings,
+  type DesktopInkRuntimeState,
   type DesktopInkSettings,
 } from '@/desktop/productContract';
 import { createDesktopInkSurfacePresentation } from '@/desktop/inkSurface';
 import { DesktopInkEventCollector } from '@/desktop/inkEventJournal';
+import { DesktopInkUnifiedProducer, shouldCollectDesktopInk } from '@/desktop/desktopInkUnifiedProducer';
 
-interface DesktopInkViewState extends DesktopInkSettings {
-  recordingActive: boolean;
-}
+type DesktopInkViewState = DesktopInkRuntimeState;
 
 const DEFAULT_SETTINGS: DesktopInkViewState = {
   ...normalizeDesktopInkSettings({
     mode: 'ink', backgroundOpacity: 0, inkOpacity: 1, pointerPolicy: 'draw',
   }),
   recordingActive: false,
+  recordingId: null,
+  paused: false,
+  visible: true,
 };
 
 export default function DesktopInkPage(): JSX.Element {
@@ -29,6 +32,8 @@ export default function DesktopInkPage(): JSX.Element {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const apiRef = useRef<any>(null);
   const recordingActiveRef = useRef(false);
+  const recordingIdRef = useRef<string | null>(null);
+  const producerRef = useRef<DesktopInkUnifiedProducer | null>(null);
   const flushTimerRef = useRef<number | null>(null);
   const flushInFlightRef = useRef<Promise<void>>(Promise.resolve());
   const presentation = useMemo(
@@ -51,13 +56,21 @@ export default function DesktopInkPage(): JSX.Element {
     void bridge.invoke(DESKTOP_IPC_CHANNELS.inkGetSettings).then((value) => {
       if (isInkSettings(value)) setSettings({
         ...normalizeDesktopInkSettings(value),
-        recordingActive: value.recordingActive === true,
+        visible: value.visible,
+        windowID: value.windowID,
+        recordingActive: value.recordingActive,
+        recordingId: value.recordingId,
+        paused: value.paused,
       });
     });
     const unsubscribe = bridge.subscribe(DESKTOP_IPC_CHANNELS.inkSettingsChanged, (value) => {
       if (isInkSettings(value)) setSettings({
         ...normalizeDesktopInkSettings(value),
-        recordingActive: value.recordingActive === true,
+        visible: value.visible,
+        windowID: value.windowID,
+        recordingActive: value.recordingActive,
+        recordingId: value.recordingId,
+        paused: value.paused,
       });
     });
     return () => {
@@ -82,12 +95,11 @@ export default function DesktopInkPage(): JSX.Element {
   const flushEvents = useCallback((): Promise<void> => {
     flushTimerRef.current = null;
     const operation = flushInFlightRef.current.then(async () => {
-      if (!recordingActiveRef.current || collectorRef.current.pendingCount === 0) return;
-      const events = collectorRef.current.drain();
+      const producer = producerRef.current;
+      if (!producer?.hasPending) return;
       try {
-        await window.excalicastDesktop?.invoke(DESKTOP_IPC_CHANNELS.inkAppendEvents, { events });
+        await producer.flush();
       } catch {
-        collectorRef.current.restore(events);
         if (recordingActiveRef.current) {
           flushTimerRef.current = window.setTimeout(() => {
             void flushEvents().catch(() => undefined);
@@ -124,12 +136,21 @@ export default function DesktopInkPage(): JSX.Element {
   }, [flushEvents]);
 
   useEffect(() => {
-    const wasActive = recordingActiveRef.current;
-    recordingActiveRef.current = settings.recordingActive;
-    if (settings.recordingActive && !wasActive) {
+    const bridge = window.excalicastDesktop;
+    const collectionEnabled = shouldCollectDesktopInk(settings);
+    recordingActiveRef.current = collectionEnabled;
+    if (bridge && settings.recordingId && settings.recordingId !== recordingIdRef.current) {
+      recordingIdRef.current = settings.recordingId;
       collectorRef.current = new DesktopInkEventCollector();
+      producerRef.current = new DesktopInkUnifiedProducer({
+        bridge,
+        collector: collectorRef.current,
+        sessionId: settings.recordingId,
+        producerEpoch: crypto.randomUUID(),
+        nowHostUs: () => Math.round(performance.now() * 1_000),
+      });
       const api = apiRef.current;
-      if (api) {
+      if (api && collectionEnabled) {
         collectorRef.current.observeScene(
           api.getSceneElementsIncludingDeleted?.() ?? api.getSceneElements?.() ?? [],
           api.getAppState?.() ?? {},
@@ -139,11 +160,16 @@ export default function DesktopInkPage(): JSX.Element {
         scheduleFlush();
       }
     }
-    if (!settings.recordingActive && flushTimerRef.current !== null) {
+    if (!collectionEnabled && flushTimerRef.current !== null) {
       window.clearTimeout(flushTimerRef.current);
       flushTimerRef.current = null;
     }
-  }, [scheduleFlush, settings.recordingActive]);
+    if (collectionEnabled && producerRef.current?.hasPending) scheduleFlush();
+    if (!settings.recordingActive) {
+      recordingIdRef.current = null;
+      producerRef.current = null;
+    }
+  }, [scheduleFlush, settings.paused, settings.recordingActive, settings.recordingId]);
 
   const handleSceneChange = useCallback<WhiteboardChangeFn>((elements, appState, files) => {
     if (!recordingActiveRef.current) return;
@@ -241,11 +267,18 @@ function InkControls({ settings }: { settings: DesktopInkViewState }): JSX.Eleme
   );
 }
 
-function isInkSettings(value: unknown): value is DesktopInkSettings & { recordingActive?: boolean } {
+function isInkSettings(value: unknown): value is DesktopInkRuntimeState {
   if (!value || typeof value !== 'object') return false;
   const settings = value as Partial<DesktopInkSettings>;
   return (settings.mode === 'ink' || settings.mode === 'full-board')
     && (settings.pointerPolicy === 'draw' || settings.pointerPolicy === 'pass-through')
     && typeof settings.backgroundOpacity === 'number'
-    && typeof settings.inkOpacity === 'number';
+    && typeof settings.inkOpacity === 'number'
+    && typeof (value as DesktopInkRuntimeState).visible === 'boolean'
+    && typeof (value as DesktopInkRuntimeState).recordingActive === 'boolean'
+    && typeof (value as DesktopInkRuntimeState).paused === 'boolean'
+    && (((value as DesktopInkRuntimeState).recordingActive
+      && typeof (value as DesktopInkRuntimeState).recordingId === 'string')
+      || (!(value as DesktopInkRuntimeState).recordingActive
+        && (value as DesktopInkRuntimeState).recordingId === null));
 }
