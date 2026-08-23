@@ -112,6 +112,63 @@ export function authorizeDesktopRendererIpc(params: {
   return role;
 }
 
+export interface DesktopIpcInvokeEventLike {
+  sender: { id: number };
+}
+
+export type DesktopIpcInvokeHandler = (
+  event: DesktopIpcInvokeEventLike,
+  ...args: unknown[]
+) => unknown;
+
+export interface DesktopIpcHandlerRegistrar {
+  handle(channel: string, handler: DesktopIpcInvokeHandler): void;
+}
+
+/** Registers a handler whose authorization always runs before business logic. */
+export function registerAuthorizedDesktopIpcHandler(params: {
+  ipcMain: DesktopIpcHandlerRegistrar;
+  roles: ReadonlyMap<number, unknown>;
+  channel: string;
+  handler: DesktopIpcInvokeHandler;
+}): void {
+  params.ipcMain.handle(params.channel, (event, ...args) => {
+    authorizeDesktopRendererIpc({
+      senderId: event.sender.id,
+      operation: 'invoke',
+      channel: params.channel,
+      roles: params.roles,
+    });
+    return params.handler(event, ...args);
+  });
+}
+
+interface DesktopRendererIdentity {
+  id: number;
+  once(event: 'destroyed', listener: () => void): unknown;
+}
+
+/** Binds a trusted BrowserWindow role and returns the matching `closed` cleanup. */
+export function bindDesktopRendererRole(
+  roles: Map<number, unknown>,
+  webContents: DesktopRendererIdentity,
+  role: DesktopRendererRole,
+): () => void {
+  if (!Number.isSafeInteger(webContents.id) || webContents.id <= 0 || !isDesktopRendererRole(role)) {
+    throw new Error('desktop_ipc_role_registration_invalid');
+  }
+  if (roles.has(webContents.id)) throw new Error('desktop_ipc_sender_already_registered');
+  roles.set(webContents.id, role);
+  let active = true;
+  const cleanup = () => {
+    if (!active) return;
+    active = false;
+    if (roles.get(webContents.id) === role) roles.delete(webContents.id);
+  };
+  webContents.once('destroyed', cleanup);
+  return cleanup;
+}
+
 export const exposedDesktopEventChannels = [
   DESKTOP_IPC_CHANNELS.inkSettingsChanged,
   DESKTOP_IPC_CHANNELS.inkFlushRequested,

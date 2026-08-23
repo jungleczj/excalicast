@@ -25,12 +25,16 @@ import {
   parseDesktopCapturePayload,
 } from './captureRequest';
 import {
+  bindDesktopRendererRole,
   createDesktopInkWindowOptions,
   createDesktopTeleprompterWindowOptions,
   createDesktopWindowOptions,
   isTrustedDesktopRendererUrl,
   parseDesktopWindowMediaSourceId,
+  registerAuthorizedDesktopIpcHandler,
   resolveDesktopTeleprompterBounds,
+  type DesktopIpcInvokeHandler,
+  type DesktopRendererRole,
 } from './windowContract';
 import { createNativeInkEventBatch } from './inkEventBatch';
 import { createNativeInputTelemetryProducerBatch } from './unifiedEventBatch';
@@ -80,6 +84,16 @@ const materializedTrackCache = new Map<string, Promise<{
   relativePath: string;
   mimeType: string;
 }>>();
+const desktopRendererRoles = new Map<number, DesktopRendererRole>();
+
+function handleDesktopIpc(channel: string, handler: DesktopIpcInvokeHandler): void {
+  registerAuthorizedDesktopIpcHandler({
+    ipcMain,
+    roles: desktopRendererRoles,
+    channel,
+    handler,
+  });
+}
 
 function rendererBaseUrl(): string {
   return process.env.EXCALICAST_RENDERER_URL
@@ -115,8 +129,8 @@ async function initializeNativeHelper(): Promise<void> {
 }
 
 function registerDesktopIpc(): void {
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.teleprompterGetState, () => teleprompterState);
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.teleprompterConfigure, (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.teleprompterGetState, () => teleprompterState);
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.teleprompterConfigure, (_event, payload: unknown) => {
     const value = objectPayload(payload, 'desktop_teleprompter_payload_invalid');
     if (value.configuration) {
       teleprompterState = configureDesktopTeleprompter(
@@ -137,7 +151,7 @@ function registerDesktopIpc(): void {
     broadcastTeleprompterState();
     return teleprompterState;
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.teleprompterSetMode, (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.teleprompterSetMode, (_event, payload: unknown) => {
     const value = objectPayload(payload, 'desktop_teleprompter_mode_invalid');
     if (value.mode === 'close') {
       teleprompterState = { ...teleprompterState, visible: false };
@@ -153,8 +167,8 @@ function registerDesktopIpc(): void {
     broadcastTeleprompterState();
     return teleprompterState;
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.inkGetSettings, () => desktopInkState());
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.inkSetMode, async (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.inkGetSettings, () => desktopInkState());
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.inkSetMode, async (_event, payload: unknown) => {
     const value = objectPayload(payload, 'desktop_ink_mode_invalid');
     if ((value.mode !== 'ink' && value.mode !== 'full-board')
       || (value.pointerPolicy !== 'draw' && value.pointerPolicy !== 'pass-through')) {
@@ -172,7 +186,7 @@ function registerDesktopIpc(): void {
     broadcastInkSettings();
     return desktopInkState();
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.inkSetOpacity, (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.inkSetOpacity, (_event, payload: unknown) => {
     const value = objectPayload(payload, 'desktop_ink_opacity_invalid');
     if (typeof value.backgroundOpacity !== 'number' || typeof value.inkOpacity !== 'number') {
       throw new Error('desktop_ink_opacity_invalid');
@@ -184,7 +198,7 @@ function registerDesktopIpc(): void {
     broadcastInkSettings();
     return desktopInkState();
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.inkAppendEvents, async (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.inkAppendEvents, async (_event, payload: unknown) => {
     const active = activeNativeCapture;
     if (!active) throw new Error('desktop_ink_recording_inactive');
     if (active.pauseStartedUnixMs !== null) return { committed: false, reason: 'capture_paused' };
@@ -201,7 +215,7 @@ function registerDesktopIpc(): void {
     await commit;
     return { committed: true, index: batch.index };
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.inputTelemetryAppend, async (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.inputTelemetryAppend, async (_event, payload: unknown) => {
     const active = activeNativeCapture;
     if (!active) throw new Error('desktop_input_telemetry_recording_inactive');
     const batch = createNativeInputTelemetryProducerBatch(payload, active.recordingId);
@@ -211,18 +225,18 @@ function registerDesktopIpc(): void {
     const acknowledgement = await commit;
     return { committed: true, ...acknowledgement };
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.inkFlushComplete, (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.inkFlushComplete, (_event, payload: unknown) => {
     const value = objectPayload(payload, 'desktop_ink_flush_invalid');
     if (typeof value.requestId !== 'string') throw new Error('desktop_ink_flush_invalid');
     pendingInkFlushes.get(value.requestId)?.();
     pendingInkFlushes.delete(value.requestId);
     return { acknowledged: true };
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.capturePermissions, async () => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.capturePermissions, async () => {
     const helper = await requireNativeHelper();
     return helper.capturePermissions();
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureRequestPermissions, async (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.captureRequestPermissions, async (_event, payload: unknown) => {
     const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
     const helper = await requireNativeHelper();
     return helper.requestCapturePermissions({
@@ -230,19 +244,19 @@ function registerDesktopIpc(): void {
       captureCamera: value.captureCamera === true,
     });
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureSources, async () => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.captureSources, async () => {
     const helper = await requireNativeHelper();
     return helper.captureSources();
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureDevices, async () => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.captureDevices, async () => {
     const helper = await requireNativeHelper();
     return helper.captureDevices();
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.capturePreflight, async (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.capturePreflight, async (_event, payload: unknown) => {
     const helper = await requireNativeHelper();
     return helper.preflightCapture(toNativeCaptureRequest(payload));
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureStart, async (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.captureStart, async (_event, payload: unknown) => {
     const helper = await requireNativeHelper();
     const request = toNativeCaptureRequest(payload);
     const result = await helper.startCapture(request);
@@ -258,7 +272,7 @@ function registerDesktopIpc(): void {
     broadcastInkSettings();
     return result;
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureStop, async () => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.captureStop, async () => {
     const helper = await requireNativeHelper();
     await requestInkWindowFlush();
     await inkEventCommitTail;
@@ -270,7 +284,7 @@ function registerDesktopIpc(): void {
       broadcastInkSettings();
     }
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.capturePause, async () => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.capturePause, async () => {
     if (!activeNativeCapture) throw new Error('native_capture_inactive');
     await requestInkWindowFlush();
     await inkEventCommitTail;
@@ -281,7 +295,7 @@ function registerDesktopIpc(): void {
     }
     return { state };
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureResume, async () => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.captureResume, async () => {
     if (!activeNativeCapture) throw new Error('native_capture_inactive');
     const state = await (await requireNativeHelper()).resumeCapture();
     const pausedAt = activeNativeCapture.pauseStartedUnixMs;
@@ -289,31 +303,31 @@ function registerDesktopIpc(): void {
     activeNativeCapture.pauseStartedUnixMs = null;
     return { state };
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureSetMicrophoneMuted, async (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.captureSetMicrophoneMuted, async (_event, payload: unknown) => {
     if (!activeNativeCapture) throw new Error('native_capture_inactive');
     const value = objectPayload(payload, 'native_microphone_mute_invalid');
     if (typeof value.muted !== 'boolean') throw new Error('native_microphone_mute_invalid');
     return { muted: await (await requireNativeHelper()).setMicrophoneMuted(value.muted) };
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureSetSystemAudioMuted, async (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.captureSetSystemAudioMuted, async (_event, payload: unknown) => {
     if (!activeNativeCapture) throw new Error('native_capture_inactive');
     const value = objectPayload(payload, 'native_system_audio_mute_invalid');
     if (typeof value.muted !== 'boolean') throw new Error('native_system_audio_mute_invalid');
     return { muted: await (await requireNativeHelper()).setSystemAudioMuted(value.muted) };
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureSetCameraVisibility, async (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.captureSetCameraVisibility, async (_event, payload: unknown) => {
     if (!activeNativeCapture) throw new Error('native_capture_inactive');
     const value = objectPayload(payload, 'native_camera_visibility_invalid');
     if (typeof value.hidden !== 'boolean') throw new Error('native_camera_visibility_invalid');
     return { hidden: await (await requireNativeHelper()).setCameraVisibility(value.hidden) };
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureSetCameraHardware, async (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.captureSetCameraHardware, async (_event, payload: unknown) => {
     if (!activeNativeCapture) throw new Error('native_capture_inactive');
     const value = objectPayload(payload, 'native_camera_hardware_invalid');
     if (typeof value.enabled !== 'boolean') throw new Error('native_camera_hardware_invalid');
     return (await requireNativeHelper()).setCameraHardwareEnabled(value.enabled);
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureStatus, async () => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.captureStatus, async () => {
     if (nativeHelperInitialization) await nativeHelperInitialization;
     if (!nativeHelper) return { available: false, state: 'idle', helper: null };
     const status = await nativeHelper.captureStatus();
@@ -323,7 +337,7 @@ function registerDesktopIpc(): void {
       helper: nativeHelperHandshake,
     };
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.projectRecover, async (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.projectRecover, async (_event, payload: unknown) => {
     const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
     const recordingId = typeof value.recordingId === 'string' ? value.recordingId : '';
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(recordingId)) {
@@ -334,7 +348,7 @@ function registerDesktopIpc(): void {
       path.join(app.getPath('videos'), 'Excalicast Projects', recordingId),
     );
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.projectValidate, async (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.projectValidate, async (_event, payload: unknown) => {
     const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
     const recordingId = typeof value.recordingId === 'string' ? value.recordingId : '';
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(recordingId)) {
@@ -345,7 +359,7 @@ function registerDesktopIpc(): void {
       path.join(app.getPath('videos'), 'Excalicast Projects', recordingId),
     );
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.projectReadMediaSegment, async (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.projectReadMediaSegment, async (_event, payload: unknown) => {
     if (activeNativeCapture) throw new Error('native_media_read_during_capture');
     const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
     const recordingId = typeof value.recordingId === 'string' ? value.recordingId : '';
@@ -362,7 +376,7 @@ function registerDesktopIpc(): void {
       length: value.length as number,
     });
   });
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.projectReadInkEvents, async (_event, payload: unknown) => {
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.projectReadInkEvents, async (_event, payload: unknown) => {
     const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
     const recordingId = typeof value.recordingId === 'string' ? value.recordingId : '';
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(recordingId)) {
@@ -429,6 +443,7 @@ function createOrMoveInkWindow(displayID?: number): BrowserWindow {
   }
   const preload = path.join(__dirname, 'preload.js');
   const window = new BrowserWindow(createDesktopInkWindowOptions(preload, display.bounds));
+  const unbindRole = bindDesktopRendererRole(desktopRendererRoles, window.webContents, 'ink');
   configureTrustedNavigation(window);
   inkWindow = window;
   window.setAlwaysOnTop(true, 'screen-saver');
@@ -438,6 +453,7 @@ function createOrMoveInkWindow(displayID?: number): BrowserWindow {
   });
   window.setContentProtection(true);
   window.on('closed', () => {
+    unbindRole();
     if (inkWindow === window) inkWindow = null;
   });
   void window.loadURL(desktopInkRendererUrl());
@@ -468,12 +484,16 @@ function createOrMoveTeleprompterWindow(): BrowserWindow {
   }
   const preload = path.join(__dirname, 'preload.js');
   const window = new BrowserWindow(createDesktopTeleprompterWindowOptions(preload, display));
+  const unbindRole = bindDesktopRendererRole(desktopRendererRoles, window.webContents, 'teleprompter');
   configureTrustedNavigation(window);
   teleprompterWindow = window;
   window.setAlwaysOnTop(true, 'screen-saver');
   window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
   window.setContentProtection(true);
-  window.on('closed', () => { if (teleprompterWindow === window) teleprompterWindow = null; });
+  window.on('closed', () => {
+    unbindRole();
+    if (teleprompterWindow === window) teleprompterWindow = null;
+  });
   const rendererUrl = new URL(rendererBaseUrl());
   rendererUrl.pathname = '/notch';
   rendererUrl.search = '';
@@ -561,9 +581,14 @@ function requiredSafeInteger(value: unknown, errorCode: string): number {
 function createMainWindow(): BrowserWindow {
   const preload = path.join(__dirname, 'preload.js');
   const window = new BrowserWindow(createDesktopWindowOptions(preload));
+  const unbindRole = bindDesktopRendererRole(desktopRendererRoles, window.webContents, 'main');
   const rendererUrl = rendererBaseUrl();
 
   window.once('ready-to-show', () => window.show());
+  window.on('closed', () => {
+    unbindRole();
+    if (mainWindow === window) mainWindow = null;
+  });
   configureTrustedNavigation(window);
   void window.loadURL(rendererUrl);
   return window;
@@ -592,6 +617,7 @@ app.on('before-quit', () => {
   inkWindow = null;
   teleprompterWindow?.destroy();
   teleprompterWindow = null;
+  desktopRendererRoles.clear();
   nativeHelper?.close();
   nativeHelper = null;
   nativeHelperHandshake = null;
