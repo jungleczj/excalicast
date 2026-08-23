@@ -295,14 +295,20 @@ export function ExportPreview({
           createdAudioUrl = URL.createObjectURL(r.audioBlob);
           setAudioUrl(createdAudioUrl);
           setSourceAudioFingerprint(audioSourceFingerprint(r.audioBlob, r.metadata.durationMs));
+        } else if (r.nativeMedia?.microphone) {
+          setAudioUrl(r.nativeMedia.microphone);
         }
         if (r.systemAudioBlob) {
           createdSystemAudioUrl = URL.createObjectURL(r.systemAudioBlob);
           setSystemAudioUrl(createdSystemAudioUrl);
+        } else if (r.nativeMedia?.systemAudio) {
+          setSystemAudioUrl(r.nativeMedia.systemAudio);
         }
         if (r.cameraBlob) {
           createdCameraUrl = URL.createObjectURL(r.cameraBlob);
           setCameraUrl(createdCameraUrl);
+        } else if (r.nativeMedia?.camera) {
+          setCameraUrl(r.nativeMedia.camera);
         }
         setCameraEvents(r.cameraEvents);
         if (shells.length > 0) {

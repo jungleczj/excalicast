@@ -94,26 +94,25 @@ export function finalizeNativeRecordingMetadata(
       : 'unavailable';
   const warnings = new Set(recording.warnings ?? []);
 
-  // Until the native segment reader is connected to preview/export, a valid
-  // capture is recoverable but not browser-export-ready. Mark it interrupted
-  // explicitly instead of presenting a blank project as a successful `done`.
-  warnings.add('native_media_adapter_required');
   if (recoveredState !== 'ready') warnings.add('native_capture_interrupted');
   if (validationState === 'invalid') warnings.add('native_validation_failed');
   if (validationState === 'unavailable') warnings.add('native_validation_unavailable');
 
+  const editorReady = recoveredState === 'ready' && validationState === 'valid';
+  if (!editorReady) warnings.add('native_media_adapter_required');
+
   return {
     ...recording,
     durationMs: Math.max(0, Math.round(input.durationMs)),
-    status: 'interrupted',
-    warnings: [...warnings],
+    status: editorReady ? 'done' : 'interrupted',
+    warnings: warnings.size > 0 ? [...warnings] : undefined,
     nativeProject: {
       schemaVersion: 1,
       storage: 'macos-videos',
       recordingId: recording.id,
       captureState: recoveredState,
       validationState,
-      exportStatus: 'adapter-required',
+      exportStatus: editorReady ? 'ready' : 'adapter-required',
       tracks: manifestTracks(manifest),
     },
   };
@@ -139,6 +138,10 @@ export function failNativeRecordingMetadata(
   };
 }
 
-export function nativeProjectRequiresExportAdapter(recording: RecordingMetadata): boolean {
-  return recording.nativeProject?.exportStatus === 'adapter-required';
+export function nativeProjectRequiresExportAdapter(
+  recording: RecordingMetadata,
+  adapterAvailable = true,
+): boolean {
+  return Boolean(recording.nativeProject)
+    && (!adapterAvailable || recording.nativeProject?.exportStatus === 'adapter-required');
 }

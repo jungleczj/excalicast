@@ -1,6 +1,6 @@
 'use client';
 
-import { createCameraFrameSource } from './webmCameraFrames';
+import { createCameraFrameSource, type MediaSourceInput } from './webmCameraFrames';
 
 type FrameImage = CanvasImageSource & {
   videoWidth?: number;
@@ -81,14 +81,14 @@ export interface DisplayFrameSourceOptions {
   videoFactory?: () => HTMLVideoElement;
   objectUrlFactory?: (blob: Blob) => string;
   revokeObjectUrl?: (url: string) => void;
-  fallbackFactory?: (blob: Blob, options: DisplayFrameSourceOptions) => Promise<DisplayFrameSource>;
+  fallbackFactory?: (source: MediaSourceInput, options: DisplayFrameSourceOptions) => Promise<DisplayFrameSource>;
 }
 
 async function createSequentialDisplayFallback(
-  blob: Blob,
+  source: MediaSourceInput,
   options: DisplayFrameSourceOptions,
 ): Promise<DisplayFrameSource> {
-  const decoded = await waitForDisplaySourceStage('decoder_init', createCameraFrameSource(blob), {
+  const decoded = await waitForDisplaySourceStage('decoder_init', createCameraFrameSource(source), {
     timeoutMs: options.decoderTimeoutMs ?? 12_000,
     signal: options.signal,
   });
@@ -103,12 +103,13 @@ async function createSequentialDisplayFallback(
 }
 
 export function createSeekableDisplayFrameSource(
-  blob: Blob,
+  source: MediaSourceInput,
   options: DisplayFrameSourceOptions = {},
 ): DisplayFrameSource {
   const createObjectUrl = options.objectUrlFactory ?? ((value: Blob) => URL.createObjectURL(value));
   const revokeObjectUrl = options.revokeObjectUrl ?? ((value: string) => URL.revokeObjectURL(value));
-  const url = createObjectUrl(blob);
+  const ownsUrl = typeof source !== 'string';
+  const url = ownsUrl ? createObjectUrl(source) : source;
   const video = options.videoFactory?.() ?? document.createElement('video');
   video.muted = true;
   video.playsInline = true;
@@ -123,7 +124,7 @@ export function createSeekableDisplayFrameSource(
   let fallbackPromise: Promise<DisplayFrameSource> | null = null;
   const ensureFallback = async (): Promise<DisplayFrameSource> => {
     if (fallbackSource) return fallbackSource;
-    fallbackPromise ??= (options.fallbackFactory ?? createSequentialDisplayFallback)(blob, options)
+    fallbackPromise ??= (options.fallbackFactory ?? createSequentialDisplayFallback)(source, options)
       .then((source) => {
         if (closed) {
           source.close();
@@ -236,16 +237,16 @@ export function createSeekableDisplayFrameSource(
       fallbackPromise = null;
       if (activeFallback) activeFallback.close();
       else void pendingFallback?.then((source) => source.close()).catch(() => undefined);
-      revokeObjectUrl(url);
+      if (ownsUrl) revokeObjectUrl(url);
     },
   };
 }
 
 export async function createDisplayFrameSource(
-  blob: Blob,
+  source: MediaSourceInput,
   options: DisplayFrameSourceOptions = {},
 ): Promise<DisplayFrameSource> {
-  const decoder = createCameraFrameSource(blob);
+  const decoder = createCameraFrameSource(source);
   try {
     const decoded = await waitForDisplaySourceStage('decoder_init', decoder, {
       timeoutMs: options.decoderTimeoutMs ?? 12_000,
@@ -262,6 +263,6 @@ export async function createDisplayFrameSource(
   } catch (error) {
     void decoder.then((source) => source.close()).catch(() => undefined);
     if (error instanceof DOMException && error.name === 'AbortError') throw error;
-    return createSeekableDisplayFrameSource(blob, options);
+    return createSeekableDisplayFrameSource(source, options);
   }
 }

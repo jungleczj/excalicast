@@ -21,6 +21,7 @@ interface HelperResponse {
   pressure?: NativeCapturePressure;
   manifest?: NativeRecordingManifest;
   validation?: NativeRecordingValidationReport;
+  materializedTrack?: NativeMaterializedTrack;
   error?: string;
   errorCode?: string;
   errorTrack?: NativeRecordingTrack;
@@ -33,6 +34,16 @@ export type NativeRecordingTrack =
   | 'system-audio'
   | 'excalidraw-events'
   | 'input-telemetry';
+
+export type NativeReadableMediaTrack = Extract<NativeRecordingTrack,
+  'screen' | 'camera' | 'microphone' | 'system-audio'>;
+
+export interface NativeMaterializedTrack {
+  track: NativeReadableMediaTrack;
+  relativePath: string;
+  byteLength: number;
+  mimeType: 'video/mp4' | 'audio/mp4';
+}
 
 export class NativeHelperError extends Error {
   readonly name = 'NativeHelperError';
@@ -312,6 +323,19 @@ export class NativeHelperClient {
     const response = await this.request({ channel: 'project.validate.v1', projectRoot }, 30_000);
     if (!response.validation) throw new Error('native_recording_validation_missing');
     return response.validation;
+  }
+
+  async materializeProjectTrack(
+    projectRoot: string,
+    mediaTrack: NativeReadableMediaTrack,
+  ): Promise<NativeMaterializedTrack> {
+    const response = await this.request({
+      channel: 'project.materialize-track.v1',
+      projectRoot,
+      mediaTrack,
+    }, 120_000);
+    if (!response.materializedTrack) throw new Error('native_materialized_track_missing');
+    return response.materializedTrack;
   }
 
   async appendInkEvents(batch: NativeInkEventBatch): Promise<void> {

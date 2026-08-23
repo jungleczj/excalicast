@@ -1,6 +1,8 @@
 'use client';
 
-import { ALL_FORMATS, BlobSource, Input, VideoSampleSink, type VideoSample } from 'mediabunny';
+import { ALL_FORMATS, BlobSource, Input, UrlSource, VideoSampleSink, type VideoSample } from 'mediabunny';
+
+export type MediaSourceInput = Blob | string;
 
 /**
  * 极简 WebM(Matroska) 解复用 + WebCodecs VideoDecoder 流式出帧。
@@ -348,12 +350,11 @@ async function createLegacyCameraFrameSource(blob: Blob): Promise<CameraFrameSou
   };
 }
 
-async function createMediabunnyFrameSource(blob: Blob): Promise<CameraFrameSource> {
+async function createMediabunnyFrameSource(source: MediaSourceInput): Promise<CameraFrameSource> {
   const input = new Input({
-    source: new BlobSource(blob, {
-      maxCacheSize: 8 * 1024 * 1024,
-      useStreamReader: true,
-    }),
+    source: typeof source === 'string'
+      ? new UrlSource(source)
+      : new BlobSource(source, { maxCacheSize: 8 * 1024 * 1024, useStreamReader: true }),
     formats: ALL_FORMATS,
   });
   const track = await input.getPrimaryVideoTrack();
@@ -439,10 +440,11 @@ async function createMediabunnyFrameSource(blob: Blob): Promise<CameraFrameSourc
  * Lazy Blob-backed demux/decode is the primary path. The legacy parser remains
  * as a compatibility fallback for unusual MediaRecorder WebM variants.
  */
-export async function createCameraFrameSource(blob: Blob): Promise<CameraFrameSource> {
+export async function createCameraFrameSource(source: MediaSourceInput): Promise<CameraFrameSource> {
   try {
-    return await createMediabunnyFrameSource(blob);
+    return await createMediabunnyFrameSource(source);
   } catch {
-    return createLegacyCameraFrameSource(blob);
+    if (typeof source === 'string') throw new Error('url_camera_decode_failed');
+    return createLegacyCameraFrameSource(source);
   }
 }

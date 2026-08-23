@@ -2,6 +2,7 @@
 
 import Dexie, { type Table } from 'dexie';
 import { loadScreenRecordingBlob, removeRecordingMediaDirectory } from '@/services/recordingMediaStore';
+import { nativeMediaSources, type NativeMediaSources } from '@/desktop/nativeMediaSource';
 import type { MediaTaskRecord } from '@/services/mediaTaskDomain';
 import type {
   AudioChunk,
@@ -966,6 +967,7 @@ export interface FullRecording {
   systemAudioBlob: Blob | null;
   cameraBlob: Blob | null;
   screenBlob: Blob | null;
+  nativeMedia: NativeMediaSources | null;
   cameraEvents: CameraPositionEvent[];
   laserEvents: LaserEvent[];
   binaryFiles: BinaryFileEntry[];
@@ -986,6 +988,7 @@ export interface RecordingMediaTracks {
   systemAudioBlob: Blob | null;
   cameraBlob: Blob | null;
   screenBlob: Blob | null;
+  nativeMedia: NativeMediaSources | null;
 }
 
 const fullRecordingCache = new Map<string, Promise<FullRecording>>();
@@ -1050,6 +1053,7 @@ export async function loadRecordingMediaTracks(
   const audioTracks = assembleRecordingAudioTracks(audioRows, systemAudioRows);
   return {
     metadata,
+    nativeMedia: nativeMediaSources(metadata.nativeProject, typeof window !== 'undefined' && Boolean(window.excalicastDesktop)),
     ...audioTracks,
     cameraBlob: cameraRows.length > 0
       ? new Blob(cameraRows.map((row) => row.blob), { type: cameraRows[0].blob.type || 'video/webm' })
@@ -1138,7 +1142,19 @@ async function loadFullRecordingUncached(recordingId: string, ownerKey?: string)
     camera: { chunks: camRows.length, bytes: camRows.reduce((sum, row) => sum + row.blob.size, 0) },
     screen: { chunks: screenRows.length, bytes: screenRows.reduce((sum, row) => sum + row.blob.size, 0) },
   };
-  return { metadata, snapshots, audioBlob, systemAudioBlob, cameraBlob, screenBlob, cameraEvents, laserEvents, binaryFiles, manifest };
+  return {
+    metadata,
+    snapshots,
+    audioBlob,
+    systemAudioBlob,
+    cameraBlob,
+    screenBlob,
+    nativeMedia: nativeMediaSources(metadata.nativeProject, typeof window !== 'undefined' && Boolean(window.excalicastDesktop)),
+    cameraEvents,
+    laserEvents,
+    binaryFiles,
+    manifest,
+  };
 }
 
 export async function loadFullRecording(recordingId: string, ownerKey?: string): Promise<FullRecording> {

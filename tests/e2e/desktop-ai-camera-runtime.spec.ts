@@ -11,6 +11,7 @@ import {
   finalizeNativeRecordingMetadata,
   nativeProjectRequiresExportAdapter,
 } from '../../src/desktop/nativeRecordingProject';
+import { nativeMediaSources } from '../../src/desktop/nativeMediaSource';
 
 function setup(source: RecordingSetupConfig['source'], cameraEnabled = true): RecordingSetupConfig {
   return {
@@ -250,7 +251,7 @@ test('native renderer persists a recoverable project reference before capture ca
   });
 });
 
-test('validated native media stays explicitly interrupted until the web export adapter can read its segments', () => {
+test('validated native media becomes editor-ready after the native segment adapter is available', () => {
   const recording = createNativeRecordingMetadata({
     recordingId: 'native-ready',
     startedAt: 1_000,
@@ -270,14 +271,20 @@ test('validated native media stays explicitly interrupted until the web export a
 
   expect(finalized).toMatchObject({
     durationMs: 4_100,
-    status: 'interrupted',
+    status: 'done',
     nativeProject: {
       captureState: 'ready',
       validationState: 'valid',
-      exportStatus: 'adapter-required',
+      exportStatus: 'ready',
     },
   });
-  expect(finalized.warnings).toContain('native_media_adapter_required');
+  expect(finalized.warnings ?? []).not.toContain('native_media_adapter_required');
+  expect(nativeMediaSources(finalized.nativeProject)).toEqual({
+    screen: 'excalicast-media://project/native-ready/screen',
+    camera: null,
+    microphone: null,
+    systemAudio: null,
+  });
 });
 
 test('invalid native recovery is marked interrupted with validation evidence', () => {
@@ -310,4 +317,5 @@ test('export route can distinguish a safely recovered native project from browse
   });
   expect(nativeProjectRequiresExportAdapter(recording)).toBe(true);
   expect(nativeProjectRequiresExportAdapter({ ...recording, nativeProject: { ...recording.nativeProject!, exportStatus: 'ready' } })).toBe(false);
+  expect(nativeProjectRequiresExportAdapter({ ...recording, nativeProject: { ...recording.nativeProject!, exportStatus: 'ready' } }, false)).toBe(true);
 });

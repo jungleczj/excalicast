@@ -312,7 +312,7 @@ export default function EditorRecordingPage(): JSX.Element {
           setLoadError(en ? 'Recording failed while saving.' : '录制保存失败。');
           return;
         }
-        if (nativeProjectRequiresExportAdapter(m)) {
+        if (nativeProjectRequiresExportAdapter(m, Boolean(window.excalicastDesktop))) {
           setFinalizing(false);
           setLoadError(en
             ? 'This native recording was recovered safely, but its macOS media adapter is not available in this editor build yet.'

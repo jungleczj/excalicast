@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, screen, shell } from 'electron';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -34,6 +34,23 @@ import {
 } from './windowContract';
 import { createNativeInkEventBatch } from './inkEventBatch';
 import { readNativeInkEventSegments } from './inkEventReader';
+import { readNativeMediaSegmentRange, type NativeReadableMediaTrack } from './nativeMediaReader';
+import {
+  createNativeMediaResponse,
+  NATIVE_MEDIA_SCHEME,
+  parseNativeMediaUrl,
+} from './nativeMediaProtocol';
+
+protocol.registerSchemesAsPrivileged([{
+  scheme: NATIVE_MEDIA_SCHEME,
+  privileges: {
+    standard: true,
+    secure: true,
+    supportFetchAPI: true,
+    stream: true,
+    corsEnabled: true,
+  },
+}]);
 
 let mainWindow: BrowserWindow | null = null;
 let inkWindow: BrowserWindow | null = null;
@@ -51,6 +68,10 @@ let nativeHelperInitialization: Promise<void> | null = null;
 let activeNativeCapture: { recordingId: string; startedUnixMs: number; nextInkEventIndex: number } | null = null;
 let inkEventCommitTail: Promise<void> = Promise.resolve();
 const pendingInkFlushes = new Map<string, () => void>();
+const materializedTrackCache = new Map<string, Promise<{
+  relativePath: string;
+  mimeType: string;
+}>>();
 
 function rendererBaseUrl(): string {
   return process.env.EXCALICAST_RENDERER_URL
@@ -257,6 +278,23 @@ function registerDesktopIpc(): void {
       path.join(app.getPath('videos'), 'Excalicast Projects', recordingId),
     );
   });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.projectReadMediaSegment, async (_event, payload: unknown) => {
+    if (activeNativeCapture) throw new Error('native_media_read_during_capture');
+    const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+    const recordingId = typeof value.recordingId === 'string' ? value.recordingId : '';
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(recordingId)) {
+      throw new Error('native_media_read_request_invalid');
+    }
+    const projectRoot = path.join(app.getPath('videos'), 'Excalicast Projects', recordingId);
+    const helper = await requireNativeHelper();
+    const manifest = await helper.recoverProject(projectRoot);
+    return readNativeMediaSegmentRange(projectRoot, manifest, {
+      track: value.track as NativeReadableMediaTrack,
+      segmentIndex: value.segmentIndex as number,
+      offset: value.offset as number,
+      length: value.length as number,
+    });
+  });
   ipcMain.handle(DESKTOP_IPC_CHANNELS.projectReadInkEvents, async (_event, payload: unknown) => {
     const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
     const recordingId = typeof value.recordingId === 'string' ? value.recordingId : '';
@@ -274,6 +312,34 @@ async function requireNativeHelper(): Promise<NativeHelperClient> {
   if (nativeHelperInitialization) await nativeHelperInitialization;
   if (!nativeHelper) throw new Error('native_media_helper_unavailable');
   return nativeHelper;
+}
+
+function registerNativeMediaProtocol(): void {
+  protocol.handle(NATIVE_MEDIA_SCHEME, async (request) => {
+    try {
+      if (activeNativeCapture) return new Response('capture active', { status: 409 });
+      const { recordingId, track } = parseNativeMediaUrl(request.url);
+      const projectRoot = path.join(app.getPath('videos'), 'Excalicast Projects', recordingId);
+      const key = `${recordingId}:${track}`;
+      let materialized = materializedTrackCache.get(key);
+      if (!materialized) {
+        materialized = requireNativeHelper().then((helper) => helper.materializeProjectTrack(projectRoot, track));
+        materializedTrackCache.set(key, materialized);
+        void materialized.catch(() => materializedTrackCache.delete(key));
+      }
+      const result = await materialized;
+      const mediaPath = path.resolve(projectRoot, result.relativePath);
+      const normalizedRoot = `${path.resolve(projectRoot)}${path.sep}`;
+      if (!mediaPath.startsWith(normalizedRoot) || !result.relativePath.startsWith(`materialized/${track}.`)) {
+        throw new Error('native_materialized_track_path_invalid');
+      }
+      return createNativeMediaResponse(request, mediaPath, result.mimeType);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'native_media_protocol_failed';
+      const status = message === 'native_media_range_invalid' ? 416 : 404;
+      return new Response(message, { status });
+    }
+  });
 }
 
 function toNativeCaptureRequest(payload: unknown) {
@@ -437,6 +503,7 @@ function createMainWindow(): BrowserWindow {
 }
 
 void app.whenReady().then(() => {
+  registerNativeMediaProtocol();
   registerDesktopIpc();
   nativeHelperInitialization = initializeNativeHelper().catch((error: unknown) => {
     nativeHelper?.close();

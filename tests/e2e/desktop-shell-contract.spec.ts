@@ -27,6 +27,13 @@ import {
 } from '../../apps/desktop/src/nativeCaptureSoak';
 import { createNativeInkEventBatch } from '../../apps/desktop/src/inkEventBatch';
 import { readNativeInkEventSegments } from '../../apps/desktop/src/inkEventReader';
+import { readNativeMediaSegmentRange } from '../../apps/desktop/src/nativeMediaReader';
+import {
+  createNativeMediaResponse,
+  nativeMediaUrl,
+  parseMediaRange,
+  parseNativeMediaUrl,
+} from '../../apps/desktop/src/nativeMediaProtocol';
 import {
   CaptureResourceCoordinator,
   startDesktopCaptureWithResourcePriority,
@@ -36,6 +43,41 @@ import {
   startDesktopAiCameraSession,
   type DesktopCaptureBridge,
 } from '../../src/desktop/aiCameraSession';
+
+test('native media protocol exposes only project-owned tracks and supports byte ranges', () => {
+  expect(nativeMediaUrl('recording_123', 'system-audio')).toBe(
+    'excalicast-media://project/recording_123/system-audio',
+  );
+  expect(parseNativeMediaUrl('excalicast-media://project/recording_123/camera')).toEqual({
+    recordingId: 'recording_123',
+    track: 'camera',
+  });
+  expect(parseMediaRange('bytes=10-19', 100)).toEqual({ start: 10, end: 19 });
+  expect(parseMediaRange('bytes=-12', 100)).toEqual({ start: 88, end: 99 });
+  expect(() => parseNativeMediaUrl('excalicast-media://project/secret/screen/extra')).toThrow(
+    'native_media_url_invalid',
+  );
+});
+
+test('native media protocol streams only the requested file range with seek headers', async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), 'excalicast-native-protocol-'));
+  try {
+    const mediaPath = join(projectRoot, 'screen.mp4');
+    await writeFile(mediaPath, Buffer.from([10, 11, 12, 13, 14, 15]));
+    const response = await createNativeMediaResponse(new Request(
+      'excalicast-media://project/recording_123/screen',
+      { headers: { Range: 'bytes=2-4' } },
+    ), mediaPath, 'video/mp4');
+
+    expect(response.status).toBe(206);
+    expect(response.headers.get('accept-ranges')).toBe('bytes');
+    expect(response.headers.get('content-range')).toBe('bytes 2-4/6');
+    expect(response.headers.get('content-length')).toBe('3');
+    expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([12, 13, 14]);
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
 
 test('desktop shell uses a hardened renderer with a narrow versioned bridge', () => {
   const options = createDesktopWindowOptions('/tmp/excalicast-preload.js');
@@ -621,6 +663,40 @@ test('native project validation returns per-track continuity and decodability ev
   });
 });
 
+test('native helper materializes only a named project track for streaming playback', async () => {
+  let onLine: ((line: string) => void) | null = null;
+  let command: Record<string, unknown> | null = null;
+  const transport: HelperTransport = {
+    write(line) {
+      command = JSON.parse(line) as Record<string, unknown>;
+      queueMicrotask(() => onLine?.(JSON.stringify({
+        id: command?.id,
+        ok: true,
+        materializedTrack: {
+          track: 'screen',
+          relativePath: 'materialized/screen.mp4',
+          byteLength: 8_192,
+          mimeType: 'video/mp4',
+        },
+      })));
+    },
+    onLine(listener) { onLine = listener; },
+    close() {},
+  };
+  const client = new NativeHelperClient(transport);
+  await expect(client.materializeProjectTrack('/projects/lesson', 'screen')).resolves.toEqual({
+    track: 'screen',
+    relativePath: 'materialized/screen.mp4',
+    byteLength: 8_192,
+    mimeType: 'video/mp4',
+  });
+  expect(command).toMatchObject({
+    channel: 'project.materialize-track.v1',
+    projectRoot: '/projects/lesson',
+    mediaTrack: 'screen',
+  });
+});
+
 test('desktop ink event batches are committed through the native recording helper', async () => {
   let onLine: ((line: string) => void) | null = null;
   let command: Record<string, unknown> | null = null;
@@ -705,6 +781,56 @@ test('desktop reads recoverable native ink segments without allowing path escape
       .rejects.toThrow('native_ink_event_path_invalid');
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('desktop reads a bounded byte range only from a manifest-owned native media segment', async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), 'excalicast-native-media-'));
+  try {
+    await mkdir(join(projectRoot, 'segments/screen'), { recursive: true });
+    await writeFile(join(projectRoot, 'segments/screen/000000.mp4'), Buffer.from([1, 2, 3, 4, 5, 6]));
+    const manifest = {
+      tracks: {
+        screen: [{
+          index: 0,
+          relativePath: 'segments/screen/000000.mp4',
+          startUs: 0,
+          durationUs: 2_000_000,
+          byteLength: 6,
+        }],
+      },
+    };
+
+    const range = await readNativeMediaSegmentRange(projectRoot, manifest, {
+      track: 'screen', segmentIndex: 0, offset: 2, length: 3,
+    });
+    expect([...range.data]).toEqual([3, 4, 5]);
+    expect(range).toMatchObject({ totalByteLength: 6, offset: 2, eof: false, mimeType: 'video/mp4' });
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
+  }
+});
+
+test('native media reader rejects path escape, unknown tracks and oversized ranges', async () => {
+  const projectRoot = await mkdtemp(join(tmpdir(), 'excalicast-native-media-invalid-'));
+  try {
+    await writeFile(join(projectRoot, 'outside.mp4'), Buffer.from([1, 2, 3]));
+    const escaped = {
+      tracks: {
+        screen: [{ index: 0, relativePath: '../outside.mp4', startUs: 0, durationUs: 1, byteLength: 3 }],
+      },
+    };
+    await expect(readNativeMediaSegmentRange(projectRoot, escaped, {
+      track: 'screen', segmentIndex: 0, offset: 0, length: 3,
+    })).rejects.toThrow('native_media_segment_path_invalid');
+    await expect(readNativeMediaSegmentRange(projectRoot, escaped, {
+      track: 'excalidraw-events' as 'screen', segmentIndex: 0, offset: 0, length: 3,
+    })).rejects.toThrow('native_media_track_invalid');
+    await expect(readNativeMediaSegmentRange(projectRoot, escaped, {
+      track: 'screen', segmentIndex: 0, offset: 0, length: 8 * 1024 * 1024,
+    })).rejects.toThrow('native_media_range_invalid');
+  } finally {
+    await rm(projectRoot, { recursive: true, force: true });
   }
 });
 

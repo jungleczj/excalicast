@@ -381,10 +381,12 @@ interface DecodedExportMono {
 /** 用 Mediabunny 解码音频并重采样到统一的 48kHz 单声道 PCM。
  *  与降噪/修复/波形生成同源，避免 decodeAudioData 对 MediaRecorder 分片录制的
  *  Opus WebM 解码时在 pre-skip / Cluster 边界产生可闻间隙。 */
-async function decodeExportMono(blob: Blob, signal?: AbortSignal): Promise<DecodedExportMono> {
-  const { ALL_FORMATS, AudioSampleSink, BlobSource, Input } = await import('mediabunny');
+async function decodeExportMono(source: Blob | string, signal?: AbortSignal): Promise<DecodedExportMono> {
+  const { ALL_FORMATS, AudioSampleSink, BlobSource, Input, UrlSource } = await import('mediabunny');
   const input = new Input({
-    source: new BlobSource(blob, { maxCacheSize: 4 * 1024 * 1024, useStreamReader: true }),
+    source: typeof source === 'string'
+      ? new UrlSource(source)
+      : new BlobSource(source, { maxCacheSize: 4 * 1024 * 1024, useStreamReader: true }),
     formats: ALL_FORMATS,
   });
   try {
@@ -437,7 +439,7 @@ async function decodeExportMono(blob: Blob, signal?: AbortSignal): Promise<Decod
 }
 
 export async function prepareExportAudio(input: {
-  blob: Blob;
+  blob: Blob | string;
   segments?: TimeSegment[];
   sourceKind?: PreparedExportAudio['sourceKind'];
   sourceTrackId?: string;

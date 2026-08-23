@@ -243,7 +243,7 @@ async function exportMainTrack(opts: ExportOptions, clips: MainTrackClip[]): Pro
     let clipOutputDurationMs = clipDurationMs;
     if ((opts.format ?? 'mp4') !== 'gif') {
       const media = await loadFullRecording(clip.recordingId);
-      let sourceAudio = media.audioBlob;
+      let sourceAudio: Blob | string | null = media.audioBlob ?? media.nativeMedia?.microphone ?? null;
       let sourceKind: PreparedExportAudio['sourceKind'] = 'original';
       let sourceTrackId: string | undefined;
       let audioSegments: TimeSegment[] = [{ start: clip.sourceStart, end: clip.sourceEnd }];
@@ -277,8 +277,9 @@ async function exportMainTrack(opts: ExportOptions, clips: MainTrackClip[]): Pro
           sourceTrackId,
           signal: opts.signal,
         }));
-      if (media.systemAudioBlob) simultaneousTracks.push(await prepareExportAudio({
-        blob: media.systemAudioBlob,
+      const systemAudio = media.systemAudioBlob ?? media.nativeMedia?.systemAudio ?? null;
+      if (systemAudio) simultaneousTracks.push(await prepareExportAudio({
+        blob: systemAudio,
         segments: [{ start: clip.sourceStart, end: clip.sourceEnd }],
         sourceKind: 'original',
         signal: opts.signal,
@@ -348,7 +349,7 @@ async function remuxEncodedVideoWithAudio(
   }
 }
 
-async function getPreviewDisplaySource(recordingId: string, screenBlob: Blob, timeMs: number): Promise<DisplayFrameSource> {
+async function getPreviewDisplaySource(recordingId: string, screenBlob: Blob | string, timeMs: number): Promise<DisplayFrameSource> {
   const cached = previewDisplayCache.get(recordingId);
   if (cached && timeMs >= cached.lastTimeMs - 80) {
     cached.lastTimeMs = Math.max(cached.lastTimeMs, timeMs);
@@ -1121,7 +1122,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const { exportToCanvas } = await import('@excalidraw/excalidraw');
   setProgress(0.03);
   setPhase('assembling_media');
-  const { metadata, snapshots, audioBlob, systemAudioBlob, cameraBlob, screenBlob, cameraEvents, laserEvents, binaryFiles, manifest } = await loadFullRecording(opts.recordingId);
+  const { metadata, snapshots, audioBlob, systemAudioBlob, cameraBlob, screenBlob, nativeMedia, cameraEvents, laserEvents, binaryFiles, manifest } = await loadFullRecording(opts.recordingId);
   diagnostics.setMedia({ audio: manifest.audio, camera: manifest.camera, screen: manifest.screen });
   diagnostics.addBreakdown('media_loading', performance.now() - phaseStartedAt);
   setProgress(0.08);
@@ -1138,8 +1139,14 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     opts.activeEnhancedAudioTrackId,
     audioSourceFingerprint(audioBlob, metadata.durationMs),
   );
-  const effectiveAudioBlob = useLocalizedTrack ? localizedTrack.audioBlob : enhancedSelection.blob;
-  const effectiveCameraBlob = useLocalizedTrack && localizedTrack.cameraBlob ? localizedTrack.cameraBlob : cameraBlob;
+  const effectiveAudioBlob = useLocalizedTrack
+    ? localizedTrack.audioBlob
+    : enhancedSelection.blob ?? nativeMedia?.microphone ?? null;
+  const effectiveSystemAudio = systemAudioBlob ?? nativeMedia?.systemAudio ?? null;
+  const effectiveCameraBlob = useLocalizedTrack && localizedTrack.cameraBlob
+    ? localizedTrack.cameraBlob
+    : cameraBlob ?? nativeMedia?.camera ?? null;
+  const screenSource = screenBlob ?? nativeMedia?.screen ?? null;
   const effectiveSubtitleSrt = useLocalizedTrack ? localizedTrack.translatedSrt : metadata.subtitleSrt;
   let cursorFocusTrack = opts.alwaysKeepZoomedIn ? await getCursorFocusTrack(opts.recordingId) : undefined;
   // ffmpeg 仅在兜底路径才加载（WebCodecs 快路径不需要）。
@@ -1154,7 +1161,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     opts.onLog?.(`native Excalidraw events unavailable; using legacy snapshots (${normalizeExportError(error).message})`);
   }
   const sceneSnapshots = desktopInkSource?.contentSnapshots ?? snapshots;
-  const desktopInkStyle = resolveDesktopInkExportStyle(opts.desktopInkStyle, screenBlob ? 0 : 1);
+  const desktopInkStyle = resolveDesktopInkExportStyle(opts.desktopInkStyle, screenSource ? 0 : 1);
   const format: ExportFormat = opts.format ?? 'mp4';
   const quality: ExportQuality = opts.quality ?? 'auto';
   // 质量档 → ffmpeg CRF（越小越清晰/越大）。WebCodecs 用倍率乘 estimateBitrate。
@@ -1186,7 +1193,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // consume this exact PCM timeline, so fallback cannot change the audio.
   const preparedAudioPromise = normalizeExportPreparation(format === 'gif' || opts.suppressAudio
     ? null
-    : effectiveAudioBlob || systemAudioBlob
+    : effectiveAudioBlob || effectiveSystemAudio
       ? Promise.all([
         effectiveAudioBlob ? prepareExportAudio({
           blob: effectiveAudioBlob,
@@ -1195,8 +1202,8 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
           sourceTrackId: useLocalizedTrack ? localizedTrack.id : enhancedSelection.track?.id,
           signal: opts.signal,
         }) : null,
-        systemAudioBlob ? prepareExportAudio({
-          blob: systemAudioBlob,
+        effectiveSystemAudio ? prepareExportAudio({
+          blob: effectiveSystemAudio,
           segments: trimmed ? kept : undefined,
           sourceKind: 'original',
           signal: opts.signal,
@@ -1266,7 +1273,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 相同帧去重：静止段（场景/外壳/字幕都没变）直接复用上一帧 PNG，跳过最贵的
   // exportToCanvas + 合成 + toBlob。有激光轨迹时逐帧不同，保守关闭去重以保正确。
   // 注：ffmpeg 兜底里若摄像头改走画布内合成（裁剪场景），逐帧含视频会再关掉去重。
-  let dedupEnabled = laserEvents.length === 0 && !desktopInkSource?.hasPointerEvents && !screenBlob;
+  let dedupEnabled = laserEvents.length === 0 && !desktopInkSource?.hasPointerEvents && !screenSource;
   let lastSig: string | null = null;
   let lastBuf: Uint8Array | null = null;
   // 基帧缓存：场景+外壳+水印只随 snapshot/shell 变化（与字幕无关）
@@ -1277,7 +1284,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 仍会创建独立 VideoFrame，因此分辨率、帧率和用户选择的画质都完全不变。
   const canReuseFinalFrame = laserEvents.length === 0
     && !desktopInkSource?.hasPointerEvents
-    && !screenBlob
+    && !screenSource
     && !effectiveCameraBlob
     && !(opts.autoZooms?.length)
     && !(opts.highlights?.length)
@@ -1294,7 +1301,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     source: createContentLayer(Math.max(2, Math.ceil(outputW / 8)), Math.max(2, Math.ceil(outputH / 8))),
     blurred: createContentLayer(Math.max(2, Math.ceil(outputW / 8)), Math.max(2, Math.ceil(outputH / 8))),
   };
-  const displayBlurWorker = screenBlob ? createDisplayBlurWorker(outputW, outputH) : null;
+  const displayBlurWorker = screenSource ? createDisplayBlurWorker(outputW, outputH) : null;
   const resetLayer = (canvas: HTMLCanvasElement): CanvasRenderingContext2D => {
     const ctx = canvas.getContext('2d')!;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1312,9 +1319,9 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 摄像头画布内合成（仅 WebCodecs 路径启用；ffmpeg 路径仍用 overlay 滤镜）
   let compositeCamera = false;
   let cameraSource: CameraFrameSource | null = null;
-  if (screenBlob) setPhase('initializing_decoder');
-  let displaySource: DisplayFrameSource | null = screenBlob
-    ? await createDisplayFrameSource(screenBlob, { signal: opts.signal })
+  if (screenSource) setPhase('initializing_decoder');
+  let displaySource: DisplayFrameSource | null = screenSource
+    ? await createDisplayFrameSource(screenSource, { signal: opts.signal })
     : null;
   if (displaySource) diagnostics.setDecoderPath('screen', displaySource.decoderPath);
   const createCursorTracking = (): CursorFocusExportAnalyzer | null => {
@@ -1765,7 +1772,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       cursorAnalyzer?.close();
       cursorAnalyzer = null;
       try { displaySource?.close(); } catch { /* */ }
-      displaySource = screenBlob ? await createDisplayFrameSource(screenBlob) : null;
+      displaySource = screenSource ? await createDisplayFrameSource(screenSource) : null;
       if (displaySource) diagnostics.setDecoderPath('screen', displaySource.decoderPath);
       cursorAnalyzer = createCursorTracking();
       cameraSource = null;
@@ -1885,6 +1892,9 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   let cameraFile: string | null = null;
   // 裁剪时摄像头改走画布内合成（见上），不再作为 ffmpeg overlay 输入；不裁时用 overlay 滤镜。
   if (effectiveCameraBlob && !compositeCamera && !trimmed) {
+    if (typeof effectiveCameraBlob === 'string') {
+      throw new Error('native_camera_requires_streaming_video_encoder');
+    }
     cameraFile = 'camera.webm';
     await ffmpeg.writeFile(cameraFile, new Uint8Array(await effectiveCameraBlob.arrayBuffer()));
   }
@@ -2083,14 +2093,15 @@ export async function renderPreviewFrame(
   };
   checkAborted();
   const { exportToCanvas } = await import('@excalidraw/excalidraw');
-  const { metadata, snapshots, binaryFiles, cameraBlob, screenBlob, laserEvents } = await loadFullRecording(recordingId);
+  const { metadata, snapshots, binaryFiles, cameraBlob, screenBlob, nativeMedia, laserEvents } = await loadFullRecording(recordingId);
+  const screenSource = screenBlob ?? nativeMedia?.screen ?? null;
   let desktopInkSource: DesktopInkRenderSource | null = null;
   try {
     desktopInkSource = await getPreviewInkSource(recordingId, metadata.durationMs);
   } catch { /* Browser-origin and legacy desktop projects have no native event track. */ }
   const nativeInkFrame = desktopInkSource?.frameAt(timeMs) ?? null;
   const sceneSnapshots = desktopInkSource?.contentSnapshots ?? snapshots;
-  const desktopInkStyle = resolveDesktopInkExportStyle(config.desktopInkStyle, screenBlob ? 0 : 1);
+  const desktopInkStyle = resolveDesktopInkExportStyle(config.desktopInkStyle, screenSource ? 0 : 1);
   const filesForExport: Record<string, unknown> = {};
   for (const bf of binaryFiles) filesForExport[bf.fileId] = bf.data;
   if (desktopInkSource) Object.assign(filesForExport, desktopInkSource.files);
@@ -2098,7 +2109,9 @@ export async function renderPreviewFrame(
   const cursorFocusTrack = config.alwaysKeepZoomedIn ? await getCursorFocusTrack(recordingId) : undefined;
   const localizedTrack = config.localizedTrackId ? await getLocalizedTrack(config.localizedTrackId) : undefined;
   const useLocalizedTrack = isUsableLocalizedTrack(localizedTrack) && config.muteOriginalAudio !== false;
-  const effectiveCameraBlob = useLocalizedTrack && localizedTrack.cameraBlob ? localizedTrack.cameraBlob : cameraBlob;
+  const effectiveCameraBlob = useLocalizedTrack && localizedTrack.cameraBlob
+    ? localizedTrack.cameraBlob
+    : cameraBlob ?? nativeMedia?.camera ?? null;
   const effectiveSubtitleSrt = useLocalizedTrack
     ? localizedTrack.translatedSrt
     : (metadataOverride?.subtitleSrt ?? metadata.subtitleSrt);
@@ -2145,8 +2158,8 @@ export async function renderPreviewFrame(
     else ctx.drawImage(foreground, 0, 0);
   };
 
-  if (screenBlob) {
-    const display = await getPreviewDisplaySource(recordingId, screenBlob, timeMs);
+  if (screenSource) {
+    const display = await getPreviewDisplaySource(recordingId, screenSource, timeMs);
     const displayFrame = await display.getFrameAt(timeMs);
     checkAborted();
     if (!displayFrame) return;

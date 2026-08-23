@@ -31,6 +31,7 @@ private struct Command: Decodable, Sendable {
     let eventStartUs: Int64?
     let eventDurationUs: Int64?
     let eventPayload: String?
+    let mediaTrack: RecordingTrackKind?
 }
 
 private struct Response: Encodable, Sendable {
@@ -46,6 +47,7 @@ private struct Response: Encodable, Sendable {
     let pressure: CapturePressureSnapshot?
     let manifest: RecoverableRecordingManifest?
     let validation: RecordingProjectValidationReport?
+    let materializedTrack: MaterializedRecordingTrack?
     let error: String?
     let errorCode: String?
     let errorTrack: RecordingTrackKind?
@@ -63,6 +65,7 @@ private struct Response: Encodable, Sendable {
         pressure: CapturePressureSnapshot?,
         manifest: RecoverableRecordingManifest?,
         validation: RecordingProjectValidationReport? = nil,
+        materializedTrack: MaterializedRecordingTrack? = nil,
         error: String?,
         errorCode: String? = nil,
         errorTrack: RecordingTrackKind? = nil
@@ -79,6 +82,7 @@ private struct Response: Encodable, Sendable {
         self.pressure = pressure
         self.manifest = manifest
         self.validation = validation
+        self.materializedTrack = materializedTrack
         self.error = error
         self.errorCode = errorCode
         self.errorTrack = errorTrack
@@ -287,6 +291,35 @@ private actor HelperServer {
                     pressure: nil,
                     manifest: nil,
                     validation: validation,
+                    error: nil
+                )
+            case "project.materialize-track.v1":
+                guard await lifecycle.state == .idle else {
+                    throw HelperServerError.recoveryWhileCaptureActive
+                }
+                guard let projectRoot = command.projectRoot, let mediaTrack = command.mediaTrack else {
+                    throw HelperServerError.missingCaptureParameters
+                }
+                let root = URL(fileURLWithPath: projectRoot, isDirectory: true)
+                let manifest = try SegmentedRecordingStore.recoverAndCheckpoint(root: root)
+                let materializedTrack = try await NativeTrackMaterializer.materialize(
+                    root: root,
+                    manifest: manifest,
+                    track: mediaTrack
+                )
+                return Response(
+                    id: command.id,
+                    ok: true,
+                    protocolVersion: HelperHandshake.currentProtocolVersion,
+                    engine: "mac-media-engine",
+                    state: await lifecycle.state,
+                    capability: nil,
+                    sources: nil,
+                    devices: nil,
+                    permissions: nil,
+                    pressure: nil,
+                    manifest: nil,
+                    materializedTrack: materializedTrack,
                     error: nil
                 )
             case "capture.preflight.v1":
