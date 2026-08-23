@@ -71,6 +71,17 @@ function registerDesktopIpc(): void {
       helper: nativeHelperHandshake,
     };
   });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.projectRecover, async (_event, payload: unknown) => {
+    const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+    const recordingId = typeof value.recordingId === 'string' ? value.recordingId : '';
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(recordingId)) {
+      throw new Error('native_recovery_request_invalid');
+    }
+    const helper = await requireNativeHelper();
+    return helper.recoverProject(
+      path.join(app.getPath('videos'), 'Excalicast Projects', recordingId),
+    );
+  });
 }
 
 async function requireNativeHelper(): Promise<NativeHelperClient> {

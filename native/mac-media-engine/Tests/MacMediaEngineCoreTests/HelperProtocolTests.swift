@@ -132,6 +132,17 @@ struct MacMediaEngineContractTests {
         try expect(recovered.tracks[.screen]?.count == 1, "screen segment recovered")
         try expect(recovered.tracks[.microphone]?.count == 1, "audio segment recovered")
 
+        let orphanStaging = try store.makeStagingSegmentURL(track: .screen, index: 99)
+        try Data([9, 9, 9]).write(to: orphanStaging)
+        let checkpointedRecovery = try SegmentedRecordingStore.recoverAndCheckpoint(root: temporaryRoot)
+        try expect(checkpointedRecovery.state == .interrupted, "recovery state is checkpointed")
+        try expect(!FileManager.default.fileExists(atPath: orphanStaging.path), "incomplete staging segment is discarded")
+        let checkpointedManifest = try JSONDecoder().decode(
+            RecoverableRecordingManifest.self,
+            from: Data(contentsOf: temporaryRoot.appendingPathComponent("manifest.json"))
+        )
+        try expect(checkpointedManifest.state == .interrupted, "interrupted state survives another launch")
+
         let cameraStaging = try store.makeStagingSegmentURL(track: .camera, index: 0)
         try Data([6, 7, 8, 9]).write(to: cameraStaging)
         try store.commitStagedSegment(

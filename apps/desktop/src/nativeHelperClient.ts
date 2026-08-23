@@ -19,6 +19,7 @@ interface HelperResponse {
   devices?: NativeCaptureDevices;
   permissions?: NativeCapturePermissions;
   pressure?: NativeCapturePressure;
+  manifest?: NativeRecordingManifest;
   error?: string;
 }
 
@@ -99,6 +100,21 @@ export interface NativeCapturePressure {
   blankSamples: number;
   suspendedSamples: number;
   pixelBufferSamples: number;
+}
+
+export interface NativeRecordingSegment {
+  index: number;
+  relativePath: string;
+  startUs: number;
+  durationUs: number;
+  byteLength: number;
+}
+
+export interface NativeRecordingManifest {
+  schemaVersion: 1;
+  recordingId: string;
+  state: 'recording' | 'finalizing' | 'ready' | 'interrupted' | 'error';
+  tracks: Record<string, NativeRecordingSegment[]>;
 }
 
 export interface NativeHelperHandshake {
@@ -187,6 +203,12 @@ export class NativeHelperClient {
     const response = await this.request({ channel: 'capture.status.v1' });
     if (!response.state) throw new Error('native_capture_status_missing');
     return { state: response.state, pressure: response.pressure };
+  }
+
+  async recoverProject(projectRoot: string): Promise<NativeRecordingManifest> {
+    const response = await this.request({ channel: 'project.recover.v1', projectRoot }, 15_000);
+    if (!response.manifest) throw new Error('native_recording_manifest_missing');
+    return response.manifest;
   }
 
   close(): void {

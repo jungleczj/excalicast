@@ -181,3 +181,35 @@ test('heavy work waits until native recording releases network, cpu and disk res
   expect(reads).toBe(3);
   expect(waits).toBe(2);
 });
+
+test('native project recovery returns a checkpointed interrupted manifest', async () => {
+  let onLine: ((line: string) => void) | null = null;
+  let command: Record<string, unknown> | null = null;
+  const transport: HelperTransport = {
+    write(line) {
+      command = JSON.parse(line) as Record<string, unknown>;
+      queueMicrotask(() => onLine?.(JSON.stringify({
+        id: command?.id,
+        ok: true,
+        state: 'idle',
+        manifest: {
+          schemaVersion: 1,
+          recordingId: 'lesson-crash',
+          state: 'interrupted',
+          tracks: { screen: [] },
+        },
+      })));
+    },
+    onLine(listener) { onLine = listener; },
+    close() {},
+  };
+  const client = new NativeHelperClient(transport);
+  await expect(client.recoverProject('/projects/lesson-crash')).resolves.toMatchObject({
+    recordingId: 'lesson-crash',
+    state: 'interrupted',
+  });
+  expect(command).toMatchObject({
+    channel: 'project.recover.v1',
+    projectRoot: '/projects/lesson-crash',
+  });
+});

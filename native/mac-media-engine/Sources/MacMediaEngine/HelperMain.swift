@@ -39,6 +39,7 @@ private struct Response: Encodable, Sendable {
     let devices: CaptureDevices?
     let permissions: CapturePermissions?
     let pressure: CapturePressureSnapshot?
+    let manifest: RecoverableRecordingManifest?
     let error: String?
 }
 
@@ -89,6 +90,7 @@ private enum HelperServerError: Error {
     case unsupportedChannel(String)
     case missingCaptureParameters
     case captureAlreadyActive
+    case recoveryWhileCaptureActive
 }
 
 @available(macOS 13.0, *)
@@ -114,6 +116,7 @@ private actor HelperServer {
                     devices: nil,
                     permissions: nil,
                     pressure: nil,
+                    manifest: nil,
                     error: nil
                 )
             case "capture.permissions.v1":
@@ -164,6 +167,7 @@ private actor HelperServer {
                     devices: nil,
                     permissions: nil,
                     pressure: nil,
+                    manifest: nil,
                     error: nil
                 )
             case "capture.devices.v1":
@@ -178,6 +182,31 @@ private actor HelperServer {
                     devices: captureDevices(),
                     permissions: nil,
                     pressure: nil,
+                    manifest: nil,
+                    error: nil
+                )
+            case "project.recover.v1":
+                guard await lifecycle.state == .idle else {
+                    throw HelperServerError.recoveryWhileCaptureActive
+                }
+                guard let projectRoot = command.projectRoot else {
+                    throw HelperServerError.missingCaptureParameters
+                }
+                let manifest = try SegmentedRecordingStore.recoverAndCheckpoint(
+                    root: URL(fileURLWithPath: projectRoot, isDirectory: true)
+                )
+                return Response(
+                    id: command.id,
+                    ok: true,
+                    protocolVersion: HelperHandshake.currentProtocolVersion,
+                    engine: "mac-media-engine",
+                    state: await lifecycle.state,
+                    capability: nil,
+                    sources: nil,
+                    devices: nil,
+                    permissions: nil,
+                    pressure: nil,
+                    manifest: manifest,
                     error: nil
                 )
             case "capture.preflight.v1":
@@ -234,6 +263,7 @@ private actor HelperServer {
                     devices: nil,
                     permissions: nil,
                     pressure: captureEngine?.pressureSnapshot(),
+                    manifest: nil,
                     error: nil
                 )
             default:
@@ -251,6 +281,7 @@ private actor HelperServer {
                 devices: nil,
                 permissions: nil,
                 pressure: captureEngine?.pressureSnapshot(),
+                manifest: nil,
                 error: String(describing: error)
             )
         }
@@ -339,6 +370,7 @@ private actor HelperServer {
             devices: nil,
             permissions: nil,
             pressure: nil,
+            manifest: nil,
             error: nil
         )
     }
@@ -359,6 +391,7 @@ private actor HelperServer {
                 camera: permissionState(for: .video)
             ),
             pressure: nil,
+            manifest: nil,
             error: nil
         )
     }
@@ -450,6 +483,7 @@ private struct MacMediaEngineMain {
                     devices: nil,
                     permissions: nil,
                     pressure: nil,
+                    manifest: nil,
                     error: "invalid_command"
                 )
             }

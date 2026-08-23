@@ -38,6 +38,57 @@ public struct RecoverableRecordingManifest: Codable, Sendable {
     public let recordingId: String
     public var state: RecordingStoreState
     public var tracks: [RecordingTrackKind: [FinalizedSegment]]
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case recordingId
+        case state
+        case tracks
+    }
+
+    public init(
+        schemaVersion: Int,
+        recordingId: String,
+        state: RecordingStoreState,
+        tracks: [RecordingTrackKind: [FinalizedSegment]]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.recordingId = recordingId
+        self.state = state
+        self.tracks = tracks
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        recordingId = try container.decode(String.self, forKey: .recordingId)
+        state = try container.decode(RecordingStoreState.self, forKey: .state)
+        do {
+            let stringTracks = try container.decode([String: [FinalizedSegment]].self, forKey: .tracks)
+            tracks = Dictionary(uniqueKeysWithValues: stringTracks.compactMap { key, value in
+                RecordingTrackKind(rawValue: key).map { ($0, value) }
+            })
+        } catch {
+            // Compatibility with the first native checkpoint, where Swift
+            // encoded enum-keyed dictionaries as alternating key/value arrays.
+            tracks = try container.decode(
+                [RecordingTrackKind: [FinalizedSegment]].self,
+                forKey: .tracks
+            )
+        }
+        for track in RecordingTrackKind.allCases where tracks[track] == nil {
+            tracks[track] = []
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(recordingId, forKey: .recordingId)
+        try container.encode(state, forKey: .state)
+        let stringTracks = Dictionary(uniqueKeysWithValues: tracks.map { ($0.key.rawValue, $0.value) })
+        try container.encode(stringTracks, forKey: .tracks)
+    }
 }
 
 public final class SegmentedRecordingStore: @unchecked Sendable {
@@ -160,14 +211,40 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
             RecoverableRecordingManifest.self,
             from: Data(contentsOf: manifestURL)
         )
+        var removedInvalidSegment = false
         for track in RecordingTrackKind.allCases {
-            manifest.tracks[track] = (manifest.tracks[track] ?? []).filter { segment in
-                FileManager.default.fileExists(atPath: root.appendingPathComponent(segment.relativePath).path)
+            let original = manifest.tracks[track] ?? []
+            let valid = original.filter { segment in
+                let url = root.appendingPathComponent(segment.relativePath)
+                guard FileManager.default.fileExists(atPath: url.path),
+                      let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+                      ((attributes[.size] as? NSNumber)?.intValue ?? 0) > 0 else { return false }
+                return true
             }
+            removedInvalidSegment = removedInvalidSegment || valid.count != original.count
+            manifest.tracks[track] = valid
         }
-        if manifest.state == .recording || manifest.state == .finalizing {
+        if manifest.state == .recording || manifest.state == .finalizing || removedInvalidSegment {
             manifest.state = .interrupted
         }
+        return manifest
+    }
+
+    public static func recoverAndCheckpoint(root: URL) throws -> RecoverableRecordingManifest {
+        let manifest = try recover(root: root)
+        let stagingRoot = root.appendingPathComponent("segments/.staging", isDirectory: true)
+        if let children = try? FileManager.default.contentsOfDirectory(
+            at: stagingRoot,
+            includingPropertiesForKeys: nil
+        ) {
+            for child in children { try FileManager.default.removeItem(at: child) }
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(manifest).write(
+            to: root.appendingPathComponent("manifest.json"),
+            options: .atomic
+        )
         return manifest
     }
 }
