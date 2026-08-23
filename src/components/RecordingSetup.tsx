@@ -5,6 +5,11 @@ import { useLocale, useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
 import { DEFAULT_VIDEO_BACKGROUND, getVideoBackgroundPreset, VIDEO_BACKGROUND_PRESETS, type VideoBackgroundPreset } from '@/config/videoBackgrounds';
 import {
+  categoriesFromRecordingTeachingSelection,
+  createRecordingTeachingSelection,
+  type TeachingRecipeCategory,
+} from '@/services/teachingFilmRecipe';
+import {
   ASPECT_PRESETS,
   type AspectRatio,
   type AspectGroup,
@@ -29,7 +34,7 @@ interface Props {
 }
 
 type Tab = AspectGroup | 'custom' | 'default';
-type TeachingRecipeAsset = 'motion' | 'charts' | 'sound';
+type TeachingRecipeAsset = TeachingRecipeCategory;
 
 const RATIOS = Object.entries(ASPECT_PRESETS) as [AspectRatio, (typeof ASPECT_PRESETS)[AspectRatio]][];
 const POSITIONS: CameraCorner[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
@@ -64,12 +69,10 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
   const [pos, setPos] = useState<CameraCorner>(initial.camera.position);
   const [bgRemove, setBgRemove] = useState(initial.camera.backgroundRemoval);
   const [recipeOpen, setRecipeOpen] = useState(false);
-  const [autoFilm, setAutoFilm] = useState(true);
-  const [recipeAssets, setRecipeAssets] = useState<Record<TeachingRecipeAsset, boolean>>({
-    motion: true,
-    charts: true,
-    sound: true,
-  });
+  const [autoFilm, setAutoFilm] = useState(initial.teachingRecipe?.enabled ?? true);
+  const [recipeAssets, setRecipeAssets] = useState<Record<TeachingRecipeAsset, boolean>>(
+    () => categoriesFromRecordingTeachingSelection(initial.teachingRecipe),
+  );
 
   if (!open) return null;
 
@@ -114,6 +117,7 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
       camera: { enabled: camEnabled, sizePx: size, shape, position: pos, backgroundRemoval: bgRemove },
       source,
       videoBackground,
+      teachingRecipe: createRecordingTeachingSelection({ enabled: autoFilm, categories: recipeAssets }),
     };
     onStart(config);
   };

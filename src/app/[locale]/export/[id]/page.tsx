@@ -44,6 +44,7 @@ import {
 } from '@/lib/db-client';
 import { getCurrentOwnerKey } from '@/lib/ownerKey';
 import { projectRecordingSetupToExport } from '@/services/recordingSetupProjection';
+import { nativeProjectRequiresExportAdapter } from '@/desktop/nativeRecordingProject';
 import type {
   AutoZoomSegment,
   ExportConfig,
@@ -309,6 +310,13 @@ export default function EditorRecordingPage(): JSX.Element {
         if (m.status === 'error') {
           setFinalizing(false);
           setLoadError(en ? 'Recording failed while saving.' : '录制保存失败。');
+          return;
+        }
+        if (nativeProjectRequiresExportAdapter(m)) {
+          setFinalizing(false);
+          setLoadError(en
+            ? 'This native recording was recovered safely, but its macOS media adapter is not available in this editor build yet.'
+            : '原生录制已安全恢复，但当前编辑器版本尚未接入 macOS 媒体读取适配器。');
           return;
         }
         if (m.status !== 'done' && m.status !== 'interrupted') {

@@ -116,6 +116,7 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
     ownerKey,
     source: opts.setup?.source ?? { kind: 'whiteboard' },
     ...(opts.setup ? { setup: opts.setup } : {}),
+    ...(opts.setup?.teachingRecipe?.enabled ? { teachingRecipeStatus: 'pending' as const } : {}),
   });
 
   // Capturing quality and cadence are untouched. The gate only lets unrelated,

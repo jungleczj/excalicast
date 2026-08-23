@@ -21,6 +21,29 @@ export interface WhiteboardSnapshot {
   appState: Record<string, unknown>;
 }
 
+export interface NativeProjectSegmentReference {
+  index: number;
+  relativePath: string;
+  startUs: number;
+  durationUs: number;
+  byteLength: number;
+}
+
+/**
+ * Reference to a ScreenCaptureKit project stored outside browser storage.
+ * The browser database keeps only bounded metadata; media remains in the
+ * user's Movies/Excalicast Projects directory.
+ */
+export interface NativeRecordingProjectReference {
+  schemaVersion: 1;
+  storage: 'macos-videos';
+  recordingId: string;
+  captureState: 'recording' | 'ready' | 'interrupted' | 'error';
+  validationState?: 'valid' | 'invalid' | 'unavailable';
+  exportStatus: 'adapter-required' | 'ready';
+  tracks?: Record<string, NativeProjectSegmentReference[]>;
+}
+
 /**
  * RecordingMetadata：与上一版相比，去掉 width/height/fps（这些移到导出阶段决定）。
  * 新增 lastFrameThumbnail（库视图用）。schema v2。
@@ -48,6 +71,10 @@ export interface RecordingMetadata {
   ownerKey?: string;
   /** 录制前 Setup 面板锁定的画幅/摄像头/工作区配置；导出默认沿用。旧录制无此字段。 */
   setup?: RecordingSetupConfig;
+  /** 录制结束后由录前白名单和录制遥测生成的一键成片轨道计划。 */
+  teachingEditRecipe?: RecordingTeachingEditRecipeV1;
+  /** 一键成片计划的后台生成状态，导出页可据此显示明确结果而非静默失败。 */
+  teachingRecipeStatus?: 'pending' | 'ready' | 'error';
   /** 录制来源。旧录制缺省为白板。 */
   source?: RecordingSourceConfig;
   /** 用户给录制打的类别标签（录制库卡片展示 + 可编辑）。 */
@@ -68,6 +95,8 @@ export interface RecordingMetadata {
   localizedTrackId?: string;
   /** 大屏幕媒体的本地 OPFS 清单。缺省时沿用旧 IndexedDB chunks。 */
   mediaStorage?: RecordingStorageManifest;
+  /** macOS native media files and their recovery/validation state. */
+  nativeProject?: NativeRecordingProjectReference;
   /** MediaRecorder fallback chunk cadence; absent legacy projects used 250ms. */
   mediaChunkIntervalMs?: number;
 }
@@ -598,4 +627,28 @@ export interface RecordingSetupConfig {
   videoBackground?: VideoBackgroundConfig;
   /** 录制来源。缺省 whiteboard。 */
   source?: RecordingSourceConfig;
+  /** 录前锁定的一键教学成片素材白名单。 */
+  teachingRecipe?: RecordingTeachingRecipeSelectionV1;
+}
+
+export interface RecordingTeachingRecipeSelectionV1 {
+  schemaVersion: 1;
+  enabled: boolean;
+  teachingPackId: string;
+  selectedAssetIds: string[];
+}
+
+export type RecordingTeachingRecipeTrack = 'motion-graphics' | 'chart' | 'sound-effect';
+
+export interface RecordingTeachingEditRecipeV1 {
+  schemaVersion: 1;
+  sourceRecordingId: string;
+  teachingPackId: string;
+  curatedAssetIds: string[];
+  placements: Array<{
+    assetId: string;
+    track: RecordingTeachingRecipeTrack;
+    startMs: number;
+    endMs: number;
+  }>;
 }

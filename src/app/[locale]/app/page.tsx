@@ -21,9 +21,18 @@ import { recordingLifecycle } from '@/services/recordingLifecycleSingleton';
 import { acquireMicStream } from '@/services/audioRecorder';
 import { acquireCameraStream } from '@/services/cameraRecorder';
 import { acquireDisplayStream, getDisplayStreamPixelSize } from '@/services/displayCaptureRecorder';
+import { finalizeRecordingTeachingRecipe } from '@/services/teachingFilmRecipe';
+import { startDesktopRecordingFromSetup } from '@/desktop/aiCameraRenderer';
+import type { DesktopAiCameraSession } from '@/desktop/aiCameraSession';
+import { DESKTOP_IPC_CHANNELS } from '@/desktop/productContract';
+import {
+  createNativeRecordingMetadata,
+  failNativeRecordingMetadata,
+  finalizeNativeRecordingMetadata,
+} from '@/desktop/nativeRecordingProject';
 import { trackEvent } from '@/lib/analytics/track';
 import type { WhiteboardChangeFn } from '@/components/Whiteboard';
-import type { CameraCorner, CameraShape, CropWindow, RecordingSetupConfig, RecordingSourceConfig, RecordingSourceKind, SourceCropWindow } from '@/types/recording';
+import type { CameraCorner, CameraShape, CropWindow, RecordingMetadata, RecordingSetupConfig, RecordingSourceConfig, RecordingSourceKind, SourceCropWindow } from '@/types/recording';
 
 const DEFAULT_SETUP: RecordingSetupConfig = {
   framing: '16:9',
@@ -179,6 +188,9 @@ export default function HomePage(): JSX.Element {
   const [recordingBarDocked, setRecordingBarDocked] = useState(false);
 
   const sessionRef = useRef<SessionHandle | null>(recordingLifecycle.activeSession());
+  const nativeSessionRef = useRef<DesktopAiCameraSession | null>(null);
+  const nativeStartedAtRef = useRef<number | null>(null);
+  const nativeMetadataRef = useRef<RecordingMetadata | null>(null);
   const stoppingRef = useRef(false);
   const changeRef = useRef<WhiteboardChangeFn | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -514,6 +526,9 @@ export default function HomePage(): JSX.Element {
       // 秒级时钟即可，1s 一跳避免录制中 4Hz 全量重渲染造成的卡顿
       tickRef.current = setInterval(() => {
         if (sessionRef.current) setElapsed(sessionRef.current.getElapsedMs());
+        else if (nativeStartedAtRef.current !== null) {
+          setElapsed(Date.now() - nativeStartedAtRef.current);
+        }
       }, 1000);
       return () => { if (tickRef.current) clearInterval(tickRef.current); };
     }
@@ -631,14 +646,72 @@ export default function HomePage(): JSX.Element {
   ) => {
     try {
       await waitForCaptureSensitiveVisualsToUnmount(config.source);
-      const session = await startRecording({
-        withCamera: config.camera.enabled,
-        workspaceRoot: workspaceRootRef.current,
+      const bridge = (window as Window & {
+        excalicastDesktop?: { invoke(channel: string, payload?: unknown): Promise<unknown> };
+      }).excalicastDesktop;
+      const nativeRecordingId = crypto.randomUUID();
+      const started = await startDesktopRecordingFromSetup({
+        bridge,
+        recordingId: nativeRecordingId,
         setup: config,
-        audioStream: micStreamRef.current,
-        cameraStream,
         displayStream: displayStreamRef.current,
+        microphoneStream: micStreamRef.current,
+        cameraStream,
+        startBrowser: () => startRecording({
+          withCamera: config.camera.enabled,
+          workspaceRoot: workspaceRootRef.current,
+          setup: config,
+          audioStream: micStreamRef.current,
+          cameraStream,
+          displayStream: displayStreamRef.current,
+        }),
       });
+      if (started.pipeline === 'native') {
+        const nativeStartedAt = Date.now();
+        try {
+          const [{ getClientDb }, { getCurrentOwnerKey }] = await Promise.all([
+            import('@/lib/db-client'),
+            import('@/lib/ownerKey'),
+          ]);
+          const metadata = createNativeRecordingMetadata({
+            recordingId: nativeRecordingId,
+            startedAt: nativeStartedAt,
+            ownerKey: await getCurrentOwnerKey(),
+            setup: config,
+          });
+          await getClientDb().recordings.put(metadata);
+          nativeMetadataRef.current = metadata;
+        } catch {
+          // A native recording without a local project row would be invisible
+          // after navigation. Stop it immediately and report a stable error.
+          await started.session.stop().catch(() => undefined);
+          throw new Error('desktop_native_metadata_create_failed');
+        }
+        // Native capture owns all four media devices on one clock. Browser
+        // previews were stopped before capture.start, so there is no hidden
+        // MediaRecorder or duplicate camera/microphone/system-audio session.
+        displayStreamRef.current = null;
+        micStreamRef.current = null;
+        setDisplayStream(null);
+        setMicStream(null);
+        setCameraStream(null);
+        nativeSessionRef.current = started.session;
+        nativeStartedAtRef.current = nativeStartedAt;
+        sessionRef.current = null;
+        setHasAudio(true);
+        setHasCamera(config.camera.enabled);
+        setState('recording');
+        setRecordingStarting(false);
+        trackEvent('recording_start', {
+          framing: config.framing,
+          withCamera: config.camera.enabled,
+          withAudio: true,
+          source: config.source?.kind ?? 'whiteboard',
+          pipeline: 'desktop-native',
+        });
+        return;
+      }
+      const session = started.session;
       // 流所有权移交 session（stop 时由其停轨）；保留 React state 供录制期间的实况预览与选区边框使用。
       // ref 清空避免页面侧重复 stop，state 只负责显示，停止/丢弃时统一由 clearDisplayStream 清掉。
       // Keep this exact stream visible to Teleprompter while recording. The
@@ -843,26 +916,42 @@ export default function HomePage(): JSX.Element {
   }, [countdown, beginRecording]);
 
   const handlePause = useCallback(() => {
+    if (nativeSessionRef.current) {
+      alert(t('startFailed', { message: 'desktop_native_pause_unsupported' }));
+      return;
+    }
     sessionRef.current?.pause();
     setState('paused');
-  }, []);
+  }, [t]);
 
   const handleResume = useCallback(() => {
+    if (nativeSessionRef.current) {
+      alert(t('startFailed', { message: 'desktop_native_pause_unsupported' }));
+      return;
+    }
     sessionRef.current?.resume();
     setState('recording');
-  }, []);
+  }, [t]);
 
   // 录制中麦克风 / 摄像头软静音状态（独立于 hasAudio / hasCamera —— 那两个表示设备是否启用）
   const [audioMuted, setAudioMuted] = useState(false);
   const [cameraMuted, setCameraMuted] = useState(false);
 
   const handleToggleAudioMute = useCallback(() => {
+    if (nativeSessionRef.current) {
+      alert(t('startFailed', { message: 'desktop_native_microphone_toggle_unsupported' }));
+      return;
+    }
     const next = !audioMuted;
     sessionRef.current?.setAudioMuted(next);
     setAudioMuted(next);
-  }, [audioMuted]);
+  }, [audioMuted, t]);
 
   const handleToggleCameraMute = useCallback(async () => {
+    if (nativeSessionRef.current) {
+      alert(t('cameraOpenFailed', { message: 'desktop_native_camera_toggle_unsupported' }));
+      return;
+    }
     // 三态循环（录制中）：off → on → muted → on …
     // off：开始录制时没勾摄像头 → 懒 acquire
     if (!hasCamera) {
@@ -907,6 +996,71 @@ export default function HomePage(): JSX.Element {
   }, [laserActive]);
 
   const handleStop = useCallback(async () => {
+    const native = nativeSessionRef.current;
+    if (native) {
+      if (stoppingRef.current) return;
+      stoppingRef.current = true;
+      const nativeStartedAt = nativeStartedAtRef.current ?? Date.now();
+      setRecordingStarting(false);
+      setState('processing');
+      try {
+        const recording = nativeMetadataRef.current;
+        if (!recording) throw new Error('desktop_native_metadata_missing');
+        await native.stop();
+        const durationMs = Date.now() - nativeStartedAt;
+        const bridge = (window as Window & {
+          excalicastDesktop?: { invoke(channel: string, payload?: unknown): Promise<unknown> };
+        }).excalicastDesktop;
+        let finalized: RecordingMetadata;
+        try {
+          if (!bridge) throw new Error('desktop_bridge_unavailable');
+          const manifest = await bridge.invoke(DESKTOP_IPC_CHANNELS.projectRecover, { recordingId: recording.id });
+          const validation = await bridge.invoke(DESKTOP_IPC_CHANNELS.projectValidate, { recordingId: recording.id });
+          finalized = finalizeNativeRecordingMetadata(recording, {
+            manifest,
+            validation,
+            durationMs,
+          });
+        } catch (err) {
+          finalized = failNativeRecordingMetadata(
+            recording,
+            durationMs,
+            err instanceof Error ? err.message : 'native_recovery_failed',
+          );
+        }
+        const { getClientDb } = await import('@/lib/db-client');
+        await getClientDb().recordings.put(finalized);
+        nativeSessionRef.current = null;
+        nativeStartedAtRef.current = null;
+        nativeMetadataRef.current = null;
+        setElapsed(0);
+        setCameraStream(null);
+        clearDisplayStream();
+        setHasCamera(false);
+        setHasAudio(false);
+        setAudioMuted(false);
+        setCameraMuted(false);
+        const exportHref = exportHrefForRecording(recording.id);
+        try { router.push(exportHref); }
+        catch { router.replace(exportHref); }
+        window.setTimeout(closeDesktopControls, 0);
+        trackEvent('recording_complete', {
+          durationMs,
+          framing: setupConfig.framing,
+          hasCamera: setupConfig.camera.enabled,
+          hasAudio: true,
+          pipeline: 'desktop-native',
+          nativeCaptureState: finalized.nativeProject?.captureState ?? 'unknown',
+          nativeValidationState: finalized.nativeProject?.validationState ?? 'unknown',
+        });
+      } catch (err) {
+        setState('recording');
+        alert(t('startFailed', { message: err instanceof Error ? err.message : 'desktop_native_stop_failed' }));
+      } finally {
+        stoppingRef.current = false;
+      }
+      return;
+    }
     const s = sessionRef.current ?? recordingLifecycle.activeSession();
     if (!s || stoppingRef.current) return;
     stoppingRef.current = true;
@@ -945,6 +1099,16 @@ export default function HomePage(): JSX.Element {
 
     void finalizeRecording.then(async (meta) => {
       if (!meta) return;
+      if (meta.setup?.teachingRecipe?.enabled) {
+        try {
+          await finalizeRecordingTeachingRecipe(meta);
+        } catch {
+          try {
+            const { getClientDb } = await import('@/lib/db-client');
+            await getClientDb().recordings.update(meta.id, { teachingRecipeStatus: 'error' });
+          } catch { /* status update is best-effort; the source recording remains usable */ }
+        }
+      }
       trackEvent('recording_complete', { durationMs: meta.durationMs, framing: setupConfig.framing, hasCamera: meta.hasCamera, hasAudio: meta.hasAudio });
       // 持久化录制中最终框定的裁切框到 recording.setup（导出默认沿用）
       const cw = cropWindowRef.current;

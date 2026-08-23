@@ -11,6 +11,19 @@ export interface CuratedTeachingAsset {
   durationMs: number;
 }
 
+export const DEFAULT_TEACHING_PACK_ID = 'chatcut-teaching-core-v1';
+
+/**
+ * The starter pack is intentionally explicit and versioned. The UI never gets
+ * access to an unbounded ChatCut catalog during recording; future catalog sync
+ * replaces this list before the user confirms the setup.
+ */
+export const DEFAULT_CURATED_TEACHING_ASSETS: readonly CuratedTeachingAsset[] = Object.freeze([
+  Object.freeze({ assetId: 'key-points-drawer-01', kind: 'motion-graphic' as const, durationMs: 3_200 }),
+  Object.freeze({ assetId: 'chart-bars-01', kind: 'chart' as const, durationMs: 4_000 }),
+  Object.freeze({ assetId: 'teaching-pop-01', kind: 'sound-effect' as const, durationMs: 420 }),
+]);
+
 export interface TeachingAssetPreselectionV1 {
   schemaVersion: 1;
   teachingPackId: string;

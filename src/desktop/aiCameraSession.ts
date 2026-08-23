@@ -155,6 +155,7 @@ export async function startDesktopAiCameraSession(
   if (started.state !== 'recording') throw new Error('desktop_capture_start_invalid');
 
   let stopped = false;
+  let stopAttempt: Promise<void> | null = null;
   return {
     recordingId: input.recordingId,
     state: 'recording',
@@ -162,8 +163,12 @@ export async function startDesktopAiCameraSession(
     microphoneDeviceID,
     async stop() {
       if (stopped) return;
-      stopped = true;
-      await input.bridge.invoke(DESKTOP_IPC_CHANNELS.captureStop);
+      if (!stopAttempt) {
+        stopAttempt = input.bridge.invoke(DESKTOP_IPC_CHANNELS.captureStop)
+          .then(() => { stopped = true; })
+          .finally(() => { stopAttempt = null; });
+      }
+      await stopAttempt;
     },
   };
 }
