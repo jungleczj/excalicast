@@ -9,12 +9,29 @@
  * 窗口拖动：`-webkit-app-region: drag` 让整条可拖动 OS 窗口，按钮/输入框 `no-drag` 保持可点。
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocale } from 'next-intl';
 import { Teleprompter } from '@/components/Teleprompter';
+import { DESKTOP_IPC_CHANNELS } from '@/desktop/productContract';
+import type { DesktopTeleprompterState } from '@/desktop/teleprompterSession';
 
 export default function NotchPage(): JSX.Element {
   const en = useLocale() === 'en';
+  const [state, setState] = useState<DesktopTeleprompterState | null>(null);
+
+  useEffect(() => {
+    const bridge = window.excalicastDesktop;
+    if (!bridge) return;
+    let active = true;
+    void bridge.invoke(DESKTOP_IPC_CHANNELS.teleprompterGetState).then((value) => {
+      if (active) setState(value as DesktopTeleprompterState);
+    });
+    const unsubscribe = bridge.subscribe(
+      DESKTOP_IPC_CHANNELS.teleprompterStateChanged,
+      (value) => setState(value as DesktopTeleprompterState),
+    );
+    return () => { active = false; unsubscribe(); };
+  }, []);
 
   // 透明页底，便于原生壳透出圆角 / 刘海形状。
   useEffect(() => {
@@ -38,7 +55,13 @@ export default function NotchPage(): JSX.Element {
         .notch-host .rb-no-record textarea,
         .notch-host .rb-no-record [data-w] { -webkit-app-region: no-drag; }
       ` }} />
-      <Teleprompter open embedded en={en} onClose={() => { /* 原生壳负责关闭 */ }} />
+      <Teleprompter
+        open={state?.visible ?? false}
+        embedded
+        en={en}
+        externalState={state}
+        onClose={() => { /* 原生壳负责关闭 */ }}
+      />
     </>
   );
 }

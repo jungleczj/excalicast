@@ -17,6 +17,8 @@ import { useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { createPortal } from 'react-dom';
 import { I } from '@/components/icons';
 import { buildScriptUnits, recognizedUnits, advanceUnitPointer, unitPointerToWordIndex } from '@/utils/teleprompterTracking';
+import { DESKTOP_IPC_CHANNELS } from '@/desktop/productContract';
+import type { DesktopTeleprompterState } from '@/desktop/teleprompterSession';
 
 interface Props {
   open: boolean;
@@ -28,11 +30,20 @@ interface Props {
   autoFollow?: boolean;
   /** 录制麦克风流：传入则跟读与录制**共用同一路音频**（不抢占）；缺省时跟读自取麦克风。 */
   micStream?: MediaStream | null;
+  /** Electron notch windows are display-only subscribers to the main renderer. */
+  externalState?: DesktopTeleprompterState | null;
 }
 
 // 原生壳（Electron）桥接：刘海窗口的尺寸/关闭由原生侧控制。
 interface NotchAPI { compact?: () => void; expand?: () => void; close?: () => void }
-const notchAPI = (): NotchAPI | undefined => (typeof window !== 'undefined' ? (window as any).notchAPI : undefined);
+const notchAPI = (): NotchAPI | undefined => {
+  if (typeof window === 'undefined') return undefined;
+  if ((window as any).notchAPI) return (window as any).notchAPI;
+  const bridge = (window as any).excalicastDesktop;
+  if (!bridge) return undefined;
+  const setMode = (mode: string) => { void bridge.invoke(DESKTOP_IPC_CHANNELS.teleprompterSetMode, { mode }); };
+  return { compact: () => setMode('compact'), expand: () => setMode('expanded'), close: () => setMode('close') };
+};
 
 const LS = {
   text: 'excalicast.teleprompter.text',
@@ -83,7 +94,7 @@ function segmentWords(text: string, locale: string): { raw: string; isWord: bool
 type Mode = 'idle' | 'auto' | 'voice';
 type VoiceStatus = 'off' | 'loading' | 'listening' | 'error' | 'fallback';
 
-export function Teleprompter({ open, onClose, en, embedded = false, autoFollow = false, micStream = null }: Props): JSX.Element | null {
+export function Teleprompter({ open, onClose, en, embedded = false, autoFollow = false, micStream = null, externalState = null }: Props): JSX.Element | null {
   const [text, setText] = useState('');
   const [editing, setEditing] = useState(false);
   const [mode, setMode] = useState<Mode>('idle');
@@ -133,7 +144,58 @@ export function Teleprompter({ open, onClose, en, embedded = false, autoFollow =
       else setPos({ x: Math.round(window.innerWidth / 2 - PANEL_W / 2), y: isMac ? 8 : 80 });
     } catch { /* */ }
   }, []);
-  useEffect(() => { if (open && !text) setEditing(true); /* eslint-disable-next-line */ }, [open]);
+  useEffect(() => { if (open && !text && !embedded && !externalState) setEditing(true); /* eslint-disable-next-line */ }, [open, embedded, externalState]);
+
+  useEffect(() => {
+    if (!externalState) return;
+    setText(externalState.script);
+    setSpeed(externalState.speed);
+    setFontSize(externalState.fontSize);
+    setOpacity(externalState.opacity);
+    setLangPref(externalState.language);
+    setCurWord(externalState.currentWord);
+    setHeard(externalState.heard);
+    setVoiceStatus(externalState.recognitionStatus === 'idle' ? 'off' : externalState.recognitionStatus);
+    setMode(externalState.mode === 'smart-readalong' ? 'voice' : 'auto');
+    setEditing(false);
+  }, [externalState]);
+
+  // The main renderer owns recognition and publishes low-frequency state. The
+  // embedded notch window is deliberately excluded to prevent a second mic request.
+  useEffect(() => {
+    if (embedded || typeof window === 'undefined') return;
+    const bridge = (window as any).excalicastDesktop;
+    if (!bridge) return;
+    void bridge.invoke(DESKTOP_IPC_CHANNELS.teleprompterConfigure, {
+      configuration: {
+        schemaVersion: 1,
+        visible: open,
+        script: text,
+        language: langPref,
+        mode: mode === 'voice' ? 'smart-readalong' : 'constant-speed',
+        dock: docked ? 'notch' : 'floating',
+        microphoneSource: 'recording-session-pcm',
+        fallback: 'constant-speed',
+        excludeFromCapture: true,
+        speed,
+        fontSize,
+        opacity,
+      },
+    });
+  }, [docked, embedded, fontSize, langPref, mode, opacity, open, speed, text]);
+
+  useEffect(() => {
+    if (embedded || typeof window === 'undefined') return;
+    const bridge = (window as any).excalicastDesktop;
+    if (!bridge) return;
+    void bridge.invoke(DESKTOP_IPC_CHANNELS.teleprompterConfigure, {
+      progress: {
+        currentWord: curWord,
+        recognitionStatus: voiceStatus === 'off' ? 'idle' : voiceStatus,
+        heard,
+      },
+    });
+  }, [curWord, embedded, heard, voiceStatus]);
   useEffect(() => { try { localStorage.setItem(LS.text, text); } catch { /* */ } }, [text]);
   useEffect(() => { try { localStorage.setItem(LS.speed, String(speed)); } catch { /* */ } }, [speed]);
   useEffect(() => { try { localStorage.setItem(LS.font, String(fontSize)); } catch { /* */ } }, [fontSize]);
@@ -164,7 +226,7 @@ export function Teleprompter({ open, onClose, en, embedded = false, autoFollow =
 
   // 智能跟读：离线 vosk-browser，喂入共用的 micStream（不抢占）。vosk 模块动态 import（懒加载，不进主包）。
   useEffect(() => {
-    if (!open || editing || mode !== 'voice') return;
+    if (!open || editing || mode !== 'voice' || embedded) return;
     if (!hasVosk) { setVoiceStatus('error'); return; }
     let stopped = false;
     let handle: { stop: () => void } | null = null;
@@ -397,12 +459,12 @@ export function Teleprompter({ open, onClose, en, embedded = false, autoFollow =
         {/* 智能跟读开关（Sparkles，非麦克风图标） */}
         {hasVosk && (
           <button type="button" style={{ ...btn(mode === 'voice'), width: 22, height: 22 }}
-            onClick={() => setMode((m) => (m === 'voice' ? 'idle' : 'voice'))}
+            onClick={() => { if (!externalState) setMode((m) => (m === 'voice' ? 'idle' : 'voice')); }}
             title={en ? 'Smart read-along' : '智能跟读'}><I.Sparkles size={12} /></button>
         )}
         {/* 语言 */}
         <button type="button" style={{ ...btn(langPref !== 'auto'), width: 22, height: 22, fontSize: 9, fontWeight: 700 }}
-          onClick={cycleLang} title={langTitle}>{langLabel}</button>
+          onClick={() => { if (!externalState) cycleLang(); }} title={langTitle}>{langLabel}</button>
         {/* 状态点 */}
         {mode === 'voice' && statusDot && (
           <span title={statusDot.t} aria-label={statusDot.t}
@@ -430,7 +492,7 @@ export function Teleprompter({ open, onClose, en, embedded = false, autoFollow =
           </button>
         )}
         <button type="button" style={{ ...btn(editing), width: 22, height: 22 }}
-          onClick={() => { setEditing(true); setMode('idle'); }} title={en ? 'Edit script' : '编辑讲稿'}><I.Pencil size={11} /></button>
+          onClick={() => { if (!externalState) { setEditing(true); setMode('idle'); } }} title={en ? 'Edit script' : '编辑讲稿'}><I.Pencil size={11} /></button>
         {!embedded && (
           <button type="button" style={{ ...btn(isFs), width: 22, height: 22 }}
             onClick={() => void toggleFullscreen()} title={isFs ? (en ? 'Exit fullscreen' : '退出全屏') : (en ? 'Fullscreen · seamless notch' : '全屏 · 无缝贴刘海')}>⛶</button>

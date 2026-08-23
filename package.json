@@ -15,6 +15,8 @@
     "typecheck": "tsc --noEmit",
     "desktop:typecheck": "tsc -p apps/desktop/tsconfig.json --noEmit",
     "desktop:build": "tsc -p apps/desktop/tsconfig.json",
+    "desktop:native:build": "node scripts/build-mac-media-engine.mjs",
+    "desktop:package:mac": "npm run desktop:build && npm run desktop:native:build && electron-builder --mac dmg --arm64 --publish never",
     "desktop:dev": "npm run desktop:build && electron apps/desktop/dist/apps/desktop/src/main.js",
     "desktop:native:test": "swift run --package-path native/mac-media-engine --scratch-path native/mac-media-engine/.build-local mac-media-engine-contract-tests",
     "desktop:native:soak": "npm run desktop:build && node scripts/run-native-capture-soak.mjs",
@@ -64,9 +66,52 @@
     "@types/ws": "^8.5.12",
     "autoprefixer": "^10.4.20",
     "electron": "^43.4.1",
+    "electron-builder": "26.15.3",
     "playwright": "^1.59.1",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.13",
     "typescript": "^5.6.3"
+  },
+  "main": "apps/desktop/dist/apps/desktop/src/main.js",
+  "build": {
+    "appId": "cc.excalicast.desktop",
+    "productName": "Excalicast",
+    "artifactName": "Excalicast-mac-${arch}.${ext}",
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "npmRebuild": false,
+    "files": [
+      "apps/desktop/dist/**/*",
+      "!node_modules/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "apps/desktop/build/bin/mac-media-engine",
+        "to": "bin/mac-media-engine"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "minimumSystemVersion": "13.0",
+      "icon": "src/app/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "notarize": true,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Excalicast records your microphone for lessons and smart teleprompter read-along.",
+        "NSCameraUsageDescription": "Excalicast records your camera when you enable AI Camera.",
+        "NSScreenCaptureUsageDescription": "Excalicast records the screen or window you select for a lesson."
+      }
+    }
   }
 }

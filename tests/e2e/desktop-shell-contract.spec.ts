@@ -9,6 +9,7 @@ import {
   exposedDesktopBridgeChannels,
   exposedDesktopEventChannels,
   parseDesktopWindowMediaSourceId,
+  isTrustedDesktopRendererUrl,
   resolveDesktopTeleprompterBounds,
 } from '../../apps/desktop/src/windowContract';
 import {
@@ -42,6 +43,21 @@ test('desktop shell uses a hardened renderer with a narrow versioned bridge', ()
   expect(webPreferences?.sandbox).toBe(true);
   expect(webPreferences?.preload).toBe('/tmp/excalicast-preload.js');
   expect(exposedDesktopBridgeChannels.every((channel) => channel.endsWith('.v1'))).toBe(true);
+});
+
+test('packaged desktop preload cannot navigate onto an untrusted web origin', () => {
+  expect(isTrustedDesktopRendererUrl(
+    'https://excalicast.cc/zh/app',
+    'https://excalicast.cc/app',
+  )).toBe(true);
+  expect(isTrustedDesktopRendererUrl(
+    'https://evil.example/app',
+    'https://excalicast.cc/app',
+  )).toBe(false);
+  expect(isTrustedDesktopRendererUrl(
+    'javascript:alert(1)',
+    'https://excalicast.cc/app',
+  )).toBe(false);
 });
 
 test('renderer bridge never exposes raw frames or unrestricted IPC', () => {

@@ -641,7 +641,8 @@ export default function HomePage(): JSX.Element {
       });
       // 流所有权移交 session（stop 时由其停轨）；保留 React state 供录制期间的实况预览与选区边框使用。
       // ref 清空避免页面侧重复 stop，state 只负责显示，停止/丢弃时统一由 clearDisplayStream 清掉。
-      setMicStream(null);
+      // Keep this exact stream visible to Teleprompter while recording. The
+      // recording session owns/stops it; smart read-along only consumes its PCM.
       displayStreamRef.current = null;
       sessionRef.current = session;
       recordingLifecycle.attach(session);

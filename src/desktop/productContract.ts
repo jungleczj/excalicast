@@ -33,7 +33,7 @@ export const DESKTOP_FEATURE_MIGRATION_MATRIX: readonly DesktopFeatureMigration[
   { id: 'editor.autozoom-highlight-keypoints', desktop: 'shared', owner: 'editor-ui' },
   { id: 'editor.captions-audio-repair-dubbing', desktop: 'shared', owner: 'editor-ui' },
   { id: 'editor.ratios-export', desktop: 'shared', owner: 'editor-ui' },
-  { id: 'teleprompter.smart-readalong', desktop: 'desktop-native', owner: 'mac-media-engine' },
+  { id: 'teleprompter.smart-readalong', desktop: 'shared', owner: 'editor-ui' },
   { id: 'chatcut.assisted-editing', desktop: 'shared', owner: 'chatcut-contract' },
 ] as const;
 

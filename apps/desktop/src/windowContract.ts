@@ -10,6 +10,20 @@ const desktopEventChannelSet = new Set<string>(exposedDesktopEventChannels);
 export const exposedDesktopBridgeChannels = Object.values(DESKTOP_IPC_CHANNELS)
   .filter((channel) => !desktopEventChannelSet.has(channel));
 
+export function isTrustedDesktopRendererUrl(candidate: string, rendererBaseUrl: string): boolean {
+  try {
+    const candidateUrl = new URL(candidate);
+    const baseUrl = new URL(rendererBaseUrl);
+    if (candidateUrl.origin !== baseUrl.origin) return false;
+    if (baseUrl.protocol === 'https:') return candidateUrl.protocol === 'https:';
+    return baseUrl.protocol === 'http:'
+      && candidateUrl.protocol === 'http:'
+      && (baseUrl.hostname === 'localhost' || baseUrl.hostname === '127.0.0.1');
+  } catch {
+    return false;
+  }
+}
+
 export function createDesktopWindowOptions(preload: string): BrowserWindowConstructorOptions {
   return {
     width: 1440,

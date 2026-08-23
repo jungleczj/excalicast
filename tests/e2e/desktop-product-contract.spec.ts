@@ -30,6 +30,8 @@ import {
   createDesktopTeleprompterState,
   resolveDesktopTeleprompterAudioRole,
 } from '../../src/desktop/teleprompterSession';
+import { resolveDesktopDownloadUrl } from '../../src/desktop/downloadContract';
+import packageJson from '../../package.json';
 
 const REQUIRED_BROWSER_FEATURES: DesktopFeatureId[] = [
   'whiteboard.excalidraw-full',
@@ -50,6 +52,26 @@ test('desktop migration contract inherits every browser feature without omission
 
   for (const id of REQUIRED_BROWSER_FEATURES) expect(ids.has(id), id).toBe(true);
   expect(DESKTOP_FEATURE_MIGRATION_MATRIX.every((entry) => entry.desktop !== 'omitted')).toBe(true);
+});
+
+test('web navigation resolves a stable signed macOS installer release URL', () => {
+  expect(resolveDesktopDownloadUrl('mac')).toBe(
+    'https://github.com/jungleczj/excalicast/releases/latest/download/Excalicast-mac-arm64.dmg',
+  );
+  expect(resolveDesktopDownloadUrl('mac', 'https://cdn.example.com/Excalicast.dmg')).toBe(
+    'https://cdn.example.com/Excalicast.dmg',
+  );
+  expect(() => resolveDesktopDownloadUrl('windows' as 'mac')).toThrow('desktop_platform_unsupported');
+
+  expect(packageJson.scripts['desktop:package:mac']).toBeTruthy();
+  expect(packageJson.build).toMatchObject({
+    appId: 'cc.excalicast.desktop',
+    productName: 'Excalicast',
+    mac: {
+      hardenedRuntime: true,
+      target: [{ target: 'dmg', arch: ['arm64'] }],
+    },
+  });
 });
 
 test('desktop ink uses the full Excalidraw surface with independent opacity controls', () => {

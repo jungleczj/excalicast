@@ -1,7 +1,10 @@
 node_modules/
 native/**/.build-local/
 native/**/.build/
+native/**/.build-release/
 apps/**/dist/
+apps/desktop/build/bin/
+dist-desktop/
 .next/
 out/
 data/

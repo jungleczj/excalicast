@@ -9,6 +9,13 @@ import {
   type DesktopInkSettings,
 } from '../../../src/desktop/productContract';
 import {
+  applyDesktopTeleprompterProgress,
+  configureDesktopTeleprompter,
+  createDesktopTeleprompterState,
+  type DesktopTeleprompterConfiguration,
+  type DesktopTeleprompterState,
+} from '../../../src/desktop/teleprompterSession';
+import {
   spawnNativeHelper,
   type NativeHelperClient,
   type NativeHelperHandshake,
@@ -19,14 +26,19 @@ import {
 } from './captureRequest';
 import {
   createDesktopInkWindowOptions,
+  createDesktopTeleprompterWindowOptions,
   createDesktopWindowOptions,
+  isTrustedDesktopRendererUrl,
   parseDesktopWindowMediaSourceId,
+  resolveDesktopTeleprompterBounds,
 } from './windowContract';
 import { createNativeInkEventBatch } from './inkEventBatch';
 import { readNativeInkEventSegments } from './inkEventReader';
 
 let mainWindow: BrowserWindow | null = null;
 let inkWindow: BrowserWindow | null = null;
+let teleprompterWindow: BrowserWindow | null = null;
+let teleprompterState: DesktopTeleprompterState = createDesktopTeleprompterState();
 let inkSettings: DesktopInkSettings = normalizeDesktopInkSettings({
   mode: 'ink',
   backgroundOpacity: 0,
@@ -39,6 +51,26 @@ let nativeHelperInitialization: Promise<void> | null = null;
 let activeNativeCapture: { recordingId: string; startedUnixMs: number; nextInkEventIndex: number } | null = null;
 let inkEventCommitTail: Promise<void> = Promise.resolve();
 const pendingInkFlushes = new Map<string, () => void>();
+
+function rendererBaseUrl(): string {
+  return process.env.EXCALICAST_RENDERER_URL
+    ?? (app.isPackaged ? 'https://excalicast.cc/app' : 'http://localhost:3001/app');
+}
+
+function configureTrustedNavigation(window: BrowserWindow): void {
+  const baseUrl = rendererBaseUrl();
+  const guard = (event: Electron.Event, url: string) => {
+    if (isTrustedDesktopRendererUrl(url, baseUrl)) return;
+    event.preventDefault();
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+  };
+  window.webContents.on('will-navigate', guard);
+  window.webContents.on('will-redirect', guard);
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+}
 
 async function initializeNativeHelper(): Promise<void> {
   const packagedPath = path.join(process.resourcesPath, 'bin', 'mac-media-engine');
@@ -54,6 +86,44 @@ async function initializeNativeHelper(): Promise<void> {
 }
 
 function registerDesktopIpc(): void {
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.teleprompterGetState, () => teleprompterState);
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.teleprompterConfigure, (_event, payload: unknown) => {
+    const value = objectPayload(payload, 'desktop_teleprompter_payload_invalid');
+    if (value.configuration) {
+      teleprompterState = configureDesktopTeleprompter(
+        teleprompterState,
+        value.configuration as DesktopTeleprompterConfiguration,
+      );
+    } else if (value.progress) {
+      const progress = objectPayload(value.progress, 'desktop_teleprompter_progress_invalid');
+      teleprompterState = applyDesktopTeleprompterProgress(teleprompterState, {
+        currentWord: progress.currentWord as number,
+        recognitionStatus: progress.recognitionStatus as DesktopTeleprompterState['recognitionStatus'],
+        heard: typeof progress.heard === 'string' ? progress.heard : '',
+      });
+    } else {
+      throw new Error('desktop_teleprompter_payload_invalid');
+    }
+    applyTeleprompterVisibility();
+    broadcastTeleprompterState();
+    return teleprompterState;
+  });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.teleprompterSetMode, (_event, payload: unknown) => {
+    const value = objectPayload(payload, 'desktop_teleprompter_mode_invalid');
+    if (value.mode === 'close') {
+      teleprompterState = { ...teleprompterState, visible: false };
+      teleprompterWindow?.hide();
+    } else if (value.mode === 'compact' || value.mode === 'expanded') {
+      const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+      const window = createOrMoveTeleprompterWindow();
+      window.setBounds(resolveDesktopTeleprompterBounds(display, value.mode), true);
+      if (teleprompterState.visible) window.showInactive();
+    } else {
+      throw new Error('desktop_teleprompter_mode_invalid');
+    }
+    broadcastTeleprompterState();
+    return teleprompterState;
+  });
   ipcMain.handle(DESKTOP_IPC_CHANNELS.inkGetSettings, () => desktopInkState());
   ipcMain.handle(DESKTOP_IPC_CHANNELS.inkSetMode, async (_event, payload: unknown) => {
     const value = objectPayload(payload, 'desktop_ink_mode_invalid');
@@ -226,6 +296,7 @@ function createOrMoveInkWindow(displayID?: number): BrowserWindow {
   }
   const preload = path.join(__dirname, 'preload.js');
   const window = new BrowserWindow(createDesktopInkWindowOptions(preload, display.bounds));
+  configureTrustedNavigation(window);
   inkWindow = window;
   window.setAlwaysOnTop(true, 'screen-saver');
   window.setVisibleOnAllWorkspaces(true, {
@@ -249,11 +320,49 @@ function applyInkWindowSettings(window: BrowserWindow): void {
 }
 
 function desktopInkRendererUrl(): string {
-  const rendererUrl = new URL(process.env.EXCALICAST_RENDERER_URL ?? 'http://localhost:3001/app');
+  const rendererUrl = new URL(rendererBaseUrl());
   rendererUrl.pathname = '/desktop-ink';
   rendererUrl.search = '';
   rendererUrl.hash = '';
   return rendererUrl.toString();
+}
+
+function createOrMoveTeleprompterWindow(): BrowserWindow {
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  if (teleprompterWindow && !teleprompterWindow.isDestroyed()) {
+    teleprompterWindow.setBounds(resolveDesktopTeleprompterBounds(display, 'compact'), false);
+    return teleprompterWindow;
+  }
+  const preload = path.join(__dirname, 'preload.js');
+  const window = new BrowserWindow(createDesktopTeleprompterWindowOptions(preload, display));
+  configureTrustedNavigation(window);
+  teleprompterWindow = window;
+  window.setAlwaysOnTop(true, 'screen-saver');
+  window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+  window.setContentProtection(true);
+  window.on('closed', () => { if (teleprompterWindow === window) teleprompterWindow = null; });
+  const rendererUrl = new URL(rendererBaseUrl());
+  rendererUrl.pathname = '/notch';
+  rendererUrl.search = '';
+  rendererUrl.hash = '';
+  void window.loadURL(rendererUrl.toString());
+  return window;
+}
+
+function applyTeleprompterVisibility(): void {
+  if (!teleprompterState.visible) {
+    teleprompterWindow?.hide();
+    return;
+  }
+  createOrMoveTeleprompterWindow().showInactive();
+}
+
+function broadcastTeleprompterState(): void {
+  for (const window of [mainWindow, teleprompterWindow]) {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send(DESKTOP_IPC_CHANNELS.teleprompterStateChanged, teleprompterState);
+    }
+  }
 }
 
 function desktopInkState(): DesktopInkSettings & {
@@ -297,12 +406,13 @@ async function requestInkWindowFlush(): Promise<void> {
 }
 
 function privateOverlayWindowIDs(): number[] {
-  if (!inkWindow || inkWindow.isDestroyed() || !inkWindow.isVisible()) return [];
-  try {
-    return [parseDesktopWindowMediaSourceId(inkWindow.getMediaSourceId())];
-  } catch {
-    return [];
+  const ids: number[] = [];
+  for (const window of [inkWindow, teleprompterWindow]) {
+    if (!window || window.isDestroyed() || !window.isVisible()) continue;
+    try { ids.push(parseDesktopWindowMediaSourceId(window.getMediaSourceId())); }
+    catch { /* best-effort exclusion */ }
   }
+  return ids;
 }
 
 function objectPayload(payload: unknown, errorCode: string): Record<string, unknown> {
@@ -318,13 +428,10 @@ function requiredSafeInteger(value: unknown, errorCode: string): number {
 function createMainWindow(): BrowserWindow {
   const preload = path.join(__dirname, 'preload.js');
   const window = new BrowserWindow(createDesktopWindowOptions(preload));
-  const rendererUrl = process.env.EXCALICAST_RENDERER_URL ?? 'http://localhost:3001/app';
+  const rendererUrl = rendererBaseUrl();
 
   window.once('ready-to-show', () => window.show());
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
-    return { action: 'deny' };
-  });
+  configureTrustedNavigation(window);
   void window.loadURL(rendererUrl);
   return window;
 }
@@ -349,6 +456,8 @@ app.on('before-quit', () => {
   pendingInkFlushes.clear();
   inkWindow?.destroy();
   inkWindow = null;
+  teleprompterWindow?.destroy();
+  teleprompterWindow = null;
   nativeHelper?.close();
   nativeHelper = null;
   nativeHelperHandshake = null;

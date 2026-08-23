@@ -90,6 +90,9 @@ export function applyDesktopTeleprompterProgress(
   if (!Number.isSafeInteger(progress.currentWord) || progress.currentWord < -1) {
     throw new Error('desktop_teleprompter_progress_invalid');
   }
+  if (!['idle', 'loading', 'listening', 'fallback', 'error'].includes(progress.recognitionStatus)) {
+    throw new Error('desktop_teleprompter_progress_invalid');
+  }
   return {
     ...current,
     currentWord: progress.currentWord,

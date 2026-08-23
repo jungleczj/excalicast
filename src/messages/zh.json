@@ -9,6 +9,7 @@
         "home": "主页",
         "library": "录制库",
         "pricing": "价格",
+        "downloadMac": "下载 Mac 版",
         "login": "登录 / 注册",
         "menu": "菜单",
         "plans": "方案",
@@ -406,6 +407,10 @@
   "header": {
     "library": "录制库",
     "record": "录制",
+    "downloadMac": "下载 Mac 版",
+    "openNavigationMenu": "打开导航菜单",
+    "closeNavigationMenu": "关闭导航菜单",
+    "navigationMenu": "导航菜单",
     "upgradePro": "升级 Pro",
     "loggedIn": "已登录",
     "logout": "退出登录",
