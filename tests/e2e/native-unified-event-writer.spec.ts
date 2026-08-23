@@ -175,8 +175,8 @@ test('failed ack retries exact tuple while a paused drop ack advances the produc
 test('pause waits for ink and telemetry queues before native pause', () => {
   const source = fs.readFileSync('apps/desktop/src/main.ts', 'utf8');
   const handler = source.slice(
-    source.indexOf('ipcMain.handle(DESKTOP_IPC_CHANNELS.capturePause'),
-    source.indexOf('ipcMain.handle(DESKTOP_IPC_CHANNELS.captureResume'),
+    source.indexOf('DESKTOP_IPC_CHANNELS.capturePause'),
+    source.indexOf('DESKTOP_IPC_CHANNELS.captureResume'),
   );
   expect(handler.indexOf('await requestInkWindowFlush()')).toBeLessThan(handler.indexOf('pauseCapture()'));
   expect(handler.indexOf('await inkEventCommitTail')).toBeLessThan(handler.indexOf('pauseCapture()'));

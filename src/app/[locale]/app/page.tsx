@@ -26,6 +26,13 @@ import { startDesktopRecordingFromSetup } from '@/desktop/aiCameraRenderer';
 import type { DesktopAiCameraSession } from '@/desktop/aiCameraSession';
 import { DESKTOP_IPC_CHANNELS } from '@/desktop/productContract';
 import {
+  cameraLayoutValue,
+  createMainRendererTelemetrySession,
+  teachingModeForSource,
+  type MainRendererTelemetrySession,
+} from '@/desktop/mainRendererTelemetry';
+import type { RendererCapturePayload } from '@/desktop/unifiedEventCaptureAdapter';
+import {
   createNativeRecordingMetadata,
   failNativeRecordingMetadata,
   finalizeNativeRecordingMetadata,
@@ -90,6 +97,10 @@ function exportHrefForRecording(recordingId: string): string {
 
 function waitForAnimationFrame(): Promise<void> {
   return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+}
+
+function monotonicHostUs(): number {
+  return Math.round(performance.now() * 1_000);
 }
 
 async function waitForCaptureSensitiveVisualsToUnmount(source: RecordingSetupConfig['source'] | undefined): Promise<void> {
@@ -191,6 +202,7 @@ export default function HomePage(): JSX.Element {
   const sessionRef = useRef<SessionHandle | null>(recordingLifecycle.activeSession());
   const nativeSessionRef = useRef<DesktopAiCameraSession | null>(null);
   const nativeMetadataRef = useRef<RecordingMetadata | null>(null);
+  const nativeTelemetryRef = useRef<MainRendererTelemetrySession | null>(null);
   const stoppingRef = useRef(false);
   const changeRef = useRef<WhiteboardChangeFn | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -205,6 +217,20 @@ export default function HomePage(): JSX.Element {
   // 演示缩放：双击画布放大/还原（开关 or Alt/⌘+双击）
   const [zoomMode, setZoomMode] = useState(false);
   const zoomedRef = useRef(false);
+
+  const recordNativeTelemetry = useCallback((payload: RendererCapturePayload): Promise<void> => {
+    const telemetry = nativeTelemetryRef.current;
+    if (!telemetry) return Promise.resolve();
+    return telemetry.capture(payload);
+  }, []);
+
+  const recordNativeTelemetryInBackground = useCallback((payload: RendererCapturePayload): void => {
+    void recordNativeTelemetry(payload).catch((error) => {
+      // The adapter retains failed lossless events for the next capture/flush.
+      // Keep the failure observable without interrupting a camera drag gesture.
+      console.error('desktop_input_telemetry_capture_failed', error);
+    });
+  }, [recordNativeTelemetry]);
 
   useEffect(() => {
     const active = recordingLifecycle.activeSession();
@@ -369,8 +395,13 @@ export default function HomePage(): JSX.Element {
     cameraPosLsTimerRef.current = setTimeout(() => {
       try { localStorage.setItem('excalicast.camera-pos', JSON.stringify(p)); }
       catch { /* quota / private mode */ }
+      recordNativeTelemetryInBackground({
+        kind: 'camera-control',
+        action: 'set-layout',
+        value: cameraLayoutValue({ x: p.x, y: p.y, size: cameraSize, shape: cameraShape }),
+      });
     }, 250);
-  }, [cameraSize, getCropFrameRect]);
+  }, [cameraShape, cameraSize, getCropFrameRect, recordNativeTelemetryInBackground]);
 
   // 摄像头尺寸变更：(1) 录制中转发给 session（位置不变、size 变）；(2) debounced 写 localStorage
   const handleCameraSizeChange = useCallback((next: number) => {
@@ -382,8 +413,13 @@ export default function HomePage(): JSX.Element {
     cameraSizeLsTimerRef.current = setTimeout(() => {
       try { localStorage.setItem('excalicast.camera-size', String(next)); }
       catch { /* quota / private mode */ }
+      recordNativeTelemetryInBackground({
+        kind: 'camera-control',
+        action: 'set-layout',
+        value: cameraLayoutValue({ x: cameraPos.x, y: cameraPos.y, size: next, shape: cameraShape }),
+      });
     }, 250);
-  }, [cameraPos.x, cameraPos.y, getCropFrameRect]);
+  }, [cameraPos.x, cameraPos.y, cameraShape, getCropFrameRect, recordNativeTelemetryInBackground]);
 
   useEffect(() => {
     if (
@@ -692,12 +728,13 @@ export default function HomePage(): JSX.Element {
       });
       if (started.pipeline === 'native') {
         const nativeStartedAt = Date.now();
+        let metadata: RecordingMetadata | null = null;
         try {
           const [{ getClientDb }, { getCurrentOwnerKey }] = await Promise.all([
             import('@/lib/db-client'),
             import('@/lib/ownerKey'),
           ]);
-          const metadata = createNativeRecordingMetadata({
+          metadata = createNativeRecordingMetadata({
             recordingId: nativeRecordingId,
             startedAt: nativeStartedAt,
             ownerKey: await getCurrentOwnerKey(),
@@ -707,12 +744,69 @@ export default function HomePage(): JSX.Element {
           if (config.camera.enabled) {
             await persistNativeCameraVisibility(metadata.id, false, 0);
           }
-          nativeMetadataRef.current = metadata;
-        } catch {
+        } catch (error) {
           // A native recording without a local project row would be invisible
           // after navigation. Stop it immediately and report a stable error.
           await started.session.stop().catch(() => undefined);
+          if (metadata) {
+            const failed = failNativeRecordingMetadata(
+              metadata,
+              started.session.getElapsedMs(),
+              'desktop_native_metadata_create_failed',
+            );
+            const { getClientDb } = await import('@/lib/db-client');
+            await getClientDb().recordings.put(failed).catch((writeError) => {
+              console.error('desktop_native_metadata_failure_checkpoint_failed', writeError);
+            });
+          }
+          console.error('desktop_native_metadata_create_failed', error);
           throw new Error('desktop_native_metadata_create_failed');
+        }
+        let telemetry: MainRendererTelemetrySession;
+        try {
+          if (!bridge) throw new Error('desktop_bridge_unavailable');
+          telemetry = createMainRendererTelemetrySession({
+            bridge,
+            sessionId: nativeRecordingId,
+            producerEpoch: crypto.randomUUID(),
+            nowHostUs: monotonicHostUs,
+          });
+          await telemetry.capture({
+            kind: 'mode-change',
+            mode: teachingModeForSource(config.source?.kind),
+          });
+          await telemetry.capture({
+            kind: 'camera-control',
+            action: config.camera.enabled ? 'enable' : 'disable',
+          });
+          await telemetry.capture({
+            kind: 'camera-control',
+            action: 'set-layout',
+            value: cameraLayoutValue({
+              x: startPos.x,
+              y: startPos.y,
+              size: startSize,
+              shape: config.camera.shape,
+            }),
+          });
+        } catch (error) {
+          await started.session.stop().catch(() => undefined);
+          if (metadata) {
+            const failed = failNativeRecordingMetadata(
+              metadata,
+              started.session.getElapsedMs(),
+              'desktop_native_telemetry_start_failed',
+            );
+            const { getClientDb } = await import('@/lib/db-client');
+            await getClientDb().recordings.put(failed).catch((writeError) => {
+              console.error('desktop_native_telemetry_failure_checkpoint_failed', writeError);
+            });
+          }
+          nativeSessionRef.current = null;
+          nativeMetadataRef.current = null;
+          nativeTelemetryRef.current = null;
+          console.error('desktop_native_telemetry_start_failed', error);
+          throw new Error('desktop_native_telemetry_start_failed');
         }
         // Native capture owns all four media devices on one clock. Browser
         // previews were stopped before capture.start, so there is no hidden
@@ -723,6 +817,8 @@ export default function HomePage(): JSX.Element {
         setMicStream(null);
         setCameraStream(null);
         nativeSessionRef.current = started.session;
+        nativeMetadataRef.current = metadata;
+        nativeTelemetryRef.current = telemetry;
         sessionRef.current = null;
         setHasAudio(true);
         setHasCamera(config.camera.enabled);
@@ -945,10 +1041,14 @@ export default function HomePage(): JSX.Element {
     const native = nativeSessionRef.current;
     if (native) {
       try {
+        await nativeTelemetryRef.current?.flushAndPause();
         await native.pause();
         setElapsed(native.getElapsedMs());
         setState('paused');
       } catch (err) {
+        await nativeTelemetryRef.current?.resume().catch((resumeError) => {
+          console.error('desktop_input_telemetry_pause_rollback_failed', resumeError);
+        });
         alert(t('startFailed', { message: err instanceof Error ? err.message : 'desktop_native_pause_failed' }));
       }
       return;
@@ -960,10 +1060,23 @@ export default function HomePage(): JSX.Element {
   const handleResume = useCallback(async () => {
     const native = nativeSessionRef.current;
     if (native) {
+      let nativeResumed = false;
       try {
         await native.resume();
+        nativeResumed = true;
+        await nativeTelemetryRef.current?.resume();
         setState('recording');
       } catch (err) {
+        if (nativeResumed) {
+          try {
+            await native.pause();
+          } catch (rollbackError) {
+            // Native media is authoritative. If rollback itself fails, reflect
+            // the recording state instead of leaving UI paused over live media.
+            console.error('desktop_native_resume_rollback_failed', rollbackError);
+            setState('recording');
+          }
+        }
         alert(t('startFailed', { message: err instanceof Error ? err.message : 'desktop_native_resume_failed' }));
       }
       return;
@@ -1021,6 +1134,13 @@ export default function HomePage(): JSX.Element {
           await native.setCameraHidden(false);
           await persistNativeCameraVisibility(native.recordingId, false, native.getElapsedMs());
         }
+        if (next) {
+          recordNativeTelemetryInBackground({ kind: 'camera-control', action: 'mute' });
+          recordNativeTelemetryInBackground({ kind: 'camera-control', action: 'disable' });
+        } else {
+          recordNativeTelemetryInBackground({ kind: 'camera-control', action: 'enable' });
+          recordNativeTelemetryInBackground({ kind: 'camera-control', action: 'unmute' });
+        }
         setCameraMuted(next);
       } catch (err) {
         if (next) {
@@ -1063,7 +1183,7 @@ export default function HomePage(): JSX.Element {
       setCameraStream(null);
       alert(t('cameraOpenFailed', { message: err instanceof Error ? err.message : 'unknown' }));
     }
-  }, [hasCamera, cameraMuted, persistNativeCameraVisibility, t]);
+  }, [hasCamera, cameraMuted, persistNativeCameraVisibility, recordNativeTelemetryInBackground, t]);
 
   // 激光笔：调 Excalidraw setActiveTool 切到 laser；再点切回 selection
   const handleToggleLaser = useCallback(() => {
@@ -1088,6 +1208,10 @@ export default function HomePage(): JSX.Element {
       try {
         const recording = nativeMetadataRef.current;
         if (!recording) throw new Error('desktop_native_metadata_missing');
+        const telemetryFlush = await nativeTelemetryRef.current?.flushForStop() ?? { ok: true as const };
+        if (!telemetryFlush.ok) {
+          console.error('desktop_input_telemetry_stop_flush_failed', telemetryFlush.error);
+        }
         await native.stop();
         const durationMs = native.getElapsedMs();
         const bridge = (window as Window & {
@@ -1114,6 +1238,7 @@ export default function HomePage(): JSX.Element {
         await getClientDb().recordings.put(finalized);
         nativeSessionRef.current = null;
         nativeMetadataRef.current = null;
+        nativeTelemetryRef.current = null;
         setElapsed(0);
         setCameraStream(null);
         clearDisplayStream();
@@ -1122,6 +1247,9 @@ export default function HomePage(): JSX.Element {
         setAudioMuted(false);
         setSystemAudioMuted(false);
         setCameraMuted(false);
+        if (!telemetryFlush.ok) {
+          alert(t('startFailed', { message: telemetryFlush.error.message }));
+        }
         const exportHref = exportHrefForRecording(recording.id);
         try { router.push(exportHref); }
         catch { router.replace(exportHref); }
