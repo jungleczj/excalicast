@@ -5,7 +5,7 @@ import {
   preferredVideoEncoderConfigs,
   selectCapturePipeline,
 } from '../../src/services/recordingCapturePolicy';
-import { prepareDisplayRecordingStream } from '../../src/services/displayCaptureRecorder';
+import { createVideoOnlyDisplayRecordingStream, prepareDisplayRecordingStream } from '../../src/services/displayCaptureRecorder';
 import {
   loadScreenRecordingBlob,
   recoverCommittedMediaBlob,
@@ -75,6 +75,31 @@ test('selected-area capture records the constrained source directly and defers c
   expect(prepared.stream).toBe(stream);
   expect(prepared.cleanup).toBeUndefined();
   expect(createdElements).toBe(0);
+});
+
+test('display video fallback excludes system audio so the independent audio track is never duplicated', () => {
+  const videoTrack = { kind: 'video' } as MediaStreamTrack;
+  const audioTrack = { kind: 'audio' } as MediaStreamTrack;
+  const source = {
+    getVideoTracks: () => [videoTrack],
+    getAudioTracks: () => [audioTrack],
+  } as unknown as MediaStream;
+  const OriginalMediaStream = globalThis.MediaStream;
+  class TestMediaStream {
+    constructor(private readonly tracks: MediaStreamTrack[]) {}
+    getTracks() { return this.tracks; }
+    getVideoTracks() { return this.tracks.filter((track) => track.kind === 'video'); }
+    getAudioTracks() { return this.tracks.filter((track) => track.kind === 'audio'); }
+  }
+  Object.defineProperty(globalThis, 'MediaStream', { configurable: true, value: TestMediaStream });
+  try {
+    const videoOnly = createVideoOnlyDisplayRecordingStream(source);
+    expect(videoOnly.getVideoTracks()).toEqual([videoTrack]);
+    expect(videoOnly.getAudioTracks()).toEqual([]);
+    expect(source.getAudioTracks()).toEqual([audioTrack]);
+  } finally {
+    Object.defineProperty(globalThis, 'MediaStream', { configurable: true, value: OriginalMediaStream });
+  }
 });
 
 test('sustained encoder pressure degrades one level and never upgrades during a recording', () => {

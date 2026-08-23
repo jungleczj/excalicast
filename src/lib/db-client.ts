@@ -999,6 +999,30 @@ export function invalidateRecordingMediaCache(recordingId: string): void {
 
 export const releaseRecordingMediaCache = invalidateRecordingMediaCache;
 
+type RecordingAudioChunkLike = Pick<AudioChunk, 'recordingId' | 'index' | 'blob'>;
+
+/**
+ * Reassembles microphone and computer audio without collapsing their identity.
+ * Keeping this boundary pure also makes legacy recordings (no system rows) an
+ * explicit, testable case instead of relying on incidental Dexie behavior.
+ */
+export function assembleRecordingAudioTracks(
+  audioRows: readonly RecordingAudioChunkLike[],
+  systemAudioRows: readonly RecordingAudioChunkLike[],
+): Pick<RecordingMediaTracks, 'audioBlob' | 'systemAudioBlob'> {
+  const assemble = (rows: readonly RecordingAudioChunkLike[]): Blob | null => {
+    if (rows.length === 0) return null;
+    const ordered = [...rows].sort((left, right) => left.index - right.index);
+    return new Blob(ordered.map((row) => row.blob), {
+      type: ordered[0].blob.type || 'audio/webm',
+    });
+  };
+  return {
+    audioBlob: assemble(audioRows),
+    systemAudioBlob: assemble(systemAudioRows),
+  };
+}
+
 export async function loadRecordingMediaTracks(
   recordingId: string,
   tracks: ReadonlyArray<'audio' | 'systemAudio' | 'camera' | 'screen'>,
@@ -1023,14 +1047,10 @@ export async function loadRecordingMediaTracks(
       ? db.screenChunks.where('recordingId').equals(recordingId).sortBy('index')
       : Promise.resolve([]),
   ]);
+  const audioTracks = assembleRecordingAudioTracks(audioRows, systemAudioRows);
   return {
     metadata,
-    audioBlob: audioRows.length > 0
-      ? new Blob(audioRows.map((row) => row.blob), { type: audioRows[0].blob.type || 'audio/webm' })
-      : null,
-    systemAudioBlob: systemAudioRows.length > 0
-      ? new Blob(systemAudioRows.map((row) => row.blob), { type: systemAudioRows[0].blob.type || 'audio/webm' })
-      : null,
+    ...audioTracks,
     cameraBlob: cameraRows.length > 0
       ? new Blob(cameraRows.map((row) => row.blob), { type: cameraRows[0].blob.type || 'video/webm' })
       : null,
@@ -1082,12 +1102,7 @@ async function loadFullRecordingUncached(recordingId: string, ownerKey?: string)
     db.laserEvents.where('recordingId').equals(recordingId).sortBy('timestamp'),
     db.binaryFiles.where('recordingId').equals(recordingId).toArray(),
   ]);
-  const audioBlob = audioRows.length > 0
-    ? new Blob(audioRows.map((c) => c.blob), { type: audioRows[0].blob.type || 'audio/webm' })
-    : null;
-  const systemAudioBlob = systemAudioRows.length > 0
-    ? new Blob(systemAudioRows.map((c) => c.blob), { type: systemAudioRows[0].blob.type || 'audio/webm' })
-    : null;
+  const { audioBlob, systemAudioBlob } = assembleRecordingAudioTracks(audioRows, systemAudioRows);
 
   const cameraBlob = camRows.length > 0
     ? new Blob(camRows.map((c) => c.blob), { type: camRows[0].blob.type || 'video/webm' })
