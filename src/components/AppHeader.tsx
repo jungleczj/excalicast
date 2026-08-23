@@ -46,7 +46,9 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
   const { user, logout, loading } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const navRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -56,6 +58,25 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
     window.addEventListener('mousedown', onClickAway);
     return () => window.removeEventListener('mousedown', onClickAway);
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (!navOpen) return;
+    const close = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent) {
+        if (event.key === 'Escape') setNavOpen(false);
+        return;
+      }
+      if (navRef.current && !navRef.current.contains(event.target as Node)) setNavOpen(false);
+    };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', close);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('keydown', close);
+    };
+  }, [navOpen]);
+
+  useEffect(() => setNavOpen(false), [pathname]);
 
   useEffect(() => {
     if (loading || user || typeof window === 'undefined') return;
@@ -76,9 +97,44 @@ export function AppHeader({ tier = 'free', onUpgradePro }: Props): JSX.Element {
           <nav className="app-craft-main-nav flex items-center gap-2">
             <NavItem href="/library" active={onLib}>{t('library')}</NavItem>
             <NavItem href="/app" active={onRecord}>{t('record')}</NavItem>
+            <a
+              href="/api/desktop/download?platform=mac"
+              className="flex items-center gap-1.5"
+              style={{
+                fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: 550,
+                letterSpacing: '-0.02em', color: 'var(--ink)', opacity: 0.72,
+                textDecoration: 'none', padding: '8px 13px', borderRadius: 999,
+              }}
+            >
+              <I.Download size={13} /> {t('downloadMac')}
+            </a>
           </nav>
         </div>
         <div className="flex items-center gap-3">
+          <div className="app-craft-mobile-nav" ref={navRef}>
+            <button
+              type="button"
+              className="app-craft-mobile-nav-trigger"
+              aria-label={navOpen ? t('closeNavigationMenu') : t('openNavigationMenu')}
+              aria-expanded={navOpen}
+              aria-controls="app-craft-mobile-nav-panel"
+              onClick={() => setNavOpen((open) => !open)}
+            >
+              <span aria-hidden="true" />
+              <span aria-hidden="true" />
+              <span aria-hidden="true" />
+            </button>
+            {navOpen && (
+              <nav id="app-craft-mobile-nav-panel" className="app-craft-mobile-nav-panel" aria-label={t('navigationMenu')}>
+                <NavItem href="/library" active={onLib}>{t('library')}</NavItem>
+                <NavItem href="/app" active={onRecord}>{t('record')}</NavItem>
+                <a href="/api/desktop/download?platform=mac" className="app-craft-mobile-download">
+                  <I.Download size={15} aria-hidden="true" />
+                  {t('downloadMac')}
+                </a>
+              </nav>
+            )}
+          </div>
           <LanguageToggle />
           {tier === 'free' && onUpgradePro && (
             <button

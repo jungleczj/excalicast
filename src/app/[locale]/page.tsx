@@ -144,6 +144,7 @@ function CraftHeader({ t }: { t: ReturnType<typeof useTranslations> }): JSX.Elem
         <Link href="/" className="is-active">{t('craft.nav.home')}</Link>
         <Link href="/library">{t('craft.nav.library')}</Link>
         <a href="#pricing">{t('craft.nav.pricing')}</a>
+        <a href="/api/desktop/download?platform=mac">{t('craft.nav.downloadMac')}</a>
       </nav>
 
       <div className="craft-nav-actions">
@@ -164,6 +165,7 @@ function CraftHeader({ t }: { t: ReturnType<typeof useTranslations> }): JSX.Elem
             <Link href="/">{t('craft.nav.home')}</Link>
             <Link href="/library">{t('craft.nav.library')}</Link>
             <a href="#pricing">{t('craft.nav.pricing')}</a>
+            <a href="/api/desktop/download?platform=mac">{t('craft.nav.downloadMac')}</a>
           </nav>
         </details>
       </div>

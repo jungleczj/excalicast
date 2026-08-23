@@ -9,6 +9,7 @@
         "home": "Home",
         "library": "Library",
         "pricing": "Pricing",
+        "downloadMac": "Download for Mac",
         "login": "Sign in",
         "menu": "Menu",
         "plans": "Plans",
@@ -406,6 +407,10 @@
   "header": {
     "library": "Library",
     "record": "Record",
+    "downloadMac": "Download for Mac",
+    "openNavigationMenu": "Open navigation menu",
+    "closeNavigationMenu": "Close navigation menu",
+    "navigationMenu": "Navigation menu",
     "upgradePro": "Upgrade Pro",
     "loggedIn": "Signed in",
     "logout": "Sign out",
