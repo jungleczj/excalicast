@@ -60,6 +60,16 @@ export type TeachingRecipeTrack =
   | 'music'
   | 'transition';
 
+const TEACHING_RECIPE_TRACKS: readonly TeachingRecipeTrack[] = [
+  'camera-direction',
+  'captions',
+  'chart',
+  'motion-graphics',
+  'sound-effect',
+  'music',
+  'transition',
+];
+
 export interface TeachingRecipePlacement {
   assetId: string;
   track: TeachingRecipeTrack;
@@ -97,7 +107,8 @@ export function parseTeachingEditRecipe(value: unknown): TeachingEditRecipeV1 {
       || typeof placement.startMs !== 'number'
       || typeof placement.endMs !== 'number'
       || placement.startMs < 0
-      || placement.endMs <= placement.startMs) {
+      || placement.endMs <= placement.startMs
+      || !TEACHING_RECIPE_TRACKS.includes(placement.track as TeachingRecipeTrack)) {
       throw new Error('recipe_placement_invalid');
     }
     if (!curated.has(placement.assetId)) throw new Error('recipe_asset_not_curated');
