@@ -111,6 +111,7 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
     hasAudio: false,
     hasCamera: false,
     status: 'recording',
+    mediaChunkIntervalMs: 1_000,
     ownerKey,
     source: opts.setup?.source ?? { kind: 'whiteboard' },
     ...(opts.setup ? { setup: opts.setup } : {}),
@@ -156,7 +157,11 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
   const writtenFileIds = new Set<string>();
   let lastSnapshotAt = -Infinity;
   let pendingTimer: ReturnType<typeof setTimeout> | null = null;
-  let pendingSnapshot: { elements: unknown[]; appState: Record<string, unknown>; t: number } | null = null;
+  let pendingSnapshot: {
+    elements: readonly unknown[];
+    appState: Record<string, unknown>;
+    t: number;
+  } | null = null;
   // onChange 是同步回调，但 IndexedDB 写入是异步的。所有快照写入走同一条队列，
   // 防止快速开始/停止时 stop() 错过正在进行中的首帧写入。
   let snapshotFlushChain: Promise<void> = Promise.resolve();
@@ -190,8 +195,10 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
     await db.snapshots.add({
       recordingId,
       timestamp: snap.t,
-      elements: snap.elements,
-      appState: snap.appState,
+      // Clone only the latest coalesced scene at flush time. Previously every
+      // onChange cloned the complete scene even when a newer snapshot replaced it.
+      elements: structuredClone(snap.elements as unknown[]),
+      appState: structuredClone(snap.appState),
     });
   };
 
@@ -259,10 +266,10 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
     lastFlushedMove = move;
   };
 
-  // 激光笔事件：batch 25ms flush 写入 laserEvents 表
+  // Event timestamps stay high-frequency; only the IndexedDB transaction cadence is batched.
   let pendingLaserEvents: LaserEvent[] = [];
   let laserFlushTimer: ReturnType<typeof setTimeout> | null = null;
-  const LASER_FLUSH_MS = 25;
+  const LASER_FLUSH_MS = 250;
 
   const flushLaserEvents = async () => {
     laserFlushTimer = null;
@@ -298,8 +305,8 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
 
       pendingSnapshot = {
         t,
-        elements: structuredClone(elements as unknown[]),
-        appState: structuredClone(appState),
+        elements,
+        appState,
       };
       // 通知 shell capturer：appState 关键字段变化时按需重抓快照
       shellCapturer?.onAppStateChange(appState);

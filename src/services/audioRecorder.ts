@@ -5,7 +5,9 @@ import { ChunkWriteBatcher, type ChunkWriteMetrics } from '@/services/mediaRecor
 import { stopMediaRecorderSafely } from '@/services/mediaRecorderStop';
 import type { AudioSourceInfo } from '@/types/recording';
 
-const RECORDER_TIMESLICE_MS = 250;
+// One second keeps crash recovery practical without opening four IndexedDB
+// transactions per second for an hour-long recording.
+const RECORDER_TIMESLICE_MS = 1_000;
 export const AUDIO_RECORDING_BITS_PER_SECOND = 128_000;
 
 export interface AudioRecorderHandle {

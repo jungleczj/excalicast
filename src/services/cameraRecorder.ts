@@ -4,7 +4,7 @@ import { getClientDb } from '@/lib/db-client';
 import { ChunkWriteBatcher, type ChunkWriteMetrics } from '@/services/mediaRecorderHealth';
 import { stopMediaRecorderSafely } from '@/services/mediaRecorderStop';
 
-const RECORDER_TIMESLICE_MS = 250;
+const RECORDER_TIMESLICE_MS = 1_000;
 
 export interface CameraHandle {
   /**
@@ -28,10 +28,10 @@ export interface CameraHandle {
 }
 
 function pickMimeType(): string {
-  return MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-    ? 'video/webm;codecs=vp9'
-    : MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
-      ? 'video/webm;codecs=vp8'
+  return MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
+    ? 'video/webm;codecs=vp8'
+    : MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9'
       : 'video/webm';
 }
 

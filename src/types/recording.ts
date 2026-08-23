@@ -64,6 +64,10 @@ export interface RecordingMetadata {
   activeEnhancedAudioTrackId?: string;
   /** 当前用于预览/导出的本地化音轨；只引用 localizedTracks，不把大 Blob 塞进 metadata。 */
   localizedTrackId?: string;
+  /** 大屏幕媒体的本地 OPFS 清单。缺省时沿用旧 IndexedDB chunks。 */
+  mediaStorage?: RecordingStorageManifest;
+  /** MediaRecorder fallback chunk cadence; absent legacy projects used 250ms. */
+  mediaChunkIntervalMs?: number;
 }
 
 export interface AudioSourceInfo {
@@ -498,6 +502,48 @@ export type RecordingSourceKind =
   | 'window'
   | 'desktop'
   | 'selected_area';
+
+export type CapturePipeline = 'webcodecs-opfs' | 'mediarecorder-fallback';
+export type CaptureProfile = 'adaptive' | 'motion-60';
+
+export interface CaptureProfileSettings {
+  width: number;
+  height: number;
+  frameRate: number;
+  videoBitsPerSecond: number;
+}
+
+export interface CaptureCapabilityReport {
+  pipeline: CapturePipeline;
+  codec: string;
+  source: { width: number; height: number; frameRate?: number };
+  selected: CaptureProfileSettings;
+  probeDurationMs: number;
+  warning?: string;
+}
+
+export interface CapturePressureSnapshot {
+  encoderQueueSize: number;
+  pendingWriteBytes: number;
+  oldestWriteAgeMs: number;
+  mainThreadLagMs: number;
+  droppedFrames: number;
+}
+
+export interface RecordingStorageTrackManifest {
+  path: string;
+  mimeType: string;
+  bytes: number;
+  committedBytes: number;
+  fragments: number;
+  durationMs?: number;
+  status: 'recording' | 'done' | 'interrupted' | 'error';
+}
+
+export interface RecordingStorageManifest {
+  pipeline: CapturePipeline;
+  screen?: RecordingStorageTrackManifest;
+}
 
 export interface SourceCropWindow {
   rx: number;

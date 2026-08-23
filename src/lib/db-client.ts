@@ -1,6 +1,7 @@
 'use client';
 
 import Dexie, { type Table } from 'dexie';
+import { loadScreenRecordingBlob, removeRecordingMediaDirectory } from '@/services/recordingMediaStore';
 import type { MediaTaskRecord } from '@/services/mediaTaskDomain';
 import type {
   AudioChunk,
@@ -381,10 +382,12 @@ export async function recoverUnfinishedRecordings(): Promise<number> {
           db.screenChunks.where('recordingId').equals(recording.id).toArray(),
           db.cameraPositions.where('recordingId').equals(recording.id).toArray(),
         ]);
+        const chunkIntervalMs = recording.mediaChunkIntervalMs ?? 250;
         const mediaChunkDuration = Math.max(
-          ...audioChunks.map((chunk) => (chunk.index + 1) * 250),
-          ...cameraChunks.map((chunk) => (chunk.index + 1) * 250),
-          ...screenChunks.map((chunk) => (chunk.index + 1) * 250),
+          ...audioChunks.map((chunk) => (chunk.index + 1) * chunkIntervalMs),
+          ...cameraChunks.map((chunk) => (chunk.index + 1) * chunkIntervalMs),
+          ...screenChunks.map((chunk) => (chunk.index + 1) * chunkIntervalMs),
+          recording.mediaStorage?.screen?.durationMs ?? 0,
           0,
         );
         const timedDuration = Math.max(
@@ -801,6 +804,7 @@ export async function deleteRecording(recordingId: string, ownerKey?: string): P
       await db.enhancedAudioTracks.where('recordingId').equals(recordingId).delete();
     },
   );
+  await removeRecordingMediaDirectory(recordingId);
   invalidateRecordingMediaCache(recordingId);
 }
 
@@ -988,8 +992,8 @@ export async function loadRecordingMediaTracks(
     cameraBlob: cameraRows.length > 0
       ? new Blob(cameraRows.map((row) => row.blob), { type: cameraRows[0].blob.type || 'video/webm' })
       : null,
-    screenBlob: screenRows.length > 0
-      ? new Blob(screenRows.map((row) => row.blob), { type: screenRows[0].blob.type || 'video/webm' })
+    screenBlob: tracks.includes('screen')
+      ? await loadScreenRecordingBlob({ manifest: metadata.mediaStorage, legacyChunks: screenRows })
       : null,
   };
 }
@@ -1009,7 +1013,9 @@ export async function loadRecordingManifest(recordingId: string, ownerKey?: stri
     metadata,
     audio: { chunks: audioRows.length, bytes: audioRows.reduce((sum, row) => sum + row.blob.size, 0) },
     camera: { chunks: cameraRows.length, bytes: cameraRows.reduce((sum, row) => sum + row.blob.size, 0) },
-    screen: { chunks: screenRows.length, bytes: screenRows.reduce((sum, row) => sum + row.blob.size, 0) },
+    screen: metadata.mediaStorage?.screen
+      ? { chunks: metadata.mediaStorage.screen.fragments, bytes: metadata.mediaStorage.screen.bytes }
+      : { chunks: screenRows.length, bytes: screenRows.reduce((sum, row) => sum + row.blob.size, 0) },
   };
 }
 
@@ -1039,9 +1045,10 @@ async function loadFullRecordingUncached(recordingId: string, ownerKey?: string)
     ? new Blob(camRows.map((c) => c.blob), { type: camRows[0].blob.type || 'video/webm' })
     : null;
 
-  const screenBlob = screenRows.length > 0
-    ? new Blob(screenRows.map((c) => c.blob), { type: screenRows[0].blob.type || 'video/webm' })
-    : null;
+  const screenBlob = await loadScreenRecordingBlob({
+    manifest: metadata.mediaStorage,
+    legacyChunks: screenRows,
+  });
 
   const cameraEvents: CameraPositionEvent[] = camPosRows.map((r) => ({
     recordingId: r.recordingId,
