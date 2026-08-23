@@ -33,6 +33,34 @@ public struct FinalizedSegment: Codable, Equatable, Sendable {
     public let byteLength: Int
 }
 
+public struct PendingSegmentCommit: Codable, Equatable, Sendable {
+    public let track: RecordingTrackKind
+    public let index: Int
+    public let stagingRelativePath: String
+    public let finalRelativePath: String
+    public let startUs: Int64
+    public let durationUs: Int64
+    public let byteLength: Int
+
+    public init(
+        track: RecordingTrackKind,
+        index: Int,
+        stagingRelativePath: String,
+        finalRelativePath: String,
+        startUs: Int64,
+        durationUs: Int64,
+        byteLength: Int
+    ) {
+        self.track = track
+        self.index = index
+        self.stagingRelativePath = stagingRelativePath
+        self.finalRelativePath = finalRelativePath
+        self.startUs = startUs
+        self.durationUs = durationUs
+        self.byteLength = byteLength
+    }
+}
+
 public struct RecoverableRecordingManifest: Codable, Sendable {
     public let schemaVersion: Int
     public let recordingId: String
@@ -198,12 +226,26 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
         try FileManager.default.createDirectory(at: trackRoot, withIntermediateDirectories: true)
         let fileName = String(format: "%06d.%@", index, fileExtension)
         let segmentURL = trackRoot.appendingPathComponent(fileName)
+        let relativePath = "segments/\(track.rawValue)/\(fileName)"
+        let stagingRelativePath = "segments/.staging/\(normalizedStaging.lastPathComponent)"
+        let pendingCommit = PendingSegmentCommit(
+            track: track,
+            index: index,
+            stagingRelativePath: stagingRelativePath,
+            finalRelativePath: relativePath,
+            startUs: startUs,
+            durationUs: durationUs,
+            byteLength: byteLength
+        )
+        let journalRoot = root.appendingPathComponent("segments/.commit-journal", isDirectory: true)
+        try FileManager.default.createDirectory(at: journalRoot, withIntermediateDirectories: true)
+        let journalURL = journalRoot.appendingPathComponent("\(UUID().uuidString).json")
+        try encoder.encode(pendingCommit).write(to: journalURL, options: .atomic)
         if FileManager.default.fileExists(atPath: segmentURL.path) {
             try FileManager.default.removeItem(at: segmentURL)
         }
         try FileManager.default.moveItem(at: normalizedStaging, to: segmentURL)
 
-        let relativePath = "segments/\(track.rawValue)/\(fileName)"
         let segment = FinalizedSegment(
             index: index,
             relativePath: relativePath,
@@ -217,6 +259,7 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
         segments.sort { $0.index < $1.index }
         manifest.tracks[track] = segments
         try checkpointUnlocked()
+        try? FileManager.default.removeItem(at: journalURL)
         committed = true
     }
 
@@ -287,20 +330,26 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
             removedInvalidSegment = removedInvalidSegment || valid.count != original.count
             manifest.tracks[track] = valid
         }
-        if manifest.state == .recording || manifest.state == .finalizing || removedInvalidSegment {
+        let replayedCommit = try replayPendingCommits(
+            root: root,
+            manifest: &manifest,
+            promoteStagedFiles: false
+        )
+        if manifest.state == .recording || manifest.state == .finalizing
+            || removedInvalidSegment || replayedCommit {
             manifest.state = .interrupted
         }
         return manifest
     }
 
     public static func recoverAndCheckpoint(root: URL) throws -> RecoverableRecordingManifest {
-        let manifest = try recover(root: root)
-        let stagingRoot = root.appendingPathComponent("segments/.staging", isDirectory: true)
-        if let children = try? FileManager.default.contentsOfDirectory(
-            at: stagingRoot,
-            includingPropertiesForKeys: nil
+        var manifest = try recover(root: root)
+        if try replayPendingCommits(
+            root: root,
+            manifest: &manifest,
+            promoteStagedFiles: true
         ) {
-            for child in children { try FileManager.default.removeItem(at: child) }
+            manifest.state = .interrupted
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -308,6 +357,100 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
             to: root.appendingPathComponent("manifest.json"),
             options: .atomic
         )
+        let journalRoot = root.appendingPathComponent("segments/.commit-journal", isDirectory: true)
+        if let journals = try? FileManager.default.contentsOfDirectory(
+            at: journalRoot,
+            includingPropertiesForKeys: nil
+        ) {
+            for journal in journals { try FileManager.default.removeItem(at: journal) }
+        }
+        let stagingRoot = root.appendingPathComponent("segments/.staging", isDirectory: true)
+        if let children = try? FileManager.default.contentsOfDirectory(
+            at: stagingRoot,
+            includingPropertiesForKeys: nil
+        ) {
+            for child in children { try FileManager.default.removeItem(at: child) }
+        }
         return manifest
+    }
+
+    private static func replayPendingCommits(
+        root: URL,
+        manifest: inout RecoverableRecordingManifest,
+        promoteStagedFiles: Bool
+    ) throws -> Bool {
+        let journalRoot = root.appendingPathComponent("segments/.commit-journal", isDirectory: true)
+        guard let journalURLs = try? FileManager.default.contentsOfDirectory(
+            at: journalRoot,
+            includingPropertiesForKeys: nil
+        ) else { return false }
+        var recoveredNewMedia = false
+        for journalURL in journalURLs where journalURL.pathExtension == "json" {
+            guard let data = try? Data(contentsOf: journalURL),
+                  let record = try? JSONDecoder().decode(PendingSegmentCommit.self, from: data),
+                  record.index >= 0,
+                  record.startUs >= 0,
+                  record.durationUs > 0,
+                  record.byteLength > 0,
+                  let stagingURL = safeURL(
+                    root: root,
+                    relativePath: record.stagingRelativePath,
+                    requiredPrefix: "segments/.staging/"
+                  ),
+                  let finalURL = safeURL(
+                    root: root,
+                    relativePath: record.finalRelativePath,
+                    requiredPrefix: "segments/\(record.track.rawValue)/"
+                  ) else { continue }
+
+            if !FileManager.default.fileExists(atPath: finalURL.path),
+               promoteStagedFiles,
+               fileSize(at: stagingURL) == record.byteLength {
+                try FileManager.default.createDirectory(
+                    at: finalURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try FileManager.default.moveItem(at: stagingURL, to: finalURL)
+            }
+            guard fileSize(at: finalURL) == record.byteLength else { continue }
+
+            let finalized = FinalizedSegment(
+                index: record.index,
+                relativePath: record.finalRelativePath,
+                startUs: record.startUs,
+                durationUs: record.durationUs,
+                byteLength: record.byteLength
+            )
+            var segments = manifest.tracks[record.track, default: []]
+            if segments.contains(finalized) { continue }
+            segments.removeAll { $0.index == record.index }
+            segments.append(finalized)
+            segments.sort { $0.index < $1.index }
+            manifest.tracks[record.track] = segments
+            recoveredNewMedia = true
+        }
+        return recoveredNewMedia
+    }
+
+    private static func safeURL(
+        root: URL,
+        relativePath: String,
+        requiredPrefix: String
+    ) -> URL? {
+        guard relativePath.hasPrefix(requiredPrefix), !relativePath.hasPrefix("/") else { return nil }
+        let rootURL = root.standardizedFileURL
+        let candidate = rootURL.appendingPathComponent(relativePath).standardizedFileURL
+        let requiredDirectory = rootURL
+            .appendingPathComponent(String(requiredPrefix.dropLast()), isDirectory: true)
+            .standardizedFileURL
+        guard candidate.path.hasPrefix(requiredDirectory.path + "/") else { return nil }
+        return candidate
+    }
+
+    private static func fileSize(at url: URL) -> Int {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+            return 0
+        }
+        return (attributes[.size] as? NSNumber)?.intValue ?? 0
     }
 }

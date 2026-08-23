@@ -217,6 +217,105 @@ struct MacMediaEngineContractTests {
         try expect(recoveredAfterCommit.tracks[.camera]?.first?.byteLength == 4, "streamed file size checkpointed")
         try expect(!FileManager.default.fileExists(atPath: cameraStaging.path), "staging file atomically promoted")
 
+        let replayRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("excalicast-commit-replay-\(UUID().uuidString)", isDirectory: true)
+        let replayStore = try SegmentedRecordingStore(root: replayRoot, recordingId: "commit-replay")
+        let replayStaging = try replayStore.makeStagingSegmentURL(track: .screen, index: 0)
+        try Data([10, 11, 12, 13]).write(to: replayStaging)
+        let replayFinalRelativePath = "segments/screen/000000.mp4"
+        let replayFinal = replayRoot.appendingPathComponent(replayFinalRelativePath)
+        try FileManager.default.createDirectory(
+            at: replayFinal.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.moveItem(at: replayStaging, to: replayFinal)
+        let replayJournalRoot = replayRoot.appendingPathComponent("segments/.commit-journal")
+        try FileManager.default.createDirectory(at: replayJournalRoot, withIntermediateDirectories: true)
+        let replayRecord = PendingSegmentCommit(
+            track: .screen,
+            index: 0,
+            stagingRelativePath: "segments/.staging/\(replayStaging.lastPathComponent)",
+            finalRelativePath: replayFinalRelativePath,
+            startUs: 0,
+            durationUs: 2_000_000,
+            byteLength: 4
+        )
+        let replayJournal = replayJournalRoot.appendingPathComponent("crash-window.json")
+        try JSONEncoder().encode(replayRecord).write(to: replayJournal, options: .atomic)
+        let replayedManifest = try SegmentedRecordingStore.recoverAndCheckpoint(root: replayRoot)
+        try expect(
+            replayedManifest.tracks[.screen]?.first?.relativePath == replayFinalRelativePath,
+            "a finalized file is replayed when the process crashes before manifest checkpoint"
+        )
+        try expect(!FileManager.default.fileExists(atPath: replayJournal.path), "replayed commit journal is removed")
+
+        let prePromotionRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("excalicast-pre-promotion-\(UUID().uuidString)", isDirectory: true)
+        let prePromotionStore = try SegmentedRecordingStore(
+            root: prePromotionRoot,
+            recordingId: "pre-promotion"
+        )
+        let prePromotionStaging = try prePromotionStore.makeStagingSegmentURL(track: .screen, index: 0)
+        try Data([20, 21, 22]).write(to: prePromotionStaging)
+        let prePromotionFinalRelativePath = "segments/screen/000000.mp4"
+        let prePromotionJournalRoot = prePromotionRoot.appendingPathComponent("segments/.commit-journal")
+        try FileManager.default.createDirectory(
+            at: prePromotionJournalRoot,
+            withIntermediateDirectories: true
+        )
+        let prePromotionRecord = PendingSegmentCommit(
+            track: .screen,
+            index: 0,
+            stagingRelativePath: "segments/.staging/\(prePromotionStaging.lastPathComponent)",
+            finalRelativePath: prePromotionFinalRelativePath,
+            startUs: 0,
+            durationUs: 2_000_000,
+            byteLength: 3
+        )
+        try JSONEncoder().encode(prePromotionRecord).write(
+            to: prePromotionJournalRoot.appendingPathComponent("before-move.json"),
+            options: .atomic
+        )
+        let promotedManifest = try SegmentedRecordingStore.recoverAndCheckpoint(root: prePromotionRoot)
+        try expect(
+            promotedManifest.tracks[.screen]?.first?.byteLength == 3,
+            "a staged file is promoted and replayed when the process crashes before the move"
+        )
+        try expect(
+            FileManager.default.fileExists(
+                atPath: prePromotionRoot.appendingPathComponent(prePromotionFinalRelativePath).path
+            ),
+            "recovery promotes the staged media to its deterministic final path"
+        )
+
+        let traversalRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("excalicast-journal-traversal-\(UUID().uuidString)", isDirectory: true)
+        _ = try SegmentedRecordingStore(root: traversalRoot, recordingId: "journal-traversal")
+        try Data([30, 31]).write(to: traversalRoot.appendingPathComponent("escaped.mp4"))
+        let traversalJournalRoot = traversalRoot.appendingPathComponent("segments/.commit-journal")
+        try FileManager.default.createDirectory(
+            at: traversalJournalRoot,
+            withIntermediateDirectories: true
+        )
+        let traversalRecord = PendingSegmentCommit(
+            track: .screen,
+            index: 0,
+            stagingRelativePath: "segments/.staging/../../escaped.part",
+            finalRelativePath: "segments/screen/../../escaped.mp4",
+            startUs: 0,
+            durationUs: 2_000_000,
+            byteLength: 2
+        )
+        try JSONEncoder().encode(traversalRecord).write(
+            to: traversalJournalRoot.appendingPathComponent("traversal.json"),
+            options: .atomic
+        )
+        let traversalManifest = try SegmentedRecordingStore.recoverAndCheckpoint(root: traversalRoot)
+        try expect(
+            traversalManifest.tracks[.screen, default: []].isEmpty,
+            "commit journal paths cannot escape their assigned track directories"
+        )
+
         let concurrentRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("excalicast-concurrent-\(UUID().uuidString)", isDirectory: true)
         let concurrentStore = try SegmentedRecordingStore(root: concurrentRoot, recordingId: "concurrent")
@@ -275,6 +374,9 @@ struct MacMediaEngineContractTests {
         }
         try? FileManager.default.removeItem(at: emptyRoot)
         try? FileManager.default.removeItem(at: missingCameraRoot)
+        try? FileManager.default.removeItem(at: replayRoot)
+        try? FileManager.default.removeItem(at: prePromotionRoot)
+        try? FileManager.default.removeItem(at: traversalRoot)
         try? FileManager.default.removeItem(at: concurrentRoot)
         try? FileManager.default.removeItem(at: temporaryRoot)
 
