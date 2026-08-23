@@ -68,6 +68,18 @@ struct MacMediaEngineContractTests {
         try expect(queue.popOldest() == 3, "kept latest frame")
 
         try expect(
+            CaptureWindowExclusionPolicy.normalized([9002, 9001, 9002, 0]) == [9002, 9001],
+            "overlay exclusions are stable, unique and omit the invalid zero window"
+        )
+        try expect(
+            CaptureWindowExclusionPolicy.matchingWindowIDs(
+                requested: [9002, 9999, 9001],
+                available: [9001, 9002, 9003]
+            ) == [9002, 9001],
+            "capture excludes only requested windows that remain shareable"
+        )
+
+        try expect(
             InitialFrameSeedPolicy.shouldSeed(streamCompleteFrames: 0, seededFrames: 0),
             "idle-only ScreenCaptureKit streams require one initial frame"
         )
@@ -246,6 +258,27 @@ struct MacMediaEngineContractTests {
             "continuity report identifies the affected screen gap"
         )
 
+        let sparseInkManifest = RecoverableRecordingManifest(
+            schemaVersion: 1,
+            recordingId: "sparse-ink",
+            state: .ready,
+            tracks: [
+                .screen: screenSegments,
+                .camera: cameraSegments,
+                .microphone: microphoneSegments,
+                .excalidrawEvents: [
+                    FinalizedSegment(index: 0, relativePath: "segments/excalidraw-events/000000.segment", startUs: 100_000, durationUs: 1, byteLength: 40),
+                    FinalizedSegment(index: 1, relativePath: "segments/excalidraw-events/000001.segment", startUs: 10_000_000, durationUs: 1, byteLength: 50),
+                ],
+            ],
+            capture: continuityMetadata
+        )
+        let sparseInkReport = RecordingContinuityValidator.validate(sparseInkManifest)
+        try expect(
+            sparseInkReport.tracks[.excalidrawEvents]?.issues.isEmpty == true,
+            "sparse event tracks do not invent media continuity gaps"
+        )
+
         var missingCameraManifest = continuousManifest
         missingCameraManifest.tracks[.camera] = []
         let missingCameraReport = RecordingContinuityValidator.validate(missingCameraManifest)
@@ -270,13 +303,22 @@ struct MacMediaEngineContractTests {
         try store.configureCapture(captureMetadata)
         try store.appendFinalizedSegment(track: .screen, index: 0, data: Data([1, 2, 3]), startUs: 0, durationUs: 2_000_000)
         try store.appendFinalizedSegment(track: .microphone, index: 0, data: Data([4, 5]), startUs: 0, durationUs: 2_000_000)
+        let inkPayload = Data(#"{"schemaVersion":1,"events":[{"kind":"pointer"}]}"#.utf8)
+        try store.appendFinalizedSegment(
+            track: .excalidrawEvents,
+            index: 0,
+            data: inkPayload,
+            startUs: 250_000,
+            durationUs: 120_000
+        )
         let storePressure = store.pressureSnapshot()
-        try expect(storePressure.committedBytes == 5, "store pressure accounts for finalized bytes")
+        try expect(storePressure.committedBytes == 5 + inkPayload.count, "store pressure accounts for media and event bytes")
         try expect(storePressure.pendingWriteBytes == 0, "synchronous atomic commits leave no hidden queue")
         let recovered = try SegmentedRecordingStore.recover(root: temporaryRoot)
         try expect(recovered.state == .interrupted, "unfinished project recovers as interrupted")
         try expect(recovered.tracks[.screen]?.count == 1, "screen segment recovered")
         try expect(recovered.tracks[.microphone]?.count == 1, "audio segment recovered")
+        try expect(recovered.tracks[.excalidrawEvents]?.count == 1, "Excalidraw event segment recovered")
         try expect(recovered.capture?.camera?.width == 1_280, "camera configuration survives recovery")
         try expect(recovered.capture?.capturesSystemAudio == true, "system audio intent survives recovery")
 

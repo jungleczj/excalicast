@@ -159,7 +159,9 @@ public enum RecordingContinuityValidator {
         switch track {
         case .screen, .camera: videoGapToleranceUs
         case .microphone, .systemAudio: audioGapToleranceUs
-        case .excalidrawEvents, .inputTelemetry: 500_000
+        // Event tracks are intentionally sparse: a ten-second pause means the
+        // teacher did not draw, not that media was lost.
+        case .excalidrawEvents, .inputTelemetry: Int64.max
         }
     }
 }

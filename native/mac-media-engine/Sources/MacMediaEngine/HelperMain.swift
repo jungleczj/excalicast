@@ -26,6 +26,11 @@ private struct Command: Decodable, Sendable {
     let cameraWidth: Int?
     let cameraHeight: Int?
     let cameraFramesPerSecond: Int?
+    let excludedWindowIDs: [UInt32]?
+    let eventIndex: Int?
+    let eventStartUs: Int64?
+    let eventDurationUs: Int64?
+    let eventPayload: String?
 }
 
 private struct Response: Encodable, Sendable {
@@ -311,7 +316,8 @@ private actor HelperServer {
                             microphoneDeviceID: parameters.microphoneDeviceID,
                             captureCamera: parameters.captureCamera,
                             cameraDeviceID: parameters.cameraDeviceID,
-                            cameraRequest: parameters.cameraRequest
+                            cameraRequest: parameters.cameraRequest,
+                            excludedWindowIDs: parameters.excludedWindowIDs
                         )
                     )
                     captureEngine = engine
@@ -325,6 +331,21 @@ private actor HelperServer {
                     _ = await lifecycle.stop()
                     throw error
                 }
+            case "ink.append-events.v1":
+                guard let captureEngine,
+                      let eventIndex = command.eventIndex,
+                      let eventStartUs = command.eventStartUs,
+                      let eventDurationUs = command.eventDurationUs,
+                      let eventPayload = command.eventPayload else {
+                    throw HelperServerError.missingCaptureParameters
+                }
+                try captureEngine.appendInkEvents(
+                    index: eventIndex,
+                    startUs: eventStartUs,
+                    durationUs: eventDurationUs,
+                    payload: eventPayload
+                )
+                return success(command.id, state: .recording, capability: nil)
             case "capture.stop.v1":
                 guard !isStoppingCapture else { throw HelperServerError.captureAlreadyStopping }
                 pressureMonitor?.cancel()
@@ -448,6 +469,7 @@ private actor HelperServer {
         let captureCamera: Bool
         let cameraDeviceID: String?
         let cameraRequest: CaptureRequest
+        let excludedWindowIDs: [UInt32]
     }
 
     private func captureParameters(from command: Command) throws -> CaptureParameters {
@@ -488,6 +510,9 @@ private actor HelperServer {
                 height: command.cameraHeight ?? 720,
                 framesPerSecond: command.cameraFramesPerSecond ?? 24,
                 codec: .h264
+            ),
+            excludedWindowIDs: CaptureWindowExclusionPolicy.normalized(
+                command.excludedWindowIDs ?? []
             )
         )
     }

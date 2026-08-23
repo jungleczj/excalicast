@@ -13,6 +13,7 @@ import { Teleprompter } from '@/components/Teleprompter';
 import { AspectCropOverlay } from '@/components/AspectCropOverlay';
 import { DisplaySourceFramingSurface } from '@/components/DisplaySourceFramingSurface';
 import { ADAPTIVE_DOCKED_CONTROLS_WINDOW_SIZE, DesktopRecordingControls, getDesktopRecordingControlsRoot, requestDesktopRecordingControlsWindow } from '@/components/DesktopRecordingControls';
+import { DesktopInkLauncher } from '@/components/DesktopInkLauncher';
 import { I } from '@/components/icons';
 import { useSubscription } from '@/hooks/useSubscription';
 import { startRecording, type SessionHandle, type CameraFrameRect } from '@/services/recordingSession';
@@ -1267,6 +1268,7 @@ export default function HomePage(): JSX.Element {
 
         {/* 自制 library 抽屉切换按钮：右上角浮动，独立于 Excalidraw 自带工具栏。
            对应的 LibraryDrawer 也独立挂在这一层 fixed 容器里。 */}
+        <DesktopInkLauncher english={en} />
         <button
           type="button"
           onClick={() => setLibraryOpen((o) => !o)}

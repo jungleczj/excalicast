@@ -48,6 +48,11 @@ export const DESKTOP_IPC_CHANNELS = {
   captureStatus: 'capture.status.v1',
   inkSetMode: 'ink.set-mode.v1',
   inkSetOpacity: 'ink.set-opacity.v1',
+  inkGetSettings: 'ink.get-settings.v1',
+  inkSettingsChanged: 'ink.settings-changed.v1',
+  inkAppendEvents: 'ink.append-events.v1',
+  inkFlushRequested: 'ink.flush-requested.v1',
+  inkFlushComplete: 'ink.flush-complete.v1',
   cameraSetLayout: 'camera.set-layout.v1',
   teleprompterConfigure: 'teleprompter.configure.v1',
   teleprompterSetMode: 'teleprompter.set-mode.v1',
@@ -83,4 +88,11 @@ export function normalizeDesktopInkSettings(input: DesktopInkSettingsInput): Des
     inkOpacity: clampOpacity(input.inkOpacity),
     pointerPolicy: input.pointerPolicy,
   };
+}
+
+export function mergeDesktopInkSettings(
+  current: DesktopInkSettingsInput,
+  patch: Partial<DesktopInkSettingsInput>,
+): DesktopInkSettings {
+  return normalizeDesktopInkSettings({ ...current, ...patch });
 }

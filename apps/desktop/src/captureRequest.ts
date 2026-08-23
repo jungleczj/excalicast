@@ -1,5 +1,23 @@
 import type { NativeCaptureRequest } from './nativeHelperClient';
 
+export function mergeDesktopCaptureExclusions(
+  payload: unknown,
+  privateWindowIDs: readonly number[],
+): unknown {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+  const value = payload as Record<string, unknown>;
+  const requested = Array.isArray(value.excludedWindowIDs) ? value.excludedWindowIDs : [];
+  const excludedWindowIDs = [...requested];
+  const seen = new Set(requested);
+  for (const windowID of privateWindowIDs) {
+    if (!seen.has(windowID)) {
+      seen.add(windowID);
+      excludedWindowIDs.push(windowID);
+    }
+  }
+  return { ...value, excludedWindowIDs };
+}
+
 export function parseDesktopCapturePayload(
   payload: unknown,
   projectRoot: string,
@@ -41,6 +59,7 @@ export function parseDesktopCapturePayload(
     cameraWidth: optionalInteger(value.cameraWidth, 320, 3840),
     cameraHeight: optionalInteger(value.cameraHeight, 240, 2160),
     cameraFramesPerSecond: optionalInteger(value.cameraFramesPerSecond, 1, 60),
+    excludedWindowIDs: optionalUniqueIntegerArray(value.excludedWindowIDs, 1, 0xffff_ffff, 32),
   };
 }
 
@@ -68,4 +87,27 @@ function optionalDeviceID(value: unknown): string | undefined {
     throw new Error('native_capture_request_invalid');
   }
   return value;
+}
+
+function optionalUniqueIntegerArray(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  maximumLength: number,
+): number[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > maximumLength) {
+    throw new Error('native_capture_request_invalid');
+  }
+  const unique: number[] = [];
+  const seen = new Set<number>();
+  for (const item of value) {
+    const parsed = optionalInteger(item, minimum, maximum);
+    if (parsed === undefined) throw new Error('native_capture_request_invalid');
+    if (!seen.has(parsed)) {
+      seen.add(parsed);
+      unique.push(parsed);
+    }
+  }
+  return unique;
 }

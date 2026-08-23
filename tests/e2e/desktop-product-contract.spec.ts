@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
   DESKTOP_FEATURE_MIGRATION_MATRIX,
   DESKTOP_IPC_CHANNELS,
+  mergeDesktopInkSettings,
   normalizeDesktopInkSettings,
   type DesktopFeatureId,
 } from '../../src/desktop/productContract';
@@ -10,6 +11,8 @@ import {
   parseTeachingEditRecipe,
   type TeleprompterDesktopSession,
 } from '../../src/desktop/projectSchema';
+import { createDesktopInkSurfacePresentation } from '../../src/desktop/inkSurface';
+import { DesktopInkEventCollector } from '../../src/desktop/inkEventJournal';
 
 const REQUIRED_BROWSER_FEATURES: DesktopFeatureId[] = [
   'whiteboard.excalidraw-full',
@@ -46,6 +49,37 @@ test('desktop ink uses the full Excalidraw surface with independent opacity cont
     inkOpacity: 0,
     pointerPolicy: 'draw',
   });
+
+  expect(mergeDesktopInkSettings({
+    mode: 'ink',
+    backgroundOpacity: 0,
+    inkOpacity: 1,
+    pointerPolicy: 'pass-through',
+  }, {
+    mode: 'full-board',
+    backgroundOpacity: 0.45,
+    inkOpacity: 0.72,
+    pointerPolicy: 'draw',
+  })).toEqual({
+    engine: 'excalidraw',
+    toolSurface: 'full',
+    mode: 'full-board',
+    backgroundOpacity: 0.45,
+    inkOpacity: 0.72,
+    pointerPolicy: 'draw',
+  });
+
+  expect(createDesktopInkSurfacePresentation({
+    mode: 'full-board',
+    backgroundOpacity: 0.45,
+    inkOpacity: 0.72,
+    pointerPolicy: 'draw',
+  })).toEqual({
+    className: 'desktop-ink-overlay desktop-ink-overlay--full-board',
+    boardBackground: 'rgba(255, 255, 255, 0.45)',
+    inkOpacity: 0.72,
+    fullToolSurface: true,
+  });
 });
 
 test('desktop IPC is versioned and separates native capture from renderer pixels', () => {
@@ -56,6 +90,11 @@ test('desktop IPC is versioned and separates native capture from renderer pixels
   expect(DESKTOP_IPC_CHANNELS.captureRequestPermissions).toBe('capture.request-permissions.v1');
   expect(DESKTOP_IPC_CHANNELS.captureStop).toBe('capture.stop.v1');
   expect(DESKTOP_IPC_CHANNELS.inkSetOpacity).toBe('ink.set-opacity.v1');
+  expect(DESKTOP_IPC_CHANNELS.inkGetSettings).toBe('ink.get-settings.v1');
+  expect(DESKTOP_IPC_CHANNELS.inkSettingsChanged).toBe('ink.settings-changed.v1');
+  expect(DESKTOP_IPC_CHANNELS.inkAppendEvents).toBe('ink.append-events.v1');
+  expect(DESKTOP_IPC_CHANNELS.inkFlushRequested).toBe('ink.flush-requested.v1');
+  expect(DESKTOP_IPC_CHANNELS.inkFlushComplete).toBe('ink.flush-complete.v1');
   expect(DESKTOP_IPC_CHANNELS.teleprompterConfigure).toBe('teleprompter.configure.v1');
   expect(DESKTOP_IPC_CHANNELS.projectRecover).toBe('project.recover.v1');
   expect(DESKTOP_IPC_CHANNELS.projectValidate).toBe('project.validate.v1');
@@ -71,6 +110,50 @@ test('native recording manifest keeps independent recoverable media and Excalidr
     'screen', 'camera', 'microphone', 'system-audio', 'excalidraw-events', 'input-telemetry',
   ]);
   expect(manifest.tracks.every((track) => track.segments.length === 0)).toBe(true);
+});
+
+test('desktop ink journal records element deltas instead of cloning the complete scene', () => {
+  const collector = new DesktopInkEventCollector();
+  collector.observeScene([
+    { id: 'a', version: 1, versionNonce: 10, isDeleted: false, x: 1 },
+    { id: 'b', version: 1, versionNonce: 20, isDeleted: false, x: 2 },
+  ], { scrollX: 0, scrollY: 0, zoom: { value: 1 } }, {}, 1_000);
+  collector.drain();
+
+  collector.observeScene([
+    { id: 'a', version: 1, versionNonce: 10, isDeleted: false, x: 1 },
+    { id: 'b', version: 2, versionNonce: 21, isDeleted: false, x: 22 },
+  ], { scrollX: 0, scrollY: 0, zoom: { value: 1 } }, {}, 1_100);
+  collector.recordPointer({ x: 80, y: 120, tool: 'laser', phase: 'move' }, 1_120);
+
+  expect(collector.drain()).toEqual([
+    {
+      kind: 'scene-delta',
+      atUnixMs: 1_100,
+      upserts: [{ id: 'b', version: 2, versionNonce: 21, isDeleted: false, x: 22 }],
+      deletedIds: [],
+      fileUpserts: {},
+    },
+    {
+      kind: 'pointer',
+      atUnixMs: 1_120,
+      x: 80,
+      y: 120,
+      tool: 'laser',
+      phase: 'move',
+    },
+  ]);
+
+  const retryable = [{
+    kind: 'pointer' as const,
+    atUnixMs: 1_200,
+    x: 90,
+    y: 130,
+    tool: 'freedraw',
+    phase: 'move' as const,
+  }];
+  collector.restore(retryable);
+  expect(collector.drain()).toEqual(retryable);
 });
 
 test('teaching recipe accepts curated ChatCut assets and rejects hidden catalog injection', () => {

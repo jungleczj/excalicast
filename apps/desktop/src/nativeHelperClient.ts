@@ -63,6 +63,8 @@ export interface NativeCaptureRequest {
   cameraWidth?: number;
   cameraHeight?: number;
   cameraFramesPerSecond?: number;
+  /** Native desktop windows that must never be baked into display capture. */
+  excludedWindowIDs?: number[];
 }
 
 export interface NativeCaptureConfiguration {
@@ -82,6 +84,13 @@ export interface NativeCaptureCapability {
 export interface NativeCaptureResult {
   state: 'idle' | 'recording' | 'stopping';
   capability: NativeCaptureCapability;
+}
+
+export interface NativeInkEventBatch {
+  index: number;
+  startUs: number;
+  durationUs: number;
+  payload: string;
 }
 
 export interface NativeCaptureSources {
@@ -303,6 +312,17 @@ export class NativeHelperClient {
     const response = await this.request({ channel: 'project.validate.v1', projectRoot }, 30_000);
     if (!response.validation) throw new Error('native_recording_validation_missing');
     return response.validation;
+  }
+
+  async appendInkEvents(batch: NativeInkEventBatch): Promise<void> {
+    const response = await this.request({
+      channel: 'ink.append-events.v1',
+      eventIndex: batch.index,
+      eventStartUs: batch.startUs,
+      eventDurationUs: batch.durationUs,
+      eventPayload: batch.payload,
+    }, 15_000);
+    if (response.state !== 'recording') throw new Error('native_ink_event_append_invalid');
   }
 
   close(): void {

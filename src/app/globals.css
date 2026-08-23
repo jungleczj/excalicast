@@ -4781,18 +4781,27 @@ body {
 /* 隐藏 Excalidraw 自带的 library / sidebar 控件 —— 本项目用自制 LibraryDrawer 替代。
    scope 在 .excalidraw 根容器下，覆盖任何页面的任何 Excalidraw 实例（录制 /app、回放 /play、/s），
    且只影响 Excalidraw 自身 DOM，不碰我们自己的 UI。类名按 @excalidraw/excalidraw v0.17.6 实测。 */
-.excalidraw .sidebar-triggers,
-.excalidraw .default-sidebar-trigger,
-.excalidraw .sidebar-trigger,
-.excalidraw .default-sidebar,
-.excalidraw .sidebar,
-.excalidraw .layer-ui__library,
-.excalidraw .layer-ui__library-message,
-.excalidraw .library-menu,
-.excalidraw .library-menu-items-container,
-.excalidraw .publish-library,
-.excalidraw .publish-library-success {
+.excalicast-board:not(.excalicast-board--full-tools) .excalidraw .sidebar-triggers,
+.excalicast-board:not(.excalicast-board--full-tools) .excalidraw .default-sidebar-trigger,
+.excalicast-board:not(.excalicast-board--full-tools) .excalidraw .sidebar-trigger,
+.excalicast-board:not(.excalicast-board--full-tools) .excalidraw .default-sidebar,
+.excalicast-board:not(.excalicast-board--full-tools) .excalidraw .sidebar,
+.excalicast-board:not(.excalicast-board--full-tools) .excalidraw .layer-ui__library,
+.excalicast-board:not(.excalicast-board--full-tools) .excalidraw .layer-ui__library-message,
+.excalicast-board:not(.excalicast-board--full-tools) .excalidraw .library-menu,
+.excalicast-board:not(.excalicast-board--full-tools) .excalidraw .library-menu-items-container,
+.excalicast-board:not(.excalicast-board--full-tools) .excalidraw .publish-library,
+.excalicast-board:not(.excalicast-board--full-tools) .excalidraw .publish-library-success {
   display: none !important;
+}
+
+.desktop-ink-overlay .excalicast-board,
+.desktop-ink-overlay .excalidraw {
+  background: transparent !important;
+}
+
+.desktop-ink-overlay .excalidraw canvas {
+  opacity: var(--desktop-ink-opacity, 1);
 }
 
 /* ────────────────────────────────────────────────────────

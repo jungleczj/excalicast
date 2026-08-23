@@ -30,9 +30,21 @@ interface Props {
    * 上层在 session 起动后把 session.recordLaserPoint 赋给这个 ref，停止/discard 时清回 null。
    */
   laserPointRef?: RefObject<((x: number, y: number, button: 'down' | 'up') => void) | null>;
+  pointerPointRef?: RefObject<((x: number, y: number, button: 'down' | 'up', tool: string) => void) | null>;
+  /** Desktop transparent overlay keeps Excalidraw's native library/sidebar surface available. */
+  fullToolSurface?: boolean;
+  /** Do not paint the regular web workspace paper behind Excalidraw. */
+  transparentBackground?: boolean;
 }
 
-export default function Whiteboard({ onChangeRef, onApiReady, laserPointRef }: Props): JSX.Element {
+export default function Whiteboard({
+  onChangeRef,
+  onApiReady,
+  laserPointRef,
+  pointerPointRef,
+  fullToolSurface = false,
+  transparentBackground = false,
+}: Props): JSX.Element {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const apiRef = useRef<any>(null);
   const [, setApiReady] = useState(false);
@@ -45,15 +57,17 @@ export default function Whiteboard({ onChangeRef, onApiReady, laserPointRef }: P
   }), [onChangeRef]);
 
   return (
-    <div className="excalicast-board absolute inset-0 bg-canvas-bg">
-      {/* 隐藏 Excalidraw 自带 library/sidebar 控件的 CSS 放在 globals.css
-         （scope 在 .excalidraw 下，覆盖所有页面的 Excalidraw 实例）。 */}
+    <div className={`excalicast-board${fullToolSurface ? ' excalicast-board--full-tools' : ''} absolute inset-0${transparentBackground ? '' : ' bg-canvas-bg'}`}>
       <Excalidraw
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         excalidrawAPI={(api: any) => { apiRef.current = api; setApiReady(true); onApiReady?.(api); }}
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onChange={handlers.onChange as any}
+        initialData={transparentBackground ? {
+          appState: { viewBackgroundColor: 'transparent' },
+        } : undefined}
         onPointerUpdate={({ pointer, button }) => {
+          pointerPointRef?.current?.(pointer.x, pointer.y, button, pointer.tool);
           if (pointer.tool === 'laser') laserPointRef?.current?.(pointer.x, pointer.y, button);
         }}
       />

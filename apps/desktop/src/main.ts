@@ -1,19 +1,43 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, screen, shell } from 'electron';
 import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { DESKTOP_IPC_CHANNELS } from '../../../src/desktop/productContract';
+import {
+  DESKTOP_IPC_CHANNELS,
+  mergeDesktopInkSettings,
+  normalizeDesktopInkSettings,
+  type DesktopInkSettings,
+} from '../../../src/desktop/productContract';
 import {
   spawnNativeHelper,
   type NativeHelperClient,
   type NativeHelperHandshake,
 } from './nativeHelperClient';
-import { parseDesktopCapturePayload } from './captureRequest';
-import { createDesktopWindowOptions } from './windowContract';
+import {
+  mergeDesktopCaptureExclusions,
+  parseDesktopCapturePayload,
+} from './captureRequest';
+import {
+  createDesktopInkWindowOptions,
+  createDesktopWindowOptions,
+  parseDesktopWindowMediaSourceId,
+} from './windowContract';
+import { createNativeInkEventBatch } from './inkEventBatch';
 
 let mainWindow: BrowserWindow | null = null;
+let inkWindow: BrowserWindow | null = null;
+let inkSettings: DesktopInkSettings = normalizeDesktopInkSettings({
+  mode: 'ink',
+  backgroundOpacity: 0,
+  inkOpacity: 1,
+  pointerPolicy: 'pass-through',
+});
 let nativeHelper: NativeHelperClient | null = null;
 let nativeHelperHandshake: NativeHelperHandshake | null = null;
 let nativeHelperInitialization: Promise<void> | null = null;
+let activeNativeCapture: { recordingId: string; startedUnixMs: number; nextInkEventIndex: number } | null = null;
+let inkEventCommitTail: Promise<void> = Promise.resolve();
+const pendingInkFlushes = new Map<string, () => void>();
 
 async function initializeNativeHelper(): Promise<void> {
   const packagedPath = path.join(process.resourcesPath, 'bin', 'mac-media-engine');
@@ -29,6 +53,59 @@ async function initializeNativeHelper(): Promise<void> {
 }
 
 function registerDesktopIpc(): void {
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.inkGetSettings, () => desktopInkState());
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.inkSetMode, async (_event, payload: unknown) => {
+    const value = objectPayload(payload, 'desktop_ink_mode_invalid');
+    if ((value.mode !== 'ink' && value.mode !== 'full-board')
+      || (value.pointerPolicy !== 'draw' && value.pointerPolicy !== 'pass-through')) {
+      throw new Error('desktop_ink_mode_invalid');
+    }
+    const displayID = value.displayID === undefined
+      ? undefined
+      : requiredSafeInteger(value.displayID, 'desktop_ink_display_invalid');
+    inkSettings = mergeDesktopInkSettings(inkSettings, {
+      mode: value.mode,
+      pointerPolicy: value.pointerPolicy,
+    });
+    const window = createOrMoveInkWindow(displayID);
+    applyInkWindowSettings(window);
+    broadcastInkSettings();
+    return desktopInkState();
+  });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.inkSetOpacity, (_event, payload: unknown) => {
+    const value = objectPayload(payload, 'desktop_ink_opacity_invalid');
+    if (typeof value.backgroundOpacity !== 'number' || typeof value.inkOpacity !== 'number') {
+      throw new Error('desktop_ink_opacity_invalid');
+    }
+    inkSettings = mergeDesktopInkSettings(inkSettings, {
+      backgroundOpacity: value.backgroundOpacity,
+      inkOpacity: value.inkOpacity,
+    });
+    broadcastInkSettings();
+    return desktopInkState();
+  });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.inkAppendEvents, async (_event, payload: unknown) => {
+    const active = activeNativeCapture;
+    if (!active) throw new Error('desktop_ink_recording_inactive');
+    const batch = createNativeInkEventBatch(
+      payload,
+      active.startedUnixMs,
+      active.nextInkEventIndex,
+    );
+    active.nextInkEventIndex += 1;
+    const helper = await requireNativeHelper();
+    const commit = inkEventCommitTail.then(() => helper.appendInkEvents(batch));
+    inkEventCommitTail = commit.catch(() => undefined);
+    await commit;
+    return { committed: true, index: batch.index };
+  });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.inkFlushComplete, (_event, payload: unknown) => {
+    const value = objectPayload(payload, 'desktop_ink_flush_invalid');
+    if (typeof value.requestId !== 'string') throw new Error('desktop_ink_flush_invalid');
+    pendingInkFlushes.get(value.requestId)?.();
+    pendingInkFlushes.delete(value.requestId);
+    return { acknowledged: true };
+  });
   ipcMain.handle(DESKTOP_IPC_CHANNELS.capturePermissions, async () => {
     const helper = await requireNativeHelper();
     return helper.capturePermissions();
@@ -55,11 +132,27 @@ function registerDesktopIpc(): void {
   });
   ipcMain.handle(DESKTOP_IPC_CHANNELS.captureStart, async (_event, payload: unknown) => {
     const helper = await requireNativeHelper();
-    return helper.startCapture(toNativeCaptureRequest(payload));
+    const request = toNativeCaptureRequest(payload);
+    const result = await helper.startCapture(request);
+    activeNativeCapture = {
+      recordingId: request.recordingId,
+      startedUnixMs: Date.now(),
+      nextInkEventIndex: 0,
+    };
+    inkEventCommitTail = Promise.resolve();
+    broadcastInkSettings();
+    return result;
   });
   ipcMain.handle(DESKTOP_IPC_CHANNELS.captureStop, async () => {
     const helper = await requireNativeHelper();
-    return helper.stopCapture();
+    await requestInkWindowFlush();
+    await inkEventCommitTail;
+    try {
+      return await helper.stopCapture();
+    } finally {
+      activeNativeCapture = null;
+      broadcastInkSettings();
+    }
   });
   ipcMain.handle(DESKTOP_IPC_CHANNELS.captureStatus, async () => {
     if (nativeHelperInitialization) await nativeHelperInitialization;
@@ -105,9 +198,109 @@ function toNativeCaptureRequest(payload: unknown) {
   const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
   const recordingId = typeof value.recordingId === 'string' ? value.recordingId : '';
   return parseDesktopCapturePayload(
-    payload,
+    mergeDesktopCaptureExclusions(payload, privateOverlayWindowIDs()),
     path.join(app.getPath('videos'), 'Excalicast Projects', recordingId),
   );
+}
+
+function createOrMoveInkWindow(displayID?: number): BrowserWindow {
+  const display = displayID === undefined
+    ? screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+    : screen.getAllDisplays().find((candidate) => candidate.id === displayID);
+  if (!display) throw new Error('desktop_ink_display_not_found');
+  if (inkWindow && !inkWindow.isDestroyed()) {
+    inkWindow.setBounds(display.bounds, false);
+    return inkWindow;
+  }
+  const preload = path.join(__dirname, 'preload.js');
+  const window = new BrowserWindow(createDesktopInkWindowOptions(preload, display.bounds));
+  inkWindow = window;
+  window.setAlwaysOnTop(true, 'screen-saver');
+  window.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+    skipTransformProcessType: true,
+  });
+  window.setContentProtection(true);
+  window.on('closed', () => {
+    if (inkWindow === window) inkWindow = null;
+  });
+  void window.loadURL(desktopInkRendererUrl());
+  return window;
+}
+
+function applyInkWindowSettings(window: BrowserWindow): void {
+  const passThrough = inkSettings.pointerPolicy === 'pass-through';
+  window.setIgnoreMouseEvents(passThrough, { forward: true });
+  window.setFocusable(!passThrough);
+  if (passThrough) window.showInactive();
+  else window.show();
+}
+
+function desktopInkRendererUrl(): string {
+  const rendererUrl = new URL(process.env.EXCALICAST_RENDERER_URL ?? 'http://localhost:3001/app');
+  rendererUrl.pathname = '/desktop-ink';
+  rendererUrl.search = '';
+  rendererUrl.hash = '';
+  return rendererUrl.toString();
+}
+
+function desktopInkState(): DesktopInkSettings & {
+  visible: boolean;
+  windowID?: number;
+  recordingActive: boolean;
+  recordingId?: string;
+} {
+  return {
+    ...inkSettings,
+    visible: inkWindow?.isDestroyed() === false && inkWindow.isVisible(),
+    windowID: privateOverlayWindowIDs()[0],
+    recordingActive: activeNativeCapture !== null,
+    recordingId: activeNativeCapture?.recordingId,
+  };
+}
+
+function broadcastInkSettings(): void {
+  const state = desktopInkState();
+  for (const window of [mainWindow, inkWindow]) {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send(DESKTOP_IPC_CHANNELS.inkSettingsChanged, state);
+    }
+  }
+}
+
+async function requestInkWindowFlush(): Promise<void> {
+  if (!inkWindow || inkWindow.isDestroyed() || !inkWindow.isVisible() || !activeNativeCapture) return;
+  const requestId = randomUUID();
+  await new Promise<void>((resolve) => {
+    const timeout = setTimeout(() => {
+      pendingInkFlushes.delete(requestId);
+      resolve();
+    }, 2_000);
+    pendingInkFlushes.set(requestId, () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    inkWindow?.webContents.send(DESKTOP_IPC_CHANNELS.inkFlushRequested, { requestId });
+  });
+}
+
+function privateOverlayWindowIDs(): number[] {
+  if (!inkWindow || inkWindow.isDestroyed() || !inkWindow.isVisible()) return [];
+  try {
+    return [parseDesktopWindowMediaSourceId(inkWindow.getMediaSourceId())];
+  } catch {
+    return [];
+  }
+}
+
+function objectPayload(payload: unknown, errorCode: string): Record<string, unknown> {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error(errorCode);
+  return payload as Record<string, unknown>;
+}
+
+function requiredSafeInteger(value: unknown, errorCode: string): number {
+  if (!Number.isSafeInteger(value)) throw new Error(errorCode);
+  return value as number;
 }
 
 function createMainWindow(): BrowserWindow {
@@ -139,6 +332,11 @@ void app.whenReady().then(() => {
 });
 
 app.on('before-quit', () => {
+  activeNativeCapture = null;
+  for (const resolve of pendingInkFlushes.values()) resolve();
+  pendingInkFlushes.clear();
+  inkWindow?.destroy();
+  inkWindow = null;
   nativeHelper?.close();
   nativeHelper = null;
   nativeHelperHandshake = null;

@@ -60,7 +60,8 @@ final class ScreenCaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate, @un
         request: CaptureRequest,
         store: SegmentedRecordingStore,
         timeline: RecordingTimeline,
-        captureSystemAudio: Bool
+        captureSystemAudio: Bool,
+        excludedWindowIDs: [UInt32]
     ) async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(
             false,
@@ -72,7 +73,12 @@ final class ScreenCaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate, @un
             guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
                 throw NativeCaptureError.displayNotFound(displayID)
             }
-            filter = SCContentFilter(display: display, excludingWindows: [])
+            let matchingIDs = Set(CaptureWindowExclusionPolicy.matchingWindowIDs(
+                requested: excludedWindowIDs,
+                available: content.windows.map(\.windowID)
+            ))
+            let excludedWindows = content.windows.filter { matchingIDs.contains($0.windowID) }
+            filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
         case .window(let windowID):
             guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
                 throw NativeCaptureError.windowNotFound(windowID)

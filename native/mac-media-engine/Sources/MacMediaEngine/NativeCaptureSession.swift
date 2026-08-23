@@ -16,6 +16,7 @@ final class NativeCaptureSession: @unchecked Sendable {
         let captureCamera: Bool
         let cameraDeviceID: String?
         let cameraRequest: CaptureRequest
+        let excludedWindowIDs: [UInt32]
     }
 
     private var store: SegmentedRecordingStore?
@@ -75,7 +76,8 @@ final class NativeCaptureSession: @unchecked Sendable {
                 request: configuration.request,
                 store: store,
                 timeline: timeline,
-                captureSystemAudio: configuration.captureSystemAudio
+                captureSystemAudio: configuration.captureSystemAudio,
+                excludedWindowIDs: configuration.excludedWindowIDs
             )
             try microphone?.start(
                 deviceID: configuration.microphoneDeviceID,
@@ -133,6 +135,30 @@ final class NativeCaptureSession: @unchecked Sendable {
         projectRoot = nil
         requiredTracks = [.screen]
         if let firstError { throw firstError }
+    }
+
+    func appendInkEvents(
+        index: Int,
+        startUs: Int64,
+        durationUs: Int64,
+        payload: String
+    ) throws {
+        guard let store,
+              index >= 0,
+              startUs >= 0,
+              durationUs > 0,
+              let data = payload.data(using: .utf8),
+              !data.isEmpty,
+              data.count <= 16 * 1_024 * 1_024 else {
+            throw RecordingStoreError.invalidSegmentMetadata
+        }
+        try store.appendFinalizedSegment(
+            track: .excalidrawEvents,
+            index: index,
+            data: data,
+            startUs: startUs,
+            durationUs: durationUs
+        )
     }
 
     func pressureSnapshot() -> CapturePressureSnapshot {

@@ -1,18 +1,25 @@
 import { expect, test } from '@playwright/test';
 import {
+  createDesktopInkWindowOptions,
   createDesktopWindowOptions,
   exposedDesktopBridgeChannels,
+  exposedDesktopEventChannels,
+  parseDesktopWindowMediaSourceId,
 } from '../../apps/desktop/src/windowContract';
 import {
   NativeHelperClient,
   NativeHelperError,
   type HelperTransport,
 } from '../../apps/desktop/src/nativeHelperClient';
-import { parseDesktopCapturePayload } from '../../apps/desktop/src/captureRequest';
+import {
+  mergeDesktopCaptureExclusions,
+  parseDesktopCapturePayload,
+} from '../../apps/desktop/src/captureRequest';
 import {
   runNativeCaptureSoak,
   summarizeNativeCaptureSoak,
 } from '../../apps/desktop/src/nativeCaptureSoak';
+import { createNativeInkEventBatch } from '../../apps/desktop/src/inkEventBatch';
 import {
   CaptureResourceCoordinator,
   startDesktopCaptureWithResourcePriority,
@@ -34,6 +41,36 @@ test('desktop shell uses a hardened renderer with a narrow versioned bridge', ()
 test('renderer bridge never exposes raw frames or unrestricted IPC', () => {
   expect(exposedDesktopBridgeChannels.some((channel) => /frame|pixel|blob/i.test(channel))).toBe(false);
   expect(exposedDesktopBridgeChannels).not.toContain('*');
+  expect(exposedDesktopBridgeChannels).not.toContain('ink.settings-changed.v1');
+  expect(exposedDesktopEventChannels).toEqual([
+    'ink.settings-changed.v1',
+    'ink.flush-requested.v1',
+  ]);
+});
+
+test('desktop ink window is a hardened transparent full-display overlay', () => {
+  const options = createDesktopInkWindowOptions('/tmp/excalicast-preload.js', {
+    x: -1728, y: 0, width: 1728, height: 1117,
+  });
+
+  expect(options).toMatchObject({
+    x: -1728, y: 0, width: 1728, height: 1117,
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: '/tmp/excalicast-preload.js',
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+    },
+  });
+  expect(parseDesktopWindowMediaSourceId('window:9087:0')).toBe(9087);
+  expect(() => parseDesktopWindowMediaSourceId('screen:0:0')).toThrow('desktop_window_media_source_invalid');
 });
 
 test('native helper handshake is correlated and rejects protocol mismatch', async () => {
@@ -224,6 +261,41 @@ test('electron capture parsing preserves optional camera, microphone and system 
   });
 });
 
+test('electron capture parsing preserves unique native overlay exclusions', () => {
+  const request = parseDesktopCapturePayload({
+    recordingId: 'overlay-exclusion',
+    sourceKind: 'display',
+    sourceID: 42,
+    width: 2560,
+    height: 1440,
+    framesPerSecond: 30,
+    codec: 'h264',
+    excludedWindowIDs: [9002, 9001, 9002],
+  }, '/projects/overlay-exclusion');
+
+  expect(request.excludedWindowIDs).toEqual([9002, 9001]);
+  expect(() => parseDesktopCapturePayload({
+    recordingId: 'invalid-overlay-exclusion',
+    sourceKind: 'display',
+    sourceID: 42,
+    width: 2560,
+    height: 1440,
+    framesPerSecond: 30,
+    codec: 'h264',
+    excludedWindowIDs: [9001, -1],
+  }, '/projects/invalid-overlay-exclusion')).toThrow('native_capture_request_invalid');
+});
+
+test('native capture automatically merges every visible private overlay exclusion', () => {
+  expect(mergeDesktopCaptureExclusions({
+    recordingId: 'auto-exclusion',
+    excludedWindowIDs: [9001, 9002],
+  }, [9002, 9087])).toEqual({
+    recordingId: 'auto-exclusion',
+    excludedWindowIDs: [9001, 9002, 9087],
+  });
+});
+
 test('heavy work waits until native recording releases network, cpu and disk resources', async () => {
   const states = ['recording', 'recording', 'idle'] as const;
   let reads = 0;
@@ -372,6 +444,60 @@ test('native project validation returns per-track continuity and decodability ev
     continuity: { isValid: true },
     segments: [expect.objectContaining({ actualCodec: 'avc1', isDecodable: true })],
   });
+});
+
+test('desktop ink event batches are committed through the native recording helper', async () => {
+  let onLine: ((line: string) => void) | null = null;
+  let command: Record<string, unknown> | null = null;
+  const transport: HelperTransport = {
+    write(line) {
+      command = JSON.parse(line) as Record<string, unknown>;
+      queueMicrotask(() => onLine?.(JSON.stringify({
+        id: command?.id,
+        ok: true,
+        state: 'recording',
+      })));
+    },
+    onLine(listener) { onLine = listener; },
+    close() {},
+  };
+  const client = new NativeHelperClient(transport);
+  await client.appendInkEvents({
+    index: 3,
+    startUs: 2_000_000,
+    durationUs: 120_000,
+    payload: '{"events":[{"kind":"pointer"}]}',
+  });
+
+  expect(command).toMatchObject({
+    channel: 'ink.append-events.v1',
+    eventIndex: 3,
+    eventStartUs: 2_000_000,
+    eventDurationUs: 120_000,
+    eventPayload: '{"events":[{"kind":"pointer"}]}',
+  });
+});
+
+test('desktop ink batches use capture-relative microsecond timing and bounded payloads', () => {
+  expect(createNativeInkEventBatch({
+    events: [
+      { kind: 'pointer', atUnixMs: 10_250, x: 1, y: 2 },
+      { kind: 'viewport', atUnixMs: 10_375, zoom: 1.2 },
+    ],
+  }, 10_000, 4)).toEqual({
+    index: 4,
+    startUs: 250_000,
+    durationUs: 125_001,
+    payload: JSON.stringify({
+      schemaVersion: 1,
+      events: [
+        { kind: 'pointer', atUnixMs: 10_250, x: 1, y: 2 },
+        { kind: 'viewport', atUnixMs: 10_375, zoom: 1.2 },
+      ],
+    }),
+  });
+  expect(() => createNativeInkEventBatch({ events: [] }, 10_000, 0))
+    .toThrow('desktop_ink_event_batch_invalid');
 });
 
 test('native soak summary rejects linear memory growth and sustained encoder backlog', () => {
