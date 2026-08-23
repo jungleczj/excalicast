@@ -1,6 +1,7 @@
 import Foundation
 import MacMediaEngineCore
 @preconcurrency import CoreMedia
+@preconcurrency import AVFoundation
 
 @available(macOS 13.0, *)
 final class NativeCaptureSession: @unchecked Sendable {
@@ -23,6 +24,14 @@ final class NativeCaptureSession: @unchecked Sendable {
     private var camera: CameraCaptureEngine?
 
     func start(configuration: Configuration) async throws -> CapturePreflightReport {
+        if configuration.captureMicrophone,
+           AVCaptureDevice.authorizationStatus(for: .audio) != .authorized {
+            throw NativeCaptureError.microphonePermissionRequired
+        }
+        if configuration.captureCamera,
+           AVCaptureDevice.authorizationStatus(for: .video) != .authorized {
+            throw NativeCaptureError.cameraPermissionRequired
+        }
         let values = try configuration.projectRoot.deletingLastPathComponent()
             .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         let availableBytes = values.volumeAvailableCapacityForImportantUsage ?? 0
@@ -30,6 +39,12 @@ final class NativeCaptureSession: @unchecked Sendable {
             requested: configuration.request,
             availableBytes: availableBytes
         )
+        if configuration.captureCamera {
+            _ = try CapturePreflight.evaluateSystem(
+                requested: configuration.cameraRequest,
+                availableBytes: availableBytes
+            )
+        }
         let store = try SegmentedRecordingStore(
             root: configuration.projectRoot,
             recordingId: configuration.recordingId

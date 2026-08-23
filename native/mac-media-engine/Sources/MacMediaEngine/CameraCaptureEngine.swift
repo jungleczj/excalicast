@@ -27,9 +27,44 @@ final class CameraCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferD
             mediaType: .video,
             position: .unspecified
         )
-        let device = deviceID.flatMap { id in discovery.devices.first { $0.uniqueID == id } }
-            ?? AVCaptureDevice.default(for: .video)
+        let device: AVCaptureDevice?
+        if let deviceID {
+            device = discovery.devices.first { $0.uniqueID == deviceID }
+        } else {
+            device = AVCaptureDevice.default(for: .video)
+        }
         guard let device else { throw NativeCaptureError.cameraNotFound(deviceID) }
+        let formats = device.formats
+        let candidates = formats.enumerated().compactMap { index, format -> CameraFormatCandidate? in
+            let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            guard let range = format.videoSupportedFrameRateRanges.first(where: {
+                $0.minFrameRate <= Double(request.framesPerSecond)
+                    && $0.maxFrameRate >= Double(request.framesPerSecond)
+            }) else { return nil }
+            return CameraFormatCandidate(
+                id: index,
+                width: Int(dimensions.width),
+                height: Int(dimensions.height),
+                minimumFPS: range.minFrameRate,
+                maximumFPS: range.maxFrameRate
+            )
+        }
+        guard let selected = CameraFormatPolicy.select(
+            requestedWidth: request.width,
+            requestedHeight: request.height,
+            requestedFramesPerSecond: request.framesPerSecond,
+            candidates: candidates
+        ) else {
+            throw NativeCaptureError.cameraFormatUnsupported(
+                width: request.width,
+                height: request.height,
+                framesPerSecond: request.framesPerSecond
+            )
+        }
+        let frameDuration = CMTime(
+            value: 1,
+            timescale: CMTimeScale(request.framesPerSecond)
+        )
         let input = try AVCaptureDeviceInput(device: device)
         let output = AVCaptureVideoDataOutput()
         output.alwaysDiscardsLateVideoFrames = true
@@ -42,9 +77,13 @@ final class CameraCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferD
 
         let session = AVCaptureSession()
         session.beginConfiguration()
-        session.sessionPreset = preset(for: request)
         guard session.canAddInput(input) else { throw NativeCaptureError.cameraCannotAddInput }
         session.addInput(input)
+        try device.lockForConfiguration()
+        device.activeFormat = formats[selected.id]
+        device.activeVideoMinFrameDuration = frameDuration
+        device.activeVideoMaxFrameDuration = frameDuration
+        device.unlockForConfiguration()
         guard session.canAddOutput(output) else { throw NativeCaptureError.cameraCannotAddOutput }
         session.addOutput(output)
         session.commitConfiguration()
@@ -102,12 +141,6 @@ final class CameraCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferD
             do { try encoder?.encode(frame) }
             catch { recordTerminalError(error) }
         }
-    }
-
-    private func preset(for request: CaptureRequest) -> AVCaptureSession.Preset {
-        if request.width >= 1_920 || request.height >= 1_080 { return .hd1920x1080 }
-        if request.width >= 1_280 || request.height >= 720 { return .hd1280x720 }
-        return .vga640x480
     }
 
     private func recordTerminalError(_ error: Error) {

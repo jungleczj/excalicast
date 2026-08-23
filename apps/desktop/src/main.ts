@@ -4,10 +4,10 @@ import path from 'node:path';
 import { DESKTOP_IPC_CHANNELS } from '../../../src/desktop/productContract';
 import {
   spawnNativeHelper,
-  type NativeCaptureRequest,
   type NativeHelperClient,
   type NativeHelperHandshake,
 } from './nativeHelperClient';
+import { parseDesktopCapturePayload } from './captureRequest';
 import { createDesktopWindowOptions } from './windowContract';
 
 let mainWindow: BrowserWindow | null = null;
@@ -45,6 +45,10 @@ function registerDesktopIpc(): void {
     const helper = await requireNativeHelper();
     return helper.captureSources();
   });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureDevices, async () => {
+    const helper = await requireNativeHelper();
+    return helper.captureDevices();
+  });
   ipcMain.handle(DESKTOP_IPC_CHANNELS.capturePreflight, async (_event, payload: unknown) => {
     const helper = await requireNativeHelper();
     return helper.preflightCapture(toNativeCaptureRequest(payload));
@@ -75,35 +79,13 @@ async function requireNativeHelper(): Promise<NativeHelperClient> {
   return nativeHelper;
 }
 
-function toNativeCaptureRequest(payload: unknown): NativeCaptureRequest {
-  if (!payload || typeof payload !== 'object') throw new Error('native_capture_request_invalid');
-  const value = payload as Record<string, unknown>;
+function toNativeCaptureRequest(payload: unknown) {
+  const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
   const recordingId = typeof value.recordingId === 'string' ? value.recordingId : '';
-  const codec = value.codec === 'h264' || value.codec === 'hevc' ? value.codec : null;
-  const legacyDisplayID = Number.isInteger(value.displayID) ? value.displayID as number : null;
-  const sourceKind = value.sourceKind === 'display' || value.sourceKind === 'window'
-    ? value.sourceKind
-    : legacyDisplayID !== null ? 'display' : null;
-  const sourceID = Number.isInteger(value.sourceID) ? value.sourceID as number : legacyDisplayID;
-  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(recordingId)
-    || !sourceKind
-    || sourceID === null
-    || !Number.isInteger(value.width)
-    || !Number.isInteger(value.height)
-    || !Number.isInteger(value.framesPerSecond)
-    || !codec) {
-    throw new Error('native_capture_request_invalid');
-  }
-  return {
-    recordingId,
-    projectRoot: path.join(app.getPath('videos'), 'Excalicast Projects', recordingId),
-    sourceKind,
-    sourceID,
-    width: value.width as number,
-    height: value.height as number,
-    framesPerSecond: value.framesPerSecond as number,
-    codec,
-  };
+  return parseDesktopCapturePayload(
+    payload,
+    path.join(app.getPath('videos'), 'Excalicast Projects', recordingId),
+  );
 }
 
 function createMainWindow(): BrowserWindow {

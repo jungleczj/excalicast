@@ -25,10 +25,13 @@ enum NativeCaptureError: Error {
     case audioMuxerAppendFailed(RecordingTrackKind)
     case audioMuxerFinishFailed(RecordingTrackKind)
     case microphoneNotFound(String?)
+    case microphonePermissionRequired
     case microphoneCannotAddInput
     case microphoneCannotAddOutput
     case microphoneStartFailed
     case cameraNotFound(String?)
+    case cameraPermissionRequired
+    case cameraFormatUnsupported(width: Int, height: Int, framesPerSecond: Int)
     case cameraCannotAddInput
     case cameraCannotAddOutput
     case cameraStartFailed

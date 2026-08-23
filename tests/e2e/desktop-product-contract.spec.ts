@@ -51,6 +51,7 @@ test('desktop ink uses the full Excalidraw surface with independent opacity cont
 test('desktop IPC is versioned and separates native capture from renderer pixels', () => {
   expect(DESKTOP_IPC_CHANNELS.captureStart).toBe('capture.start.v1');
   expect(DESKTOP_IPC_CHANNELS.captureSources).toBe('capture.sources.v1');
+  expect(DESKTOP_IPC_CHANNELS.captureDevices).toBe('capture.devices.v1');
   expect(DESKTOP_IPC_CHANNELS.capturePermissions).toBe('capture.permissions.v1');
   expect(DESKTOP_IPC_CHANNELS.captureRequestPermissions).toBe('capture.request-permissions.v1');
   expect(DESKTOP_IPC_CHANNELS.captureStop).toBe('capture.stop.v1');

@@ -16,6 +16,7 @@ interface HelperResponse {
   state?: 'idle' | 'recording' | 'stopping';
   capability?: NativeCaptureCapability;
   sources?: NativeCaptureSources;
+  devices?: NativeCaptureDevices;
   permissions?: NativeCapturePermissions;
   pressure?: NativeCapturePressure;
   error?: string;
@@ -76,6 +77,17 @@ export interface NativeCapturePermissions {
   camera: 'granted' | 'denied' | 'restricted' | 'not-determined';
 }
 
+export interface NativeCaptureDevice {
+  id: string;
+  name: string;
+  isDefault: boolean;
+}
+
+export interface NativeCaptureDevices {
+  microphones: NativeCaptureDevice[];
+  cameras: NativeCaptureDevice[];
+}
+
 export interface NativeCapturePressure {
   receivedScreenSamples: number;
   submittedVideoFrames: number;
@@ -119,7 +131,7 @@ export class NativeHelperClient {
   }
 
   async preflightCapture(request: NativeCaptureRequest): Promise<NativeCaptureCapability> {
-    const response = await this.request({ channel: 'capture.preflight.v1', ...request });
+    const response = await this.request({ channel: 'capture.preflight.v1', ...request }, 10_000);
     if (!response.capability) throw new Error('native_capture_capability_missing');
     return response.capability;
   }
@@ -128,6 +140,12 @@ export class NativeHelperClient {
     const response = await this.request({ channel: 'capture.sources.v1' });
     if (!response.sources) throw new Error('native_capture_sources_missing');
     return response.sources;
+  }
+
+  async captureDevices(): Promise<NativeCaptureDevices> {
+    const response = await this.request({ channel: 'capture.devices.v1' });
+    if (!response.devices) throw new Error('native_capture_devices_missing');
+    return response.devices;
   }
 
   async capturePermissions(): Promise<NativeCapturePermissions> {
@@ -140,13 +158,16 @@ export class NativeHelperClient {
     captureMicrophone: boolean;
     captureCamera: boolean;
   }): Promise<NativeCapturePermissions> {
-    const response = await this.request({ channel: 'capture.request-permissions.v1', ...options });
+    const response = await this.request(
+      { channel: 'capture.request-permissions.v1', ...options },
+      120_000,
+    );
     if (!response.permissions) throw new Error('native_capture_permissions_missing');
     return response.permissions;
   }
 
   async startCapture(request: NativeCaptureRequest): Promise<NativeCaptureResult> {
-    const response = await this.request({ channel: 'capture.start.v1', ...request });
+    const response = await this.request({ channel: 'capture.start.v1', ...request }, 30_000);
     if (response.state !== 'recording' || !response.capability) {
       throw new Error('native_capture_start_invalid');
     }
@@ -177,13 +198,16 @@ export class NativeHelperClient {
     this.transport.close();
   }
 
-  private request(command: Record<string, unknown>): Promise<HelperResponse> {
+  private request(
+    command: Record<string, unknown>,
+    timeoutMs = 5_000,
+  ): Promise<HelperResponse> {
     const id = randomUUID();
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error('native_helper_timeout'));
-      }, 5_000);
+      }, timeoutMs);
       this.pending.set(id, { resolve, reject, timeout });
       this.transport.write(`${JSON.stringify({ id, ...command })}\n`);
     });

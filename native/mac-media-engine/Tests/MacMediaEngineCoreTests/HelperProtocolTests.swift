@@ -95,6 +95,29 @@ struct MacMediaEngineContractTests {
             "real image detail is accepted"
         )
 
+        let cameraFormat = CameraFormatPolicy.select(
+            requestedWidth: 1_280,
+            requestedHeight: 720,
+            requestedFramesPerSecond: 24,
+            candidates: [
+                CameraFormatCandidate(id: 0, width: 640, height: 480, minimumFPS: 15, maximumFPS: 30),
+                CameraFormatCandidate(id: 1, width: 1_920, height: 1_080, minimumFPS: 24, maximumFPS: 60),
+                CameraFormatCandidate(id: 2, width: 1_280, height: 720, minimumFPS: 24, maximumFPS: 30),
+            ]
+        )
+        try expect(cameraFormat?.id == 2, "camera chooses the smallest native format that preserves quality")
+        try expect(
+            CameraFormatPolicy.select(
+                requestedWidth: 1_920,
+                requestedHeight: 1_080,
+                requestedFramesPerSecond: 60,
+                candidates: [
+                    CameraFormatCandidate(id: 0, width: 1_280, height: 720, minimumFPS: 24, maximumFPS: 60),
+                ]
+            ) == nil,
+            "camera never silently lowers requested resolution"
+        )
+
         let timeline = RecordingTimeline(originUs: 5_000_000)
         try expect(timeline.relativeUs(for: 5_250_000) == 250_000, "tracks share one relative clock")
         try expect(timeline.relativeUs(for: 4_999_000) == 0, "pre-roll timestamp clamps to zero")

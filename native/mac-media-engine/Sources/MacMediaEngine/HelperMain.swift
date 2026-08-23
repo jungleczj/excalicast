@@ -36,6 +36,7 @@ private struct Response: Encodable, Sendable {
     let state: HelperState?
     let capability: CapturePreflightReport?
     let sources: CaptureSources?
+    let devices: CaptureDevices?
     let permissions: CapturePermissions?
     let pressure: CapturePressureSnapshot?
     let error: String?
@@ -73,6 +74,17 @@ private struct CaptureSources: Encodable, Sendable {
     let windows: [CaptureWindowSource]
 }
 
+private struct CaptureDeviceSource: Encodable, Sendable {
+    let id: String
+    let name: String
+    let isDefault: Bool
+}
+
+private struct CaptureDevices: Encodable, Sendable {
+    let microphones: [CaptureDeviceSource]
+    let cameras: [CaptureDeviceSource]
+}
+
 private enum HelperServerError: Error {
     case unsupportedChannel(String)
     case missingCaptureParameters
@@ -99,6 +111,7 @@ private actor HelperServer {
                     state: await lifecycle.state,
                     capability: nil,
                     sources: nil,
+                    devices: nil,
                     permissions: nil,
                     pressure: nil,
                     error: nil
@@ -148,6 +161,21 @@ private actor HelperServer {
                     state: await lifecycle.state,
                     capability: nil,
                     sources: sources,
+                    devices: nil,
+                    permissions: nil,
+                    pressure: nil,
+                    error: nil
+                )
+            case "capture.devices.v1":
+                return Response(
+                    id: command.id,
+                    ok: true,
+                    protocolVersion: HelperHandshake.currentProtocolVersion,
+                    engine: "mac-media-engine",
+                    state: await lifecycle.state,
+                    capability: nil,
+                    sources: nil,
+                    devices: captureDevices(),
                     permissions: nil,
                     pressure: nil,
                     error: nil
@@ -203,6 +231,7 @@ private actor HelperServer {
                     state: await lifecycle.state,
                     capability: nil,
                     sources: nil,
+                    devices: nil,
                     permissions: nil,
                     pressure: captureEngine?.pressureSnapshot(),
                     error: nil
@@ -219,6 +248,7 @@ private actor HelperServer {
                 state: await lifecycle.state,
                 capability: nil,
                 sources: nil,
+                devices: nil,
                 permissions: nil,
                 pressure: captureEngine?.pressureSnapshot(),
                 error: String(describing: error)
@@ -306,6 +336,7 @@ private actor HelperServer {
             state: state,
             capability: capability,
             sources: nil,
+            devices: nil,
             permissions: nil,
             pressure: nil,
             error: nil
@@ -321,6 +352,7 @@ private actor HelperServer {
             state: await lifecycle.state,
             capability: nil,
             sources: nil,
+            devices: nil,
             permissions: CapturePermissions(
                 screen: CGPreflightScreenCaptureAccess() ? .granted : .notDetermined,
                 microphone: permissionState(for: .audio),
@@ -339,6 +371,44 @@ private actor HelperServer {
         case .notDetermined: return .notDetermined
         @unknown default: return .denied
         }
+    }
+
+    private func captureDevices() -> CaptureDevices {
+        let microphoneDefaultID = AVCaptureDevice.default(for: .audio)?.uniqueID
+        let microphones = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInMicrophone, .externalUnknown],
+            mediaType: .audio,
+            position: .unspecified
+        ).devices.map {
+            CaptureDeviceSource(
+                id: $0.uniqueID,
+                name: $0.localizedName,
+                isDefault: $0.uniqueID == microphoneDefaultID
+            )
+        }
+        var cameraTypes: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera, .externalUnknown]
+        if #available(macOS 14.0, *) { cameraTypes.append(.continuityCamera) }
+        let cameraDefaultID = AVCaptureDevice.default(for: .video)?.uniqueID
+        let cameras = AVCaptureDevice.DiscoverySession(
+            deviceTypes: cameraTypes,
+            mediaType: .video,
+            position: .unspecified
+        ).devices.map {
+            CaptureDeviceSource(
+                id: $0.uniqueID,
+                name: $0.localizedName,
+                isDefault: $0.uniqueID == cameraDefaultID
+            )
+        }
+        return CaptureDevices(
+            microphones: microphones.sorted(by: deviceSort),
+            cameras: cameras.sorted(by: deviceSort)
+        )
+    }
+
+    private func deviceSort(_ lhs: CaptureDeviceSource, _ rhs: CaptureDeviceSource) -> Bool {
+        if lhs.isDefault != rhs.isDefault { return lhs.isDefault }
+        return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
     }
 }
 
@@ -377,6 +447,7 @@ private struct MacMediaEngineMain {
                     state: nil,
                     capability: nil,
                     sources: nil,
+                    devices: nil,
                     permissions: nil,
                     pressure: nil,
                     error: "invalid_command"

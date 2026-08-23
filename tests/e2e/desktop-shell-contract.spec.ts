@@ -4,6 +4,7 @@ import {
   exposedDesktopBridgeChannels,
 } from '../../apps/desktop/src/windowContract';
 import { NativeHelperClient, type HelperTransport } from '../../apps/desktop/src/nativeHelperClient';
+import { parseDesktopCapturePayload } from '../../apps/desktop/src/captureRequest';
 
 test('desktop shell uses a hardened renderer with a narrow versioned bridge', () => {
   const options = createDesktopWindowOptions('/tmp/excalicast-preload.js');
@@ -109,4 +110,61 @@ test('native capture request preserves requested quality and project file refere
   });
   expect(result.capability.effective).toEqual(result.capability.requested);
   expect(result.capability.hardwareEncodingConfirmed).toBe(true);
+});
+
+test('native media devices expose stable ids before camera capture starts', async () => {
+  let onLine: ((line: string) => void) | null = null;
+  let command: Record<string, unknown> | null = null;
+  const transport: HelperTransport = {
+    write(line) {
+      command = JSON.parse(line) as Record<string, unknown>;
+      queueMicrotask(() => onLine?.(JSON.stringify({
+        id: command?.id,
+        ok: true,
+        state: 'idle',
+        devices: {
+          microphones: [{ id: 'mic-1', name: 'MacBook Microphone', isDefault: true }],
+          cameras: [{ id: 'cam-1', name: 'FaceTime Camera', isDefault: true }],
+        },
+      })));
+    },
+    onLine(listener) { onLine = listener; },
+    close() {},
+  };
+  const client = new NativeHelperClient(transport);
+  await expect(client.captureDevices()).resolves.toEqual({
+    microphones: [{ id: 'mic-1', name: 'MacBook Microphone', isDefault: true }],
+    cameras: [{ id: 'cam-1', name: 'FaceTime Camera', isDefault: true }],
+  });
+  expect(command).toMatchObject({ channel: 'capture.devices.v1' });
+});
+
+test('electron capture parsing preserves optional camera, microphone and system audio tracks', () => {
+  expect(parseDesktopCapturePayload({
+    recordingId: 'lesson-1',
+    sourceKind: 'window',
+    sourceID: 42,
+    width: 2560,
+    height: 1440,
+    framesPerSecond: 30,
+    codec: 'h264',
+    captureSystemAudio: true,
+    captureMicrophone: true,
+    microphoneDeviceID: 'mic-1',
+    captureCamera: true,
+    cameraDeviceID: 'cam-1',
+    cameraWidth: 1280,
+    cameraHeight: 720,
+    cameraFramesPerSecond: 24,
+  }, '/projects/lesson-1')).toMatchObject({
+    projectRoot: '/projects/lesson-1',
+    captureSystemAudio: true,
+    captureMicrophone: true,
+    microphoneDeviceID: 'mic-1',
+    captureCamera: true,
+    cameraDeviceID: 'cam-1',
+    cameraWidth: 1280,
+    cameraHeight: 720,
+    cameraFramesPerSecond: 24,
+  });
 });
