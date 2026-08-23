@@ -22,6 +22,9 @@ final class NativeCaptureSession: @unchecked Sendable {
     private var screen: ScreenCaptureEngine?
     private var microphone: MicrophoneCaptureEngine?
     private var camera: CameraCaptureEngine?
+    private var projectRoot: URL?
+    private var lastAvailableDiskBytes: Int64 = 0
+    private let pressureLock = NSLock()
 
     func start(configuration: Configuration) async throws -> CapturePreflightReport {
         if configuration.captureMicrophone,
@@ -79,33 +82,38 @@ final class NativeCaptureSession: @unchecked Sendable {
             self.screen = screen
             self.microphone = microphone
             self.camera = camera
+            self.projectRoot = configuration.projectRoot
+            self.lastAvailableDiskBytes = availableBytes
             return report
         } catch {
             try? camera?.stop()
             try? microphone?.stop()
             try? await screen.stop()
+            try? store.markInterrupted()
             throw error
         }
     }
 
-    func stop() async throws {
+    func stop(interrupted: Bool = false) async throws {
         var firstError: Error?
         do { try camera?.stop() } catch { firstError = error }
         do { try microphone?.stop() } catch { if firstError == nil { firstError = error } }
         do { try await screen?.stop() } catch { if firstError == nil { firstError = error } }
-        if firstError == nil {
+        if firstError == nil, !interrupted {
             do { try store?.finalize(requiredTracks: [.screen]) }
             catch { firstError = error }
         }
+        if firstError != nil || interrupted { try? store?.markInterrupted() }
         microphone = nil
         camera = nil
         screen = nil
         store = nil
+        projectRoot = nil
         if let firstError { throw firstError }
     }
 
     func pressureSnapshot() -> CapturePressureSnapshot {
-        screen?.pressureSnapshot() ?? CapturePressureSnapshot(
+        let media = screen?.pressureSnapshot() ?? CapturePressureSnapshot(
             receivedScreenSamples: 0,
             submittedVideoFrames: 0,
             encodedVideoFrames: 0,
@@ -117,5 +125,27 @@ final class NativeCaptureSession: @unchecked Sendable {
             suspendedSamples: 0,
             pixelBufferSamples: 0
         )
+        guard let store else { return media }
+        let availableBytes = currentAvailableDiskBytes()
+        return media.enriched(
+            availableDiskBytes: availableBytes,
+            store: store.pressureSnapshot()
+        )
+    }
+
+    private func currentAvailableDiskBytes() -> Int64 {
+        let latest: Int64?
+        if let projectRoot {
+            latest = try? projectRoot.resourceValues(
+                forKeys: [.volumeAvailableCapacityForImportantUsageKey]
+            ).volumeAvailableCapacityForImportantUsage
+        } else {
+            latest = nil
+        }
+        pressureLock.lock()
+        if let latest { lastAvailableDiskBytes = latest }
+        let value = lastAvailableDiskBytes
+        pressureLock.unlock()
+        return value
     }
 }

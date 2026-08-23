@@ -100,6 +100,12 @@ export interface NativeCapturePressure {
   blankSamples: number;
   suspendedSamples: number;
   pixelBufferSamples: number;
+  availableDiskBytes: number;
+  diskPressure: 'normal' | 'warning' | 'critical';
+  pendingWriteBytes: number;
+  committedBytes: number;
+  lastSegmentWriteLatencyMs: number;
+  maximumSegmentWriteLatencyMs: number;
 }
 
 export interface NativeRecordingSegment {
@@ -199,10 +205,11 @@ export class NativeHelperClient {
   async captureStatus(): Promise<{
     state: 'idle' | 'recording' | 'stopping';
     pressure?: NativeCapturePressure;
+    error?: string;
   }> {
     const response = await this.request({ channel: 'capture.status.v1' });
     if (!response.state) throw new Error('native_capture_status_missing');
-    return { state: response.state, pressure: response.pressure };
+    return { state: response.state, pressure: response.pressure, error: response.error };
   }
 
   async recoverProject(projectRoot: string): Promise<NativeRecordingManifest> {

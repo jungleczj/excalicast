@@ -44,12 +44,24 @@ public actor HelperLifecycle {
     }
 
     @discardableResult
-    public func stop() -> HelperState {
-        guard state != .idle else { return .idle }
+    public func beginStopping() -> HelperState {
+        guard state == .recording else { return state }
         state = .stopping
         sessionId = nil
         stopCount += 1
+        return state
+    }
+
+    @discardableResult
+    public func finishStopping() -> HelperState {
+        guard state == .stopping else { return state }
         state = .idle
         return state
+    }
+
+    @discardableResult
+    public func stop() -> HelperState {
+        _ = beginStopping()
+        return finishStopping()
     }
 }

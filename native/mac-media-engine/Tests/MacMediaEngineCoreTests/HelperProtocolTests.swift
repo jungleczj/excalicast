@@ -51,6 +51,13 @@ struct MacMediaEngineContractTests {
         try expect(second == .idle, "idempotent stop")
         try expect(stopCount == 1, "single finalize")
 
+        let stoppingLifecycle = HelperLifecycle()
+        try await stoppingLifecycle.start(sessionId: "recording-pressure")
+        let stoppingState = await stoppingLifecycle.beginStopping()
+        let stoppedState = await stoppingLifecycle.finishStopping()
+        try expect(stoppingState == .stopping, "safe stop exposes stopping state")
+        try expect(stoppedState == .idle, "safe stop returns to idle after flush")
+
         var queue = LatestFrameQueue<Int>(capacity: 2)
         queue.offer(1)
         queue.offer(2)
@@ -117,6 +124,18 @@ struct MacMediaEngineContractTests {
             ) == nil,
             "camera never silently lowers requested resolution"
         )
+        try expect(
+            CaptureDiskPressurePolicy.classify(availableBytes: 12 * 1_024 * 1_024 * 1_024) == .normal,
+            "healthy disk remains normal"
+        )
+        try expect(
+            CaptureDiskPressurePolicy.classify(availableBytes: 3 * 1_024 * 1_024 * 1_024) == .warning,
+            "low disk raises a warning during capture"
+        )
+        try expect(
+            CaptureDiskPressurePolicy.classify(availableBytes: 900 * 1_024 * 1_024) == .critical,
+            "critical disk triggers safe interruption"
+        )
 
         let timeline = RecordingTimeline(originUs: 5_000_000)
         try expect(timeline.relativeUs(for: 5_250_000) == 250_000, "tracks share one relative clock")
@@ -127,6 +146,9 @@ struct MacMediaEngineContractTests {
         let store = try SegmentedRecordingStore(root: temporaryRoot, recordingId: "recording-1")
         try store.appendFinalizedSegment(track: .screen, index: 0, data: Data([1, 2, 3]), startUs: 0, durationUs: 2_000_000)
         try store.appendFinalizedSegment(track: .microphone, index: 0, data: Data([4, 5]), startUs: 0, durationUs: 2_000_000)
+        let storePressure = store.pressureSnapshot()
+        try expect(storePressure.committedBytes == 5, "store pressure accounts for finalized bytes")
+        try expect(storePressure.pendingWriteBytes == 0, "synchronous atomic commits leave no hidden queue")
         let recovered = try SegmentedRecordingStore.recover(root: temporaryRoot)
         try expect(recovered.state == .interrupted, "unfinished project recovers as interrupted")
         try expect(recovered.tracks[.screen]?.count == 1, "screen segment recovered")

@@ -97,6 +97,11 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
     private var manifest: RecoverableRecordingManifest
     private let encoder = JSONEncoder()
     private let stateLock = NSLock()
+    private let pressureLock = NSLock()
+    private var pendingWriteBytes = 0
+    private var committedBytes = 0
+    private var lastCommitLatencyMs: Double = 0
+    private var maximumCommitLatencyMs: Double = 0
 
     public init(root: URL, recordingId: String) throws {
         self.root = root
@@ -146,8 +151,6 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
         durationUs: Int64,
         fileExtension: String
     ) throws {
-        stateLock.lock()
-        defer { stateLock.unlock() }
         guard index >= 0, startUs >= 0, durationUs > 0 else {
             throw RecordingStoreError.invalidSegmentMetadata
         }
@@ -165,6 +168,24 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
         let attributes = try FileManager.default.attributesOfItem(atPath: normalizedStaging.path)
         let byteLength = (attributes[.size] as? NSNumber)?.intValue ?? 0
         guard byteLength > 0 else { throw RecordingStoreError.emptySegment }
+
+        let started = DispatchTime.now().uptimeNanoseconds
+        pressureLock.lock()
+        pendingWriteBytes += byteLength
+        pressureLock.unlock()
+        var committed = false
+        defer {
+            let elapsedMs = Double(DispatchTime.now().uptimeNanoseconds - started) / 1_000_000
+            pressureLock.lock()
+            pendingWriteBytes = max(0, pendingWriteBytes - byteLength)
+            lastCommitLatencyMs = elapsedMs
+            maximumCommitLatencyMs = max(maximumCommitLatencyMs, elapsedMs)
+            if committed { committedBytes += byteLength }
+            pressureLock.unlock()
+        }
+
+        stateLock.lock()
+        defer { stateLock.unlock() }
 
         let trackRoot = root.appendingPathComponent("segments/\(track.rawValue)", isDirectory: true)
         try FileManager.default.createDirectory(at: trackRoot, withIntermediateDirectories: true)
@@ -189,6 +210,7 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
         segments.sort { $0.index < $1.index }
         manifest.tracks[track] = segments
         try checkpointUnlocked()
+        committed = true
     }
 
     public func finalize(requiredTracks: Set<RecordingTrackKind> = [.screen]) throws {
@@ -203,6 +225,25 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
 
     private func checkpointUnlocked() throws {
         try encoder.encode(manifest).write(to: manifestURL, options: .atomic)
+    }
+
+    public func pressureSnapshot() -> RecordingStorePressureSnapshot {
+        pressureLock.lock()
+        let snapshot = RecordingStorePressureSnapshot(
+            pendingWriteBytes: pendingWriteBytes,
+            committedBytes: committedBytes,
+            lastCommitLatencyMs: lastCommitLatencyMs,
+            maximumCommitLatencyMs: maximumCommitLatencyMs
+        )
+        pressureLock.unlock()
+        return snapshot
+    }
+
+    public func markInterrupted() throws {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        manifest.state = .interrupted
+        try checkpointUnlocked()
     }
 
     public static func recover(root: URL) throws -> RecoverableRecordingManifest {

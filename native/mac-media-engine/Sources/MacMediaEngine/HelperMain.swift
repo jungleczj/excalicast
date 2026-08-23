@@ -90,6 +90,7 @@ private enum HelperServerError: Error {
     case unsupportedChannel(String)
     case missingCaptureParameters
     case captureAlreadyActive
+    case captureAlreadyStopping
     case recoveryWhileCaptureActive
 }
 
@@ -97,6 +98,10 @@ private enum HelperServerError: Error {
 private actor HelperServer {
     private let lifecycle = HelperLifecycle()
     private var captureEngine: NativeCaptureSession?
+    private var pressureMonitor: Task<Void, Never>?
+    private var isStoppingCapture = false
+    private var lastCaptureError: String?
+    private var lastPressureSnapshot: CapturePressureSnapshot?
 
     func handle(_ command: Command) async -> Response {
         do {
@@ -218,7 +223,9 @@ private actor HelperServer {
                 )
                 return success(command.id, state: await lifecycle.state, capability: report)
             case "capture.start.v1":
-                guard captureEngine == nil else { throw HelperServerError.captureAlreadyActive }
+                guard captureEngine == nil, !isStoppingCapture else {
+                    throw HelperServerError.captureAlreadyActive
+                }
                 let parameters = try captureParameters(from: command)
                 let engine = NativeCaptureSession()
                 try await lifecycle.start(sessionId: parameters.recordingId)
@@ -238,20 +245,37 @@ private actor HelperServer {
                         )
                     )
                     captureEngine = engine
+                    lastCaptureError = nil
+                    lastPressureSnapshot = engine.pressureSnapshot()
+                    startPressureMonitor(engine)
                     return success(command.id, state: .recording, capability: report)
                 } catch {
                     _ = await lifecycle.stop()
                     throw error
                 }
             case "capture.stop.v1":
+                guard !isStoppingCapture else { throw HelperServerError.captureAlreadyStopping }
+                pressureMonitor?.cancel()
+                pressureMonitor = nil
+                isStoppingCapture = true
+                _ = await lifecycle.beginStopping()
                 var stopError: Error?
                 do { if let captureEngine { try await captureEngine.stop() } }
                 catch { stopError = error }
                 captureEngine = nil
-                let state = await lifecycle.stop()
-                if let stopError { throw stopError }
+                isStoppingCapture = false
+                let state = await lifecycle.finishStopping()
+                if let stopError {
+                    lastCaptureError = String(describing: stopError)
+                    throw stopError
+                }
+                lastCaptureError = nil
                 return success(command.id, state: state, capability: nil)
             case "capture.status.v1":
+                let pressure = isStoppingCapture
+                    ? lastPressureSnapshot
+                    : captureEngine?.pressureSnapshot() ?? lastPressureSnapshot
+                if let pressure { lastPressureSnapshot = pressure }
                 return Response(
                     id: command.id,
                     ok: true,
@@ -262,9 +286,9 @@ private actor HelperServer {
                     sources: nil,
                     devices: nil,
                     permissions: nil,
-                    pressure: captureEngine?.pressureSnapshot(),
+                    pressure: pressure,
                     manifest: nil,
-                    error: nil
+                    error: lastCaptureError
                 )
             default:
                 throw HelperServerError.unsupportedChannel(command.channel)
@@ -280,7 +304,7 @@ private actor HelperServer {
                 sources: nil,
                 devices: nil,
                 permissions: nil,
-                pressure: captureEngine?.pressureSnapshot(),
+                pressure: isStoppingCapture ? lastPressureSnapshot : captureEngine?.pressureSnapshot(),
                 manifest: nil,
                 error: String(describing: error)
             )
@@ -288,9 +312,45 @@ private actor HelperServer {
     }
 
     func shutdown() async {
-        try? await captureEngine?.stop()
+        pressureMonitor?.cancel()
+        pressureMonitor = nil
+        _ = await lifecycle.beginStopping()
+        try? await captureEngine?.stop(interrupted: true)
         captureEngine = nil
-        _ = await lifecycle.stop()
+        isStoppingCapture = false
+        _ = await lifecycle.finishStopping()
+    }
+
+    private func startPressureMonitor(_ engine: NativeCaptureSession) {
+        pressureMonitor?.cancel()
+        pressureMonitor = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard !Task.isCancelled else { return }
+                await self?.handlePressureTick(engine)
+            }
+        }
+    }
+
+    private func handlePressureTick(_ engine: NativeCaptureSession) async {
+        guard captureEngine === engine, !isStoppingCapture else { return }
+        let pressure = engine.pressureSnapshot()
+        lastPressureSnapshot = pressure
+        guard pressure.diskPressure == .critical else { return }
+        isStoppingCapture = true
+        pressureMonitor?.cancel()
+        pressureMonitor = nil
+        _ = await lifecycle.beginStopping()
+        var reason = "critical_disk_space"
+        do {
+            try await engine.stop(interrupted: true)
+        } catch {
+            reason = "critical_disk_space: \(error)"
+        }
+        captureEngine = nil
+        lastCaptureError = reason
+        isStoppingCapture = false
+        _ = await lifecycle.finishStopping()
     }
 
     private struct CaptureParameters {
