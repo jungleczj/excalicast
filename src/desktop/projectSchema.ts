@@ -6,6 +6,22 @@ export type NativeTrackKind =
   | 'excalidraw-events'
   | 'input-telemetry';
 
+/** Events allowed on the versioned unified desktop telemetry data plane. */
+export const UNIFIED_EVENT_KINDS = [
+  'active-window',
+  'window-bounds',
+  'cursor',
+  'click',
+  'dwell',
+  'scroll',
+  'ink',
+  'undo',
+  'mode-change',
+  'camera-control',
+] as const;
+
+export type UnifiedEventKind = typeof UNIFIED_EVENT_KINDS[number];
+
 export interface NativeMediaSegment {
   index: number;
   relativePath: string;
