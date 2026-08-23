@@ -31,6 +31,7 @@ private struct Command: Decodable, Sendable {
     let eventStartUs: Int64?
     let eventDurationUs: Int64?
     let eventPayload: String?
+    let telemetryProducerPayload: String?
     let mediaTrack: RecordingTrackKind?
     let muted: Bool?
     let hidden: Bool?
@@ -55,6 +56,7 @@ private struct Response: Encodable, Sendable {
     let hidden: Bool?
     let hardwareState: CameraHardwareState?
     let physicallyPowered: Bool?
+    let telemetryAck: InputTelemetryAcknowledgement?
     let error: String?
     let errorCode: String?
     let errorTrack: RecordingTrackKind?
@@ -77,6 +79,7 @@ private struct Response: Encodable, Sendable {
         hidden: Bool? = nil,
         hardwareState: CameraHardwareState? = nil,
         physicallyPowered: Bool? = nil,
+        telemetryAck: InputTelemetryAcknowledgement? = nil,
         error: String?,
         errorCode: String? = nil,
         errorTrack: RecordingTrackKind? = nil
@@ -98,6 +101,7 @@ private struct Response: Encodable, Sendable {
         self.hidden = hidden
         self.hardwareState = hardwareState
         self.physicallyPowered = physicallyPowered
+        self.telemetryAck = telemetryAck
         self.error = error
         self.errorCode = errorCode
         self.errorTrack = errorTrack
@@ -435,6 +439,33 @@ private actor HelperServer {
                     payload: eventPayload
                 )
                 return success(command.id, state: .recording, capability: nil)
+            case "input-telemetry.append-producer-events.v1":
+                guard let captureEngine,
+                      let telemetryProducerPayload = command.telemetryProducerPayload else {
+                    throw HelperServerError.missingCaptureParameters
+                }
+                let state = await lifecycle.state
+                guard state == .recording || state == .paused else {
+                    throw HelperServerError.missingCaptureParameters
+                }
+                let acknowledgement = try captureEngine.appendInputTelemetry(
+                    payload: telemetryProducerPayload
+                )
+                return Response(
+                    id: command.id,
+                    ok: true,
+                    protocolVersion: nil,
+                    engine: nil,
+                    state: state,
+                    capability: nil,
+                    sources: nil,
+                    devices: nil,
+                    permissions: nil,
+                    pressure: nil,
+                    manifest: nil,
+                    telemetryAck: acknowledgement,
+                    error: nil
+                )
             case "capture.stop.v1":
                 guard !isStoppingCapture else { throw HelperServerError.captureAlreadyStopping }
                 pressureMonitor?.cancel()

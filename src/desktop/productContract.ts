@@ -57,6 +57,7 @@ export const DESKTOP_IPC_CHANNELS = {
   inkGetSettings: 'ink.get-settings.v1',
   inkSettingsChanged: 'ink.settings-changed.v1',
   inkAppendEvents: 'ink.append-events.v1',
+  inputTelemetryAppend: 'input-telemetry.append-producer-events.v1',
   inkFlushRequested: 'ink.flush-requested.v1',
   inkFlushComplete: 'ink.flush-complete.v1',
   cameraSetLayout: 'camera.set-layout.v1',

@@ -332,14 +332,100 @@ struct MacMediaEngineContractTests {
             startUs: 250_000,
             durationUs: 120_000
         )
+        let telemetryCoordinator = InputTelemetryCoordinator(sessionId: "recording-1")
+        var telemetryCommittedBytes = 0
+        var telemetryPersistCount = 0
+        func persistTelemetry(_ index: Int, _ startUs: Int64, _ durationUs: Int64, _ data: Data) throws {
+            telemetryPersistCount += 1
+            telemetryCommittedBytes += data.count
+            try store.appendFinalizedSegment(
+                track: .inputTelemetry,
+                index: index,
+                data: data,
+                startUs: startUs,
+                durationUs: durationUs
+            )
+        }
+        let producerA = Data(#"{"schemaVersion":1,"events":[{"schemaVersion":1,"sessionId":"recording-1","producerId":"main-whiteboard","producerEpoch":"main-a","producerSequence":0,"surfaceId":"whiteboard","kind":"cursor","payload":{"x":1,"y":2}},{"schemaVersion":1,"sessionId":"recording-1","producerId":"main-whiteboard","producerEpoch":"main-a","producerSequence":1,"surfaceId":"whiteboard","kind":"click","payload":{"x":1,"y":2,"button":"primary","phase":"down"}}]}"#.utf8)
+        let producerB = Data(#"{"schemaVersion":1,"events":[{"schemaVersion":1,"sessionId":"recording-1","producerId":"desktop-ink","producerEpoch":"ink-a","producerSequence":0,"surfaceId":"overlay","kind":"ink","payload":{"operation":"stroke","payload":{"points":[[1,2]]}}}]}"#.utf8)
+        let firstAck = try telemetryCoordinator.append(
+            payload: producerA,
+            projectAtUs: 300_000,
+            persist: persistTelemetry
+        )
+        let secondAck = try telemetryCoordinator.append(
+            payload: producerB,
+            projectAtUs: 300_000,
+            persist: persistTelemetry
+        )
+        try expect(firstAck.segmentIndex == 0, "first producer owns native segment zero")
+        try expect(secondAck.segmentIndex == 1, "second producer may independently begin at sequence zero")
+        let retryAck = try telemetryCoordinator.append(
+            payload: producerA,
+            projectAtUs: 900_000,
+            persist: persistTelemetry
+        )
+        try expect(retryAck.duplicate && telemetryPersistCount == 2, "durable ack retry never duplicates a segment")
+
+        let pausedControls = CaptureControlState()
+        _ = pausedControls.pause(atUs: 1_000_000)
+        try expect(pausedControls.adjustedPresentationUs(1_100_000) == nil, "pause does not advance project time")
+        let pausedPayload = Data(#"{"schemaVersion":1,"events":[{"schemaVersion":1,"sessionId":"recording-1","producerId":"desktop-ink","producerEpoch":"ink-a","producerSequence":1,"surfaceId":"overlay","kind":"cursor","payload":{"x":3,"y":4}}]}"#.utf8)
+        let droppedAck = try telemetryCoordinator.acknowledgeDropped(payload: pausedPayload)
+        try expect(droppedAck.dropped && telemetryPersistCount == 2, "paused producer events are acknowledged without persistence")
+        _ = pausedControls.resume(atUs: 2_000_000)
+        let resumedPayload = Data(#"{"schemaVersion":1,"events":[{"schemaVersion":1,"sessionId":"recording-1","producerId":"desktop-ink","producerEpoch":"ink-a","producerSequence":2,"surfaceId":"overlay","kind":"cursor","payload":{"x":5,"y":6}}]}"#.utf8)
+        _ = try telemetryCoordinator.append(
+            payload: resumedPayload,
+            projectAtUs: 400_000,
+            persist: persistTelemetry
+        )
+        let restartedEpoch = Data(#"{"schemaVersion":1,"events":[{"schemaVersion":1,"sessionId":"recording-1","producerId":"main-whiteboard","producerEpoch":"main-b","producerSequence":0,"surfaceId":"whiteboard","kind":"mode-change","payload":{"mode":"whiteboard"}}]}"#.utf8)
+        _ = try telemetryCoordinator.append(
+            payload: restartedEpoch,
+            projectAtUs: 400_000,
+            persist: persistTelemetry
+        )
+        try expect(telemetryPersistCount == 4, "resume and a restarted producer epoch persist exactly once")
+
+        let boundedEpochs = InputTelemetryCoordinator(sessionId: "recording-1")
+        for epoch in 0..<64 {
+            let payload = Data("{\"schemaVersion\":1,\"events\":[{\"schemaVersion\":1,\"sessionId\":\"recording-1\",\"producerId\":\"main-whiteboard\",\"producerEpoch\":\"epoch-\(epoch)\",\"producerSequence\":0,\"surfaceId\":\"whiteboard\",\"kind\":\"cursor\",\"payload\":{\"x\":1,\"y\":2}}]}".utf8)
+            _ = try boundedEpochs.append(payload: payload, projectAtUs: Int64(epoch)) { _, _, _, _ in }
+        }
+        let overflowEpoch = Data(#"{"schemaVersion":1,"events":[{"schemaVersion":1,"sessionId":"recording-1","producerId":"main-whiteboard","producerEpoch":"epoch-overflow","producerSequence":0,"surfaceId":"whiteboard","kind":"cursor","payload":{"x":1,"y":2}}]}"#.utf8)
+        do {
+            _ = try boundedEpochs.append(payload: overflowEpoch, projectAtUs: 100) { _, _, _, _ in }
+            throw ContractFailure.expectation("producer epoch state must stay bounded")
+        } catch InputTelemetryBatchError.tooManyProducerEpochs {
+            // expected
+        }
         let storePressure = store.pressureSnapshot()
-        try expect(storePressure.committedBytes == 5 + inkPayload.count, "store pressure accounts for media and event bytes")
+        try expect(
+            storePressure.committedBytes == 5 + inkPayload.count + telemetryCommittedBytes,
+            "store pressure accounts for media and both event tracks"
+        )
         try expect(storePressure.pendingWriteBytes == 0, "synchronous atomic commits leave no hidden queue")
         let recovered = try SegmentedRecordingStore.recover(root: temporaryRoot)
         try expect(recovered.state == .interrupted, "unfinished project recovers as interrupted")
         try expect(recovered.tracks[.screen]?.count == 1, "screen segment recovered")
         try expect(recovered.tracks[.microphone]?.count == 1, "audio segment recovered")
         try expect(recovered.tracks[.excalidrawEvents]?.count == 1, "Excalidraw event segment recovered")
+        try expect(
+            recovered.tracks[.inputTelemetry]?.first?.relativePath == "segments/input-telemetry/000000.segment",
+            "input telemetry stays in its manifest-owned track directory"
+        )
+        let escapingTelemetry = Data(#"{"schemaVersion":1,"events":[{"schemaVersion":1,"sessionId":"recording-1","producerId":"main-whiteboard","producerEpoch":"main-c","producerSequence":0,"surfaceId":"whiteboard","kind":"ink","payload":{"operation":"stroke","payload":{"relativePath":"../../outside"}}}]}"#.utf8)
+        do {
+            _ = try telemetryCoordinator.append(
+                payload: escapingTelemetry,
+                projectAtUs: 500_000,
+                persist: persistTelemetry
+            )
+            throw ContractFailure.expectation("telemetry payload paths must be rejected")
+        } catch InputTelemetryBatchError.invalidEnvelope {
+            // expected
+        }
         try expect(recovered.capture?.camera?.width == 1_280, "camera configuration survives recovery")
         try expect(recovered.capture?.capturesSystemAudio == true, "system audio intent survives recovery")
 

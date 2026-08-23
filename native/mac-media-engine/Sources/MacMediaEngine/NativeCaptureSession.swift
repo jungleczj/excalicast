@@ -24,6 +24,8 @@ final class NativeCaptureSession: @unchecked Sendable {
     private var microphone: MicrophoneCaptureEngine?
     private var camera: CameraCaptureEngine?
     private var projectRoot: URL?
+    private var timeline: RecordingTimeline?
+    private var inputTelemetryCoordinator: InputTelemetryCoordinator?
     private var requiredTracks: Set<RecordingTrackKind> = [.screen]
     private var lastAvailableDiskBytes: Int64 = 0
     private let pressureLock = NSLock()
@@ -99,6 +101,8 @@ final class NativeCaptureSession: @unchecked Sendable {
             self.microphone = microphone
             self.camera = camera
             self.projectRoot = configuration.projectRoot
+            self.timeline = timeline
+            self.inputTelemetryCoordinator = InputTelemetryCoordinator(sessionId: configuration.recordingId)
             self.requiredTracks = CaptureTrackRequirementPolicy.requiredTracks(
                 capturesCamera: configuration.captureCamera,
                 capturesMicrophone: configuration.captureMicrophone
@@ -167,6 +171,8 @@ final class NativeCaptureSession: @unchecked Sendable {
         screen = nil
         store = nil
         projectRoot = nil
+        timeline = nil
+        inputTelemetryCoordinator = nil
         requiredTracks = [.screen]
         if let firstError { throw firstError }
     }
@@ -193,6 +199,29 @@ final class NativeCaptureSession: @unchecked Sendable {
             startUs: startUs,
             durationUs: durationUs
         )
+    }
+
+    func appendInputTelemetry(payload: String) throws -> InputTelemetryAcknowledgement {
+        guard let store, let timeline, let inputTelemetryCoordinator,
+              let data = payload.data(using: .utf8) else {
+            throw RecordingStoreError.invalidSegmentMetadata
+        }
+        guard let adjustedHostUs = controls.adjustedPresentationUs(currentHostTimeUs()) else {
+            return try inputTelemetryCoordinator.acknowledgeDropped(payload: data)
+        }
+        let projectAtUs = timeline.relativeUs(for: adjustedHostUs)
+        return try inputTelemetryCoordinator.append(
+            payload: data,
+            projectAtUs: projectAtUs
+        ) { index, startUs, durationUs, authoritativePayload in
+            try store.appendFinalizedSegment(
+                track: .inputTelemetry,
+                index: index,
+                data: authoritativePayload,
+                startUs: startUs,
+                durationUs: durationUs
+            )
+        }
     }
 
     func pressureSnapshot() -> CapturePressureSnapshot {

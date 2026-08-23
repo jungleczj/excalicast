@@ -26,6 +26,7 @@ interface HelperResponse {
   hidden?: boolean;
   hardwareState?: 'active' | 'off';
   physicallyPowered?: boolean;
+  telemetryAck?: NativeInputTelemetryAcknowledgement;
   error?: string;
   errorCode?: string;
   errorTrack?: NativeRecordingTrack;
@@ -106,6 +107,19 @@ export interface NativeInkEventBatch {
   startUs: number;
   durationUs: number;
   payload: string;
+}
+
+export interface NativeInputTelemetryProducerBatch {
+  payload: string;
+}
+
+export interface NativeInputTelemetryAcknowledgement {
+  producerId: 'main-whiteboard' | 'desktop-ink';
+  producerEpoch: string;
+  acknowledgedSequence: number;
+  segmentIndex: number | null;
+  duplicate: boolean;
+  dropped: boolean;
 }
 
 export interface NativeCaptureSources {
@@ -393,6 +407,19 @@ export class NativeHelperClient {
       eventPayload: batch.payload,
     }, 15_000);
     if (response.state !== 'recording') throw new Error('native_ink_event_append_invalid');
+  }
+
+  async appendInputTelemetry(
+    batch: NativeInputTelemetryProducerBatch,
+  ): Promise<NativeInputTelemetryAcknowledgement> {
+    const response = await this.request({
+      channel: 'input-telemetry.append-producer-events.v1',
+      telemetryProducerPayload: batch.payload,
+    }, 15_000);
+    if ((response.state !== 'recording' && response.state !== 'paused') || !response.telemetryAck) {
+      throw new Error('native_input_telemetry_append_invalid');
+    }
+    return response.telemetryAck;
   }
 
   close(): void {

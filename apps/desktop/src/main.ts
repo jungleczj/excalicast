@@ -33,6 +33,7 @@ import {
   resolveDesktopTeleprompterBounds,
 } from './windowContract';
 import { createNativeInkEventBatch } from './inkEventBatch';
+import { createNativeInputTelemetryProducerBatch } from './unifiedEventBatch';
 import { readNativeInkEventSegments } from './inkEventReader';
 import { readNativeMediaSegmentRange, type NativeReadableMediaTrack } from './nativeMediaReader';
 import {
@@ -73,6 +74,7 @@ let activeNativeCapture: {
   pauseStartedUnixMs: number | null;
 } | null = null;
 let inkEventCommitTail: Promise<void> = Promise.resolve();
+let inputTelemetryCommitTail: Promise<void> = Promise.resolve();
 const pendingInkFlushes = new Map<string, () => void>();
 const materializedTrackCache = new Map<string, Promise<{
   relativePath: string;
@@ -199,6 +201,16 @@ function registerDesktopIpc(): void {
     await commit;
     return { committed: true, index: batch.index };
   });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.inputTelemetryAppend, async (_event, payload: unknown) => {
+    const active = activeNativeCapture;
+    if (!active) throw new Error('desktop_input_telemetry_recording_inactive');
+    const batch = createNativeInputTelemetryProducerBatch(payload, active.recordingId);
+    const helper = await requireNativeHelper();
+    const commit = inputTelemetryCommitTail.then(() => helper.appendInputTelemetry(batch));
+    inputTelemetryCommitTail = commit.then(() => undefined, () => undefined);
+    const acknowledgement = await commit;
+    return { committed: true, ...acknowledgement };
+  });
   ipcMain.handle(DESKTOP_IPC_CHANNELS.inkFlushComplete, (_event, payload: unknown) => {
     const value = objectPayload(payload, 'desktop_ink_flush_invalid');
     if (typeof value.requestId !== 'string') throw new Error('desktop_ink_flush_invalid');
@@ -242,6 +254,7 @@ function registerDesktopIpc(): void {
       pauseStartedUnixMs: null,
     };
     inkEventCommitTail = Promise.resolve();
+    inputTelemetryCommitTail = Promise.resolve();
     broadcastInkSettings();
     return result;
   });
@@ -249,6 +262,7 @@ function registerDesktopIpc(): void {
     const helper = await requireNativeHelper();
     await requestInkWindowFlush();
     await inkEventCommitTail;
+    await inputTelemetryCommitTail;
     try {
       return await helper.stopCapture();
     } finally {
@@ -258,6 +272,9 @@ function registerDesktopIpc(): void {
   });
   ipcMain.handle(DESKTOP_IPC_CHANNELS.capturePause, async () => {
     if (!activeNativeCapture) throw new Error('native_capture_inactive');
+    await requestInkWindowFlush();
+    await inkEventCommitTail;
+    await inputTelemetryCommitTail;
     const state = await (await requireNativeHelper()).pauseCapture();
     if (activeNativeCapture.pauseStartedUnixMs === null) {
       activeNativeCapture.pauseStartedUnixMs = Date.now();
