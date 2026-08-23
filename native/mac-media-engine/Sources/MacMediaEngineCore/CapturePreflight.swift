@@ -1,6 +1,8 @@
 import Foundation
 import VideoToolbox
 
+private let capturePreflightOutputCallback: VTCompressionOutputCallback = { _, _, _, _, _ in }
+
 public enum CaptureCodec: String, Codable, Equatable, Sendable {
     case h264
     case hevc
@@ -31,6 +33,7 @@ public enum CapturePreflightError: Error, Equatable, Sendable {
     case invalidDimensions
     case invalidFrameRate(Int)
     case hardwareEncoderUnavailable(CaptureCodec)
+    case hardwareEncoderProbeFailed(CaptureCodec, status: OSStatus)
     case insufficientDiskSpace(availableBytes: Int64)
 }
 
@@ -63,7 +66,26 @@ public enum CapturePreflight {
         )
     }
 
+    public static func evaluateSystem(
+        requested: CaptureRequest,
+        availableBytes: Int64
+    ) throws -> CapturePreflightReport {
+        let status = systemHardwareEncoderStatus(requested.codec)
+        guard status == noErr else {
+            throw CapturePreflightError.hardwareEncoderProbeFailed(requested.codec, status: status)
+        }
+        return try evaluate(
+            requested: requested,
+            hardwareProbe: { _ in true },
+            availableBytes: availableBytes
+        )
+    }
+
     public static func systemHardwareEncoderAvailable(_ codec: CaptureCodec) -> Bool {
+        systemHardwareEncoderStatus(codec) == noErr
+    }
+
+    public static func systemHardwareEncoderStatus(_ codec: CaptureCodec) -> OSStatus {
         let codecType: CMVideoCodecType = codec == .h264 ? kCMVideoCodecType_H264 : kCMVideoCodecType_HEVC
         let specification = [
             kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String: true,
@@ -71,17 +93,33 @@ public enum CapturePreflight {
         var session: VTCompressionSession?
         let status = VTCompressionSessionCreate(
             allocator: kCFAllocatorDefault,
-            width: 64,
-            height: 64,
+            width: 1_920,
+            height: 1_080,
             codecType: codecType,
             encoderSpecification: specification,
             imageBufferAttributes: nil,
             compressedDataAllocator: nil,
-            outputCallback: nil,
+            outputCallback: capturePreflightOutputCallback,
             refcon: nil,
             compressionSessionOut: &session
         )
-        if let session { VTCompressionSessionInvalidate(session) }
-        return status == noErr && session != nil
+        guard status == noErr, let session else {
+            return status == noErr ? kVTVideoEncoderNotAvailableNowErr : status
+        }
+        VTCompressionSessionInvalidate(session)
+        return noErr
+    }
+}
+
+public enum CaptureEncodingPolicy {
+    public static let frameQueueCapacity = 2
+    public static let screenCaptureQueueDepth = 3
+    public static let segmentDurationUs: Int64 = 2_000_000
+
+    public static func targetBitRate(for request: CaptureRequest) -> Int {
+        let pixelsPerSecond = Double(request.width * request.height * request.framesPerSecond)
+        let qualityBitsPerPixel = request.framesPerSecond > 30 ? 0.12 : 0.14
+        let calculated = Int((pixelsPerSecond * qualityBitsPerPixel).rounded())
+        return min(90_000_000, max(12_000_000, calculated))
     }
 }

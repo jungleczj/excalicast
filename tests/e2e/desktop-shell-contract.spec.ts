@@ -49,3 +49,49 @@ test('native helper handshake is correlated and rejects protocol mismatch', asyn
   });
   expect(JSON.parse(writes[0])).toMatchObject({ channel: 'helper.handshake.v1', protocolVersion: 1 });
 });
+
+test('native capture request preserves requested quality and project file references', async () => {
+  let onLine: ((line: string) => void) | null = null;
+  let command: Record<string, unknown> | null = null;
+  const transport: HelperTransport = {
+    write(line) {
+      command = JSON.parse(line) as Record<string, unknown>;
+      queueMicrotask(() => onLine?.(JSON.stringify({
+        id: command?.id,
+        ok: true,
+        protocolVersion: 1,
+        engine: 'mac-media-engine',
+        state: 'recording',
+        capability: {
+          requested: { width: 3840, height: 2160, framesPerSecond: 60, codec: 'h264' },
+          effective: { width: 3840, height: 2160, framesPerSecond: 60, codec: 'h264' },
+          hardwareEncodingConfirmed: true,
+          availableBytes: 100_000_000_000,
+        },
+      })));
+    },
+    onLine(listener) { onLine = listener; },
+    close() {},
+  };
+  const client = new NativeHelperClient(transport);
+  const result = await client.startCapture({
+    recordingId: 'rec-4k',
+    projectRoot: '/projects/rec-4k',
+    displayID: 1,
+    width: 3840,
+    height: 2160,
+    framesPerSecond: 60,
+    codec: 'h264',
+  });
+
+  expect(command).toMatchObject({
+    channel: 'capture.start.v1',
+    recordingId: 'rec-4k',
+    projectRoot: '/projects/rec-4k',
+    width: 3840,
+    height: 2160,
+    framesPerSecond: 60,
+  });
+  expect(result.capability.effective).toEqual(result.capability.requested);
+  expect(result.capability.hardwareEncodingConfirmed).toBe(true);
+});

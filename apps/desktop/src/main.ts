@@ -2,26 +2,88 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DESKTOP_IPC_CHANNELS } from '../../../src/desktop/productContract';
-import { spawnNativeHelper, type NativeHelperClient, type NativeHelperHandshake } from './nativeHelperClient';
+import {
+  spawnNativeHelper,
+  type NativeCaptureRequest,
+  type NativeHelperClient,
+  type NativeHelperHandshake,
+} from './nativeHelperClient';
 import { createDesktopWindowOptions } from './windowContract';
 
 let mainWindow: BrowserWindow | null = null;
 let nativeHelper: NativeHelperClient | null = null;
 let nativeHelperHandshake: NativeHelperHandshake | null = null;
+let nativeHelperInitialization: Promise<void> | null = null;
 
 async function initializeNativeHelper(): Promise<void> {
+  const packagedPath = path.join(process.resourcesPath, 'bin', 'mac-media-engine');
+  const developmentPath = path.join(
+    app.getAppPath(),
+    'native/mac-media-engine/.build-local/arm64-apple-macosx/debug/mac-media-engine',
+  );
   const executablePath = process.env.EXCALICAST_MEDIA_HELPER_PATH
-    ?? (app.isPackaged ? path.join(process.resourcesPath, 'bin', 'mac-media-engine') : '');
+    ?? (app.isPackaged ? packagedPath : developmentPath);
   if (!executablePath || !fs.existsSync(executablePath)) return;
   nativeHelper = spawnNativeHelper(executablePath);
   nativeHelperHandshake = await nativeHelper.handshake();
 }
 
 function registerDesktopIpc(): void {
-  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureStatus, () => ({
-    available: nativeHelperHandshake !== null,
-    helper: nativeHelperHandshake,
-  }));
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureSources, async () => {
+    const helper = await requireNativeHelper();
+    return helper.captureSources();
+  });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.capturePreflight, async (_event, payload: unknown) => {
+    const helper = await requireNativeHelper();
+    return helper.preflightCapture(toNativeCaptureRequest(payload));
+  });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureStart, async (_event, payload: unknown) => {
+    const helper = await requireNativeHelper();
+    return helper.startCapture(toNativeCaptureRequest(payload));
+  });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureStop, async () => {
+    const helper = await requireNativeHelper();
+    return helper.stopCapture();
+  });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureStatus, async () => {
+    if (nativeHelperInitialization) await nativeHelperInitialization;
+    if (!nativeHelper) return { available: false, state: 'idle', helper: null };
+    return {
+      available: true,
+      state: await nativeHelper.captureStatus(),
+      helper: nativeHelperHandshake,
+    };
+  });
+}
+
+async function requireNativeHelper(): Promise<NativeHelperClient> {
+  if (nativeHelperInitialization) await nativeHelperInitialization;
+  if (!nativeHelper) throw new Error('native_media_helper_unavailable');
+  return nativeHelper;
+}
+
+function toNativeCaptureRequest(payload: unknown): NativeCaptureRequest {
+  if (!payload || typeof payload !== 'object') throw new Error('native_capture_request_invalid');
+  const value = payload as Record<string, unknown>;
+  const recordingId = typeof value.recordingId === 'string' ? value.recordingId : '';
+  const codec = value.codec === 'h264' || value.codec === 'hevc' ? value.codec : null;
+  if (!/^[a-zA-Z0-9_-]{1,128}$/.test(recordingId)
+    || !Number.isInteger(value.displayID)
+    || !Number.isInteger(value.width)
+    || !Number.isInteger(value.height)
+    || !Number.isInteger(value.framesPerSecond)
+    || !codec) {
+    throw new Error('native_capture_request_invalid');
+  }
+  return {
+    recordingId,
+    projectRoot: path.join(app.getPath('videos'), 'Excalicast Projects', recordingId),
+    displayID: value.displayID as number,
+    width: value.width as number,
+    height: value.height as number,
+    framesPerSecond: value.framesPerSecond as number,
+    codec,
+  };
 }
 
 function createMainWindow(): BrowserWindow {
@@ -40,7 +102,7 @@ function createMainWindow(): BrowserWindow {
 
 void app.whenReady().then(() => {
   registerDesktopIpc();
-  void initializeNativeHelper().catch((error: unknown) => {
+  nativeHelperInitialization = initializeNativeHelper().catch((error: unknown) => {
     nativeHelper?.close();
     nativeHelper = null;
     nativeHelperHandshake = null;

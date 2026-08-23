@@ -51,6 +51,20 @@ struct MacMediaEngineContractTests {
         try expect(recovered.state == .interrupted, "unfinished project recovers as interrupted")
         try expect(recovered.tracks[.screen]?.count == 1, "screen segment recovered")
         try expect(recovered.tracks[.microphone]?.count == 1, "audio segment recovered")
+
+        let cameraStaging = try store.makeStagingSegmentURL(track: .camera, index: 0)
+        try Data([6, 7, 8, 9]).write(to: cameraStaging)
+        try store.commitStagedSegment(
+            track: .camera,
+            index: 0,
+            stagingURL: cameraStaging,
+            startUs: 0,
+            durationUs: 2_000_000,
+            fileExtension: "mp4"
+        )
+        let recoveredAfterCommit = try SegmentedRecordingStore.recover(root: temporaryRoot)
+        try expect(recoveredAfterCommit.tracks[.camera]?.first?.byteLength == 4, "streamed file size checkpointed")
+        try expect(!FileManager.default.fileExists(atPath: cameraStaging.path), "staging file atomically promoted")
         try? FileManager.default.removeItem(at: temporaryRoot)
 
         let h264Preflight = try CapturePreflight.evaluate(
@@ -60,6 +74,17 @@ struct MacMediaEngineContractTests {
         )
         try expect(h264Preflight.hardwareEncodingConfirmed, "hardware encoder confirmed")
         try expect(h264Preflight.effective == h264Preflight.requested, "quality is not silently reduced")
+        try expect(CaptureEncodingPolicy.targetBitRate(for: h264Preflight.requested) >= 48_000_000, "4K60 retains production bitrate")
+        let teachingRequest = CaptureRequest(width: 2560, height: 1440, framesPerSecond: 30, codec: .h264)
+        try expect(CaptureEncodingPolicy.targetBitRate(for: teachingRequest) >= 12_000_000, "1440p text remains crisp")
+        try expect(CaptureEncodingPolicy.frameQueueCapacity == 2, "real-time queue stays bounded")
+        let hardwareStatus = CapturePreflight.systemHardwareEncoderStatus(.h264)
+        print("VideoToolbox H.264 hardware probe status: \(hardwareStatus)")
+        let actualHardwareReport = try CapturePreflight.evaluateSystem(
+            requested: teachingRequest,
+            availableBytes: 100 * 1_024 * 1_024 * 1_024
+        )
+        try expect(actualHardwareReport.hardwareEncodingConfirmed, "system hardware preflight succeeds")
 
         do {
             _ = try CapturePreflight.evaluate(

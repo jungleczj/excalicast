@@ -39,6 +39,7 @@ export const DESKTOP_FEATURE_MIGRATION_MATRIX: readonly DesktopFeatureMigration[
 
 export const DESKTOP_IPC_CHANNELS = {
   capturePreflight: 'capture.preflight.v1',
+  captureSources: 'capture.sources.v1',
   captureStart: 'capture.start.v1',
   captureStop: 'capture.stop.v1',
   captureStatus: 'capture.status.v1',

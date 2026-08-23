@@ -17,6 +17,13 @@ public enum RecordingStoreState: String, Codable, Sendable {
     case error
 }
 
+public enum RecordingStoreError: Error, Equatable, Sendable {
+    case invalidSegmentMetadata
+    case invalidFileExtension
+    case stagingFileOutsideProject
+    case emptySegment
+}
+
 public struct FinalizedSegment: Codable, Equatable, Sendable {
     public let index: Int
     public let relativePath: String
@@ -59,11 +66,59 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
         startUs: Int64,
         durationUs: Int64
     ) throws {
+        let stagingURL = try makeStagingSegmentURL(track: track, index: index)
+        try data.write(to: stagingURL, options: .atomic)
+        try commitStagedSegment(
+            track: track,
+            index: index,
+            stagingURL: stagingURL,
+            startUs: startUs,
+            durationUs: durationUs,
+            fileExtension: "segment"
+        )
+    }
+
+    public func makeStagingSegmentURL(track: RecordingTrackKind, index: Int) throws -> URL {
+        guard index >= 0 else { throw RecordingStoreError.invalidSegmentMetadata }
+        let stagingRoot = root.appendingPathComponent("segments/.staging", isDirectory: true)
+        try FileManager.default.createDirectory(at: stagingRoot, withIntermediateDirectories: true)
+        return stagingRoot.appendingPathComponent("\(track.rawValue)-\(index)-\(UUID().uuidString).part")
+    }
+
+    public func commitStagedSegment(
+        track: RecordingTrackKind,
+        index: Int,
+        stagingURL: URL,
+        startUs: Int64,
+        durationUs: Int64,
+        fileExtension: String
+    ) throws {
+        guard index >= 0, startUs >= 0, durationUs > 0 else {
+            throw RecordingStoreError.invalidSegmentMetadata
+        }
+        let allowedExtension = fileExtension.unicodeScalars.allSatisfy {
+            CharacterSet.alphanumerics.contains($0)
+        }
+        guard allowedExtension, !fileExtension.isEmpty else {
+            throw RecordingStoreError.invalidFileExtension
+        }
+        let stagingRoot = root.appendingPathComponent("segments/.staging", isDirectory: true).standardizedFileURL
+        let normalizedStaging = stagingURL.standardizedFileURL
+        guard normalizedStaging.path.hasPrefix(stagingRoot.path + "/") else {
+            throw RecordingStoreError.stagingFileOutsideProject
+        }
+        let attributes = try FileManager.default.attributesOfItem(atPath: normalizedStaging.path)
+        let byteLength = (attributes[.size] as? NSNumber)?.intValue ?? 0
+        guard byteLength > 0 else { throw RecordingStoreError.emptySegment }
+
         let trackRoot = root.appendingPathComponent("segments/\(track.rawValue)", isDirectory: true)
         try FileManager.default.createDirectory(at: trackRoot, withIntermediateDirectories: true)
-        let fileName = String(format: "%06d.segment", index)
+        let fileName = String(format: "%06d.%@", index, fileExtension)
         let segmentURL = trackRoot.appendingPathComponent(fileName)
-        try data.write(to: segmentURL, options: .atomic)
+        if FileManager.default.fileExists(atPath: segmentURL.path) {
+            try FileManager.default.removeItem(at: segmentURL)
+        }
+        try FileManager.default.moveItem(at: normalizedStaging, to: segmentURL)
 
         let relativePath = "segments/\(track.rawValue)/\(fileName)"
         let segment = FinalizedSegment(
@@ -71,7 +126,7 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
             relativePath: relativePath,
             startUs: startUs,
             durationUs: durationUs,
-            byteLength: data.count
+            byteLength: byteLength
         )
         var segments = manifest.tracks[track] ?? []
         segments.removeAll { $0.index == index }

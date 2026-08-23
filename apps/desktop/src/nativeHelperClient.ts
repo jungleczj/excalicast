@@ -14,7 +14,49 @@ interface HelperResponse {
   protocolVersion?: number;
   engine?: string;
   state?: 'idle' | 'recording' | 'stopping';
+  capability?: NativeCaptureCapability;
+  sources?: NativeCaptureSources;
   error?: string;
+}
+
+export interface NativeCaptureRequest {
+  recordingId: string;
+  projectRoot: string;
+  displayID: number;
+  width: number;
+  height: number;
+  framesPerSecond: number;
+  codec: 'h264' | 'hevc';
+}
+
+export interface NativeCaptureConfiguration {
+  width: number;
+  height: number;
+  framesPerSecond: number;
+  codec: 'h264' | 'hevc';
+}
+
+export interface NativeCaptureCapability {
+  requested: NativeCaptureConfiguration;
+  effective: NativeCaptureConfiguration;
+  hardwareEncodingConfirmed: boolean;
+  availableBytes: number;
+}
+
+export interface NativeCaptureResult {
+  state: 'idle' | 'recording' | 'stopping';
+  capability: NativeCaptureCapability;
+}
+
+export interface NativeCaptureSources {
+  displays: Array<{ displayID: number; width: number; height: number }>;
+  windows: Array<{
+    windowID: number;
+    title: string;
+    applicationName: string;
+    width: number;
+    height: number;
+  }>;
 }
 
 export interface NativeHelperHandshake {
@@ -44,6 +86,38 @@ export class NativeHelperClient {
       engine: response.engine,
       state: response.state,
     };
+  }
+
+  async preflightCapture(request: NativeCaptureRequest): Promise<NativeCaptureCapability> {
+    const response = await this.request({ channel: 'capture.preflight.v1', ...request });
+    if (!response.capability) throw new Error('native_capture_capability_missing');
+    return response.capability;
+  }
+
+  async captureSources(): Promise<NativeCaptureSources> {
+    const response = await this.request({ channel: 'capture.sources.v1' });
+    if (!response.sources) throw new Error('native_capture_sources_missing');
+    return response.sources;
+  }
+
+  async startCapture(request: NativeCaptureRequest): Promise<NativeCaptureResult> {
+    const response = await this.request({ channel: 'capture.start.v1', ...request });
+    if (response.state !== 'recording' || !response.capability) {
+      throw new Error('native_capture_start_invalid');
+    }
+    return { state: response.state, capability: response.capability };
+  }
+
+  async stopCapture(): Promise<'idle'> {
+    const response = await this.request({ channel: 'capture.stop.v1' });
+    if (response.state !== 'idle') throw new Error('native_capture_stop_invalid');
+    return response.state;
+  }
+
+  async captureStatus(): Promise<'idle' | 'recording' | 'stopping'> {
+    const response = await this.request({ channel: 'capture.status.v1' });
+    if (!response.state) throw new Error('native_capture_status_missing');
+    return response.state;
   }
 
   close(): void {
