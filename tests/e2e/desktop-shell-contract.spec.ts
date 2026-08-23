@@ -32,6 +32,10 @@ import {
   startDesktopCaptureWithResourcePriority,
   waitForCaptureResourceRelease,
 } from '../../src/desktop/captureResourceGate';
+import {
+  startDesktopAiCameraSession,
+  type DesktopCaptureBridge,
+} from '../../src/desktop/aiCameraSession';
 
 test('desktop shell uses a hardened renderer with a narrow versioned bridge', () => {
   const options = createDesktopWindowOptions('/tmp/excalicast-preload.js');
@@ -43,6 +47,128 @@ test('desktop shell uses a hardened renderer with a narrow versioned bridge', ()
   expect(webPreferences?.sandbox).toBe(true);
   expect(webPreferences?.preload).toBe('/tmp/excalicast-preload.js');
   expect(exposedDesktopBridgeChannels.every((channel) => channel.endsWith('.v1'))).toBe(true);
+});
+
+test('AI Camera starts native capture with independent system audio and recording microphone', async () => {
+  const calls: Array<{ channel: string; payload?: unknown }> = [];
+  const bridge: DesktopCaptureBridge = {
+    async invoke(channel, payload) {
+      calls.push({ channel, payload });
+      if (channel === 'capture.permissions.v1') {
+        return { screen: 'granted', microphone: 'granted', camera: 'granted' };
+      }
+      if (channel === 'capture.devices.v1') {
+        return {
+          microphones: [{ id: 'mic-default', name: 'MacBook Microphone', isDefault: true }],
+          cameras: [{ id: 'camera-default', name: 'FaceTime Camera', isDefault: true }],
+        };
+      }
+      if (channel === 'capture.preflight.v1') {
+        return {
+          requested: { width: 2560, height: 1440, framesPerSecond: 30, codec: 'h264' },
+          effective: { width: 2560, height: 1440, framesPerSecond: 30, codec: 'h264' },
+          hardwareEncodingConfirmed: true,
+          availableBytes: 100_000_000_000,
+        };
+      }
+      if (channel === 'capture.start.v1') {
+        return { state: 'recording', capability: {} };
+      }
+      if (channel === 'capture.stop.v1') return { state: 'idle' };
+      throw new Error(`unexpected_channel:${channel}`);
+    },
+  };
+
+  const session = await startDesktopAiCameraSession({
+    bridge,
+    recordingId: 'lesson-ai-camera',
+    source: { kind: 'display', id: 8, width: 2560, height: 1440 },
+    captureSystemAudio: true,
+    captureMicrophone: true,
+    camera: { enabled: true },
+  });
+
+  expect(calls.map((call) => call.channel)).toEqual([
+    'capture.permissions.v1',
+    'capture.devices.v1',
+    'capture.preflight.v1',
+    'capture.start.v1',
+  ]);
+  expect(calls.at(-1)?.payload).toMatchObject({
+    recordingId: 'lesson-ai-camera',
+    sourceKind: 'display',
+    sourceID: 8,
+    width: 2560,
+    height: 1440,
+    framesPerSecond: 30,
+    codec: 'h264',
+    captureSystemAudio: true,
+    captureMicrophone: true,
+    microphoneDeviceID: 'mic-default',
+    captureCamera: true,
+    cameraDeviceID: 'camera-default',
+    cameraWidth: 1280,
+    cameraHeight: 720,
+    cameraFramesPerSecond: 24,
+  });
+  expect(session).toMatchObject({
+    recordingId: 'lesson-ai-camera',
+    state: 'recording',
+    cameraDeviceID: 'camera-default',
+    microphoneDeviceID: 'mic-default',
+  });
+  await session.stop();
+  await session.stop();
+  expect(calls.filter((call) => call.channel === 'capture.stop.v1')).toHaveLength(1);
+});
+
+test('AI Camera requests only the missing native permissions before device acquisition', async () => {
+  const calls: Array<{ channel: string; payload?: unknown }> = [];
+  const bridge: DesktopCaptureBridge = {
+    async invoke(channel, payload) {
+      calls.push({ channel, payload });
+      if (channel === 'capture.permissions.v1') {
+        return { screen: 'granted', microphone: 'not-determined', camera: 'not-determined' };
+      }
+      if (channel === 'capture.request-permissions.v1') {
+        return { screen: 'granted', microphone: 'granted', camera: 'granted' };
+      }
+      if (channel === 'capture.devices.v1') {
+        return {
+          microphones: [{ id: 'mic-1', name: 'USB Mic', isDefault: true }],
+          cameras: [{ id: 'cam-1', name: 'Studio Camera', isDefault: true }],
+        };
+      }
+      if (channel === 'capture.preflight.v1') {
+        return { hardwareEncodingConfirmed: true };
+      }
+      if (channel === 'capture.start.v1') return { state: 'recording' };
+      if (channel === 'capture.stop.v1') return { state: 'idle' };
+      throw new Error(`unexpected_channel:${channel}`);
+    },
+  };
+
+  const session = await startDesktopAiCameraSession({
+    bridge,
+    recordingId: 'permission-retry',
+    source: { kind: 'display', id: 1, width: 3024, height: 1964 },
+    captureSystemAudio: true,
+    captureMicrophone: true,
+    camera: { enabled: true },
+  });
+
+  expect(calls[1]).toEqual({
+    channel: 'capture.request-permissions.v1',
+    payload: { captureMicrophone: true, captureCamera: true },
+  });
+  expect(calls.find((call) => call.channel === 'capture.start.v1')?.payload).toMatchObject({
+    width: 2218,
+    height: 1440,
+    captureSystemAudio: true,
+    captureMicrophone: true,
+    captureCamera: true,
+  });
+  await session.stop();
 });
 
 test('packaged desktop preload cannot navigate onto an untrusted web origin', () => {
