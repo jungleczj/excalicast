@@ -10,6 +10,10 @@ import {
 } from '../../apps/desktop/src/nativeHelperClient';
 import { parseDesktopCapturePayload } from '../../apps/desktop/src/captureRequest';
 import {
+  runNativeCaptureSoak,
+  summarizeNativeCaptureSoak,
+} from '../../apps/desktop/src/nativeCaptureSoak';
+import {
   CaptureResourceCoordinator,
   startDesktopCaptureWithResourcePriority,
   waitForCaptureResourceRelease,
@@ -368,4 +372,88 @@ test('native project validation returns per-track continuity and decodability ev
     continuity: { isValid: true },
     segments: [expect.objectContaining({ actualCodec: 'avc1', isDecodable: true })],
   });
+});
+
+test('native soak summary rejects linear memory growth and sustained encoder backlog', () => {
+  const stable = summarizeNativeCaptureSoak({
+    durationMs: 60 * 60_000,
+    validationPassed: true,
+    samples: Array.from({ length: 13 }, (_, index) => ({
+      elapsedMs: index * 5 * 60_000,
+      residentBytes: 220 * 1024 * 1024 + (index % 2) * 2 * 1024 * 1024,
+      pendingEncoderFrames: index % 3,
+      pendingWriteBytes: 0,
+      segmentWriteLatencyMs: 18,
+      state: 'recording' as const,
+    })),
+  });
+  expect(stable.passed).toBe(true);
+  expect(stable.memorySlopeBytesPerMinute).toBeLessThan(2 * 1024 * 1024);
+
+  const unstable = summarizeNativeCaptureSoak({
+    durationMs: 10 * 60_000,
+    validationPassed: true,
+    samples: Array.from({ length: 11 }, (_, index) => ({
+      elapsedMs: index * 60_000,
+      residentBytes: (200 + index * 12) * 1024 * 1024,
+      pendingEncoderFrames: index < 4 ? 0 : 5,
+      pendingWriteBytes: index < 4 ? 0 : 80 * 1024 * 1024,
+      segmentWriteLatencyMs: index < 4 ? 20 : 2_500,
+      state: 'recording' as const,
+    })),
+  });
+  expect(unstable.passed).toBe(false);
+  expect(unstable.failures).toEqual(expect.arrayContaining([
+    'memory_growth_linear',
+    'encoder_backlog',
+    'write_backlog',
+    'write_latency',
+  ]));
+});
+
+test('native soak runner records pressure, stops capture, and validates decoded media', async () => {
+  const calls: string[] = [];
+  let clock = 0;
+  const client = {
+    async startCapture() { calls.push('start'); },
+    async captureStatus() {
+      calls.push('status');
+      return {
+        state: 'recording' as const,
+        pressure: {
+          pendingEncoderFrames: 1,
+          pendingWriteBytes: 1024,
+          maximumSegmentWriteLatencyMs: 12,
+        },
+      };
+    },
+    async stopCapture() { calls.push('stop'); return 'idle' as const; },
+    async validateProject() {
+      calls.push('validate');
+      return {
+        isValid: true,
+        manifestState: 'ready' as const,
+        continuity: { isValid: true, requiredTracks: ['screen' as const], tracks: {} },
+        segments: [],
+      };
+    },
+  } as unknown as NativeHelperClient;
+
+  const result = await runNativeCaptureSoak({
+    client,
+    request: {
+      recordingId: 'soak-contract', projectRoot: '/tmp/soak-contract',
+      sourceKind: 'display', sourceID: 1, width: 1920, height: 1080,
+      framesPerSecond: 30, codec: 'h264',
+    },
+    durationMs: 1_000,
+    sampleIntervalMs: 500,
+    now: () => clock,
+    sleep: async (milliseconds) => { clock += milliseconds; },
+    sampleResidentBytes: async () => 200 * 1024 * 1024,
+  });
+
+  expect(result.summary.passed).toBe(true);
+  expect(result.samples).toHaveLength(2);
+  expect(calls).toEqual(['start', 'status', 'status', 'stop', 'validate']);
 });

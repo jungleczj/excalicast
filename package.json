@@ -17,6 +17,7 @@
     "desktop:build": "tsc -p apps/desktop/tsconfig.json",
     "desktop:dev": "npm run desktop:build && electron apps/desktop/dist/apps/desktop/src/main.js",
     "desktop:native:test": "swift run --package-path native/mac-media-engine --scratch-path native/mac-media-engine/.build-local mac-media-engine-contract-tests",
+    "desktop:native:soak": "npm run desktop:build && node scripts/run-native-capture-soak.mjs",
     "geo:generate": "node scripts/geo-answer-benchmark.mjs generate",
     "geo:run": "node scripts/geo-answer-benchmark.mjs run",
     "geo:analyze": "node scripts/geo-answer-benchmark.mjs analyze",

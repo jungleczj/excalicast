@@ -206,7 +206,10 @@ export class NativeHelperClient {
     timeout: ReturnType<typeof setTimeout>;
   }>();
 
-  constructor(private readonly transport: HelperTransport) {
+  constructor(
+    private readonly transport: HelperTransport,
+    readonly processId?: number,
+  ) {
     transport.onLine((line) => this.receive(line));
   }
 
@@ -360,5 +363,5 @@ export function spawnNativeHelper(executablePath: string): NativeHelperClient {
       if (!child.killed) child.kill('SIGTERM');
     },
   };
-  return new NativeHelperClient(transport);
+  return new NativeHelperClient(transport, child.pid);
 }
