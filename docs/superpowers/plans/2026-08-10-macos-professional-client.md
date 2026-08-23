@@ -1,4 +1,6 @@
-# Excalicast macOS 专业客户端重构计划
+# Excalicast macOS 专业客户端重构计划（已被取代）
+
+> 当前唯一执行计划为 `2026-08-23-macos-ai-teaching-studio.md`。本文件只保留历史参考；新计划补齐完整浏览器能力迁移、完整 Excalidraw 透明白板、刘海智能提词器、教学 Director、ChatCut Recipe 与 Screen Studio 级原生录制验收。
 
 > 状态：架构规划稿
 > 日期：2026-08-10
@@ -414,4 +416,3 @@ interface PresenterSceneEvent {
 - Apple ScreenCaptureKit：https://developer.apple.com/documentation/screencapturekit
 - Apple AVFoundation Capture：https://developer.apple.com/documentation/avfoundation/avcapturesession
 - Apple App Review Guidelines：https://developer.apple.com/app-store/review/guidelines/
-

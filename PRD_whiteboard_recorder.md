@@ -1,9 +1,9 @@
 # PRD：白板录制工具
-**版本**：v0.9.4
+**版本**：v0.10.0
 **状态**：开发中
 **作者**：—
-**最后更新**：2026-08-18
-**变更**：v0.9.4 - 大纲/讲义改为数据库持久化后台任务并接入统一任务中心；长录制云备份改用 Supabase TUS 分片上传且 recordings bucket 单对象上限提升至 1GB；补生产配音字段修复迁移。详见「## 十一」最新一条。
+**最后更新**：2026-08-23
+**变更**：v0.10.0 - 新增 Mac 混合桌面端：原生高性能录制、完整 Excalidraw 透明桌面白板、独立摄像头、刘海智能跟读提词器、教学 AI Director、ChatCut 教学素材编排，并规定浏览器能力零阉割迁移。详见「## 十点五」与「## 十一」最新一条。
 **历史变更**：v0.9.3 - 翻译配音语音合成新增 edge-tts 作为主用（微软 Edge 免费神经 TTS，无需 key，本地生成 Sec-MS-GEC token + WebSocket 直连），失败自动回退 Azure Speech（已配置时）再回退浏览器本地 Kokoro。详见「## 十一」最新一条。
 **历史变更**：v0.9.2 - SEO 关键词扩量：首页标题补「白板录制 / Whiteboard Recorder」关键词，llms.txt 增品牌 logo 与中英文关键词簇，use-cases 新增 5 个中文流量词长尾页（白板录视频工具 / 在线录屏 / Excalidraw 录屏 / 网课录屏 / 免费免注册录屏）。详见「## 十一」最新一条。
 **历史变更**：v0.9.1 - 导出页新增统一任务中心：所有媒体任务只在顶部最右侧展示进度；本地重任务串行、网络任务并行；导出使用启动时快照且不阻断预览和编辑；工具栏固定两行，不可用操作改为点击后付费或前置步骤引导；任务完成支持声音提醒。详见「## 十一」最新一条。
@@ -935,6 +935,53 @@ Excalicast 落地页以 Craft.do 当前官网首页为硬参考进行重构，�
 
 ---
 
+## 十点五、Mac AI 教学录制工作室（v0.10）
+
+### 产品目标与范围
+
+Mac 端定位为面向教学录制的 `Excalicast Studio`，采用 **Electron/React 编辑与业务层 + Swift 原生实时媒体层**的混合架构。目标是录制阶段保持 Screen Studio 级流畅，停止后由 AI 自动生成可回退、可编辑的完整多轨草稿，让普通用户通过少量教学功能键完成一键成片。场景覆盖白板、PPT/PDF、软件演示、代码教学、数据教学和摄像头加屏幕；不扩展为通用影视剪辑器。
+
+### 浏览器能力零阉割
+
+桌面端必须继承现有浏览器版的全部产品能力：完整 Excalidraw、全部录制源、摄像头布局、画幅与背景、项目库/云同步/分享/权益、多录制时间线、Autozoom/Highlight/要点动效、字幕、音频修复、英文配音、多比例导出、ChatCut 辅助剪辑和智能跟读提词器。能力可以由共享包、Web 适配器或桌面原生实现承接，但发布矩阵不得出现 `omitted`。
+
+### 原生录制热路径
+
+- Swift Helper 使用 ScreenCaptureKit、AVFoundation 与 VideoToolbox；Electron/React 不接触逐帧原始像素，不通过 Canvas 或 JS 主线程编码。
+- 屏幕、摄像头、麦克风、系统音频和输入遥测保持独立轨道；硬件编码能力在录制前验证，不能静默回退软件编码或偷偷降低质量。
+- 录制文件按短分段持续落盘，清单原子更新，支持崩溃恢复；录制期间暂停上传、ASR、AI、导出与素材预取，停止后再调度重任务。
+- 支持最高 4K60 能力档；默认档位必须根据真实预热和写盘压力选择。背压时优先关闭预览和非必要实时效果，并向用户明确显示状态。
+
+### 完整 Excalidraw 桌面透明白板
+
+- 白板引擎直接复用当前 `@excalidraw/excalidraw` 组件、场景格式、工具、快捷键、素材库、图片、文本、箭头、自由绘制、激光笔、撤销重做、缩放与协作能力，不另建缩水绘图模型。
+- 提供 `Ink Mode`（紧凑悬浮工具条）与 `Full Board Mode`（完整 Excalidraw 工具面）。背景透明度与笔迹/元素透明度分别设置，互不绑定。
+- 原生 AppKit 只管理透明置顶窗口、跨显示器定位、点击穿透、窗口层级和 ScreenCaptureKit 排除；React Excalidraw 管理绘制与场景事件。
+- 录制时保存 Excalidraw 场景增量与指针/激光遥测，实时捕获排除白板窗口；预览和导出阶段再确定性合成，因此透明度和布局可录后修改。
+
+### AI Camera、提词器与自动导演
+
+- 摄像头保存独立原始轨，AI Camera/Auto Director 根据教学语义与输入遥测生成 Full、Focus、Follow、Reveal 等可编辑镜头计划，录制时不烘焙背景、阴影、圆角或自动缩放。
+- 提词器继承浏览器现有 Google 优先、Vosk 离线回退、当前词高亮、智能跟读、自动/常速滚动、语言/字号/透明度等能力；录制时复用同一麦克风 PCM 会话，禁止第二次打开麦克风。
+- Mac 增加独立原生提词器窗口，吸附 MacBook 刘海/菜单栏中央，支持多显示器并从录屏中排除；识别不可用时明确回退常速滚动。
+
+### DeepSeek 与 ChatCut 教学成片
+
+- 录制前选择 Teaching Production Pack，并可开关动效、图表、转场、音效、字幕与镜头策略；高级用户可固定具体素材。
+- DeepSeek 只负责教学语义：章节、要点、概念关系、图表结构、素材槽位与证据时间，不直接改写原始媒体。
+- ChatCut Library 全量可搜索可见；自动选材仅在经过策划的教学素材包内进行。停止录制后生成版本化 `EditRecipe`，把图表、动效、音效、字幕、镜头与白板事件确定性落到独立轨道。
+- AI 结果必须非破坏、可撤销、可重新生成；时间线始终可见，但默认工作流以“重新编排、精简、强调、换风格、导出”等高层按钮为主。
+
+### 桌面 UI 方向
+
+桌面工作区采用深色专业外壳、暖纸色内容舞台与黄色强调色：项目库首页、紧凑录制设置、中央预览、右侧 Director、底部时间线、可折叠素材库。沿用现有品牌气质，但桌面工作区移除粗重手绘边框和硬阴影，建立统一间距、排版、状态、动效和无障碍令牌；视觉验收以 Screen Studio 的信息密度与精细度为质量基准，不复制其品牌资产。
+
+### 阶段验收门槛
+
+每阶段必须先有失败测试，再实现并通过测试后自动进入下一阶段。最终门槛包括：浏览器功能迁移矩阵无遗漏；透明白板完整工具回归；1440p30+麦克风+720p 摄像头 60 分钟录制内存不随时长线性增长；无音频缺口且分段可恢复；录制期间网络与本地文件复制保持可用；停止后三秒内进入可播放编辑器；原生提词器/白板/摄像头窗口均不被烘焙进屏幕轨。
+
+---
+
 ## 十一、实现进展与变更记录（持续同步）
 
 > 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
@@ -1076,6 +1123,7 @@ Excalicast 落地页以 Craft.do 当前官网首页为硬参考进行重构，�
 
 ### 11.2 变更记录（按时间倒序）
 
+- **2026-08-23｜Mac AI 教学录制工作室立项与零阉割契约**：新增 Electron/React + Swift 混合桌面端规划；明确 ScreenCaptureKit/AVFoundation/VideoToolbox 原生录制热路径、分段恢复、独立摄像头与音频轨；桌面透明白板直接复用完整 Excalidraw，并独立控制背景/笔迹透明度；提词器继承浏览器智能跟读并增加刘海吸附原生窗口；DeepSeek 生成教学语义与镜头/素材槽位，ChatCut 教学素材包生成非破坏多轨 `EditRecipe`；桌面 UI 升级为 Excalicast Studio 专业工作区。新增机器可验证浏览器迁移矩阵和版本化 IPC 契约，桌面发布不得遗漏浏览器能力。
 - **2026-08-18｜大纲/讲义后台任务 + 长录制分片上传 + 配音 schema 修复**：① **大纲/讲义异步化**：`/api/handout/submit` 只创建持久化 `handout_jobs` 并立即返回 202，模型生成由 `waitUntil` 后台执行；`/api/handout/status` 只查询状态并可重新唤醒 pending/过期 running job，刷新或切换 Tab 后按 remote job checkpoint 恢复轮询；Outline 与 Handout 继续共享一次生成结果并接入统一任务中心，不再让同步请求等待 DeepSeek 导致 504。② **长录制上传**：抽取通用 `uploadSupabaseStorageObject`，小文件直接传、大文件自动用 TUS 6MB 分片断点续传；云备份的 `camera.webm` 即使 WebCodecs 代理转码失败回退原文件，也不再走普通单次上传；`recordings` 私有 bucket 单对象上限提升到 1GB。③ **配音生产 schema 修复**：前向幂等迁移补齐 `dubbing_jobs` 的 voice/计费/分片统计字段并主动刷新 PostgREST schema cache，修复 `database_schema_stale`。涉及 `src/app/api/handout/{submit,status,generate}`、`src/services/{handoutJob,handoutClient,supabaseStorageUpload,cloudSync,privateMediaUpload}.ts`、`src/lib/{handoutJobStore}.ts`、`HandoutPanel.tsx`、统一任务中心、`supabase/migrations/20260818130000_background_handout_jobs.sql` 及 E2E。
 - **2026-08-18｜翻译配音语音合成新增 edge-tts 主用**：① 新增 `src/services/edgeTtsProvider.ts`（server-only，依赖 `ws`）——复刻 edge-tts 7.x 协议：`Sec-MS-GEC` 令牌本地 SHA256 生成（Windows-file-time 5 分钟桶 + TrustedClientToken，无需 token 接口），WebSocket 直连 `speech.platform.bing.com` 合成 `audio-24khz-48kbitrate-mono-mp3`，再用 `mediabunny` 解码 MP3→PCM WAV 后复用 `assembleTimedPcm16Wav` 逐字幕 chunk 拼接（带 rate 控制，对齐 Azure 行为）；② `status/route.ts` 合成链改为 **edge-tts 主用 → Azure Speech 回退（已配置）→ Kokoro 本地兜底**，抽取 `persistAudio` 复用上传/本地落盘；③ 导出 `encodePcm16Wav`、`package.json` 新增 `ws`/`@types/ws`、`.env.local.example` 更新配音说明。注：edge-tts 端点仅支持 MP3（riff/raw PCM 返回空），故走 mediabunny 服务端解码。涉及 `src/services/edgeTtsProvider.ts`、`src/app/api/dubbing/status/route.ts`、`src/lib/dubbingAudio.ts`、`package.json`、`.env.local.example`。
 - **2026-08-18｜SEO 关键词扩量（+5 场景页）+ 首页标题白板关键词 + llms.txt 品牌/关键词**：① 首页标题/描述关键词化：zh「Excalicast — 白板录制工具：录屏、剪辑、多比例视频导出」、en「Excalicast — Whiteboard Recorder & Online Screen Recorder」，`landing.meta.{title,description}` 单一来源，首页/OpenGraph/Twitter/`SoftwareApplication` schema 同步生效；② `src/app/llms.txt/route.ts` 增「Brand & logo」（SVG + icon.png）与「Topics covered」中英文关键词簇；③ `src/content/use-cases.ts` 新增 5 个中文流量词长尾页：`whiteboard-recording-tool`（白板录视频工具）、`online-screen-recorder`（在线录屏）、`record-excalidraw-to-video`（Excalidraw 录屏）、`record-online-course-screen`（网课录屏）、`free-screen-recorder-no-signup`（免费免注册录屏），双语完整（directAnswer + steps + FAQ + related 内链），`[slug]` 模板、`generateStaticParams`、sitemap、hreflang、FAQ JSON-LD 全自动收录，零路由改动。涉及 `src/content/use-cases.ts`、`src/messages/{en,zh}.json`、`src/app/llms.txt/route.ts`。
