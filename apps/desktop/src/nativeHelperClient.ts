@@ -20,6 +20,7 @@ interface HelperResponse {
   permissions?: NativeCapturePermissions;
   pressure?: NativeCapturePressure;
   manifest?: NativeRecordingManifest;
+  validation?: NativeRecordingValidationReport;
   error?: string;
   errorCode?: string;
   errorTrack?: NativeRecordingTrack;
@@ -154,6 +155,44 @@ export interface NativeRecordingManifest {
   };
 }
 
+export interface NativeContinuityIssue {
+  code: 'missing-required-track' | 'invalid-segment-metadata' | 'non-contiguous-index'
+    | 'non-monotonic-timeline' | 'gap' | 'overlap';
+  segmentIndex?: number;
+  deltaUs?: number;
+}
+
+export interface NativeTrackContinuityReport {
+  track: NativeRecordingTrack;
+  segmentCount: number;
+  firstStartUs?: number;
+  endUs?: number;
+  maximumGapUs: number;
+  maximumOverlapUs: number;
+  issues: NativeContinuityIssue[];
+}
+
+export interface NativeRecordingValidationReport {
+  isValid: boolean;
+  manifestState: NativeRecordingManifest['state'];
+  continuity: {
+    isValid: boolean;
+    requiredTracks: NativeRecordingTrack[];
+    tracks: Partial<Record<NativeRecordingTrack, NativeTrackContinuityReport>>;
+  };
+  segments: Array<{
+    track: NativeRecordingTrack;
+    index: number;
+    relativePath: string;
+    expectedCodec: string;
+    actualCodec?: string;
+    durationUs: number;
+    byteLength: number;
+    isDecodable: boolean;
+    issue?: string | null;
+  }>;
+}
+
 export interface NativeHelperHandshake {
   protocolVersion: 1;
   engine: 'mac-media-engine';
@@ -255,6 +294,12 @@ export class NativeHelperClient {
     const response = await this.request({ channel: 'project.recover.v1', projectRoot }, 15_000);
     if (!response.manifest) throw new Error('native_recording_manifest_missing');
     return response.manifest;
+  }
+
+  async validateProject(projectRoot: string): Promise<NativeRecordingValidationReport> {
+    const response = await this.request({ channel: 'project.validate.v1', projectRoot }, 30_000);
+    if (!response.validation) throw new Error('native_recording_validation_missing');
+    return response.validation;
   }
 
   close(): void {

@@ -86,6 +86,24 @@ struct MacMediaEngineContractTests {
             "static content emits one low-frequency recovery heartbeat"
         )
         try expect(
+            InitialFrameSeedPolicy.heartbeatPresentationTimes(
+                lastFrameUs: 1_000_000,
+                nowUs: 3_532_000,
+                framesPerSecond: 30,
+                forceFinalFrame: false
+            ) == [2_966_667, 3_000_000],
+            "timer jitter does not become a gap in the static video timeline"
+        )
+        try expect(
+            InitialFrameSeedPolicy.heartbeatPresentationTimes(
+                lastFrameUs: 1_000_000,
+                nowUs: 3_532_000,
+                framesPerSecond: 30,
+                forceFinalFrame: true
+            ) == [2_966_667, 3_000_000, 3_532_000],
+            "stop extends the final static segment to the real stop time"
+        )
+        try expect(
             !InitialFrameSeedPolicy.shouldEmitHeartbeat(elapsedSinceLastFrameUs: 500_000),
             "active content is not duplicated"
         )
@@ -166,6 +184,76 @@ struct MacMediaEngineContractTests {
         let timeline = RecordingTimeline(originUs: 5_000_000)
         try expect(timeline.relativeUs(for: 5_250_000) == 250_000, "tracks share one relative clock")
         try expect(timeline.relativeUs(for: 4_999_000) == 0, "pre-roll timestamp clamps to zero")
+
+        let screenSegments = [
+            FinalizedSegment(index: 0, relativePath: "segments/screen/000000.mp4", startUs: 0, durationUs: 2_000_000, byteLength: 100),
+            FinalizedSegment(index: 1, relativePath: "segments/screen/000001.mp4", startUs: 2_033_333, durationUs: 1_966_667, byteLength: 100),
+        ]
+        let cameraSegments = [
+            FinalizedSegment(index: 0, relativePath: "segments/camera/000000.mp4", startUs: 80_000, durationUs: 3_900_000, byteLength: 80),
+        ]
+        let microphoneSegments = [
+            FinalizedSegment(index: 0, relativePath: "segments/microphone/000000.m4a", startUs: 20_000, durationUs: 3_970_000, byteLength: 40),
+        ]
+        let continuityMetadata = RecordingCaptureMetadata(
+            screen: CaptureRequest(width: 2_560, height: 1_440, framesPerSecond: 30, codec: .h264),
+            camera: CaptureRequest(width: 1_280, height: 720, framesPerSecond: 24, codec: .h264),
+            capturesSystemAudio: true,
+            capturesMicrophone: true,
+            hardwareEncodingConfirmed: true,
+            initialAvailableBytes: 100 * 1_024 * 1_024 * 1_024,
+            finalPressure: nil
+        )
+        let continuousManifest = RecoverableRecordingManifest(
+            schemaVersion: 1,
+            recordingId: "continuous",
+            state: .ready,
+            tracks: [
+                .screen: screenSegments,
+                .camera: cameraSegments,
+                .microphone: microphoneSegments,
+            ],
+            capture: continuityMetadata
+        )
+        let continuity = RecordingContinuityValidator.validate(continuousManifest)
+        try expect(continuity.isValid, "normal frame and audio packet spacing is continuous")
+        try expect(continuity.requiredTracks == [.screen, .camera, .microphone], "capture intent drives validation")
+
+        let gappedManifest = RecoverableRecordingManifest(
+            schemaVersion: 1,
+            recordingId: "gapped",
+            state: .ready,
+            tracks: [
+                .screen: [
+                    screenSegments[0],
+                    FinalizedSegment(
+                        index: 1,
+                        relativePath: "segments/screen/000001.mp4",
+                        startUs: 2_800_000,
+                        durationUs: 1_200_000,
+                        byteLength: 100
+                    ),
+                ],
+                .camera: cameraSegments,
+                .microphone: microphoneSegments,
+            ],
+            capture: continuityMetadata
+        )
+        let gapReport = RecordingContinuityValidator.validate(gappedManifest)
+        try expect(!gapReport.isValid, "a visible screen timeline gap fails validation")
+        try expect(
+            gapReport.tracks[.screen]?.issues.contains(where: { $0.code == .gap }) == true,
+            "continuity report identifies the affected screen gap"
+        )
+
+        var missingCameraManifest = continuousManifest
+        missingCameraManifest.tracks[.camera] = []
+        let missingCameraReport = RecordingContinuityValidator.validate(missingCameraManifest)
+        try expect(!missingCameraReport.isValid, "enabled camera without media fails continuity validation")
+        try expect(
+            missingCameraReport.tracks[.camera]?.issues.contains(where: { $0.code == .missingRequiredTrack }) == true,
+            "continuity report identifies a missing enabled camera track"
+        )
 
         let temporaryRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("excalicast-contract-\(UUID().uuidString)", isDirectory: true)

@@ -327,3 +327,45 @@ test('native project recovery returns a checkpointed interrupted manifest', asyn
     projectRoot: '/projects/lesson-crash',
   });
 });
+
+test('native project validation returns per-track continuity and decodability evidence', async () => {
+  let onLine: ((line: string) => void) | null = null;
+  let command: Record<string, unknown> | null = null;
+  const transport: HelperTransport = {
+    write(line) {
+      command = JSON.parse(line) as Record<string, unknown>;
+      queueMicrotask(() => onLine?.(JSON.stringify({
+        id: command?.id,
+        ok: true,
+        state: 'idle',
+        validation: {
+          isValid: true,
+          manifestState: 'ready',
+          continuity: {
+            isValid: true,
+            requiredTracks: ['camera', 'microphone', 'screen'],
+            tracks: {
+              screen: { track: 'screen', segmentCount: 1, maximumGapUs: 0, maximumOverlapUs: 0, issues: [] },
+            },
+          },
+          segments: [{
+            track: 'screen', index: 0, relativePath: 'segments/screen/000000.mp4',
+            expectedCodec: 'h264', actualCodec: 'avc1', durationUs: 2_000_000,
+            byteLength: 1024, isDecodable: true, issue: null,
+          }],
+        },
+      })));
+    },
+    onLine(listener) { onLine = listener; },
+    close() {},
+  };
+  const client = new NativeHelperClient(transport);
+  const validation = await client.validateProject('/projects/validated');
+
+  expect(command).toMatchObject({ channel: 'project.validate.v1', projectRoot: '/projects/validated' });
+  expect(validation).toMatchObject({
+    isValid: true,
+    continuity: { isValid: true },
+    segments: [expect.objectContaining({ actualCodec: 'avc1', isDecodable: true })],
+  });
+});

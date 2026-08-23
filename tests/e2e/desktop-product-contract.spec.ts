@@ -58,6 +58,7 @@ test('desktop IPC is versioned and separates native capture from renderer pixels
   expect(DESKTOP_IPC_CHANNELS.inkSetOpacity).toBe('ink.set-opacity.v1');
   expect(DESKTOP_IPC_CHANNELS.teleprompterConfigure).toBe('teleprompter.configure.v1');
   expect(DESKTOP_IPC_CHANNELS.projectRecover).toBe('project.recover.v1');
+  expect(DESKTOP_IPC_CHANNELS.projectValidate).toBe('project.validate.v1');
   expect(Object.values(DESKTOP_IPC_CHANNELS).every((channel) => channel.endsWith('.v1'))).toBe(true);
 });
 

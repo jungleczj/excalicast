@@ -40,6 +40,7 @@ private struct Response: Encodable, Sendable {
     let permissions: CapturePermissions?
     let pressure: CapturePressureSnapshot?
     let manifest: RecoverableRecordingManifest?
+    let validation: RecordingProjectValidationReport?
     let error: String?
     let errorCode: String?
     let errorTrack: RecordingTrackKind?
@@ -56,6 +57,7 @@ private struct Response: Encodable, Sendable {
         permissions: CapturePermissions?,
         pressure: CapturePressureSnapshot?,
         manifest: RecoverableRecordingManifest?,
+        validation: RecordingProjectValidationReport? = nil,
         error: String?,
         errorCode: String? = nil,
         errorTrack: RecordingTrackKind? = nil
@@ -71,6 +73,7 @@ private struct Response: Encodable, Sendable {
         self.permissions = permissions
         self.pressure = pressure
         self.manifest = manifest
+        self.validation = validation
         self.error = error
         self.errorCode = errorCode
         self.errorTrack = errorTrack
@@ -254,6 +257,31 @@ private actor HelperServer {
                     permissions: nil,
                     pressure: nil,
                     manifest: manifest,
+                    error: nil
+                )
+            case "project.validate.v1":
+                guard await lifecycle.state == .idle else {
+                    throw HelperServerError.recoveryWhileCaptureActive
+                }
+                guard let projectRoot = command.projectRoot else {
+                    throw HelperServerError.missingCaptureParameters
+                }
+                let validation = try await RecordingProjectValidator.validate(
+                    root: URL(fileURLWithPath: projectRoot, isDirectory: true)
+                )
+                return Response(
+                    id: command.id,
+                    ok: true,
+                    protocolVersion: HelperHandshake.currentProtocolVersion,
+                    engine: "mac-media-engine",
+                    state: await lifecycle.state,
+                    capability: nil,
+                    sources: nil,
+                    devices: nil,
+                    permissions: nil,
+                    pressure: nil,
+                    manifest: nil,
+                    validation: validation,
                     error: nil
                 )
             case "capture.preflight.v1":

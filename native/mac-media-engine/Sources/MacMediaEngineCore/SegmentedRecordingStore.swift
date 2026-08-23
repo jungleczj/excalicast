@@ -31,6 +31,20 @@ public struct FinalizedSegment: Codable, Equatable, Sendable {
     public let startUs: Int64
     public let durationUs: Int64
     public let byteLength: Int
+
+    public init(
+        index: Int,
+        relativePath: String,
+        startUs: Int64,
+        durationUs: Int64,
+        byteLength: Int
+    ) {
+        self.index = index
+        self.relativePath = relativePath
+        self.startUs = startUs
+        self.durationUs = durationUs
+        self.byteLength = byteLength
+    }
 }
 
 public struct PendingSegmentCommit: Codable, Equatable, Sendable {

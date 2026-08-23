@@ -318,20 +318,30 @@ final class ScreenCaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate, @un
         guard force || InitialFrameSeedPolicy.shouldEmitHeartbeat(
             elapsedSinceLastFrameUs: elapsedUs
         ) else { return }
+        let lastUs = lastPresentationTime
+            .convertScale(1_000_000, method: .roundTowardZero)
+            .value
+        let nowUs = now
+            .convertScale(1_000_000, method: .roundTowardZero)
+            .value
+        let presentationTimes = InitialFrameSeedPolicy.heartbeatPresentationTimes(
+            lastFrameUs: lastUs,
+            nowUs: nowUs,
+            framesPerSecond: requestFramesPerSecond,
+            forceFinalFrame: force
+        )
+        let frameDuration = CMTime(
+            value: 1,
+            timescale: CMTimeScale(max(1, requestFramesPerSecond))
+        )
         do {
-            if InitialFrameSeedPolicy.shouldEmitHeartbeat(elapsedSinceLastFrameUs: elapsedUs) {
-                let frameDuration = CMTime(
-                    value: 1,
-                    timescale: CMTimeScale(max(1, requestFramesPerSecond))
+            for presentationTimeUs in presentationTimes {
+                try submit(
+                    pixelBuffer,
+                    presentationTime: CMTime(value: presentationTimeUs, timescale: 1_000_000),
+                    duration: frameDuration
                 )
-                let bridgeTime = lastPresentationTime
-                    + CMTime(value: CaptureEncodingPolicy.segmentDurationUs, timescale: 1_000_000)
-                    - frameDuration
-                if bridgeTime > lastPresentationTime, bridgeTime < now {
-                    try submit(pixelBuffer, presentationTime: bridgeTime, duration: frameDuration)
-                }
             }
-            try submit(pixelBuffer, presentationTime: now)
         } catch {
             recordTerminalError(error)
         }
