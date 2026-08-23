@@ -61,6 +61,7 @@ import {
   EXPORT_AUDIO_BITRATE,
   EXPORT_AUDIO_SAMPLE_RATE,
   prepareExportAudio,
+  mixPreparedExportAudio,
   type PreparedExportAudio,
 } from '@/services/exportAudio';
 import { mapProjectRangeToClip, normalizeMainTrack } from '@/services/mainTrack';
@@ -268,14 +269,22 @@ async function exportMainTrack(opts: ExportOptions, clips: MainTrackClip[]): Pro
           : selection.track?.mode === 'repair' ? 'repair' : selection.track ? 'enhanced' : 'original';
         sourceTrackId = useLocalized ? localized.id : selection.track?.id;
       }
-      preparedAudioTracks.push(sourceAudio
-        ? await prepareExportAudio({
+      const simultaneousTracks: PreparedExportAudio[] = [];
+      if (sourceAudio) simultaneousTracks.push(await prepareExportAudio({
           blob: sourceAudio,
           segments: audioSegments,
           sourceKind,
           sourceTrackId,
           signal: opts.signal,
-        })
+        }));
+      if (media.systemAudioBlob) simultaneousTracks.push(await prepareExportAudio({
+        blob: media.systemAudioBlob,
+        segments: [{ start: clip.sourceStart, end: clip.sourceEnd }],
+        sourceKind: 'original',
+        signal: opts.signal,
+      }));
+      preparedAudioTracks.push(simultaneousTracks.length > 0
+        ? mixPreparedExportAudio(simultaneousTracks)
         : createSilentExportAudio(clipOutputDurationMs));
     }
     const segmentOptions = mapProjectEffectsToClip(opts, clip, outputStartMs);
@@ -1112,11 +1121,11 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const { exportToCanvas } = await import('@excalidraw/excalidraw');
   setProgress(0.03);
   setPhase('assembling_media');
-  const { metadata, snapshots, audioBlob, cameraBlob, screenBlob, cameraEvents, laserEvents, binaryFiles, manifest } = await loadFullRecording(opts.recordingId);
+  const { metadata, snapshots, audioBlob, systemAudioBlob, cameraBlob, screenBlob, cameraEvents, laserEvents, binaryFiles, manifest } = await loadFullRecording(opts.recordingId);
   diagnostics.setMedia({ audio: manifest.audio, camera: manifest.camera, screen: manifest.screen });
   diagnostics.addBreakdown('media_loading', performance.now() - phaseStartedAt);
   setProgress(0.08);
-  opts.onLog?.(`media manifest: audio=${manifest.audio.chunks} chunks/${manifest.audio.bytes} bytes, camera=${manifest.camera.chunks} chunks/${manifest.camera.bytes} bytes, screen=${manifest.screen.chunks} chunks/${manifest.screen.bytes} bytes`);
+  opts.onLog?.(`media manifest: audio=${manifest.audio.chunks} chunks/${manifest.audio.bytes} bytes, system-audio=${manifest.systemAudio.chunks} chunks/${manifest.systemAudio.bytes} bytes, camera=${manifest.camera.chunks} chunks/${manifest.camera.bytes} bytes, screen=${manifest.screen.chunks} chunks/${manifest.screen.bytes} bytes`);
   opts.onLog?.(`media ready in ${Math.round(performance.now() - phaseStartedAt)}ms`);
   const localizedTrack = opts.localizedTrackId ? await getLocalizedTrack(opts.localizedTrackId) : undefined;
   const useLocalizedTrack = isUsableLocalizedTrack(localizedTrack) && opts.muteOriginalAudio !== false;
@@ -1177,14 +1186,24 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // consume this exact PCM timeline, so fallback cannot change the audio.
   const preparedAudioPromise = normalizeExportPreparation(format === 'gif' || opts.suppressAudio
     ? null
-    : effectiveAudioBlob
-      ? prepareExportAudio({
-        blob: effectiveAudioBlob,
-        segments: trimmed ? presentationKept : undefined,
-        sourceKind: audioSourceKind,
-        sourceTrackId: useLocalizedTrack ? localizedTrack.id : enhancedSelection.track?.id,
-        signal: opts.signal,
-      }).then((audio) => {
+    : effectiveAudioBlob || systemAudioBlob
+      ? Promise.all([
+        effectiveAudioBlob ? prepareExportAudio({
+          blob: effectiveAudioBlob,
+          segments: trimmed ? presentationKept : undefined,
+          sourceKind: audioSourceKind,
+          sourceTrackId: useLocalizedTrack ? localizedTrack.id : enhancedSelection.track?.id,
+          signal: opts.signal,
+        }) : null,
+        systemAudioBlob ? prepareExportAudio({
+          blob: systemAudioBlob,
+          segments: trimmed ? kept : undefined,
+          sourceKind: 'original',
+          signal: opts.signal,
+        }) : null,
+      ]).then((tracks) => mixPreparedExportAudio(
+        tracks.filter((track): track is PreparedExportAudio => track !== null),
+      )).then((audio) => {
         diagnostics.setAudio({
           sourceKind: audio.sourceKind,
           sourceTrackId: audio.sourceTrackId,

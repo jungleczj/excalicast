@@ -56,6 +56,8 @@ export const DESKTOP_IPC_CHANNELS = {
   cameraSetLayout: 'camera.set-layout.v1',
   teleprompterConfigure: 'teleprompter.configure.v1',
   teleprompterSetMode: 'teleprompter.set-mode.v1',
+  teleprompterGetState: 'teleprompter.get-state.v1',
+  teleprompterStateChanged: 'teleprompter.state-changed.v1',
   projectRecover: 'project.recover.v1',
   projectValidate: 'project.validate.v1',
   projectReadInkEvents: 'project.read-ink-events.v1',

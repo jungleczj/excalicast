@@ -187,7 +187,9 @@ export async function startDisplayCaptureRecorder(
   if (fastPath) return fastPath;
   const db = getClientDb();
   const prepared = await prepareDisplayRecordingStream(sourceStream, source);
-  const recordedStream = prepared.stream;
+  // System audio is persisted by its own recorder. Keeping this stream video-only
+  // prevents duplicate audio writes and makes preview/export track selection explicit.
+  const recordedStream = new MediaStream(prepared.stream.getVideoTracks());
   const recorder = new MediaRecorder(recordedStream, {
     mimeType: mimeType(),
     videoBitsPerSecond: bitrateFor(recordedStream, source.kind),

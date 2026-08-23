@@ -37,9 +37,9 @@ const DEFAULT_SETUP: RecordingSetupConfig = {
 const SOURCE_PRESETS: Partial<Record<RecordingSourceKind, RecordingSourceConfig>> = {
   whiteboard: { kind: 'whiteboard' },
   current_tab: { kind: 'current_tab', displaySurface: 'browser', captureSystemAudio: true },
-  window: { kind: 'window', displaySurface: 'window' },
-  desktop: { kind: 'desktop', displaySurface: 'monitor' },
-  selected_area: { kind: 'selected_area' },
+  window: { kind: 'window', displaySurface: 'window', captureSystemAudio: true },
+  desktop: { kind: 'desktop', displaySurface: 'monitor', captureSystemAudio: true },
+  selected_area: { kind: 'selected_area', captureSystemAudio: true },
 };
 
 function evenPixel(n: number): number {

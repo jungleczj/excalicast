@@ -83,6 +83,7 @@ export function ExportPreview({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const renderCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const systemAudioRef = useRef<HTMLAudioElement>(null);
   const cameraRef = useRef<HTMLVideoElement>(null);
   // 受控播放头（源时间）。播放/读数走「成片」输出时间（跳过被删段）。
   const projectTimeMs = playheadMs;
@@ -102,6 +103,7 @@ export function ExportPreview({
   const [rendering, setRendering] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [systemAudioUrl, setSystemAudioUrl] = useState<string | null>(null);
   const [sourceAudioFingerprint, setSourceAudioFingerprint] = useState<string | null>(null);
   const [cameraUrl, setCameraUrl] = useState<string | null>(null);
   const [localizedTrack, setLocalizedTrack] = useState<LocalizedTrack | null>(null);
@@ -279,8 +281,10 @@ export function ExportPreview({
   useEffect(() => {
     let cancelled = false;
     let createdAudioUrl: string | null = null;
+    let createdSystemAudioUrl: string | null = null;
     let createdCameraUrl: string | null = null;
     setAudioUrl(null);
+    setSystemAudioUrl(null);
     setSourceAudioFingerprint(null);
     setCameraUrl(null);
     Promise.all([loadFullRecording(activeRecordingId), getWorkspaceShells(activeRecordingId)])
@@ -291,6 +295,10 @@ export function ExportPreview({
           createdAudioUrl = URL.createObjectURL(r.audioBlob);
           setAudioUrl(createdAudioUrl);
           setSourceAudioFingerprint(audioSourceFingerprint(r.audioBlob, r.metadata.durationMs));
+        }
+        if (r.systemAudioBlob) {
+          createdSystemAudioUrl = URL.createObjectURL(r.systemAudioBlob);
+          setSystemAudioUrl(createdSystemAudioUrl);
         }
         if (r.cameraBlob) {
           createdCameraUrl = URL.createObjectURL(r.cameraBlob);
@@ -305,6 +313,7 @@ export function ExportPreview({
     return () => {
       cancelled = true;
       if (createdAudioUrl) URL.revokeObjectURL(createdAudioUrl);
+      if (createdSystemAudioUrl) URL.revokeObjectURL(createdSystemAudioUrl);
       if (createdCameraUrl) URL.revokeObjectURL(createdCameraUrl);
     };
   }, [activeRecordingId]);
@@ -524,7 +533,8 @@ export function ExportPreview({
             : sourceTimeMsRef.current,
         ),
     };
-    const audio = audioRef.current;
+    const primaryAudio = audioRef.current ?? systemAudioRef.current;
+    const systemAudio = systemAudioRef.current;
     const camera = cameraRef.current;
     const tick = () => {
       const ref = clockRef.current;
@@ -545,7 +555,8 @@ export function ExportPreview({
         setTimeMs(mainTrack.length > 0 ? endProject : endSource);
         drawFrame(endSource, true);
         setPlaying(false);
-        if (audio) { try { audio.pause(); } catch { /* ignore */ } }
+        if (primaryAudio) { try { primaryAudio.pause(); } catch { /* ignore */ } }
+        if (systemAudio && systemAudio !== primaryAudio) { try { systemAudio.pause(); } catch { /* ignore */ } }
         if (camera) { try { camera.pause(); } catch { /* ignore */ } }
         return;
       }
@@ -554,9 +565,9 @@ export function ExportPreview({
         : outputToSource(presentationKept, outT);
       const audioClock = resolvePreviewPlaybackClock({
         expectedSourceTimeMs: expectedPresentationTimeMs,
-        audioCurrentTimeSeconds: audio?.currentTime ?? Number.NaN,
-        audioReady: !!audio && audio.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && mainTrack.length === 0,
-        audioPaused: audio?.paused ?? true,
+        audioCurrentTimeSeconds: primaryAudio?.currentTime ?? Number.NaN,
+        audioReady: !!primaryAudio && primaryAudio.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && mainTrack.length === 0,
+        audioPaused: primaryAudio?.paused ?? true,
       });
       const presentationTimeMs = audioClock.sourceTimeMs;
       const src = localizedTimingMap.length > 0
@@ -571,8 +582,12 @@ export function ExportPreview({
       const audioSec = presentationTimeMs / 1000;
       const sourceSec = src / 1000;
       // 音频是普通单轨预览的媒体时钟；仅跨裁剪段或真实漂移时校正。
-      if (audio && audioClock.seekAudio) {
-        try { audio.currentTime = audioSec; } catch { /* ignore */ }
+      if (primaryAudio && audioClock.seekAudio) {
+        try { primaryAudio.currentTime = audioSec; } catch { /* ignore */ }
+      }
+      if (systemAudio && systemAudio !== primaryAudio
+        && Math.abs(systemAudio.currentTime - sourceSec) > 0.18) {
+        try { systemAudio.currentTime = sourceSec; } catch { /* ignore */ }
       }
       if (camera && isFinite(camera.currentTime) && Math.abs(camera.currentTime - sourceSec) > 0.18) {
         try { camera.currentTime = sourceSec; } catch { /* ignore */ }
@@ -590,6 +605,7 @@ export function ExportPreview({
     setPlaying((prev) => {
       const next = !prev;
       const audio = audioRef.current;
+      const systemAudio = systemAudioRef.current;
       const camera = cameraRef.current;
       if (next) {
         const curPresentation = localizedTimingMap.length > 0
@@ -616,12 +632,17 @@ export function ExportPreview({
           try { audio.currentTime = startPresentation / 1000; } catch { /* ignore */ }
           void audio.play().catch(() => { /* ignore */ });
         }
+        if (systemAudio) {
+          try { systemAudio.currentTime = startSrc / 1000; } catch { /* ignore */ }
+          void systemAudio.play().catch(() => { /* ignore */ });
+        }
         if (camera) {
           try { camera.currentTime = startSrc / 1000; } catch { /* ignore */ }
           void camera.play().catch(() => { /* ignore */ });
         }
       } else {
         if (audio) audio.pause();
+        if (systemAudio) systemAudio.pause();
         if (camera) camera.pause();
       }
       return next;
@@ -653,6 +674,7 @@ export function ExportPreview({
     const wasPlaying = playing;
     barScrubbingRef.current = true;
     audioRef.current?.pause();
+    systemAudioRef.current?.pause();
     cameraRef.current?.pause();
     void setPreviewPlayback(activeRecordingId, false, timeMs).catch(() => undefined);
 
@@ -663,6 +685,9 @@ export function ExportPreview({
         : position.sourceTimeMs;
       if (audioRef.current) {
         try { audioRef.current.currentTime = presentationTimeMs / 1000; } catch { /* ignore */ }
+      }
+      if (systemAudioRef.current) {
+        try { systemAudioRef.current.currentTime = position.sourceTimeMs / 1000; } catch { /* ignore */ }
       }
       if (cameraRef.current) {
         try { cameraRef.current.currentTime = position.sourceTimeMs / 1000; } catch { /* ignore */ }
@@ -691,6 +716,7 @@ export function ExportPreview({
           finalPosition.sourceTimeMs,
         ).catch(() => undefined);
         void audioRef.current?.play().catch(() => { /* ignore */ });
+        void systemAudioRef.current?.play().catch(() => { /* ignore */ });
         void cameraRef.current?.play().catch(() => { /* ignore */ });
       }
       barScrubPositionRef.current = null;
@@ -1086,6 +1112,15 @@ export function ExportPreview({
             data-enhanced-audio={enhancedAudioTrack ? enhancedAudioTrack.mode : 'false'}
             ref={audioRef}
             src={activeAudioUrl}
+            preload="auto"
+            hidden
+          />
+        )}
+        {systemAudioUrl && (
+          <audio
+            data-testid="export-preview-system-audio"
+            ref={systemAudioRef}
+            src={systemAudioUrl}
             preload="auto"
             hidden
           />

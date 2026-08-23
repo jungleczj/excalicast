@@ -18,6 +18,7 @@ import type {
   RecordingMetadata,
   RecordingLibrarySummary,
   ScreenChunk,
+  SystemAudioChunk,
   ShellCanvasRect,
   ShellSize,
   TimeSegment,
@@ -39,6 +40,10 @@ interface CameraChunkRow extends CameraChunk {
 }
 
 interface ScreenChunkRow extends ScreenChunk {
+  id?: number;
+}
+
+interface SystemAudioChunkRow extends SystemAudioChunk {
   id?: number;
 }
 
@@ -99,6 +104,7 @@ class ExcalicastDB extends Dexie {
   audioChunks!: Table<AudioChunkRow, number>;
   cameraChunks!: Table<CameraChunkRow, number>;
   screenChunks!: Table<ScreenChunkRow, number>;
+  systemAudioChunks!: Table<SystemAudioChunkRow, number>;
   cameraPositions!: Table<CameraPositionRow, number>;
   binaryFiles!: Table<BinaryFileRow, number>;
   workspaceShells!: Table<WorkspaceShellRow, number>;
@@ -341,6 +347,29 @@ class ExcalicastDB extends Dexie {
       autoEditCaches: 'id, recordingId, analyzerVersion, updatedAt, [recordingId+analyzerVersion]',
       enhancedAudioTracks: 'id, recordingId, sourceFingerprint, mode, status, createdAt, [recordingId+sourceFingerprint]',
     });
+    // v16: computer/system audio is a first-class source track. It must not be
+    // embedded in screen video because preview/export decode video independently.
+    this.version(16).stores({
+      recordings: 'id, startedAt, status, ownerKey, [ownerKey+startedAt]',
+      snapshots: '++id, recordingId, timestamp',
+      audioChunks: '++id, recordingId, index',
+      systemAudioChunks: '++id, recordingId, index',
+      cameraChunks: '++id, recordingId, index',
+      screenChunks: '++id, recordingId, index',
+      binaryFiles: '++id, recordingId, fileId',
+      workspaceShells: '++id, recordingId, timestamp, hash, [recordingId+timestamp]',
+      cameraPositions: '++id, recordingId, timestamp, [recordingId+timestamp]',
+      libraryItems: 'id, status, created',
+      laserEvents: '++id, recordingId, timestamp, [recordingId+timestamp]',
+      localizedTracks: 'id, recordingId, targetLang, status, createdAt, [recordingId+targetLang]',
+      cursorFocusTracks: 'recordingId, analyzedAt, detectorVersion',
+      mediaTasks: 'id, recordingId, kind, status, updatedAt, [recordingId+kind]',
+      exportSegments: 'id, taskId, recordingId, index, [taskId+index]',
+      audioPeakTracks: 'id, recordingId, sourceSignature, createdAt',
+      recordingThumbnails: 'recordingId, updatedAt',
+      autoEditCaches: 'id, recordingId, analyzerVersion, updatedAt, [recordingId+analyzerVersion]',
+      enhancedAudioTracks: 'id, recordingId, sourceFingerprint, mode, status, createdAt, [recordingId+sourceFingerprint]',
+    });
   }
 }
 
@@ -369,15 +398,17 @@ export async function recoverUnfinishedRecordings(): Promise<number> {
       db.recordings,
       db.snapshots,
       db.audioChunks,
+      db.systemAudioChunks,
       db.cameraChunks,
       db.screenChunks,
       db.cameraPositions,
     ],
     async () => {
       for (const recording of unfinished) {
-        const [snapshots, audioChunks, cameraChunks, screenChunks, cameraPositions] = await Promise.all([
+        const [snapshots, audioChunks, systemAudioChunks, cameraChunks, screenChunks, cameraPositions] = await Promise.all([
           db.snapshots.where('recordingId').equals(recording.id).toArray(),
           db.audioChunks.where('recordingId').equals(recording.id).toArray(),
+          db.systemAudioChunks.where('recordingId').equals(recording.id).toArray(),
           db.cameraChunks.where('recordingId').equals(recording.id).toArray(),
           db.screenChunks.where('recordingId').equals(recording.id).toArray(),
           db.cameraPositions.where('recordingId').equals(recording.id).toArray(),
@@ -385,6 +416,7 @@ export async function recoverUnfinishedRecordings(): Promise<number> {
         const chunkIntervalMs = recording.mediaChunkIntervalMs ?? 250;
         const mediaChunkDuration = Math.max(
           ...audioChunks.map((chunk) => (chunk.index + 1) * chunkIntervalMs),
+          ...systemAudioChunks.map((chunk) => (chunk.index + 1) * chunkIntervalMs),
           ...cameraChunks.map((chunk) => (chunk.index + 1) * chunkIntervalMs),
           ...screenChunks.map((chunk) => (chunk.index + 1) * chunkIntervalMs),
           recording.mediaStorage?.screen?.durationMs ?? 0,
@@ -783,11 +815,12 @@ export async function deleteRecording(recordingId: string, ownerKey?: string): P
   if (ownerKey && !(await ownsRecording(recordingId, ownerKey))) return;
   await db.transaction(
     'rw',
-    [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.screenChunks, db.cameraPositions, db.binaryFiles, db.workspaceShells, db.laserEvents, db.localizedTracks, db.cursorFocusTracks, db.mediaTasks, db.exportSegments, db.audioPeakTracks, db.recordingThumbnails, db.autoEditCaches, db.enhancedAudioTracks],
+    [db.recordings, db.snapshots, db.audioChunks, db.systemAudioChunks, db.cameraChunks, db.screenChunks, db.cameraPositions, db.binaryFiles, db.workspaceShells, db.laserEvents, db.localizedTracks, db.cursorFocusTracks, db.mediaTasks, db.exportSegments, db.audioPeakTracks, db.recordingThumbnails, db.autoEditCaches, db.enhancedAudioTracks],
     async () => {
       await db.recordings.delete(recordingId);
       await db.snapshots.where('recordingId').equals(recordingId).delete();
       await db.audioChunks.where('recordingId').equals(recordingId).delete();
+      await db.systemAudioChunks.where('recordingId').equals(recordingId).delete();
       await db.cameraChunks.where('recordingId').equals(recordingId).delete();
       await db.screenChunks.where('recordingId').equals(recordingId).delete();
       await db.cameraPositions.where('recordingId').equals(recordingId).delete();
@@ -930,6 +963,7 @@ export interface FullRecording {
   metadata: RecordingMetadata;
   snapshots: WhiteboardSnapshot[];
   audioBlob: Blob | null;
+  systemAudioBlob: Blob | null;
   cameraBlob: Blob | null;
   screenBlob: Blob | null;
   cameraEvents: CameraPositionEvent[];
@@ -941,6 +975,7 @@ export interface FullRecording {
 export interface RecordingMediaManifest {
   metadata: RecordingMetadata;
   audio: { chunks: number; bytes: number };
+  systemAudio: { chunks: number; bytes: number };
   camera: { chunks: number; bytes: number };
   screen: { chunks: number; bytes: number };
 }
@@ -948,6 +983,7 @@ export interface RecordingMediaManifest {
 export interface RecordingMediaTracks {
   metadata: RecordingMetadata;
   audioBlob: Blob | null;
+  systemAudioBlob: Blob | null;
   cameraBlob: Blob | null;
   screenBlob: Blob | null;
 }
@@ -965,7 +1001,7 @@ export const releaseRecordingMediaCache = invalidateRecordingMediaCache;
 
 export async function loadRecordingMediaTracks(
   recordingId: string,
-  tracks: ReadonlyArray<'audio' | 'camera' | 'screen'>,
+  tracks: ReadonlyArray<'audio' | 'systemAudio' | 'camera' | 'screen'>,
   ownerKey?: string,
 ): Promise<RecordingMediaTracks> {
   const db = getClientDb();
@@ -973,9 +1009,12 @@ export async function loadRecordingMediaTracks(
   if (!metadata || (ownerKey && metadata.ownerKey && metadata.ownerKey !== ownerKey)) {
     throw new Error(`recording_not_found: ${recordingId}`);
   }
-  const [audioRows, cameraRows, screenRows] = await Promise.all([
+  const [audioRows, systemAudioRows, cameraRows, screenRows] = await Promise.all([
     tracks.includes('audio')
       ? db.audioChunks.where('recordingId').equals(recordingId).sortBy('index')
+      : Promise.resolve([]),
+    tracks.includes('systemAudio')
+      ? db.systemAudioChunks.where('recordingId').equals(recordingId).sortBy('index')
       : Promise.resolve([]),
     tracks.includes('camera')
       ? db.cameraChunks.where('recordingId').equals(recordingId).sortBy('index')
@@ -988,6 +1027,9 @@ export async function loadRecordingMediaTracks(
     metadata,
     audioBlob: audioRows.length > 0
       ? new Blob(audioRows.map((row) => row.blob), { type: audioRows[0].blob.type || 'audio/webm' })
+      : null,
+    systemAudioBlob: systemAudioRows.length > 0
+      ? new Blob(systemAudioRows.map((row) => row.blob), { type: systemAudioRows[0].blob.type || 'audio/webm' })
       : null,
     cameraBlob: cameraRows.length > 0
       ? new Blob(cameraRows.map((row) => row.blob), { type: cameraRows[0].blob.type || 'video/webm' })
@@ -1004,14 +1046,16 @@ export async function loadRecordingManifest(recordingId: string, ownerKey?: stri
   if (!metadata || (ownerKey && metadata.ownerKey && metadata.ownerKey !== ownerKey)) {
     throw new Error(`recording_not_found: ${recordingId}`);
   }
-  const [audioRows, cameraRows, screenRows] = await Promise.all([
+  const [audioRows, systemAudioRows, cameraRows, screenRows] = await Promise.all([
     db.audioChunks.where('recordingId').equals(recordingId).toArray(),
+    db.systemAudioChunks.where('recordingId').equals(recordingId).toArray(),
     db.cameraChunks.where('recordingId').equals(recordingId).toArray(),
     db.screenChunks.where('recordingId').equals(recordingId).toArray(),
   ]);
   return {
     metadata,
     audio: { chunks: audioRows.length, bytes: audioRows.reduce((sum, row) => sum + row.blob.size, 0) },
+    systemAudio: { chunks: systemAudioRows.length, bytes: systemAudioRows.reduce((sum, row) => sum + row.blob.size, 0) },
     camera: { chunks: cameraRows.length, bytes: cameraRows.reduce((sum, row) => sum + row.blob.size, 0) },
     screen: metadata.mediaStorage?.screen
       ? { chunks: metadata.mediaStorage.screen.fragments, bytes: metadata.mediaStorage.screen.bytes }
@@ -1028,9 +1072,10 @@ async function loadFullRecordingUncached(recordingId: string, ownerKey?: string)
     throw new Error(`recording_not_found: ${recordingId}`);
   }
 
-  const [snapshots, audioRows, camRows, screenRows, camPosRows, laserRows, binaryFiles] = await Promise.all([
+  const [snapshots, audioRows, systemAudioRows, camRows, screenRows, camPosRows, laserRows, binaryFiles] = await Promise.all([
     db.snapshots.where('recordingId').equals(recordingId).sortBy('timestamp'),
     db.audioChunks.where('recordingId').equals(recordingId).sortBy('index'),
+    db.systemAudioChunks.where('recordingId').equals(recordingId).sortBy('index'),
     db.cameraChunks.where('recordingId').equals(recordingId).sortBy('index'),
     db.screenChunks.where('recordingId').equals(recordingId).sortBy('index'),
     db.cameraPositions.where('recordingId').equals(recordingId).sortBy('timestamp'),
@@ -1039,6 +1084,9 @@ async function loadFullRecordingUncached(recordingId: string, ownerKey?: string)
   ]);
   const audioBlob = audioRows.length > 0
     ? new Blob(audioRows.map((c) => c.blob), { type: audioRows[0].blob.type || 'audio/webm' })
+    : null;
+  const systemAudioBlob = systemAudioRows.length > 0
+    ? new Blob(systemAudioRows.map((c) => c.blob), { type: systemAudioRows[0].blob.type || 'audio/webm' })
     : null;
 
   const cameraBlob = camRows.length > 0
@@ -1071,10 +1119,11 @@ async function loadFullRecordingUncached(recordingId: string, ownerKey?: string)
   const manifest: RecordingMediaManifest = {
     metadata,
     audio: { chunks: audioRows.length, bytes: audioRows.reduce((sum, row) => sum + row.blob.size, 0) },
+    systemAudio: { chunks: systemAudioRows.length, bytes: systemAudioRows.reduce((sum, row) => sum + row.blob.size, 0) },
     camera: { chunks: camRows.length, bytes: camRows.reduce((sum, row) => sum + row.blob.size, 0) },
     screen: { chunks: screenRows.length, bytes: screenRows.reduce((sum, row) => sum + row.blob.size, 0) },
   };
-  return { metadata, snapshots, audioBlob, cameraBlob, screenBlob, cameraEvents, laserEvents, binaryFiles, manifest };
+  return { metadata, snapshots, audioBlob, systemAudioBlob, cameraBlob, screenBlob, cameraEvents, laserEvents, binaryFiles, manifest };
 }
 
 export async function loadFullRecording(recordingId: string, ownerKey?: string): Promise<FullRecording> {

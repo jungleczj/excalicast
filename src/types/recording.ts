@@ -30,6 +30,8 @@ export interface RecordingMetadata {
   startedAt: number;
   durationMs: number;
   hasAudio: boolean;
+  /** A separately persisted computer/system audio track is available. */
+  hasSystemAudio?: boolean;
   /** Browser-granted microphone format. Export uses this for diagnostics; the codec remains the source of truth. */
   audioSourceInfo?: AudioSourceInfo;
   hasCamera: boolean;
@@ -190,6 +192,12 @@ export interface EnhancedAudioTrack {
 }
 
 export interface AudioChunk {
+  recordingId: string;
+  index: number;
+  blob: Blob;
+}
+
+export interface SystemAudioChunk {
   recordingId: string;
   index: number;
   blob: Blob;

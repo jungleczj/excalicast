@@ -24,6 +24,12 @@ import {
   projectDesktopInkPointer,
   resolveDesktopInkExportStyle,
 } from '../../src/desktop/inkReplayFrameSource';
+import {
+  applyDesktopTeleprompterProgress,
+  configureDesktopTeleprompter,
+  createDesktopTeleprompterState,
+  resolveDesktopTeleprompterAudioRole,
+} from '../../src/desktop/teleprompterSession';
 
 const REQUIRED_BROWSER_FEATURES: DesktopFeatureId[] = [
   'whiteboard.excalidraw-full',
@@ -107,6 +113,8 @@ test('desktop IPC is versioned and separates native capture from renderer pixels
   expect(DESKTOP_IPC_CHANNELS.inkFlushRequested).toBe('ink.flush-requested.v1');
   expect(DESKTOP_IPC_CHANNELS.inkFlushComplete).toBe('ink.flush-complete.v1');
   expect(DESKTOP_IPC_CHANNELS.teleprompterConfigure).toBe('teleprompter.configure.v1');
+  expect(DESKTOP_IPC_CHANNELS.teleprompterGetState).toBe('teleprompter.get-state.v1');
+  expect(DESKTOP_IPC_CHANNELS.teleprompterStateChanged).toBe('teleprompter.state-changed.v1');
   expect(DESKTOP_IPC_CHANNELS.projectRecover).toBe('project.recover.v1');
   expect(DESKTOP_IPC_CHANNELS.projectValidate).toBe('project.validate.v1');
   expect(DESKTOP_IPC_CHANNELS.projectReadInkEvents).toBe('project.read-ink-events.v1');
@@ -322,4 +330,46 @@ test('desktop teleprompter session reuses the recording microphone', () => {
 
   expect(session.microphoneSource).toBe('recording-session-pcm');
   expect(session.excludeFromCapture).toBe(true);
+
+  const configured = configureDesktopTeleprompter(createDesktopTeleprompterState(), {
+    schemaVersion: 1,
+    visible: true,
+    script: 'First idea. Second idea.',
+    language: 'en',
+    mode: 'smart-readalong',
+    dock: 'notch',
+    microphoneSource: 'recording-session-pcm',
+    fallback: 'constant-speed',
+    excludeFromCapture: true,
+    speed: 4,
+    fontSize: 30,
+    opacity: 0.9,
+  });
+  expect(configured).toMatchObject({
+    visible: true,
+    recognitionStatus: 'idle',
+    currentWord: -1,
+    microphoneSource: 'recording-session-pcm',
+    excludeFromCapture: true,
+  });
+  expect(applyDesktopTeleprompterProgress(configured, {
+    currentWord: 3,
+    recognitionStatus: 'listening',
+    heard: 'second idea',
+  })).toMatchObject({ currentWord: 3, recognitionStatus: 'listening', heard: 'second idea' });
+  const invalidMicrophoneConfiguration = JSON.parse(JSON.stringify({
+    ...configured,
+    microphoneSource: 'new-device-request',
+  }));
+  expect(() => configureDesktopTeleprompter(configured, invalidMicrophoneConfiguration))
+    .toThrow('desktop_teleprompter_microphone_invalid');
+  expect(resolveDesktopTeleprompterAudioRole({
+    embedded: false, desktopBridge: true, hasRecordingStream: true,
+  })).toBe('publisher-shared-stream');
+  expect(resolveDesktopTeleprompterAudioRole({
+    embedded: true, desktopBridge: true, hasRecordingStream: false,
+  })).toBe('subscriber-display-only');
+  expect(resolveDesktopTeleprompterAudioRole({
+    embedded: false, desktopBridge: false, hasRecordingStream: false,
+  })).toBe('browser-own-stream');
 });

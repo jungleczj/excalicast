@@ -560,6 +560,8 @@
       "title": "录制来源",
       "subtitle": "先确定要留下什么，再进入取景。",
       "browserChooserHint": "浏览器仍会显示系统选择器；这里的选项会作为采集提示和后续裁切方式。",
+      "systemAudioTitle": "录制电脑声音",
+      "systemAudioDesc": "将应用、视频和会议声音保存为独立音轨，并与麦克风安全混音。系统选择器仍需允许共享音频。",
       "whiteboard": {
         "title": "白板",
         "desc": "只记录画板讲解"

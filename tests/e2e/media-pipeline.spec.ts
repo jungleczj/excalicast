@@ -7,7 +7,9 @@ import {
   concatenatePreparedExportAudio,
   createContinuousAacTimeline,
   encodeFloat32Wav,
+  mixPreparedExportAudio,
   validateProcessedAudioFrameCount,
+  type PreparedExportAudio,
 } from '@/services/exportAudio';
 import { AUDIO_RECORDING_BITS_PER_SECOND, MIC_CONSTRAINTS, buildAudioSourceInfo } from '@/services/audioRecorder';
 import { LatestTaskRunner } from '@/lib/latestTaskRunner';
@@ -96,6 +98,39 @@ test('localized editing variants preserve source captions and key points when re
     subtitleSrt: metadata.subtitleSrt,
     keyPointMotions: [sourceMotion],
   });
+});
+
+test('microphone and system audio mix into one continuous non-clipping export track', () => {
+  const makeTrack = (samples: number[]): PreparedExportAudio => ({
+    samples: Float32Array.from(samples),
+    sampleRate: EXPORT_AUDIO_SAMPLE_RATE,
+    channels: 1 as const,
+    totalFrames: samples.length,
+    durationMs: samples.length / EXPORT_AUDIO_SAMPLE_RATE * 1_000,
+    diagnostics: {
+      sourceFrames: samples.length,
+      outputFrames: samples.length,
+      nonFiniteSamples: 0,
+      clippedSamples: 0,
+      peak: Math.max(...samples.map(Math.abs)),
+      originalPeak: Math.max(...samples.map(Math.abs)),
+      appliedGainDb: 0,
+    },
+    getWavBlob: () => new Blob(),
+    sourceKind: 'original' as const,
+  });
+
+  const mixed = mixPreparedExportAudio([
+    makeTrack([0.8, 0.2, -0.8, -0.2]),
+    makeTrack([0.8, -0.2, -0.8, 0.2, 0.4, -0.4]),
+  ]);
+
+  expect(mixed.totalFrames).toBe(6);
+  expect(mixed.samples[4]).toBeCloseTo(0.4 * (10 ** (-1 / 20) / 1.6));
+  expect(mixed.diagnostics.originalPeak).toBeCloseTo(1.6);
+  expect(mixed.diagnostics.clippedSamples).toBe(0);
+  expect(mixed.diagnostics.peak).toBeLessThanOrEqual(1);
+  expect(mixed.diagnostics.appliedGainDb).toBeLessThan(0);
 });
 
 function createFloat32Wav(samples: Float32Array, sampleRate = 24_000): Uint8Array {

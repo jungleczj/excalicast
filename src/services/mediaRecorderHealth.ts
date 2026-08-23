@@ -1,4 +1,4 @@
-export type RecorderTrackKind = 'audio' | 'camera' | 'screen';
+export type RecorderTrackKind = 'audio' | 'system-audio' | 'camera' | 'screen';
 
 export type ChunkWriteOutcome =
   | { ok: true }

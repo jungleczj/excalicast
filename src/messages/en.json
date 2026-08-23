@@ -560,6 +560,8 @@
       "title": "Recording source",
       "subtitle": "Choose what should be kept before framing.",
       "browserChooserHint": "The browser still shows its own picker. This choice controls the capture hint and later cropping behavior.",
+      "systemAudioTitle": "Record computer audio",
+      "systemAudioDesc": "Save apps, videos, and meeting audio as a separate track and safely mix it with the microphone. Audio must also be allowed in the system picker.",
       "whiteboard": {
         "title": "Whiteboard",
         "desc": "Record board explanations"

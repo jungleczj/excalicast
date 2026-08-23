@@ -4,6 +4,7 @@ import { DESKTOP_IPC_CHANNELS } from '../../../src/desktop/productContract';
 export const exposedDesktopEventChannels = [
   DESKTOP_IPC_CHANNELS.inkSettingsChanged,
   DESKTOP_IPC_CHANNELS.inkFlushRequested,
+  DESKTOP_IPC_CHANNELS.teleprompterStateChanged,
 ] as const;
 const desktopEventChannelSet = new Set<string>(exposedDesktopEventChannels);
 export const exposedDesktopBridgeChannels = Object.values(DESKTOP_IPC_CHANNELS)
@@ -40,6 +41,55 @@ export function createDesktopInkWindowOptions(
     skipTaskbar: true,
     hasShadow: false,
     movable: false,
+    resizable: false,
+    fullscreenable: false,
+    backgroundColor: '#00000000',
+    show: false,
+    webPreferences: {
+      preload,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+    },
+  };
+}
+
+interface DesktopDisplayGeometry {
+  bounds: Rectangle;
+  workArea: Rectangle;
+}
+
+export type DesktopTeleprompterWindowMode = 'compact' | 'expanded';
+
+export function resolveDesktopTeleprompterBounds(
+  display: DesktopDisplayGeometry,
+  mode: DesktopTeleprompterWindowMode,
+): Rectangle {
+  const width = mode === 'compact'
+    ? Math.min(820, Math.max(320, display.bounds.width - 32))
+    : Math.min(520, Math.max(360, display.workArea.width - 32));
+  const height = mode === 'compact' ? 44 : Math.min(380, display.workArea.height);
+  const area = mode === 'compact' ? display.bounds : display.workArea;
+  return {
+    x: Math.round(area.x + (area.width - width) / 2),
+    y: area.y,
+    width,
+    height,
+  };
+}
+
+export function createDesktopTeleprompterWindowOptions(
+  preload: string,
+  display: DesktopDisplayGeometry,
+): BrowserWindowConstructorOptions {
+  return {
+    ...resolveDesktopTeleprompterBounds(display, 'compact'),
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
     resizable: false,
     fullscreenable: false,
     backgroundColor: '#00000000',

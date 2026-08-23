@@ -6,6 +6,7 @@ import { getCurrentOwnerKey } from '@/lib/ownerKey';
 import { startAudioRecorder, type AudioRecorderHandle } from '@/services/audioRecorder';
 import { startCameraRecorder, type CameraHandle } from '@/services/cameraRecorder';
 import { startDisplayCaptureRecorder, type DisplayCaptureHandle } from '@/services/displayCaptureRecorder';
+import { startSystemAudioRecorder, type SystemAudioRecorderHandle } from '@/services/systemAudioRecorder';
 import { collectRecorderWarnings, type RecorderTrackKind } from '@/services/mediaRecorderHealth';
 import { ShellCapturer } from '@/services/workspaceShellCapture';
 import { captureCameraPlacement } from '@/services/cameraPlacement';
@@ -126,6 +127,7 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
   let camera: CameraHandle | null = null;
   const source = opts.setup?.source ?? { kind: 'whiteboard' };
   let display: DisplayCaptureHandle | null = null;
+  let systemAudio: SystemAudioRecorderHandle | null = null;
   try {
     try { audio = await startAudioRecorder(recordingId, opts.audioStream); } catch { audio = null; }
     if (audio) {
@@ -139,6 +141,10 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
     }
     if (camera) await db.recordings.update(recordingId, { hasCamera: true });
     if (source.kind !== 'whiteboard' && opts.displayStream) {
+      if (source.captureSystemAudio) {
+        systemAudio = await startSystemAudioRecorder(recordingId, opts.displayStream);
+        if (systemAudio) await db.recordings.update(recordingId, { hasSystemAudio: true });
+      }
       display = await startDisplayCaptureRecorder(recordingId, source, opts.displayStream);
       await db.recordings.update(recordingId, { source });
     }
@@ -147,6 +153,7 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
       audio?.stop(),
       camera?.stop(),
       display?.stop(),
+      systemAudio?.stop(),
     ].filter((operation): operation is Promise<void> => !!operation));
     diagnosticSession.dispose();
     releaseRecordingResources();
@@ -415,6 +422,7 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
       audio?.pause();
       camera?.pause();
       display?.pause();
+      systemAudio?.pause();
     },
     resume() {
       if (!paused) return;
@@ -423,6 +431,7 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
       audio?.resume();
       camera?.resume();
       display?.resume();
+      systemAudio?.resume();
     },
     async stop(finalStatus = 'done') {
       try {
@@ -438,6 +447,8 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
       if (audio) activeRecorders.push({ track: 'audio', stop: audio.stop });
       if (camera) activeRecorders.push({ track: 'camera', stop: camera.stop });
       if (display) activeRecorders.push({ track: 'screen', stop: display.stop });
+      // Stop the audio recorder before display.stop() releases their shared tracks.
+      if (systemAudio) activeRecorders.unshift({ track: 'system-audio', stop: systemAudio.stop });
       const mediaFinalization = Promise.allSettled(activeRecorders.map((entry) => entry.stop()));
       await db.recordings.update(recordingId, {
         durationMs,
@@ -480,6 +491,7 @@ export async function startRecording(opts: StartOptions): Promise<SessionHandle>
           ...(audio ? { audio: audio.diagnostics() } : {}),
           ...(camera ? { camera: camera.diagnostics() } : {}),
           ...(display ? { screen: display.diagnostics() } : {}),
+          ...(systemAudio ? { 'system-audio': systemAudio.diagnostics() } : {}),
         };
         // Storage estimation can be slow on a busy profile. It is diagnostic
         // only and must never delay navigation to the export editor.

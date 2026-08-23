@@ -35,9 +35,9 @@ const POSITIONS: CameraCorner[] = ['top-left', 'top-right', 'bottom-left', 'bott
 const SOURCE_OPTIONS: RecordingSourceConfig[] = [
   { kind: 'whiteboard' },
   { kind: 'current_tab', displaySurface: 'browser', captureSystemAudio: true },
-  { kind: 'window', displaySurface: 'window' },
-  { kind: 'desktop', displaySurface: 'monitor' },
-  { kind: 'selected_area' },
+  { kind: 'window', displaySurface: 'window', captureSystemAudio: true },
+  { kind: 'desktop', displaySurface: 'monitor', captureSystemAudio: true },
+  { kind: 'selected_area', captureSystemAudio: true },
 ];
 const BACKGROUND_TONES: VideoBackgroundTone[] = ['all', 'fresh', 'soft', 'dark', 'natural'];
 
@@ -187,8 +187,24 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
               ))}
             </div>
             {source.kind !== 'whiteboard' && (
-              <div style={{ marginTop: 10, fontSize: 11.5, color: 'var(--ink-3)', lineHeight: 1.45 }}>
-                {t('source.browserChooserHint')}
+              <div style={{ marginTop: 12, display: 'grid', gap: 8 }}>
+                <label className="flex items-start" style={{ gap: 9, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={source.captureSystemAudio === true}
+                    onChange={(event) => setSource({ ...source, captureSystemAudio: event.target.checked })}
+                    style={{ marginTop: 2 }}
+                  />
+                  <span>
+                    <strong style={{ display: 'block', fontSize: 12 }}>{t('source.systemAudioTitle')}</strong>
+                    <span style={{ display: 'block', marginTop: 2, fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.45 }}>
+                      {t('source.systemAudioDesc')}
+                    </span>
+                  </span>
+                </label>
+                <div style={{ fontSize: 11.5, color: 'var(--ink-3)', lineHeight: 1.45 }}>
+                  {t('source.browserChooserHint')}
+                </div>
               </div>
             )}
           </SetupSection>

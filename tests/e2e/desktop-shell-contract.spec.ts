@@ -4,10 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   createDesktopInkWindowOptions,
+  createDesktopTeleprompterWindowOptions,
   createDesktopWindowOptions,
   exposedDesktopBridgeChannels,
   exposedDesktopEventChannels,
   parseDesktopWindowMediaSourceId,
+  resolveDesktopTeleprompterBounds,
 } from '../../apps/desktop/src/windowContract';
 import {
   NativeHelperClient,
@@ -49,6 +51,7 @@ test('renderer bridge never exposes raw frames or unrestricted IPC', () => {
   expect(exposedDesktopEventChannels).toEqual([
     'ink.settings-changed.v1',
     'ink.flush-requested.v1',
+    'teleprompter.state-changed.v1',
   ]);
 });
 
@@ -75,6 +78,32 @@ test('desktop ink window is a hardened transparent full-display overlay', () => 
   });
   expect(parseDesktopWindowMediaSourceId('window:9087:0')).toBe(9087);
   expect(() => parseDesktopWindowMediaSourceId('screen:0:0')).toThrow('desktop_window_media_source_invalid');
+});
+
+test('desktop teleprompter docks to the active Mac notch and expands inside its safe work area', () => {
+  const display = {
+    bounds: { x: -1728, y: 0, width: 1728, height: 1117 },
+    workArea: { x: -1728, y: 38, width: 1728, height: 1079 },
+  };
+  expect(resolveDesktopTeleprompterBounds(display, 'compact')).toEqual({
+    x: -1274, y: 0, width: 820, height: 44,
+  });
+  expect(resolveDesktopTeleprompterBounds(display, 'expanded')).toEqual({
+    x: -1124, y: 38, width: 520, height: 380,
+  });
+  expect(createDesktopTeleprompterWindowOptions('/tmp/preload.js', display)).toMatchObject({
+    x: -1274, y: 0, width: 820, height: 44,
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: '/tmp/preload.js', contextIsolation: true,
+      nodeIntegration: false, sandbox: true, webSecurity: true,
+    },
+  });
 });
 
 test('native helper handshake is correlated and rejects protocol mismatch', async () => {

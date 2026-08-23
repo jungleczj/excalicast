@@ -123,6 +123,43 @@ export function concatenatePreparedExportAudio(
   };
 }
 
+/**
+ * Mixes simultaneous recording sources (normally microphone + system audio).
+ * Tracks stay time-aligned at frame zero; a single post-mix gain is applied only
+ * when their sum would clip, preserving the relative level and full duration.
+ */
+export function mixPreparedExportAudio(tracks: PreparedExportAudio[]): PreparedExportAudio {
+  if (tracks.length === 0) return createSilentExportAudio(0);
+  const totalFrames = Math.max(...tracks.map((track) => track.totalFrames));
+  const samples = new Float32Array(Math.max(1, totalFrames));
+  for (const track of tracks) {
+    for (let index = 0; index < track.totalFrames; index += 1) {
+      samples[index] += track.samples[index];
+    }
+  }
+  const level = normalizeExportPeak(samples);
+  return {
+    samples,
+    sampleRate: EXPORT_AUDIO_SAMPLE_RATE,
+    channels: 1,
+    totalFrames: samples.length,
+    durationMs: samples.length / EXPORT_AUDIO_SAMPLE_RATE * 1_000,
+    diagnostics: {
+      sourceFrames: tracks.reduce((sum, track) => sum + track.diagnostics.sourceFrames, 0),
+      outputFrames: samples.length,
+      nonFiniteSamples: level.nonFiniteSamples,
+      clippedSamples: level.clippedSamples,
+      peak: level.peak,
+      originalPeak: level.originalPeak,
+      appliedGainDb: level.appliedGainDb,
+    },
+    getWavBlob: lazyWavBlob(samples),
+    sourceKind: tracks.every((track) => track.sourceKind === tracks[0].sourceKind)
+      ? tracks[0].sourceKind
+      : 'original',
+  };
+}
+
 const aacTimestampAt = (index: number): number => (
   Math.round(index * AAC_FRAME_SAMPLES / EXPORT_AUDIO_SAMPLE_RATE * 1_000_000)
 );

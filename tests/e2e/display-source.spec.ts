@@ -323,6 +323,16 @@ test('desktop capture preserves the camera position relative to the selected fra
   expect(event.rs).toBeCloseTo(expected.rs, 2);
 });
 
+test('display recording lets the user include computer audio explicitly', async ({ page }) => {
+  await page.goto('/app');
+  await page.getByRole('button', { name: /新建录制/ }).first().click();
+  await page.getByRole('button', { name: /整个桌面/ }).click();
+  const computerAudio = page.getByRole('checkbox', { name: /录制电脑声音/ });
+  await expect(computerAudio).toBeChecked();
+  await computerAudio.uncheck();
+  await expect(computerAudio).not.toBeChecked();
+});
+
 test('desktop capture requests a detached recording controller before countdown', async ({ page }) => {
   await page.addInitScript(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
