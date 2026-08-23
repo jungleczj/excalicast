@@ -17,6 +17,7 @@ final class CameraCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferD
     private var lastPixelBuffer: CVPixelBuffer?
     private var lastSubmittedPresentationTime: CMTime?
     private var hardwareEnabled = true
+    private var awaitingFirstFrameAfterRestart = false
     private var terminalError: Error?
     private let firstSampleGate = FirstMediaSampleGate()
 
@@ -129,6 +130,7 @@ final class CameraCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferD
         controls = nil
         lastPixelBuffer = nil
         lastSubmittedPresentationTime = nil
+        awaitingFirstFrameAfterRestart = false
         if let firstError { throw firstError }
     }
 
@@ -179,6 +181,7 @@ final class CameraCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferD
                     queueLock.unlock()
                 }
                 firstSampleGate.markReady()
+                finishHardwareRestartAfterFirstFrame()
             } catch {
                 recordTerminalError(error)
             }
@@ -196,15 +199,32 @@ final class CameraCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferD
         queueLock.unlock()
         guard changed else { return }
         if enabled {
-            hardwareFillTimer?.cancel()
-            hardwareFillTimer = nil
             session?.startRunning()
             guard session?.isRunning == true else { throw NativeCaptureError.cameraHardwareTransitionFailed }
-            queueLock.lock(); hardwareEnabled = true; queueLock.unlock()
+            // Keep the bounded filler alive until the first real camera sample is
+            // encoded. If startRunning succeeds but the device stalls, the camera
+            // track remains continuous while the renderer keeps it hidden.
+            queueLock.lock()
+            hardwareEnabled = true
+            awaitingFirstFrameAfterRestart = true
+            queueLock.unlock()
         } else {
-            queueLock.lock(); hardwareEnabled = false; queueLock.unlock()
+            queueLock.lock()
+            hardwareEnabled = false
+            awaitingFirstFrameAfterRestart = false
+            queueLock.unlock()
             session?.stopRunning()
-            guard session?.isRunning != true else { throw NativeCaptureError.cameraHardwareTransitionFailed }
+            guard session?.isRunning != true else {
+                queueLock.lock(); hardwareEnabled = true; queueLock.unlock()
+                throw NativeCaptureError.cameraHardwareTransitionFailed
+            }
+            captureQueue.sync {}
+            encodingQueue.sync {}
+            queueLock.lock()
+            pendingFrames = LatestFrameQueue<CMSampleBuffer>(
+                capacity: CaptureEncodingPolicy.frameQueueCapacity
+            )
+            queueLock.unlock()
             startHardwareFillTimer()
         }
     }
@@ -222,8 +242,9 @@ final class CameraCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferD
         let pixelBuffer = lastPixelBuffer
         let previous = lastSubmittedPresentationTime
         let enabled = hardwareEnabled
+        let awaitingRestart = awaitingFirstFrameAfterRestart
         queueLock.unlock()
-        guard !enabled, let pixelBuffer, let controls else { return }
+        guard (!enabled || awaitingRestart), let pixelBuffer, let controls else { return }
         let sourceUs = CMClockGetTime(CMClockGetHostTimeClock())
             .convertScale(1_000_000, method: .roundTowardZero).value
         guard let adjustedUs = controls.adjustedPresentationUs(sourceUs) else { return }
@@ -239,6 +260,16 @@ final class CameraCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferD
         } catch {
             recordTerminalError(error)
         }
+    }
+
+    private func finishHardwareRestartAfterFirstFrame() {
+        queueLock.lock()
+        let shouldStopFiller = awaitingFirstFrameAfterRestart
+        awaitingFirstFrameAfterRestart = false
+        queueLock.unlock()
+        guard shouldStopFiller else { return }
+        hardwareFillTimer?.cancel()
+        hardwareFillTimer = nil
     }
 
     private func recordTerminalError(_ error: Error) {
