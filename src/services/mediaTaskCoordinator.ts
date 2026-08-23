@@ -5,7 +5,10 @@ import {
   type MediaTaskResourceClass,
 } from '@/services/mediaTaskDomain';
 import type { ExportDiagnosticReport, ExportProgressDetails } from '@/types/exportDiagnostics';
-import { waitForCaptureResourceRelease } from '@/desktop/captureResourceGate';
+import {
+  acquireCaptureResourceLease,
+  tryAcquireCaptureResourceLeaseImmediately,
+} from '@/desktop/captureResourceGate';
 
 export interface MediaTaskProgress {
   phase: string;
@@ -81,6 +84,7 @@ export class MediaTaskCoordinator {
   private readonly controllers = new Map<string, AbortController>();
   private readonly runners = new Map<string, { input: StartMediaTaskInput; runner: MediaTaskRunner }>();
   private readonly listeners = new Set<Listener>();
+  private readonly capturePreemptions = new Set<string>();
   private readonly now: () => number;
   private readonly createId: () => string;
   private heavyTail: Promise<void> | null = null;
@@ -183,12 +187,25 @@ export class MediaTaskCoordinator {
 
     const execute = async (): Promise<MediaTaskRunResult | Blob | void> => {
       if (controller.signal.aborted) throw new DOMException('Task cancelled', 'AbortError');
-      await waitForCaptureResourceRelease({ signal: controller.signal });
+      const lease = tryAcquireCaptureResourceLeaseImmediately(controller.signal)
+        ?? await acquireCaptureResourceLease({ signal: controller.signal });
+      const markCapturePreemption = () => {
+        const reason = lease.signal.reason;
+        if (reason instanceof DOMException && reason.message === 'capture_resource_preempted') {
+          this.capturePreemptions.add(task.id);
+        }
+      };
+      lease.signal.addEventListener('abort', markCapturePreemption, { once: true });
       const current = this.tasks.get(task.id);
       if (current?.status === 'queued') {
         this.replaceTask({ ...current, status: 'running', updatedAt: this.now() });
       }
-      return runner(report, controller.signal);
+      try {
+        return await runner(report, lease.signal);
+      } finally {
+        lease.signal.removeEventListener('abort', markCapturePreemption);
+        lease.release();
+      }
     };
     let execution: Promise<MediaTaskRunResult | Blob | void>;
     if (input.resourceClass === 'local_heavy' && this.heavyTail) {
@@ -202,6 +219,7 @@ export class MediaTaskCoordinator {
     }
 
     const promise = execution.then(async (result) => {
+      this.capturePreemptions.delete(task.id);
       const normalized = result instanceof Blob ? { resultBlob: result } : (result ?? {});
       const completed: CoordinatedMediaTask = {
         ...(this.tasks.get(task.id) ?? task),
@@ -218,16 +236,19 @@ export class MediaTaskCoordinator {
       return completed;
     }).catch(async (error: unknown) => {
       const cancelled = controller.signal.aborted;
+      const capturePreempted = this.capturePreemptions.delete(task.id);
       const normalizedError = normalizeMediaTaskError(error);
       const failed: CoordinatedMediaTask = {
         ...(this.tasks.get(task.id) ?? task),
-        status: cancelled ? 'cancelled' : 'failed',
-        phase: cancelled ? 'cancelled' : (this.tasks.get(task.id)?.phase ?? task.phase ?? 'failed'),
+        status: capturePreempted ? 'paused' : cancelled ? 'cancelled' : 'failed',
+        phase: capturePreempted
+          ? 'paused'
+          : cancelled ? 'cancelled' : (this.tasks.get(task.id)?.phase ?? task.phase ?? 'failed'),
         updatedAt: this.now(),
-        error: cancelled ? undefined : normalizedError.message,
+        error: capturePreempted || cancelled ? undefined : normalizedError.message,
       };
       this.replaceTask(failed);
-      if (!cancelled) throw normalizedError;
+      if (!capturePreempted && !cancelled) throw normalizedError;
       return failed;
     }).finally(() => {
       this.activeByKey.delete(activeKey);

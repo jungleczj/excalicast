@@ -10,6 +10,16 @@ export function resolveSupabaseUploadMode(bytes: number): 'direct' | 'tus' {
   return bytes < DIRECT_UPLOAD_LIMIT ? 'direct' : 'tus';
 }
 
+export function resolveSupabaseUploadTransport(
+  bytes: number,
+  hasAbortSignal: boolean,
+): 'direct' | 'tus' {
+  // Supabase's small-object SDK upload does not expose a transport abort.
+  // Capture-sensitive work therefore uses TUS even for small objects so a
+  // recording priority request can stop the active network transfer itself.
+  return hasAbortSignal ? 'tus' : resolveSupabaseUploadMode(bytes);
+}
+
 function resumableEndpoint(): string {
   const configured = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!configured) throw new Error('supabase_url_missing');
@@ -40,7 +50,7 @@ export async function uploadSupabaseStorageObject(params: {
   if (!accessToken) throw new Error('login_required');
 
   const contentType = params.blob.type || 'application/octet-stream';
-  if (resolveSupabaseUploadMode(params.blob.size) === 'direct') {
+  if (resolveSupabaseUploadTransport(params.blob.size, !!params.signal) === 'direct') {
     if (params.signal?.aborted) throw new DOMException('Upload aborted', 'AbortError');
     params.onProgress?.(0, params.blob.size);
     const { error } = await supabase.storage.from(params.bucket).upload(params.path, params.blob, {
@@ -83,7 +93,9 @@ export async function uploadSupabaseStorageObject(params: {
       onSuccess: () => finish(resolve),
     });
     const abort = () => {
-      void upload.abort(true).finally(() => finish(() => reject(new DOMException('Upload aborted', 'AbortError'))));
+      // Pause without terminating the remote upload or deleting its fingerprint;
+      // the same object can resume from the last acknowledged TUS chunk after recording.
+      void upload.abort(false).finally(() => finish(() => reject(new DOMException('Upload aborted', 'AbortError'))));
     };
     if (params.signal?.aborted) {
       abort();

@@ -32,6 +32,7 @@ import { RecordingLifecycleCoordinator } from '@/services/recordingLifecycle';
 import { PreviewPlaybackRegistry } from '@/services/previewPlaybackRegistry';
 import { resolveFrameTransform } from '@/services/frameTransform';
 import { resolvePrivateUploadMode } from '@/services/privateMediaUpload';
+import { resolveSupabaseUploadTransport } from '@/services/supabaseStorageUpload';
 import { DOWNLOAD_URL_REVOKE_DELAY_MS } from '@/services/exportPipeline';
 import { MonotonicTimestampNormalizer, createMp4TimestampMapper } from '@/services/mediaTimestamps';
 import {
@@ -1188,6 +1189,12 @@ test('private media paths are user scoped and large-job submit payloads contain 
   });
   expect(dubbing.cameraAssetPath).toContain('/jobs/dubbing/');
   expect(dubbing.cameraBytes).toBe(350_000_000);
+});
+
+test('capture-preemptible uploads use an abortable transport even for small blobs', () => {
+  expect(resolveSupabaseUploadTransport(64_000, false)).toBe('direct');
+  expect(resolveSupabaseUploadTransport(64_000, true)).toBe('tus');
+  expect(resolveSupabaseUploadTransport(16 * 1024 * 1024, false)).toBe('tus');
 });
 
 test('large export downloads retain their blob URL long enough for the browser to acquire it', () => {

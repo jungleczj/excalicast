@@ -9,7 +9,11 @@ import {
   type HelperTransport,
 } from '../../apps/desktop/src/nativeHelperClient';
 import { parseDesktopCapturePayload } from '../../apps/desktop/src/captureRequest';
-import { waitForCaptureResourceRelease } from '../../src/desktop/captureResourceGate';
+import {
+  CaptureResourceCoordinator,
+  startDesktopCaptureWithResourcePriority,
+  waitForCaptureResourceRelease,
+} from '../../src/desktop/captureResourceGate';
 
 test('desktop shell uses a hardened renderer with a narrow versioned bridge', () => {
   const options = createDesktopWindowOptions('/tmp/excalicast-preload.js');
@@ -226,6 +230,70 @@ test('heavy work waits until native recording releases network, cpu and disk res
   });
   expect(reads).toBe(3);
   expect(waits).toBe(2);
+});
+
+test('capture priority aborts and drains in-flight heavy work before native capture starts', async () => {
+  const coordinator = new CaptureResourceCoordinator();
+  const lease = coordinator.acquire();
+  const events: string[] = [];
+  lease.signal.addEventListener('abort', () => {
+    events.push('heavy-aborted');
+    queueMicrotask(() => {
+      events.push('heavy-released');
+      lease.release();
+    });
+  });
+
+  const result = await startDesktopCaptureWithResourcePriority(
+    { recordingId: 'priority-capture' },
+    {
+      coordinator,
+      invoke: async () => {
+        events.push('capture-started');
+        return { state: 'recording' };
+      },
+      drainTimeoutMs: 1_000,
+    },
+  );
+
+  expect(result).toEqual({ state: 'recording' });
+  expect(events).toEqual(['heavy-aborted', 'heavy-released', 'capture-started']);
+  expect(coordinator.isCapturePriorityActive()).toBe(false);
+});
+
+test('capture does not start while an in-flight task ignores its abort signal', async () => {
+  const coordinator = new CaptureResourceCoordinator();
+  const lease = coordinator.acquire();
+  let invoked = false;
+
+  await expect(startDesktopCaptureWithResourcePriority(
+    { recordingId: 'busy-capture' },
+    {
+      coordinator,
+      invoke: async () => {
+        invoked = true;
+        return { state: 'recording' };
+      },
+      drainTimeoutMs: 5,
+    },
+  )).rejects.toThrow('capture_resources_did_not_drain');
+  expect(lease.signal.aborted).toBe(true);
+  expect(invoked).toBe(false);
+  expect(coordinator.isCapturePriorityActive()).toBe(false);
+  lease.release();
+});
+
+test('a duplicate capture start cannot release another start request priority lock', async () => {
+  const coordinator = new CaptureResourceCoordinator();
+  await coordinator.beginCapturePriority();
+
+  await expect(startDesktopCaptureWithResourcePriority({}, {
+    coordinator,
+    invoke: async () => ({ state: 'recording' }),
+  })).rejects.toThrow('capture_priority_already_active');
+  expect(coordinator.isCapturePriorityActive()).toBe(true);
+
+  coordinator.endCapturePriority();
 });
 
 test('native project recovery returns a checkpointed interrupted manifest', async () => {

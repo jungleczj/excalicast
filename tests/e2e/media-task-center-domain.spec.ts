@@ -9,6 +9,7 @@ import {
   MEDIA_TASK_COMPLETION_RETENTION_MS,
   type MediaTaskRecord,
 } from '@/services/mediaTaskDomain';
+import { startDesktopCaptureWithResourcePriority } from '@/desktop/captureResourceGate';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -108,6 +109,33 @@ test('task progress persists phase eta and checkpoint for the task center', asyn
     progress: 1,
     resultRef: 'auto-edit-cache:r1',
   });
+});
+
+test('native capture preempts an active media task and leaves it resumable', async () => {
+  const { value } = coordinator();
+  const started = deferred<void>();
+  const execution = value.startTask(
+    { recordingId: 'r1', kind: 'export', resourceClass: 'local_heavy' },
+    async (_report, signal) => {
+      started.resolve();
+      await new Promise<void>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    },
+  );
+  await started.promise;
+
+  let nativeStarted = false;
+  await startDesktopCaptureWithResourcePriority({}, {
+    invoke: async () => {
+      nativeStarted = true;
+      return { state: 'recording' };
+    },
+  });
+  const task = await execution;
+
+  expect(nativeStarted).toBe(true);
+  expect(task).toMatchObject({ status: 'paused', phase: 'paused' });
 });
 
 test('completion cue only reacts to newly completed tasks', () => {

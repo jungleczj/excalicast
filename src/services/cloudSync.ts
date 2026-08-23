@@ -9,7 +9,7 @@ import {
   thumbnailDataUrlToBlob,
 } from '@/lib/db-client';
 import { uploadSupabaseStorageObject } from '@/services/supabaseStorageUpload';
-import { waitForCaptureResourceRelease } from '@/desktop/captureResourceGate';
+import { withCaptureResourceLease } from '@/desktop/captureResourceGate';
 import type {
   AudioChunk,
   BinaryFileEntry,
@@ -61,8 +61,8 @@ async function uploadObject(
   name: string,
   body: Blob | string,
   contentType: string,
+  signal: AbortSignal,
 ): Promise<number> {
-  await waitForCaptureResourceRelease();
   const path = pathFor(userId, recordingId, name);
   const blob = typeof body === 'string'
     ? new Blob([body], { type: contentType })
@@ -74,8 +74,12 @@ async function uploadObject(
       blob,
       cacheControl: '3600',
       upsert: true,
+      signal,
     });
   } catch (error) {
+    if (signal.aborted) {
+      throw signal.reason ?? new DOMException('Upload paused for recording', 'AbortError');
+    }
     throw new Error(`upload_${name}: ${error instanceof Error ? error.message : 'unknown'}`);
   }
   return blob.size;
@@ -112,7 +116,7 @@ export async function uploadRecording(
   recordingId: string,
   onProgress?: (p: UploadProgress) => void,
 ): Promise<{ storagePrefix: string }> {
-  await waitForCaptureResourceRelease();
+  return withCaptureResourceLease(async (signal) => {
   const userId = await ensureUserId();
   const { metadata, snapshots, audioBlob, cameraBlob, cameraEvents, binaryFiles } =
     await loadFullRecording(recordingId);
@@ -136,7 +140,7 @@ export async function uploadRecording(
     binaryFileIds: binaryFiles.map((b) => b.fileId),
     schemaVersion: 1,
   });
-  const sizeMeta = await uploadObject(userId, recordingId, 'metadata.json', metaPayload, 'application/json');
+  const sizeMeta = await uploadObject(userId, recordingId, 'metadata.json', metaPayload, 'application/json', signal);
   bytesUploaded += sizeMeta;
 
   // 2) snapshots.json.gz
@@ -147,14 +151,14 @@ export async function uploadRecording(
   }));
   const sizeSnaps = await uploadObject(
     userId, recordingId, 'snapshots.json.gz', snapsBlob,
-    'application/gzip',
+    'application/gzip', signal,
   );
   bytesUploaded += sizeSnaps;
 
   // 3) audio.webm
   if (audioBlob) {
     onProgress?.({ step: 'audio', bytesUploaded, bytesTotal });
-    const sizeAudio = await uploadObject(userId, recordingId, 'audio.webm', audioBlob, 'audio/webm');
+    const sizeAudio = await uploadObject(userId, recordingId, 'audio.webm', audioBlob, 'audio/webm', signal);
     bytesUploaded += sizeAudio;
   }
 
@@ -165,13 +169,16 @@ export async function uploadRecording(
     let camUpload = cameraBlob;
     try {
       const { transcodeCameraForUpload } = await import('./webCodecsExport');
-      const proxy = await transcodeCameraForUpload(cameraBlob);
+      const proxy = await transcodeCameraForUpload(cameraBlob, signal);
       // 仅当代理确实更小才用它
       if (proxy.size > 0 && proxy.size < cameraBlob.size) camUpload = proxy;
     } catch {
+      if (signal.aborted) {
+        throw signal.reason ?? new DOMException('Camera proxy paused for recording', 'AbortError');
+      }
       camUpload = cameraBlob; // 回退原始
     }
-    const sizeCam = await uploadObject(userId, recordingId, 'camera.webm', camUpload, 'video/webm');
+    const sizeCam = await uploadObject(userId, recordingId, 'camera.webm', camUpload, 'video/webm', signal);
     bytesUploaded += sizeCam;
   }
 
@@ -192,7 +199,7 @@ export async function uploadRecording(
     }));
     const sizeCamPos = await uploadObject(
       userId, recordingId, 'cameraPositions.json.gz', camPosBlob,
-      'application/gzip',
+      'application/gzip', signal,
     );
     bytesUploaded += sizeCamPos;
   }
@@ -213,6 +220,7 @@ export async function uploadRecording(
       thumbnail,
       bytesStored: bytesUploaded,
     }),
+    signal,
   });
   if (!res.ok) {
     const j = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
@@ -221,6 +229,7 @@ export async function uploadRecording(
   const { storagePrefix } = (await res.json()) as { storagePrefix: string };
   onProgress?.({ step: 'done', bytesUploaded, bytesTotal });
   return { storagePrefix };
+  });
 }
 
 export interface BulkUploadProgress {
@@ -254,6 +263,7 @@ export async function uploadMany(
       await uploadRecording(id);
       state.ok.push(id);
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') throw err;
       state.failed.push({ id, error: err instanceof Error ? err.message : 'unknown' });
     }
     state.done += 1;
@@ -303,19 +313,23 @@ export async function removeCloudRecording(recordingId: string): Promise<void> {
 export async function importCloudRecording(
   recordingId: string,
   onProgress?: (p: UploadProgress) => void,
+  externalSignal?: AbortSignal,
 ): Promise<void> {
+  return withCaptureResourceLease(async (signal) => {
   const userId = await ensureUserId();
   const supabase = createClient();
   const db = getClientDb();
 
   const fetchObj = async (name: string): Promise<Blob | null> => {
     const path = pathFor(userId, recordingId, name);
-    const { data, error } = await supabase.storage.from(BUCKET).download(path);
-    if (error) {
+    const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 300);
+    if (error || !data?.signedUrl) {
       // 404 / not found is fine for optional files (camera, audio)
       return null;
     }
-    return data;
+    const response = await fetch(data.signedUrl, { cache: 'no-store', signal });
+    if (!response.ok) return null;
+    return response.blob();
   };
 
   onProgress?.({ step: 'metadata', bytesUploaded: 0, bytesTotal: 0 });
@@ -361,6 +375,7 @@ export async function importCloudRecording(
     'rw',
     [db.recordings, db.snapshots, db.audioChunks, db.cameraChunks, db.cameraPositions, db.binaryFiles, db.recordingThumbnails],
     async () => {
+      signal.throwIfAborted();
       // Clear any old local row with the same id so we start clean
       await db.recordings.delete(recordingId);
       await db.snapshots.where('recordingId').equals(recordingId).delete();
@@ -369,6 +384,7 @@ export async function importCloudRecording(
       await db.cameraPositions.where('recordingId').equals(recordingId).delete();
       await db.binaryFiles.where('recordingId').equals(recordingId).delete();
       await db.recordingThumbnails.delete(recordingId);
+      signal.throwIfAborted();
 
       const metaRow: RecordingMetadata = {
         id: metaJson.id ?? recordingId,
@@ -397,6 +413,7 @@ export async function importCloudRecording(
         appState: s.appState,
       }));
       if (snapRows.length > 0) await db.snapshots.bulkAdd(snapRows);
+      signal.throwIfAborted();
 
       // Binary files (image assets etc.)
       if (snapsObj.binaryFiles && snapsObj.binaryFiles.length > 0) {
@@ -406,6 +423,7 @@ export async function importCloudRecording(
           data: b.data,
         }));
         await db.binaryFiles.bulkAdd(binRows);
+        signal.throwIfAborted();
       }
 
       // Audio / Camera — store as single chunk
@@ -431,6 +449,7 @@ export async function importCloudRecording(
         }));
         await db.cameraPositions.bulkAdd(posRows);
       }
+      signal.throwIfAborted();
     },
   );
 
@@ -440,4 +459,5 @@ export async function importCloudRecording(
   }
 
   onProgress?.({ step: 'done', bytesUploaded: 0, bytesTotal: 0 });
+  }, { signal: externalSignal });
 }

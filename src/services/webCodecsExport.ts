@@ -383,12 +383,14 @@ export async function encodeWebCodecsMp4(params: EncodeParams): Promise<WebCodec
  * 仍输出 webm（同名 camera.webm，分享/播放零改动）。
  * 不支持/任何失败 → 抛错，调用方原样上传。
  */
-export async function transcodeCameraForUpload(blob: Blob): Promise<Blob> {
+export async function transcodeCameraForUpload(blob: Blob, signal?: AbortSignal): Promise<Blob> {
+  signal?.throwIfAborted();
   const VideoEncoderCtor = G.VideoEncoder;
   const VideoFrameCtor = G.VideoFrame;
   if (!VideoEncoderCtor || !VideoFrameCtor) throw new Error('videoencoder_unavailable');
 
   const source = await createCameraFrameSource(blob); // 解复用 + VideoDecoder（失败抛错）
+  signal?.throwIfAborted();
   const width = source.width;
   const height = source.height;
   const targetFps = 15;
@@ -421,6 +423,7 @@ export async function transcodeCameraForUpload(blob: Blob): Promise<Blob> {
     let n = 0;
     const timestampNormalizer = new MonotonicTimestampNormalizer(minGapUs);
     for await (const frame of source.frames()) {
+      signal?.throwIfAborted();
       if (encErr) throw encErr;
       const sourceTimestamp = frame.timestamp as number;
       const ts = timestampNormalizer.push(sourceTimestamp);
@@ -438,17 +441,19 @@ export async function transcodeCameraForUpload(blob: Blob): Promise<Blob> {
         if (normalizedFrame !== frame) normalizedFrame.close();
       }
       n++;
-      await drainEncoderBackpressure(encoder, 8);
+      await drainEncoderBackpressure(encoder, 8, signal);
       if (encErr) throw encErr;
     }
+    signal?.throwIfAborted();
     await encoder.flush();
-    encoder.close();
+    signal?.throwIfAborted();
     if (encErr) throw encErr;
     if (n === 0) throw new Error('camera_transcode_no_frames');
     muxer.finalize();
     const { buffer } = muxer.target as InstanceType<typeof WebmTarget>;
     return new Blob([buffer], { type: 'video/webm' });
   } finally {
+    try { encoder.close(); } catch { /* encoder may already be closed */ }
     source.close();
   }
 }

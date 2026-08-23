@@ -13,7 +13,7 @@ import { shouldUseMediaJobMocks } from '@/services/mediaJobMode';
 import { removePrivateJobAssets, uploadPrivateJobAsset } from '@/services/privateMediaUpload';
 import { parsePcm16Wav } from '@/lib/dubbingAudio';
 import type { AzureEnglishVoice, VoiceProfile } from '@/services/voiceProfile';
-import { waitForCaptureResourceRelease } from '@/desktop/captureResourceGate';
+import { waitForCaptureResourceRelease, withCaptureResourceLease } from '@/desktop/captureResourceGate';
 
 interface SubmitResponse { jobId: string; reused?: boolean }
 
@@ -308,7 +308,15 @@ export async function resumeEnglishDubbingTrack(params: {
   sourceAudioHash: string;
 } & DubbingOptions): Promise<LocalizedTrack> {
   const { recordingId, jobId, sourceAudioHash, ...options } = params;
-  return finishEnglishDubbingTrack({ recordingId, jobId, sourceAudioHash, options });
+  return withCaptureResourceLease(
+    (signal) => finishEnglishDubbingTrack({
+      recordingId,
+      jobId,
+      sourceAudioHash,
+      options: { ...options, signal },
+    }),
+    { signal: options.signal },
+  );
 }
 
 export async function createEnglishDubbingTrack(params: {
@@ -317,7 +325,7 @@ export async function createEnglishDubbingTrack(params: {
   voiceName: AzureEnglishVoice;
   voiceProfile?: VoiceProfile;
 } & DubbingOptions): Promise<LocalizedTrack> {
-  await waitForCaptureResourceRelease({ signal: params.signal });
+  return withCaptureResourceLease(async (signal) => {
   const sourceSrt = params.sourceSrt?.trim();
   if (!sourceSrt) throw new Error('dubbing_subtitles_required');
   const media = await loadRecordingMediaTracks(params.recordingId, ['audio']);
@@ -335,14 +343,14 @@ export async function createEnglishDubbingTrack(params: {
       jobNonce: nonce,
       filename: 'authorization.txt',
       blob: new Blob([nonce], { type: 'text/plain' }),
-      signal: params.signal,
+      signal,
     });
   }
   try {
     const submit = await fetch('/api/dubbing/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      signal: params.signal,
+      signal,
       body: JSON.stringify({
         recordingId: params.recordingId,
         targetLang: 'en',
@@ -380,10 +388,14 @@ export async function createEnglishDubbingTrack(params: {
       jobId,
       sourceAudioHash,
       voiceProfile: params.voiceProfile,
-      options: params,
+      options: { ...params, signal },
     });
   } catch (error) {
+    if (signal.aborted) {
+      throw signal.reason ?? new DOMException('Dubbing paused for recording', 'AbortError');
+    }
     await removePrivateJobAssets([proofAsset?.path]);
     throw error;
   }
+  }, { signal: params.signal });
 }

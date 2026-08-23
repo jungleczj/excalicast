@@ -1,6 +1,6 @@
 'use client';
 
-import { waitForCaptureResourceRelease } from '@/desktop/captureResourceGate';
+import { withCaptureResourceLease } from '@/desktop/captureResourceGate';
 
 export interface HandoutJobStatusResponse {
   status: 'pending' | 'running' | 'done' | 'failed';
@@ -22,21 +22,23 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 export async function submitHandoutJob(recordingId: string, signal?: AbortSignal): Promise<{ jobId: string }> {
-  await waitForCaptureResourceRelease({ signal });
-  const response = await fetch('/api/handout/submit', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ recordingId }),
-    signal,
-  });
-  return readJson<{ jobId: string }>(response);
+  return withCaptureResourceLease(async (leaseSignal) => {
+    const response = await fetch('/api/handout/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recordingId }),
+      signal: leaseSignal,
+    });
+    return readJson<{ jobId: string }>(response);
+  }, { signal });
 }
 
 export async function pollHandoutJob(jobId: string, signal?: AbortSignal): Promise<HandoutJobStatusResponse> {
-  await waitForCaptureResourceRelease({ signal });
-  const response = await fetch(`/api/handout/status?jobId=${encodeURIComponent(jobId)}`, {
-    cache: 'no-store',
-    signal,
-  });
-  return readJson<HandoutJobStatusResponse>(response);
+  return withCaptureResourceLease(async (leaseSignal) => {
+    const response = await fetch(`/api/handout/status?jobId=${encodeURIComponent(jobId)}`, {
+      cache: 'no-store',
+      signal: leaseSignal,
+    });
+    return readJson<HandoutJobStatusResponse>(response);
+  }, { signal });
 }
