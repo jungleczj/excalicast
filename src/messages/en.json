@@ -561,6 +561,29 @@
     "title": "New recording",
     "close": "Close",
     "cropLocked": "CROP LOCKED",
+    "recipe": {
+      "eyebrow": "AI DIRECTOR · PRE-RECORD",
+      "title": "Teaching film recipe",
+      "subtitle": "Choose material types now; AI generates and places them on the right tracks after recording.",
+      "selected": "{count} selected",
+      "autoFilm": "Create film automatically",
+      "autoFilmHint": "Arrange the selected materials after your lesson, with no manual timeline editing.",
+      "workflow": "RECORD → UNDERSTAND → GENERATE → PLACE ON TRACKS",
+      "assets": {
+        "motion": {
+          "title": "Key-point motion",
+          "desc": "Emphasize ideas as they land"
+        },
+        "charts": {
+          "title": "Smart charts",
+          "desc": "Turn spoken data into visuals"
+        },
+        "sound": {
+          "title": "Teaching sound cues",
+          "desc": "Light cues for sections and ideas"
+        }
+      }
+    },
     "source": {
       "title": "Recording source",
       "subtitle": "Choose what should be kept before framing.",

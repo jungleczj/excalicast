@@ -29,6 +29,7 @@ interface Props {
 }
 
 type Tab = AspectGroup | 'custom' | 'default';
+type TeachingRecipeAsset = 'motion' | 'charts' | 'sound';
 
 const RATIOS = Object.entries(ASPECT_PRESETS) as [AspectRatio, (typeof ASPECT_PRESETS)[AspectRatio]][];
 const POSITIONS: CameraCorner[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
@@ -62,6 +63,13 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
   const [shape, setShape] = useState<CameraShape>(initial.camera.shape);
   const [pos, setPos] = useState<CameraCorner>(initial.camera.position);
   const [bgRemove, setBgRemove] = useState(initial.camera.backgroundRemoval);
+  const [recipeOpen, setRecipeOpen] = useState(false);
+  const [autoFilm, setAutoFilm] = useState(true);
+  const [recipeAssets, setRecipeAssets] = useState<Record<TeachingRecipeAsset, boolean>>({
+    motion: true,
+    charts: true,
+    sound: true,
+  });
 
   if (!open) return null;
 
@@ -172,6 +180,32 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
             </div>
           </aside>
           <div className="recording-setup-config" style={{ padding: 28 }}>
+          <TeachingFilmRecipe
+            open={recipeOpen}
+            autoFilm={autoFilm}
+            assets={recipeAssets}
+            labels={{
+              eyebrow: t('recipe.eyebrow'),
+              title: t('recipe.title'),
+              subtitle: t('recipe.subtitle'),
+              selected: t('recipe.selected', { count: Object.values(recipeAssets).filter(Boolean).length }),
+              autoFilm: t('recipe.autoFilm'),
+              autoFilmHint: t('recipe.autoFilmHint'),
+              workflow: t('recipe.workflow'),
+              motion: t('recipe.assets.motion.title'),
+              motionHint: t('recipe.assets.motion.desc'),
+              charts: t('recipe.assets.charts.title'),
+              chartsHint: t('recipe.assets.charts.desc'),
+              sound: t('recipe.assets.sound.title'),
+              soundHint: t('recipe.assets.sound.desc'),
+            }}
+            onToggleOpen={() => setRecipeOpen((current) => !current)}
+            onAutoFilmChange={setAutoFilm}
+            onAssetChange={(asset) => setRecipeAssets((current) => ({ ...current, [asset]: !current[asset] }))}
+          />
+
+          <SectionDivider />
+
           {/* Recording source */}
           <SetupSection title={t('source.title')} subtitle={t('source.subtitle')}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 8 }}>
@@ -621,6 +655,172 @@ function PreviewDisplaySurface(): JSX.Element {
 
 // ── sub-components (1:1 with design setup.jsx) ──────────────────────
 
+function TeachingFilmRecipe({
+  open,
+  autoFilm,
+  assets,
+  labels,
+  onToggleOpen,
+  onAutoFilmChange,
+  onAssetChange,
+}: {
+  open: boolean;
+  autoFilm: boolean;
+  assets: Record<TeachingRecipeAsset, boolean>;
+  labels: {
+    eyebrow: string;
+    title: string;
+    subtitle: string;
+    selected: string;
+    autoFilm: string;
+    autoFilmHint: string;
+    workflow: string;
+    motion: string;
+    motionHint: string;
+    charts: string;
+    chartsHint: string;
+    sound: string;
+    soundHint: string;
+  };
+  onToggleOpen: () => void;
+  onAutoFilmChange: (enabled: boolean) => void;
+  onAssetChange: (asset: TeachingRecipeAsset) => void;
+}): JSX.Element {
+  const assetOptions: Array<{
+    id: TeachingRecipeAsset;
+    title: string;
+    hint: string;
+    Icon: (props: { size?: number }) => JSX.Element;
+  }> = [
+    { id: 'motion', title: labels.motion, hint: labels.motionHint, Icon: I.Sparkles },
+    { id: 'charts', title: labels.charts, hint: labels.chartsHint, Icon: I.Grid },
+    { id: 'sound', title: labels.sound, hint: labels.soundHint, Icon: I.Bell },
+  ];
+
+  return (
+    <section
+      data-testid="teaching-film-recipe"
+      style={{
+        overflow: 'hidden',
+        border: '1.4px solid var(--ink)',
+        borderRadius: 18,
+        background: 'var(--paper-2)',
+        boxShadow: '0 10px 28px rgba(48,38,26,.07)',
+      }}
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={onToggleOpen}
+        className="press"
+        style={{
+          width: '100%',
+          padding: 0,
+          border: 0,
+          background: 'transparent',
+          color: 'var(--ink)',
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <span style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 17px' }}>
+          <span
+            aria-hidden="true"
+            style={{
+              display: 'grid',
+              placeItems: 'center',
+              width: 39,
+              height: 39,
+              flex: '0 0 auto',
+              border: '1.3px solid var(--ink)',
+              borderRadius: 999,
+              background: 'var(--hi)',
+              boxShadow: '2px 2px 0 var(--ink)',
+            }}
+          >
+            <I.Sparkles size={18} />
+          </span>
+          <span style={{ minWidth: 0, flex: 1 }}>
+            <span className="label-mono" style={{ display: 'block', fontSize: 9, color: 'var(--ink-3)' }}>{labels.eyebrow}</span>
+            <span style={{ display: 'block', marginTop: 3, fontSize: 14.5, fontWeight: 780 }}>{labels.title}</span>
+            <span style={{ display: 'block', marginTop: 3, fontSize: 11, color: 'var(--ink-3)', lineHeight: 1.4 }}>{labels.subtitle}</span>
+          </span>
+          <span
+            className="label-mono"
+            style={{
+              flex: '0 0 auto',
+              padding: '5px 8px',
+              border: '1px solid rgba(31,34,37,.14)',
+              borderRadius: 999,
+              background: 'var(--paper)',
+              fontSize: 9.5,
+              color: 'var(--ink-2)',
+            }}
+          >
+            {labels.selected}
+          </span>
+          <span aria-hidden="true" style={{ display: 'grid', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 160ms ease' }}>
+            <I.ChevronDown size={15} />
+          </span>
+        </span>
+      </button>
+
+      {open && (
+        <div style={{ padding: '0 17px 17px' }}>
+          <div style={{ height: 1, background: 'rgba(31,34,37,.12)', marginBottom: 14 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 12px', border: '1px solid rgba(31,34,37,.12)', borderRadius: 12, background: 'var(--paper)' }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <label htmlFor="teaching-recipe-auto-film" style={{ display: 'block', fontSize: 12.5, fontWeight: 750 }}>{labels.autoFilm}</label>
+              <div style={{ marginTop: 2, fontSize: 10.5, color: 'var(--ink-3)', lineHeight: 1.4 }}>{labels.autoFilmHint}</div>
+            </div>
+            <Toggle id="teaching-recipe-auto-film" label={labels.autoFilm} on={autoFilm} onChange={onAutoFilmChange} />
+          </div>
+
+          <div role="group" aria-label={labels.title} style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8, marginTop: 10 }}>
+            {assetOptions.map(({ id, title, hint, Icon }) => {
+              const selected = assets[id];
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => onAssetChange(id)}
+                  className="press"
+                  style={{
+                    minHeight: 102,
+                    padding: 12,
+                    border: selected ? '1.3px solid var(--ink)' : '1px solid rgba(31,34,37,.12)',
+                    borderRadius: 13,
+                    background: selected ? 'var(--ink)' : 'var(--paper)',
+                    color: selected ? 'var(--paper)' : 'var(--ink)',
+                    boxShadow: selected ? '0 8px 18px rgba(31,34,37,.13)' : 'none',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ display: 'grid', placeItems: 'center', width: 29, height: 29, borderRadius: 999, background: selected ? 'rgba(255,255,255,.12)' : 'var(--paper-2)', border: selected ? '1px solid rgba(255,255,255,.17)' : '1px solid rgba(31,34,37,.09)' }}>
+                      <Icon size={14} />
+                    </span>
+                    {selected && <I.Check size={13} />}
+                  </span>
+                  <span style={{ display: 'block', marginTop: 9, fontSize: 11.5, fontWeight: 750 }}>{title}</span>
+                  <span style={{ display: 'block', marginTop: 3, fontSize: 10, lineHeight: 1.35, color: selected ? 'rgba(255,253,248,.65)' : 'var(--ink-3)' }}>{hint}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="label-mono" style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 11, fontSize: 9.5, color: 'var(--ink-3)' }}>
+            <I.ArrowRight size={12} />
+            {labels.workflow}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function SetupSection({ title, subtitle, right, children }: { title: string; subtitle?: string; right?: ReactNode; children: ReactNode }): JSX.Element {
   return (
     <div>
@@ -847,12 +1047,14 @@ function PositionPicker({ value, onChange }: { value: CameraCorner; onChange: (p
   );
 }
 
-function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }): JSX.Element {
+function Toggle({ id, label, on, onChange }: { id?: string; label?: string; on: boolean; onChange: (v: boolean) => void }): JSX.Element {
   return (
     <button
+      id={id}
       type="button"
       onClick={() => onChange(!on)}
       role="switch"
+      aria-label={label}
       aria-checked={on}
       style={{ width: 38, height: 22, borderRadius: 999, border: '1.4px solid var(--ink)', background: on ? 'var(--ink)' : 'var(--paper-2)', position: 'relative', cursor: 'pointer', padding: 0, flexShrink: 0, transition: 'background 150ms ease' }}
     >

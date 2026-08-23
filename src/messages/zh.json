@@ -561,6 +561,29 @@
     "title": "新建录制",
     "close": "关闭",
     "cropLocked": "已锁定裁切",
+    "recipe": {
+      "eyebrow": "AI 导演 · 录制前预选",
+      "title": "教学成片配方",
+      "subtitle": "先选素材类型，录制后由 AI 智能生成并落到对应轨道。",
+      "selected": "已选 {count} 项",
+      "autoFilm": "一键成片",
+      "autoFilmHint": "讲解结束后自动编排所选素材，无需手动剪轨道。",
+      "workflow": "录制 → 理解讲解 → 生成素材 → 智能落轨",
+      "assets": {
+        "motion": {
+          "title": "要点动效",
+          "desc": "重点出现时自动强调"
+        },
+        "charts": {
+          "title": "智能图表",
+          "desc": "数据内容生成可视化"
+        },
+        "sound": {
+          "title": "教学音效",
+          "desc": "章节与重点轻量提示"
+        }
+      }
+    },
     "source": {
       "title": "录制来源",
       "subtitle": "先确定要留下什么，再进入取景。",
