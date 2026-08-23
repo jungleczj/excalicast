@@ -13,6 +13,17 @@ import {
 } from '../../src/desktop/projectSchema';
 import { createDesktopInkSurfacePresentation } from '../../src/desktop/inkSurface';
 import { DesktopInkEventCollector } from '../../src/desktop/inkEventJournal';
+import {
+  DesktopInkReplay,
+  createReplayFrameTimes,
+  parseNativeInkEventSegments,
+} from '../../src/desktop/inkReplay';
+import { loadDesktopInkReplay } from '../../src/desktop/loadInkReplay';
+import {
+  createDesktopInkRenderSource,
+  projectDesktopInkPointer,
+  resolveDesktopInkExportStyle,
+} from '../../src/desktop/inkReplayFrameSource';
 
 const REQUIRED_BROWSER_FEATURES: DesktopFeatureId[] = [
   'whiteboard.excalidraw-full',
@@ -98,6 +109,7 @@ test('desktop IPC is versioned and separates native capture from renderer pixels
   expect(DESKTOP_IPC_CHANNELS.teleprompterConfigure).toBe('teleprompter.configure.v1');
   expect(DESKTOP_IPC_CHANNELS.projectRecover).toBe('project.recover.v1');
   expect(DESKTOP_IPC_CHANNELS.projectValidate).toBe('project.validate.v1');
+  expect(DESKTOP_IPC_CHANNELS.projectReadInkEvents).toBe('project.read-ink-events.v1');
   expect(Object.values(DESKTOP_IPC_CHANNELS).every((channel) => channel.endsWith('.v1'))).toBe(true);
 });
 
@@ -117,13 +129,23 @@ test('desktop ink journal records element deltas instead of cloning the complete
   collector.observeScene([
     { id: 'a', version: 1, versionNonce: 10, isDeleted: false, x: 1 },
     { id: 'b', version: 1, versionNonce: 20, isDeleted: false, x: 2 },
-  ], { scrollX: 0, scrollY: 0, zoom: { value: 1 } }, {}, 1_000);
-  collector.drain();
+  ], {
+    scrollX: 0, scrollY: 0, zoom: { value: 1 },
+    width: 1440, height: 900, viewBackgroundColor: '#ffffff',
+  }, {}, 1_000);
+  expect(collector.drain()[1]).toEqual({
+    kind: 'viewport', atUnixMs: 1_000,
+    scrollX: 0, scrollY: 0, zoom: 1,
+    width: 1440, height: 900, viewBackgroundColor: '#ffffff',
+  });
 
   collector.observeScene([
     { id: 'a', version: 1, versionNonce: 10, isDeleted: false, x: 1 },
     { id: 'b', version: 2, versionNonce: 21, isDeleted: false, x: 22 },
-  ], { scrollX: 0, scrollY: 0, zoom: { value: 1 } }, {}, 1_100);
+  ], {
+    scrollX: 0, scrollY: 0, zoom: { value: 1 },
+    width: 1440, height: 900, viewBackgroundColor: '#ffffff',
+  }, {}, 1_100);
   collector.recordPointer({ x: 80, y: 120, tool: 'laser', phase: 'move' }, 1_120);
 
   expect(collector.drain()).toEqual([
@@ -154,6 +176,120 @@ test('desktop ink journal records element deltas instead of cloning the complete
   }];
   collector.restore(retryable);
   expect(collector.drain()).toEqual(retryable);
+});
+
+test('native ink segments round-trip into seekable 60fps Excalidraw scenes', () => {
+  const events = parseNativeInkEventSegments([
+    {
+      startUs: 0,
+      payload: JSON.stringify({
+        schemaVersion: 1,
+        events: [
+          { kind: 'scene-delta', atUnixMs: 10_000, upserts: [
+            { id: 'a', version: 1, x: 10 }, { id: 'b', version: 1, x: 20 },
+          ], deletedIds: [], fileUpserts: {} },
+          { kind: 'pointer', atUnixMs: 10_000, x: 0, y: 10, tool: 'laser', phase: 'move' },
+          { kind: 'pointer', atUnixMs: 10_100, x: 100, y: 30, tool: 'laser', phase: 'move' },
+        ],
+      }),
+    },
+    {
+      startUs: 500_000,
+      payload: JSON.stringify({
+        schemaVersion: 1,
+        events: [
+          { kind: 'scene-delta', atUnixMs: 20_000, upserts: [
+            { id: 'b', version: 2, x: 25 },
+          ], deletedIds: [], fileUpserts: {} },
+          { kind: 'viewport', atUnixMs: 20_100, scrollX: -40, scrollY: -20, zoom: 1.5 },
+        ],
+      }),
+    },
+    {
+      startUs: 1_000_000,
+      payload: JSON.stringify({
+        schemaVersion: 1,
+        events: [
+          { kind: 'scene-delta', atUnixMs: 30_000, upserts: [], deletedIds: ['a'], fileUpserts: {} },
+        ],
+      }),
+    },
+  ]);
+  const replay = new DesktopInkReplay(events);
+
+  expect(replay.frameAt(50_000)).toMatchObject({
+    revisionUs: 0,
+    elements: [{ id: 'a' }, { id: 'b' }],
+    pointer: { x: 50, y: 20, tool: 'laser' },
+  });
+  expect(replay.frameAt(750_000)).toMatchObject({
+    revisionUs: 600_000,
+    elements: [{ id: 'a', version: 1 }, { id: 'b', version: 2, x: 25 }],
+    appState: { scrollX: -40, scrollY: -20, zoom: { value: 1.5 } },
+  });
+  expect(replay.frameAt(1_100_000).elements).toEqual([{ id: 'b', version: 2, x: 25 }]);
+  expect(replay.frameAt(100_000).elements).toEqual([
+    { id: 'a', version: 1, x: 10 }, { id: 'b', version: 1, x: 20 },
+  ]);
+  expect(createReplayFrameTimes(50_000, 60)).toEqual([0, 16_667, 33_333, 50_000]);
+  expect(replay.hasPointerEvents).toBe(true);
+  expect(replay.hasEvents).toBe(true);
+  expect(replay.contentElements()).toEqual([
+    { id: 'a', version: 1, x: 10 },
+    { id: 'b', version: 1, x: 20 },
+    { id: 'b', version: 2, x: 25 },
+  ]);
+
+  const renderSource = createDesktopInkRenderSource(replay, 1_100);
+  expect(renderSource.contentSnapshots[0].elements).toHaveLength(3);
+  expect(renderSource.frameAt(50)).toMatchObject({
+    signature: '0|laser:50:20:move',
+    snapshot: { timestamp: 0, elements: [{ id: 'a' }, { id: 'b' }] },
+    pointer: { x: 50, y: 20, tool: 'laser' },
+  });
+  expect(renderSource.frameAt(750)).toMatchObject({
+    signature: '600000|none',
+    snapshot: { timestamp: 600, appState: { scrollX: -40, scrollY: -20 } },
+  });
+  expect(projectDesktopInkPointer(
+    { x: 50, y: 20, tool: 'laser', phase: 'move' },
+    { x: 0, y: 0, width: 100, height: 40 },
+    { x: 10, y: 20, width: 200, height: 80 },
+  )).toEqual({ x: 110, y: 60 });
+  expect(resolveDesktopInkExportStyle(
+    { backgroundOpacity: 1.2, inkOpacity: -0.2 },
+    0,
+  )).toEqual({ backgroundOpacity: 1, inkOpacity: 0 });
+  expect(resolveDesktopInkExportStyle(undefined, 0)).toEqual({
+    backgroundOpacity: 0,
+    inkOpacity: 1,
+  });
+});
+
+test('desktop replay loader uses native event references while browser mode remains unchanged', async () => {
+  await expect(loadDesktopInkReplay('rec-native', {
+    async invoke(channel, payload) {
+      expect(channel).toBe('project.read-ink-events.v1');
+      expect(payload).toEqual({ recordingId: 'rec-native' });
+      return {
+        segments: [{
+          startUs: 0,
+          durationUs: 1,
+          payload: JSON.stringify({
+            schemaVersion: 1,
+            events: [{
+              kind: 'scene-delta', atUnixMs: 1_000,
+              upserts: [{ id: 'native-element', version: 1 }],
+              deletedIds: [], fileUpserts: {},
+            }],
+          }),
+        }],
+      };
+    },
+  })).resolves.toMatchObject({
+    frameAt: expect.any(Function),
+  });
+  await expect(loadDesktopInkReplay('rec-browser', undefined)).resolves.toBeNull();
 });
 
 test('teaching recipe accepts curated ChatCut assets and rejects hidden catalog injection', () => {

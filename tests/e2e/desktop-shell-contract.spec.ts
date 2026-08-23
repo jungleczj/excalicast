@@ -1,4 +1,7 @@
 import { expect, test } from '@playwright/test';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   createDesktopInkWindowOptions,
   createDesktopWindowOptions,
@@ -20,6 +23,7 @@ import {
   summarizeNativeCaptureSoak,
 } from '../../apps/desktop/src/nativeCaptureSoak';
 import { createNativeInkEventBatch } from '../../apps/desktop/src/inkEventBatch';
+import { readNativeInkEventSegments } from '../../apps/desktop/src/inkEventReader';
 import {
   CaptureResourceCoordinator,
   startDesktopCaptureWithResourcePriority,
@@ -498,6 +502,39 @@ test('desktop ink batches use capture-relative microsecond timing and bounded pa
   });
   expect(() => createNativeInkEventBatch({ events: [] }, 10_000, 0))
     .toThrow('desktop_ink_event_batch_invalid');
+});
+
+test('desktop reads recoverable native ink segments without allowing path escape', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'excalicast-ink-read-'));
+  try {
+    await mkdir(join(root, 'segments/excalidraw-events'), { recursive: true });
+    await writeFile(join(root, 'segments/excalidraw-events/000000.segment'), '{"schemaVersion":1,"events":[]}');
+    const manifest = {
+      schemaVersion: 1 as const,
+      recordingId: 'ink-read',
+      state: 'ready' as const,
+      tracks: {
+        'excalidraw-events': [{
+          index: 0,
+          relativePath: 'segments/excalidraw-events/000000.segment',
+          startUs: 250_000,
+          durationUs: 100_000,
+          byteLength: 31,
+        }],
+      },
+    };
+    await expect(readNativeInkEventSegments(root, manifest)).resolves.toEqual([{
+      startUs: 250_000,
+      durationUs: 100_000,
+      payload: '{"schemaVersion":1,"events":[]}',
+    }]);
+
+    manifest.tracks['excalidraw-events'][0].relativePath = '../outside.segment';
+    await expect(readNativeInkEventSegments(root, manifest))
+      .rejects.toThrow('native_ink_event_path_invalid');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('native soak summary rejects linear memory growth and sustained encoder backlog', () => {

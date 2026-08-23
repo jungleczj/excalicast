@@ -58,6 +58,7 @@ export const DESKTOP_IPC_CHANNELS = {
   teleprompterSetMode: 'teleprompter.set-mode.v1',
   projectRecover: 'project.recover.v1',
   projectValidate: 'project.validate.v1',
+  projectReadInkEvents: 'project.read-ink-events.v1',
   renderPreview: 'render.preview.v1',
   renderExport: 'render.export.v1',
 } as const;

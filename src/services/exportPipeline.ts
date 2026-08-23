@@ -69,6 +69,14 @@ import {
   localizedToSourceTime,
   mapSourceSegmentsToLocalized,
 } from '@/services/dubbingTiming';
+import { loadDesktopInkReplay } from '@/desktop/loadInkReplay';
+import {
+  createDesktopInkRenderSource,
+  projectDesktopInkPointer,
+  resolveDesktopInkExportStyle,
+  type DesktopInkRenderFrame,
+  type DesktopInkRenderSource,
+} from '@/desktop/inkReplayFrameSource';
 
 export interface ExportOptions extends ExportConfig {
   recordingId: string;
@@ -145,6 +153,7 @@ export function classifyWebCodecsFailure(error: unknown): WebCodecsFailureDecisi
 
 let _ffmpeg: FFmpeg | null = null;
 const previewDisplayCache = new Map<string, { source: DisplayFrameSource; lastTimeMs: number }>();
+const previewInkCache = new Map<string, Promise<DesktopInkRenderSource | null>>();
 const previewLayerCache = new WeakMap<HTMLCanvasElement, {
   content: HTMLCanvasElement;
   foreground: HTMLCanvasElement;
@@ -357,6 +366,113 @@ function snapshotAt(snapshots: WhiteboardSnapshot[], t: number): WhiteboardSnaps
     else hi = mid - 1;
   }
   return ans === -1 ? snapshots[0] : snapshots[ans];
+}
+
+async function loadRecordingDesktopInkSource(
+  recordingId: string,
+  durationMs: number,
+): Promise<DesktopInkRenderSource | null> {
+  const replay = await loadDesktopInkReplay(recordingId);
+  return replay?.hasEvents ? createDesktopInkRenderSource(replay, durationMs) : null;
+}
+
+async function getPreviewInkSource(
+  recordingId: string,
+  durationMs: number,
+): Promise<DesktopInkRenderSource | null> {
+  const cached = previewInkCache.get(recordingId);
+  if (cached) return cached;
+  const pending = loadRecordingDesktopInkSource(recordingId, durationMs);
+  previewInkCache.set(recordingId, pending);
+  try {
+    return await pending;
+  } catch (error) {
+    previewInkCache.delete(recordingId);
+    throw error;
+  }
+}
+
+function drawDesktopInkPointer(
+  ctx: CanvasRenderingContext2D,
+  frame: DesktopInkRenderFrame | null,
+  sceneSourceRect: SceneRect,
+  destination: SceneRect,
+  opacity = 1,
+): void {
+  if (!frame?.pointer) return;
+  const point = projectDesktopInkPointer(frame.pointer, sceneSourceRect, destination);
+  const laser = frame.pointer.tool === 'laser';
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, laser ? 5 : 4, 0, Math.PI * 2);
+  ctx.fillStyle = laser ? '#fd2c41' : '#6366f1';
+  ctx.shadowColor = laser ? 'rgba(253,44,65,.75)' : 'rgba(99,102,241,.55)';
+  ctx.shadowBlur = laser ? 10 : 6;
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = 'rgba(255,255,255,.95)';
+  ctx.stroke();
+  ctx.restore();
+}
+
+async function drawDesktopInkSceneOverlay(
+  ctx: CanvasRenderingContext2D,
+  frame: DesktopInkRenderFrame | null,
+  sceneSourceRect: SceneRect,
+  destination: SceneRect,
+  files: Record<string, unknown>,
+  canvasExporter: typeof import('@excalidraw/excalidraw')['exportToCanvas'],
+  style: { backgroundOpacity: number; inkOpacity: number },
+): Promise<void> {
+  if (!frame) return;
+  if (style.backgroundOpacity > 0) {
+    ctx.save();
+    ctx.globalAlpha = style.backgroundOpacity;
+    ctx.fillStyle = typeof frame.snapshot.appState.viewBackgroundColor === 'string'
+      ? frame.snapshot.appState.viewBackgroundColor
+      : '#fbfbfa';
+    ctx.fillRect(destination.x, destination.y, destination.width, destination.height);
+    ctx.restore();
+  }
+  if (frame.snapshot.elements.length > 0) {
+    const elements = [buildGhostRect(sceneSourceRect), ...frame.snapshot.elements];
+    const sceneCanvas = await canvasExporter({
+      elements,
+      appState: {
+        ...frame.snapshot.appState,
+        exportBackground: false,
+        viewBackgroundColor: 'transparent',
+        exportWithDarkMode: false,
+        exportPadding: 0,
+      },
+      files,
+      getDimensions: (width: number, height: number) => ({ width, height, scale: 1 }),
+    // The replay validator guarantees Excalidraw-shaped element/file payloads.
+    } as Parameters<typeof canvasExporter>[0]);
+    const realBounds = elementBoundsUnion(frame.snapshot.elements);
+    const renderedRect = realBounds ? unionRect(realBounds, sceneSourceRect) : sceneSourceRect;
+    const scaleX = sceneCanvas.width / renderedRect.width;
+    const scaleY = sceneCanvas.height / renderedRect.height;
+    const sourceX = (sceneSourceRect.x - renderedRect.x) * scaleX;
+    const sourceY = (sceneSourceRect.y - renderedRect.y) * scaleY;
+    ctx.save();
+    ctx.globalAlpha = style.inkOpacity;
+    try {
+      ctx.drawImage(
+        sceneCanvas,
+        Math.max(0, sourceX),
+        Math.max(0, sourceY),
+        Math.min(sceneSourceRect.width * scaleX, sceneCanvas.width - sourceX),
+        Math.min(sceneSourceRect.height * scaleY, sceneCanvas.height - sourceY),
+        destination.x, destination.y, destination.width, destination.height,
+      );
+    } catch {
+      ctx.drawImage(sceneCanvas, destination.x, destination.y, destination.width, destination.height);
+    }
+    ctx.restore();
+  }
+  drawDesktopInkPointer(ctx, frame, sceneSourceRect, destination, style.inkOpacity);
 }
 
 /**
@@ -881,6 +997,7 @@ export function releasePreviewResources(recordingId: string): void {
   }
   const shells = previewShellCache.get(recordingId);
   previewShellCache.delete(recordingId);
+  previewInkCache.delete(recordingId);
   previewPlaybackRegistry.clear(recordingId);
   void shells?.then(disposeShells).catch(() => undefined);
 }
@@ -1021,6 +1138,14 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const preset = ASPECT_PRESETS[opts.aspectRatio];
   const fps = opts.fps;
   const durationMs = metadata.durationMs;
+  let desktopInkSource: DesktopInkRenderSource | null = null;
+  try {
+    desktopInkSource = await loadRecordingDesktopInkSource(opts.recordingId, durationMs);
+  } catch (error) {
+    opts.onLog?.(`native Excalidraw events unavailable; using legacy snapshots (${normalizeExportError(error).message})`);
+  }
+  const sceneSnapshots = desktopInkSource?.contentSnapshots ?? snapshots;
+  const desktopInkStyle = resolveDesktopInkExportStyle(opts.desktopInkStyle, screenBlob ? 0 : 1);
   const format: ExportFormat = opts.format ?? 'mp4';
   const quality: ExportQuality = opts.quality ?? 'auto';
   // 质量档 → ffmpeg CRF（越小越清晰/越大）。WebCodecs 用倍率乘 estimateBitrate。
@@ -1080,6 +1205,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
 
   const filesForExport: Record<string, unknown> = {};
   for (const bf of binaryFiles) filesForExport[bf.fileId] = bf.data;
+  if (desktopInkSource) Object.assign(filesForExport, desktopInkSource.files);
 
   // 字幕与水印：在帧画布上直接绘制（不再走 ffmpeg overlay 滤镜）
   const burnSubs = (opts.burnSubtitles ?? true) && !!effectiveSubtitleSrt;
@@ -1100,10 +1226,10 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const outputW = evenize(baseW * resScale);
   const outputH = evenize(baseH * resScale);
 
-  const contentBox = computeContentBoundingBox(snapshots);
+  const contentBox = computeContentBoundingBox(sceneSnapshots);
   const fallbackViewport = (() => {
-    if (snapshots.length === 0) return DEFAULT_FALLBACK_VIEWPORT;
-    const lastVp = viewportFromAppState(snapshots[snapshots.length - 1].appState);
+    if (sceneSnapshots.length === 0) return DEFAULT_FALLBACK_VIEWPORT;
+    const lastVp = viewportFromAppState(sceneSnapshots[sceneSnapshots.length - 1].appState);
     return lastVp ?? DEFAULT_FALLBACK_VIEWPORT;
   })();
 
@@ -1121,7 +1247,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 相同帧去重：静止段（场景/外壳/字幕都没变）直接复用上一帧 PNG，跳过最贵的
   // exportToCanvas + 合成 + toBlob。有激光轨迹时逐帧不同，保守关闭去重以保正确。
   // 注：ffmpeg 兜底里若摄像头改走画布内合成（裁剪场景），逐帧含视频会再关掉去重。
-  let dedupEnabled = laserEvents.length === 0 && !screenBlob;
+  let dedupEnabled = laserEvents.length === 0 && !desktopInkSource?.hasPointerEvents && !screenBlob;
   let lastSig: string | null = null;
   let lastBuf: Uint8Array | null = null;
   // 基帧缓存：场景+外壳+水印只随 snapshot/shell 变化（与字幕无关）
@@ -1131,6 +1257,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   // 仅在没有视频源、激光轨迹和自动推镜时复用最终 canvas；每一个输出时间戳
   // 仍会创建独立 VideoFrame，因此分辨率、帧率和用户选择的画质都完全不变。
   const canReuseFinalFrame = laserEvents.length === 0
+    && !desktopInkSource?.hasPointerEvents
     && !screenBlob
     && !effectiveCameraBlob
     && !(opts.autoZooms?.length)
@@ -1238,14 +1365,16 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     const t = localizedTimingMap.length > 0
       ? localizedToSourceTime(localizedTimingMap, presentationTimeMs)
       : presentationTimeMs;
-    const snap = snapshotAt(snapshots, t);
+    const nativeInkFrame = desktopInkSource?.frameAt(t) ?? null;
+    const snap = nativeInkFrame?.snapshot ?? snapshotAt(snapshots, t);
     const shellAtTframe = useShell ? (shellAt(decodedShells, t) as DecodedShell | null) : null;
     const cueAtT = cues.length > 0 ? cueAt(cues, presentationTimeMs) : null;
     const animatedEffectActive = !!opts.highlights?.some((item) => t >= item.start && t < item.end)
       || !!opts.keyPointMotions?.some((item) => item.enabled && presentationTimeMs >= item.start && presentationTimeMs < item.end);
     const effectSig = animatedEffectActive ? `fx@${Math.round(t)}:${Math.round(presentationTimeMs)}` : 'fx-none';
-    const sig = `${snap?.timestamp ?? -1}|${shellAtTframe?.timestamp ?? -1}|${cueAtT ? `${cueAtT.startMs}-${cueAtT.endMs}#${subtitlePageAt(cueAtT, presentationTimeMs)}` : -1}|${effectSig}`;
-    return { t, presentationTimeMs, snap, shellAtTframe, sig };
+    const sceneSig = nativeInkFrame?.signature ?? String(snap?.timestamp ?? -1);
+    const sig = `${sceneSig}|${shellAtTframe?.timestamp ?? -1}|${cueAtT ? `${cueAtT.startMs}-${cueAtT.endMs}#${subtitlePageAt(cueAtT, presentationTimeMs)}` : -1}|${effectSig}`;
+    return { t, presentationTimeMs, snap, nativeInkFrame, shellAtTframe, sig };
   };
 
   // 合成一帧到独立 canvas（场景+外壳+水印+字幕），含基帧缓存。ffmpeg / WebCodecs 两路径共用。
@@ -1253,7 +1382,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
     if (canReuseFinalFrame && inp.sig === lastFinalSig && lastFinalCanvas) {
       return lastFinalCanvas;
     }
-    const { t, presentationTimeMs, snap, shellAtTframe } = inp;
+    const { t, presentationTimeMs, snap, nativeInkFrame, shellAtTframe } = inp;
     const target = frameTarget;
     const targetCtx = resetLayer(target);
     const backgroundStarted = performance.now();
@@ -1367,6 +1496,19 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
               : trackedFocus)
           : undefined,
       );
+      if (nativeInkFrame) {
+        const inkViewport = viewportFromAppState(nativeInkFrame.snapshot.appState)
+          ?? cropRectForSnapshot(nativeInkFrame.snapshot, cropCtx);
+        await drawDesktopInkSceneOverlay(
+          contentCtx,
+          nativeInkFrame,
+          inkViewport,
+          { x: 0, y: 0, width: content.width, height: content.height },
+          filesForExport,
+          exportToCanvas,
+          desktopInkStyle,
+        );
+      }
       diagnostics.addBreakdown('display_composition', performance.now() - displayComposeStarted);
       // Autozoom changes only the texture inside the recording frame. The frame
       // geometry and the selected background stay fixed for the whole export.
@@ -1404,8 +1546,11 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
 
       if (snap) {
         const boardColor = (snap.appState as { viewBackgroundColor?: string }).viewBackgroundColor ?? '#fbfbfa';
+        contentCtx.save();
+        if (nativeInkFrame) contentCtx.globalAlpha = desktopInkStyle.backgroundOpacity;
         contentCtx.fillStyle = boardColor;
         contentCtx.fillRect(dest.x, dest.y, dest.width, dest.height);
+        contentCtx.restore();
       }
 
       const sceneSourceRect: SceneRect = (() => {
@@ -1450,6 +1595,8 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         const sw = sceneSourceRect.width * scale;
         const sh2 = sceneSourceRect.height * scaleY;
 
+        contentCtx.save();
+        if (nativeInkFrame) contentCtx.globalAlpha = desktopInkStyle.inkOpacity;
         try {
           contentCtx.drawImage(
             sceneCanvas,
@@ -1462,6 +1609,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
         } catch {
           contentCtx.drawImage(sceneCanvas, dest.x, dest.y, dest.width, dest.height);
         }
+        contentCtx.restore();
       }
 
       if (laserEvents.length > 0) {
@@ -1473,6 +1621,7 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
           }),
         });
       }
+      drawDesktopInkPointer(contentCtx, nativeInkFrame, sceneSourceRect, dest, desktopInkStyle.inkOpacity);
 
       if (dedupEnabled) {
         if (!baseCanvas) baseCanvas = document.createElement('canvas');
@@ -1916,6 +2065,16 @@ export async function renderPreviewFrame(
   checkAborted();
   const { exportToCanvas } = await import('@excalidraw/excalidraw');
   const { metadata, snapshots, binaryFiles, cameraBlob, screenBlob, laserEvents } = await loadFullRecording(recordingId);
+  let desktopInkSource: DesktopInkRenderSource | null = null;
+  try {
+    desktopInkSource = await getPreviewInkSource(recordingId, metadata.durationMs);
+  } catch { /* Browser-origin and legacy desktop projects have no native event track. */ }
+  const nativeInkFrame = desktopInkSource?.frameAt(timeMs) ?? null;
+  const sceneSnapshots = desktopInkSource?.contentSnapshots ?? snapshots;
+  const desktopInkStyle = resolveDesktopInkExportStyle(config.desktopInkStyle, screenBlob ? 0 : 1);
+  const filesForExport: Record<string, unknown> = {};
+  for (const bf of binaryFiles) filesForExport[bf.fileId] = bf.data;
+  if (desktopInkSource) Object.assign(filesForExport, desktopInkSource.files);
   checkAborted();
   const cursorFocusTrack = config.alwaysKeepZoomedIn ? await getCursorFocusTrack(recordingId) : undefined;
   const localizedTrack = config.localizedTrackId ? await getLocalizedTrack(config.localizedTrackId) : undefined;
@@ -1991,6 +2150,25 @@ export async function renderPreviewFrame(
             : focusPointAt(cursorFocusTrack, timeMs))
         : undefined,
     );
+    if (nativeInkFrame) {
+      const inkViewport = viewportFromAppState(nativeInkFrame.snapshot.appState)
+        ?? cropRectForSnapshot(nativeInkFrame.snapshot, {
+          aspectRatio: config.aspectRatio,
+          croppingMode: config.croppingMode,
+          contentBox: computeContentBoundingBox(sceneSnapshots),
+          fallbackViewport: DEFAULT_FALLBACK_VIEWPORT,
+          cropWindow: config.cropWindow,
+        });
+      await drawDesktopInkSceneOverlay(
+        contentCtx,
+        nativeInkFrame,
+        inkViewport,
+        { x: 0, y: 0, width: content.width, height: content.height },
+        filesForExport,
+        exportToCanvas,
+        desktopInkStyle,
+      );
+    }
     finalizePreviewForeground({ x: 0, y: 0, width: content.width, height: content.height });
     return;
   }
@@ -2012,24 +2190,24 @@ export async function renderPreviewFrame(
     }
   }
 
-  const snap = snapshotAt(snapshots, timeMs);
+  const snap = nativeInkFrame?.snapshot ?? snapshotAt(snapshots, timeMs);
   const dest = (useShell && shellAtT && frameShellLayout)
     ? frameShellLayout.canvasRect
     : { x: 0, y: 0, width: target.width, height: target.height };
   if (snap) {
     const boardColor = (snap.appState as { viewBackgroundColor?: string }).viewBackgroundColor ?? '#fbfbfa';
+    contentCtx.save();
+    if (nativeInkFrame) contentCtx.globalAlpha = desktopInkStyle.backgroundOpacity;
     contentCtx.fillStyle = boardColor;
     contentCtx.fillRect(dest.x, dest.y, dest.width, dest.height);
+    contentCtx.restore();
   }
   if (!snap || (snap.elements as unknown[]).length === 0) {
     finalizePreviewForeground(frameShellLayout?.canvasRect ?? { x: 0, y: 0, width: content.width, height: content.height });
     return;
   }
 
-  const filesForExport: Record<string, unknown> = {};
-  for (const bf of binaryFiles) filesForExport[bf.fileId] = bf.data;
-
-  const contentBox = computeContentBoundingBox(snapshots);
+  const contentBox = computeContentBoundingBox(sceneSnapshots);
   const fallbackViewport = viewportFromAppState(snap.appState) ?? DEFAULT_FALLBACK_VIEWPORT;
 
   // shell 模式：source 按 canvasRect 的 aspect 裁，croppingMode 仍生效；
@@ -2081,6 +2259,8 @@ export async function renderPreviewFrame(
   const sw = sceneSourceRect.width * scale;
   const sh = sceneSourceRect.height * scaleY;
 
+  contentCtx.save();
+  if (nativeInkFrame) contentCtx.globalAlpha = desktopInkStyle.inkOpacity;
   try {
     contentCtx.drawImage(
       sceneCanvas,
@@ -2093,6 +2273,7 @@ export async function renderPreviewFrame(
   } catch {
     contentCtx.drawImage(sceneCanvas, dest.x, dest.y, dest.width, dest.height);
   }
+  contentCtx.restore();
 
   // 激光笔轨迹叠加（预览也需要）
   if (laserEvents.length > 0) {
@@ -2103,6 +2284,7 @@ export async function renderPreviewFrame(
       }),
     });
   }
+  drawDesktopInkPointer(contentCtx, nativeInkFrame, sceneSourceRect, dest, desktopInkStyle.inkOpacity);
 
   finalizePreviewForeground(dest);
 }

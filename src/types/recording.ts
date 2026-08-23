@@ -426,6 +426,11 @@ export interface ExportConfig {
   videoBackground?: VideoBackgroundConfig;
   /** 英文配音 / 本地化音轨。缺省不启用，旧录制兼容。 */
   localizedTrackId?: string;
+  /** Desktop Excalidraw overlay remains independently adjustable after capture. */
+  desktopInkStyle?: {
+    backgroundOpacity?: number;
+    inkOpacity?: number;
+  };
   /** 启用 localizedTrack 时默认 true：不混入中文原声。 */
   muteOriginalAudio?: boolean;
 }

@@ -23,6 +23,7 @@ import {
   parseDesktopWindowMediaSourceId,
 } from './windowContract';
 import { createNativeInkEventBatch } from './inkEventBatch';
+import { readNativeInkEventSegments } from './inkEventReader';
 
 let mainWindow: BrowserWindow | null = null;
 let inkWindow: BrowserWindow | null = null;
@@ -185,6 +186,17 @@ function registerDesktopIpc(): void {
     return helper.validateProject(
       path.join(app.getPath('videos'), 'Excalicast Projects', recordingId),
     );
+  });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.projectReadInkEvents, async (_event, payload: unknown) => {
+    const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+    const recordingId = typeof value.recordingId === 'string' ? value.recordingId : '';
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(recordingId)) {
+      throw new Error('native_ink_event_read_request_invalid');
+    }
+    const projectRoot = path.join(app.getPath('videos'), 'Excalicast Projects', recordingId);
+    const helper = await requireNativeHelper();
+    const manifest = await helper.recoverProject(projectRoot);
+    return { segments: await readNativeInkEventSegments(projectRoot, manifest) };
   });
 }
 

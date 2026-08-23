@@ -12,6 +12,9 @@ export type DesktopInkEvent =
       scrollX: number;
       scrollY: number;
       zoom: number;
+      width?: number;
+      height?: number;
+      viewBackgroundColor?: string;
     }
   | {
       kind: 'pointer';
@@ -68,10 +71,20 @@ export class DesktopInkEventCollector {
       ? (appState.zoom as Record<string, unknown>).value
       : appState.zoom;
     const zoom = finiteNumber(zoomValue, 1);
-    const viewportSignature = `${scrollX}:${scrollY}:${zoom}`;
+    const width = optionalFiniteNumber(appState.width);
+    const height = optionalFiniteNumber(appState.height);
+    const viewBackgroundColor = typeof appState.viewBackgroundColor === 'string'
+      ? appState.viewBackgroundColor
+      : undefined;
+    const viewportSignature = `${scrollX}:${scrollY}:${zoom}:${width ?? ''}:${height ?? ''}:${viewBackgroundColor ?? ''}`;
     if (viewportSignature !== this.viewportSignature) {
       this.viewportSignature = viewportSignature;
-      this.enqueue({ kind: 'viewport', atUnixMs, scrollX, scrollY, zoom });
+      this.enqueue({
+        kind: 'viewport', atUnixMs, scrollX, scrollY, zoom,
+        ...(width === undefined ? {} : { width }),
+        ...(height === undefined ? {} : { height }),
+        ...(viewBackgroundColor === undefined ? {} : { viewBackgroundColor }),
+      });
     }
   }
 
@@ -115,4 +128,8 @@ export class DesktopInkEventCollector {
 
 function finiteNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function optionalFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
