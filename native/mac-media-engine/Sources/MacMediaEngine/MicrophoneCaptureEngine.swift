@@ -10,9 +10,15 @@ final class MicrophoneCaptureEngine: NSObject, AVCaptureAudioDataOutputSampleBuf
     private var writer: AudioSegmentWriter?
     private var terminalError: Error?
     private let firstSampleGate = FirstMediaSampleGate()
+    private var controls: CaptureControlState?
     var onSharedPCMSample: (@Sendable (CMSampleBuffer) -> Void)?
 
-    func start(deviceID: String?, store: SegmentedRecordingStore, timeline: RecordingTimeline) throws {
+    func start(
+        deviceID: String?,
+        store: SegmentedRecordingStore,
+        timeline: RecordingTimeline,
+        controls: CaptureControlState
+    ) throws {
         let device: AVCaptureDevice?
         if let deviceID {
             let discovery = AVCaptureDevice.DiscoverySession(
@@ -45,6 +51,7 @@ final class MicrophoneCaptureEngine: NSObject, AVCaptureAudioDataOutputSampleBuf
         )
         self.output = output
         self.session = session
+        self.controls = controls
         session.startRunning()
         guard session.isRunning else { throw NativeCaptureError.microphoneStartFailed }
         guard firstSampleGate.wait(timeout: 3) == .ready else {
@@ -63,6 +70,7 @@ final class MicrophoneCaptureEngine: NSObject, AVCaptureAudioDataOutputSampleBuf
         writer = nil
         output = nil
         session = nil
+        controls = nil
         if let firstError { throw firstError }
     }
 
@@ -72,9 +80,16 @@ final class MicrophoneCaptureEngine: NSObject, AVCaptureAudioDataOutputSampleBuf
         from connection: AVCaptureConnection
     ) {
         do {
-            try writer?.append(sampleBuffer)
+            guard let controls else { return }
+            let muted = controls.snapshot().microphoneMuted
+            guard let controlled = try ControlledSampleBuffer.audio(
+                sampleBuffer,
+                controls: controls,
+                muted: muted
+            ) else { return }
+            try writer?.append(controlled)
             firstSampleGate.markReady()
-            onSharedPCMSample?(sampleBuffer)
+            if !muted { onSharedPCMSample?(controlled) }
         } catch {
             recordTerminalError(error)
         }

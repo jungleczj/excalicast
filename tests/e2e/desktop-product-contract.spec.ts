@@ -128,6 +128,12 @@ test('desktop IPC is versioned and separates native capture from renderer pixels
   expect(DESKTOP_IPC_CHANNELS.capturePermissions).toBe('capture.permissions.v1');
   expect(DESKTOP_IPC_CHANNELS.captureRequestPermissions).toBe('capture.request-permissions.v1');
   expect(DESKTOP_IPC_CHANNELS.captureStop).toBe('capture.stop.v1');
+  expect(DESKTOP_IPC_CHANNELS.capturePause).toBe('capture.pause.v1');
+  expect(DESKTOP_IPC_CHANNELS.captureResume).toBe('capture.resume.v1');
+  expect(DESKTOP_IPC_CHANNELS.captureSetMicrophoneMuted).toBe('capture.microphone-muted.v1');
+  expect(DESKTOP_IPC_CHANNELS.captureSetSystemAudioMuted).toBe('capture.system-audio-muted.v1');
+  expect(DESKTOP_IPC_CHANNELS.captureSetCameraVisibility).toBe('capture.camera-visibility.v1');
+  expect(DESKTOP_IPC_CHANNELS.captureSetCameraHardware).toBe('capture.camera-hardware.v1');
   expect(DESKTOP_IPC_CHANNELS.inkSetOpacity).toBe('ink.set-opacity.v1');
   expect(DESKTOP_IPC_CHANNELS.inkGetSettings).toBe('ink.get-settings.v1');
   expect(DESKTOP_IPC_CHANNELS.inkSettingsChanged).toBe('ink.settings-changed.v1');

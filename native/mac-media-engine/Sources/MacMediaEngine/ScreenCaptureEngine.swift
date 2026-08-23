@@ -42,6 +42,7 @@ final class ScreenCaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate, @un
     private var stream: SCStream?
     private var encoder: HardwareVideoEncoder?
     private var systemAudioWriter: AudioSegmentWriter?
+    private var controls: CaptureControlState?
     private var store: SegmentedRecordingStore?
     private var terminalError: Error?
     private var heartbeatTimer: DispatchSourceTimer?
@@ -54,6 +55,7 @@ final class ScreenCaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate, @un
     private var blankSamples = 0
     private var suspendedSamples = 0
     private var pixelBufferSamples = 0
+    private(set) var hasSystemAudio = false
 
     func start(
         source: CaptureSourceSelection,
@@ -61,6 +63,7 @@ final class ScreenCaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate, @un
         store: SegmentedRecordingStore,
         timeline: RecordingTimeline,
         captureSystemAudio: Bool,
+        controls: CaptureControlState,
         excludedWindowIDs: [UInt32]
     ) async throws {
         let content = try await SCShareableContent.excludingDesktopWindows(
@@ -118,6 +121,8 @@ final class ScreenCaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate, @un
         self.store = store
         self.encoder = encoder
         self.systemAudioWriter = systemAudioWriter
+        self.controls = controls
+        self.hasSystemAudio = captureSystemAudio
         self.requestFramesPerSecond = request.framesPerSecond
         self.stream = stream
         let initialPixelBuffer = try await captureInitialPixelBuffer(
@@ -142,9 +147,13 @@ final class ScreenCaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate, @un
             )
             queueLock.unlock()
             if shouldSeed {
+                guard let presentationTime = controls.adjustedPresentationUs(
+                    CMClockGetTime(CMClockGetHostTimeClock())
+                        .convertScale(1_000_000, method: .roundTowardZero).value
+                ) else { return }
                 try submit(
                     initialPixelBuffer,
-                    presentationTime: CMClockGetTime(CMClockGetHostTimeClock())
+                    presentationTime: CMTime(value: presentationTime, timescale: 1_000_000)
                 )
                 queueLock.lock()
                 seededFrames += 1
@@ -167,6 +176,8 @@ final class ScreenCaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate, @un
         do { try systemAudioWriter?.finishAndWait() } catch { if firstError == nil { firstError = error } }
         encoder = nil
         systemAudioWriter = nil
+        controls = nil
+        hasSystemAudio = false
         store = nil
         clearLastFrame()
         if let firstError { throw firstError }
@@ -193,11 +204,20 @@ final class ScreenCaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate, @un
     ) {
         guard sampleBuffer.isValid, CMSampleBufferDataIsReady(sampleBuffer) else { return }
         if outputType == .audio {
-            do { try systemAudioWriter?.append(sampleBuffer) }
+            do {
+                guard let controls else { return }
+                guard let controlled = try ControlledSampleBuffer.audio(
+                    sampleBuffer,
+                    controls: controls,
+                    muted: controls.snapshot().systemAudioMuted
+                ) else { return }
+                try systemAudioWriter?.append(controlled)
+            }
             catch { recordTerminalError(error) }
             return
         }
-        guard outputType == .screen else { return }
+        guard outputType == .screen, let controls,
+              ControlledSampleBuffer.videoPresentationTime(sampleBuffer, controls: controls) != nil else { return }
         queueLock.lock()
         receivedScreenSamples += 1
         switch frameStatus(sampleBuffer) {
@@ -271,9 +291,13 @@ final class ScreenCaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate, @un
             queueLock.unlock()
             do {
                 guard let pixelBuffer = CMSampleBufferGetImageBuffer(frame) else { continue }
+                guard let controls,
+                      let presentationTime = ControlledSampleBuffer.videoPresentationTime(frame, controls: controls) else {
+                    continue
+                }
                 try submit(
                     pixelBuffer,
-                    presentationTime: CMSampleBufferGetPresentationTimeStamp(frame),
+                    presentationTime: presentationTime,
                     duration: CMSampleBufferGetDuration(frame)
                 )
             } catch {
@@ -317,7 +341,11 @@ final class ScreenCaptureEngine: NSObject, SCStreamOutput, SCStreamDelegate, @un
         let lastPresentationTime = lastSubmittedPresentationTime
         queueLock.unlock()
         guard let pixelBuffer, let lastPresentationTime else { return }
-        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        guard let controls else { return }
+        let rawNow = CMClockGetTime(CMClockGetHostTimeClock())
+            .convertScale(1_000_000, method: .roundTowardZero).value
+        guard let adjustedNow = controls.adjustedPresentationUs(rawNow) else { return }
+        let now = CMTime(value: adjustedNow, timescale: 1_000_000)
         let elapsedUs = (now - lastPresentationTime)
             .convertScale(1_000_000, method: .roundTowardZero)
             .value

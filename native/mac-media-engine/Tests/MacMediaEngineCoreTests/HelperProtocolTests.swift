@@ -58,6 +58,27 @@ struct MacMediaEngineContractTests {
         try expect(stoppingState == .stopping, "safe stop exposes stopping state")
         try expect(stoppedState == .idle, "safe stop returns to idle after flush")
 
+        let controls = CaptureControlState()
+        try expect(controls.pause(atUs: 2_000_000), "first pause changes state")
+        try expect(controls.adjustedPresentationUs(2_500_000) == nil, "paused samples are dropped")
+        try expect(controls.resume(atUs: 5_000_000), "resume changes state")
+        try expect(
+            controls.adjustedPresentationUs(6_000_000) == 3_000_000,
+            "paused wall time is removed from the project clock"
+        )
+        controls.setMicrophoneMuted(true)
+        controls.setSystemAudioMuted(true)
+        controls.setCameraHidden(true)
+        controls.setCameraHardwareEnabled(false)
+        let controlSnapshot = controls.snapshot()
+        try expect(controlSnapshot.microphoneMuted, "microphone mute is explicit")
+        try expect(controlSnapshot.systemAudioMuted, "system audio mute is explicit")
+        try expect(controlSnapshot.cameraHidden, "camera visibility is independent")
+        try expect(
+            controlSnapshot.cameraHardwareState == .off && !controlSnapshot.cameraPhysicallyPowered,
+            "hardware-off state never claims the camera remains powered"
+        )
+
         var queue = LatestFrameQueue<Int>(capacity: 2)
         queue.offer(1)
         queue.offer(2)

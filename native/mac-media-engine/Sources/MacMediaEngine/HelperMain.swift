@@ -32,6 +32,9 @@ private struct Command: Decodable, Sendable {
     let eventDurationUs: Int64?
     let eventPayload: String?
     let mediaTrack: RecordingTrackKind?
+    let muted: Bool?
+    let hidden: Bool?
+    let enabled: Bool?
 }
 
 private struct Response: Encodable, Sendable {
@@ -48,6 +51,10 @@ private struct Response: Encodable, Sendable {
     let manifest: RecoverableRecordingManifest?
     let validation: RecordingProjectValidationReport?
     let materializedTrack: MaterializedRecordingTrack?
+    let muted: Bool?
+    let hidden: Bool?
+    let hardwareState: CameraHardwareState?
+    let physicallyPowered: Bool?
     let error: String?
     let errorCode: String?
     let errorTrack: RecordingTrackKind?
@@ -66,6 +73,10 @@ private struct Response: Encodable, Sendable {
         manifest: RecoverableRecordingManifest?,
         validation: RecordingProjectValidationReport? = nil,
         materializedTrack: MaterializedRecordingTrack? = nil,
+        muted: Bool? = nil,
+        hidden: Bool? = nil,
+        hardwareState: CameraHardwareState? = nil,
+        physicallyPowered: Bool? = nil,
         error: String?,
         errorCode: String? = nil,
         errorTrack: RecordingTrackKind? = nil
@@ -83,6 +94,10 @@ private struct Response: Encodable, Sendable {
         self.manifest = manifest
         self.validation = validation
         self.materializedTrack = materializedTrack
+        self.muted = muted
+        self.hidden = hidden
+        self.hardwareState = hardwareState
+        self.physicallyPowered = physicallyPowered
         self.error = error
         self.errorCode = errorCode
         self.errorTrack = errorTrack
@@ -364,6 +379,47 @@ private actor HelperServer {
                     _ = await lifecycle.stop()
                     throw error
                 }
+            case "capture.pause.v1":
+                guard let captureEngine, await lifecycle.state == .recording else {
+                    throw HelperServerError.missingCaptureParameters
+                }
+                captureEngine.pause()
+                return success(command.id, state: await lifecycle.pause(), capability: nil)
+            case "capture.resume.v1":
+                guard let captureEngine, await lifecycle.state == .paused else {
+                    throw HelperServerError.missingCaptureParameters
+                }
+                captureEngine.resume()
+                return success(command.id, state: await lifecycle.resume(), capability: nil)
+            case "capture.microphone-muted.v1":
+                guard let captureEngine, let muted = command.muted else {
+                    throw HelperServerError.missingCaptureParameters
+                }
+                try captureEngine.setMicrophoneMuted(muted)
+                return controlResponse(command.id, state: await lifecycle.state, muted: muted)
+            case "capture.system-audio-muted.v1":
+                guard let captureEngine, let muted = command.muted else {
+                    throw HelperServerError.missingCaptureParameters
+                }
+                try captureEngine.setSystemAudioMuted(muted)
+                return controlResponse(command.id, state: await lifecycle.state, muted: muted)
+            case "capture.camera-visibility.v1":
+                guard let captureEngine, let hidden = command.hidden else {
+                    throw HelperServerError.missingCaptureParameters
+                }
+                try captureEngine.setCameraHidden(hidden)
+                return controlResponse(command.id, state: await lifecycle.state, hidden: hidden)
+            case "capture.camera-hardware.v1":
+                guard let captureEngine, let enabled = command.enabled else {
+                    throw HelperServerError.missingCaptureParameters
+                }
+                let snapshot = try captureEngine.setCameraHardwareEnabled(enabled)
+                return controlResponse(
+                    command.id,
+                    state: await lifecycle.state,
+                    hardwareState: snapshot.cameraHardwareState,
+                    physicallyPowered: snapshot.cameraPhysicallyPowered
+                )
             case "ink.append-events.v1":
                 guard let captureEngine,
                       let eventIndex = command.eventIndex,
@@ -577,6 +633,34 @@ private actor HelperServer {
         )
     }
 
+    private func controlResponse(
+        _ id: String,
+        state: HelperState,
+        muted: Bool? = nil,
+        hidden: Bool? = nil,
+        hardwareState: CameraHardwareState? = nil,
+        physicallyPowered: Bool? = nil
+    ) -> Response {
+        Response(
+            id: id,
+            ok: true,
+            protocolVersion: HelperHandshake.currentProtocolVersion,
+            engine: "mac-media-engine",
+            state: state,
+            capability: nil,
+            sources: nil,
+            devices: nil,
+            permissions: nil,
+            pressure: nil,
+            manifest: nil,
+            muted: muted,
+            hidden: hidden,
+            hardwareState: hardwareState,
+            physicallyPowered: physicallyPowered,
+            error: nil
+        )
+    }
+
     private func permissionResponse(_ id: String) async -> Response {
         Response(
             id: id,
@@ -652,6 +736,12 @@ private actor HelperServer {
             return CaptureFailureDescriptor(
                 message: "The enabled \(track.rawValue) track did not deliver encodable media before startup timed out.",
                 code: "capture_track_not_ready",
+                track: track
+            )
+        case NativeCaptureError.controlTrackUnavailable(let track):
+            return CaptureFailureDescriptor(
+                message: "The (track.rawValue) track was not enabled when this recording started.",
+                code: "capture_control_track_unavailable",
                 track: track
             )
         case RecordingStoreError.missingRequiredTrack(let track):

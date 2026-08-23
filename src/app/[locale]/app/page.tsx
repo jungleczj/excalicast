@@ -144,6 +144,7 @@ export default function HomePage(): JSX.Element {
   const [elapsed, setElapsed] = useState<number>(0);
   const [hasAudio, setHasAudio] = useState<boolean>(false);
   const [hasCamera, setHasCamera] = useState<boolean>(false);
+  const [systemAudioMuted, setSystemAudioMuted] = useState(false);
   const [cameraEnabled, setCameraEnabled] = useState<boolean>(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [cameraPos, setCameraPos] = useState({ x: 0, y: 0 });
@@ -189,7 +190,6 @@ export default function HomePage(): JSX.Element {
 
   const sessionRef = useRef<SessionHandle | null>(recordingLifecycle.activeSession());
   const nativeSessionRef = useRef<DesktopAiCameraSession | null>(null);
-  const nativeStartedAtRef = useRef<number | null>(null);
   const nativeMetadataRef = useRef<RecordingMetadata | null>(null);
   const stoppingRef = useRef(false);
   const changeRef = useRef<WhiteboardChangeFn | null>(null);
@@ -526,8 +526,8 @@ export default function HomePage(): JSX.Element {
       // 秒级时钟即可，1s 一跳避免录制中 4Hz 全量重渲染造成的卡顿
       tickRef.current = setInterval(() => {
         if (sessionRef.current) setElapsed(sessionRef.current.getElapsedMs());
-        else if (nativeStartedAtRef.current !== null) {
-          setElapsed(Date.now() - nativeStartedAtRef.current);
+        else if (nativeSessionRef.current) {
+          setElapsed(nativeSessionRef.current.getElapsedMs());
         }
       }, 1000);
       return () => { if (tickRef.current) clearInterval(tickRef.current); };
@@ -637,6 +637,30 @@ export default function HomePage(): JSX.Element {
     if (!recordingLifecycle.activeSession()) closeDesktopControls();
   }, [closeDesktopControls]);
 
+  const persistNativeCameraVisibility = useCallback(async (
+    recordingId: string,
+    hidden: boolean,
+    timestamp: number,
+  ) => {
+    const frame = getCropFrameRect();
+    const rootRect = workspaceRootRef.current?.getBoundingClientRect();
+    const basis = frame
+      ? { x: frame.x, y: frame.y, width: frame.w, height: frame.h }
+      : rootRect && rootRect.width > 0 && rootRect.height > 0
+        ? { x: rootRect.left, y: rootRect.top, width: rootRect.width, height: rootRect.height }
+        : null;
+    if (!basis) throw new Error('desktop_native_camera_geometry_unavailable');
+    const { getClientDb } = await import('@/lib/db-client');
+    await getClientDb().cameraPositions.add({
+      recordingId,
+      timestamp: Math.max(0, Math.round(timestamp)),
+      rx: (cameraPos.x - basis.x) / basis.width,
+      ry: (cameraPos.y - basis.y) / basis.height,
+      rs: cameraSize / Math.min(basis.width, basis.height),
+      hidden,
+    });
+  }, [cameraPos.x, cameraPos.y, cameraSize, getCropFrameRect]);
+
   // 真正开录（取景确认 + 倒计时结束后调用）—— 复用取景已采集的麦克风/摄像头流，瞬时开录
   const beginRecording = useCallback(async (
     config: RecordingSetupConfig,
@@ -680,6 +704,9 @@ export default function HomePage(): JSX.Element {
             setup: config,
           });
           await getClientDb().recordings.put(metadata);
+          if (config.camera.enabled) {
+            await persistNativeCameraVisibility(metadata.id, false, 0);
+          }
           nativeMetadataRef.current = metadata;
         } catch {
           // A native recording without a local project row would be invisible
@@ -696,7 +723,6 @@ export default function HomePage(): JSX.Element {
         setMicStream(null);
         setCameraStream(null);
         nativeSessionRef.current = started.session;
-        nativeStartedAtRef.current = nativeStartedAt;
         sessionRef.current = null;
         setHasAudio(true);
         setHasCamera(config.camera.enabled);
@@ -753,7 +779,7 @@ export default function HomePage(): JSX.Element {
       setRecordingStarting(false);
       alert(t('startFailed', { message: err instanceof Error ? err.message : 'unknown' }));
     }
-  }, [cameraStream, locale, router, t]);
+  }, [cameraStream, locale, persistNativeCameraVisibility, router, t]);
 
   // Setup 面板确认：应用配置 → 进入取景态（在画布上框选裁切框/摆相机），暂不倒计时
   const handleSetupConfirm = useCallback(async (config: RecordingSetupConfig) => {
@@ -915,18 +941,31 @@ export default function HomePage(): JSX.Element {
     return () => clearTimeout(id);
   }, [countdown, beginRecording]);
 
-  const handlePause = useCallback(() => {
-    if (nativeSessionRef.current) {
-      alert(t('startFailed', { message: 'desktop_native_pause_unsupported' }));
+  const handlePause = useCallback(async () => {
+    const native = nativeSessionRef.current;
+    if (native) {
+      try {
+        await native.pause();
+        setElapsed(native.getElapsedMs());
+        setState('paused');
+      } catch (err) {
+        alert(t('startFailed', { message: err instanceof Error ? err.message : 'desktop_native_pause_failed' }));
+      }
       return;
     }
     sessionRef.current?.pause();
     setState('paused');
   }, [t]);
 
-  const handleResume = useCallback(() => {
-    if (nativeSessionRef.current) {
-      alert(t('startFailed', { message: 'desktop_native_pause_unsupported' }));
+  const handleResume = useCallback(async () => {
+    const native = nativeSessionRef.current;
+    if (native) {
+      try {
+        await native.resume();
+        setState('recording');
+      } catch (err) {
+        alert(t('startFailed', { message: err instanceof Error ? err.message : 'desktop_native_resume_failed' }));
+      }
       return;
     }
     sessionRef.current?.resume();
@@ -937,19 +976,63 @@ export default function HomePage(): JSX.Element {
   const [audioMuted, setAudioMuted] = useState(false);
   const [cameraMuted, setCameraMuted] = useState(false);
 
-  const handleToggleAudioMute = useCallback(() => {
+  const handleToggleAudioMute = useCallback(async () => {
+    const next = !audioMuted;
     if (nativeSessionRef.current) {
-      alert(t('startFailed', { message: 'desktop_native_microphone_toggle_unsupported' }));
+      try {
+        await nativeSessionRef.current.setMicrophoneMuted(next);
+        setAudioMuted(next);
+      } catch (err) {
+        alert(t('startFailed', { message: err instanceof Error ? err.message : 'desktop_native_microphone_toggle_failed' }));
+      }
       return;
     }
-    const next = !audioMuted;
     sessionRef.current?.setAudioMuted(next);
     setAudioMuted(next);
   }, [audioMuted, t]);
 
+  const handleToggleSystemAudioMute = useCallback(async () => {
+    const native = nativeSessionRef.current;
+    if (!native) return;
+    const next = !systemAudioMuted;
+    try {
+      await native.setSystemAudioMuted(next);
+      setSystemAudioMuted(next);
+    } catch (err) {
+      alert(t('startFailed', { message: err instanceof Error ? err.message : 'desktop_native_system_audio_toggle_failed' }));
+    }
+  }, [systemAudioMuted, t]);
+
   const handleToggleCameraMute = useCallback(async () => {
-    if (nativeSessionRef.current) {
-      alert(t('cameraOpenFailed', { message: 'desktop_native_camera_toggle_unsupported' }));
+    const native = nativeSessionRef.current;
+    if (native) {
+      if (!hasCamera) {
+        alert(t('cameraOpenFailed', { message: 'desktop_native_camera_not_configured' }));
+        return;
+      }
+      const next = !cameraMuted;
+      try {
+        if (next) {
+          await native.setCameraHidden(true);
+          await persistNativeCameraVisibility(native.recordingId, true, native.getElapsedMs());
+          await native.setCameraHardwareEnabled(false);
+        } else {
+          await native.setCameraHardwareEnabled(true);
+          await native.setCameraHidden(false);
+          await persistNativeCameraVisibility(native.recordingId, false, native.getElapsedMs());
+        }
+        setCameraMuted(next);
+      } catch (err) {
+        if (next) {
+          await native.setCameraHidden(false).catch(() => undefined);
+          await persistNativeCameraVisibility(native.recordingId, false, native.getElapsedMs()).catch(() => undefined);
+        } else {
+          await native.setCameraHidden(true).catch(() => undefined);
+          await native.setCameraHardwareEnabled(false).catch(() => undefined);
+          await persistNativeCameraVisibility(native.recordingId, true, native.getElapsedMs()).catch(() => undefined);
+        }
+        alert(t('cameraOpenFailed', { message: err instanceof Error ? err.message : 'desktop_native_camera_toggle_failed' }));
+      }
       return;
     }
     // 三态循环（录制中）：off → on → muted → on …
@@ -980,7 +1063,7 @@ export default function HomePage(): JSX.Element {
       setCameraStream(null);
       alert(t('cameraOpenFailed', { message: err instanceof Error ? err.message : 'unknown' }));
     }
-  }, [hasCamera, cameraMuted, t]);
+  }, [hasCamera, cameraMuted, persistNativeCameraVisibility, t]);
 
   // 激光笔：调 Excalidraw setActiveTool 切到 laser；再点切回 selection
   const handleToggleLaser = useCallback(() => {
@@ -1000,14 +1083,13 @@ export default function HomePage(): JSX.Element {
     if (native) {
       if (stoppingRef.current) return;
       stoppingRef.current = true;
-      const nativeStartedAt = nativeStartedAtRef.current ?? Date.now();
       setRecordingStarting(false);
       setState('processing');
       try {
         const recording = nativeMetadataRef.current;
         if (!recording) throw new Error('desktop_native_metadata_missing');
         await native.stop();
-        const durationMs = Date.now() - nativeStartedAt;
+        const durationMs = native.getElapsedMs();
         const bridge = (window as Window & {
           excalicastDesktop?: { invoke(channel: string, payload?: unknown): Promise<unknown> };
         }).excalicastDesktop;
@@ -1031,7 +1113,6 @@ export default function HomePage(): JSX.Element {
         const { getClientDb } = await import('@/lib/db-client');
         await getClientDb().recordings.put(finalized);
         nativeSessionRef.current = null;
-        nativeStartedAtRef.current = null;
         nativeMetadataRef.current = null;
         setElapsed(0);
         setCameraStream(null);
@@ -1039,6 +1120,7 @@ export default function HomePage(): JSX.Element {
         setHasCamera(false);
         setHasAudio(false);
         setAudioMuted(false);
+        setSystemAudioMuted(false);
         setCameraMuted(false);
         const exportHref = exportHrefForRecording(recording.id);
         try { router.push(exportHref); }
@@ -1227,6 +1309,8 @@ export default function HomePage(): JSX.Element {
     hasCamera: hasCamera || cameraEnabled,
     cameraEnabled,
     audioMuted,
+    hasSystemAudio: !!nativeSessionRef.current && setupConfig.source?.captureSystemAudio === true,
+    systemAudioMuted,
     cameraMuted,
     laserActive,
     zoomActive: zoomMode,
@@ -1234,6 +1318,7 @@ export default function HomePage(): JSX.Element {
     aspect: isRecording ? setupConfig.framing : undefined,
     onToggleCamera: handleToggleCamera,
     onToggleAudioMute: handleToggleAudioMute,
+    onToggleSystemAudioMute: handleToggleSystemAudioMute,
     onToggleCameraMute: handleToggleCameraMute,
     onToggleLaser: handleToggleLaser,
     onToggleZoom: () => setZoomMode((value) => !value),

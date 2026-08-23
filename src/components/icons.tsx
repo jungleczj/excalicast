@@ -51,6 +51,19 @@ export const I = {
       <path d="M9 21 h6" />
     </Base>
   ),
+  Speaker: (p: IconProps) => (
+    <Base {...p}>
+      <path d="M4 10 h4 l5 -4 v12 l-5 -4 H4 Z" />
+      <path d="M16 9 a4 4 0 0 1 0 6" />
+      <path d="M18.5 6.5 a8 8 0 0 1 0 11" />
+    </Base>
+  ),
+  SpeakerOff: (p: IconProps) => (
+    <Base {...p}>
+      <path d="M4 10 h4 l5 -4 v8" />
+      <path d="M3 3 l18 18" />
+    </Base>
+  ),
   Camera: (p: IconProps) => (
     <Base {...p}>
       <rect x="3" y="6" width="18" height="13" rx="2" />

@@ -11,6 +11,8 @@ export interface RecordingBarProps {
   cameraEnabled: boolean;
   /** 录制中麦克风是否被软静音（hasAudio=true 时才有意义） */
   audioMuted?: boolean;
+  hasSystemAudio?: boolean;
+  systemAudioMuted?: boolean;
   /** 录制中摄像头是否被软关闭（hasCamera=true 时才有意义） */
   cameraMuted?: boolean;
   /** 激光笔（Excalidraw laser tool）是否激活 */
@@ -24,6 +26,7 @@ export interface RecordingBarProps {
   onToggleCamera: () => void;
   /** 录制中点 mic 图标 —— 翻转软静音 */
   onToggleAudioMute?: () => void;
+  onToggleSystemAudioMute?: () => void;
   /**
    * 点 camera 图标 —— 三态循环（仅录制中）：
    *  off（hasCamera=false）→ on（懒 acquire）；
@@ -77,8 +80,8 @@ export function RecordingBar(props: RecordingBarProps): JSX.Element {
   const t = useTranslations('recordingBar');
   const {
     state, elapsedMs, hasAudio, hasCamera, cameraEnabled,
-    audioMuted, cameraMuted, laserActive, zoomActive, teleprompterActive, aspect,
-    onToggleCamera, onToggleAudioMute, onToggleCameraMute, onToggleLaser, onToggleZoom, onToggleTeleprompter,
+    audioMuted, hasSystemAudio, systemAudioMuted, cameraMuted, laserActive, zoomActive, teleprompterActive, aspect,
+    onToggleCamera, onToggleAudioMute, onToggleSystemAudioMute, onToggleCameraMute, onToggleLaser, onToggleZoom, onToggleTeleprompter,
     onOpenTemplates, onStart, onStop, onDiscard, onPause, onResume,
   } = props;
 
@@ -307,6 +310,17 @@ export function RecordingBar(props: RecordingBarProps): JSX.Element {
         title={!hasAudio ? t('micTooltip') : audioMuted ? t('unmuteAudio') : t('muteAudio')}
         onClick={hasAudio ? onToggleAudioMute : undefined}
       />
+      {hasSystemAudio && (
+        <SrcToggle
+          IconOn={I.Speaker}
+          IconOff={I.SpeakerOff}
+          present
+          muted={!!systemAudioMuted}
+          label={t('systemAudio')}
+          title={systemAudioMuted ? t('unmuteSystemAudio') : t('muteSystemAudio')}
+          onClick={onToggleSystemAudioMute}
+        />
+      )}
       <SrcToggle
         IconOn={I.Camera}
         IconOff={I.CameraOff}

@@ -31,9 +31,19 @@ export interface DesktopAiCameraSessionInput {
 
 export interface DesktopAiCameraSession {
   recordingId: string;
-  state: 'recording';
+  readonly state: 'recording' | 'paused';
   cameraDeviceID?: string;
   microphoneDeviceID?: string;
+  getElapsedMs(): number;
+  pause(): Promise<void>;
+  resume(): Promise<void>;
+  setMicrophoneMuted(muted: boolean): Promise<void>;
+  setSystemAudioMuted(muted: boolean): Promise<void>;
+  setCameraHidden(hidden: boolean): Promise<void>;
+  setCameraHardwareEnabled(enabled: boolean): Promise<{
+    hardwareState: 'active' | 'off';
+    physicallyPowered: boolean;
+  }>;
   stop(): Promise<void>;
 }
 
@@ -156,16 +166,97 @@ export async function startDesktopAiCameraSession(
 
   let stopped = false;
   let stopAttempt: Promise<void> | null = null;
+  let sessionState: DesktopAiCameraSession['state'] = 'recording';
+  const startedAt = Date.now();
+  let pauseStartedAt = 0;
+  let pausedTotalMs = 0;
+  let stoppedElapsedMs: number | null = null;
+  let controlTail = Promise.resolve();
+  const currentElapsedMs = () => Math.max(0, Date.now() - startedAt - pausedTotalMs
+    - (sessionState === 'paused' ? Date.now() - pauseStartedAt : 0));
+  const control = <T>(operation: () => Promise<T>): Promise<T> => {
+    const pending = controlTail.then(operation, operation);
+    controlTail = pending.then(() => undefined, () => undefined);
+    return pending;
+  };
   return {
     recordingId: input.recordingId,
-    state: 'recording',
+    get state() { return sessionState; },
     cameraDeviceID,
     microphoneDeviceID,
+    getElapsedMs() {
+      return stoppedElapsedMs ?? currentElapsedMs();
+    },
+    pause() {
+      return control(async () => {
+        if (sessionState === 'paused') return;
+        const response = await input.bridge.invoke(DESKTOP_IPC_CHANNELS.capturePause) as { state?: unknown };
+        if (response?.state !== 'paused') throw new Error('desktop_capture_pause_invalid');
+        sessionState = 'paused';
+        pauseStartedAt = Date.now();
+      });
+    },
+    resume() {
+      return control(async () => {
+        if (sessionState === 'recording') return;
+        const response = await input.bridge.invoke(DESKTOP_IPC_CHANNELS.captureResume) as { state?: unknown };
+        if (response?.state !== 'recording') throw new Error('desktop_capture_resume_invalid');
+        pausedTotalMs += Date.now() - pauseStartedAt;
+        pauseStartedAt = 0;
+        sessionState = 'recording';
+      });
+    },
+    setMicrophoneMuted(muted) {
+      return control(async () => {
+        const response = await input.bridge.invoke(
+          DESKTOP_IPC_CHANNELS.captureSetMicrophoneMuted,
+          { muted },
+        ) as { muted?: unknown };
+        if (response?.muted !== muted) throw new Error('desktop_microphone_mute_invalid');
+      });
+    },
+    setSystemAudioMuted(muted) {
+      return control(async () => {
+        const response = await input.bridge.invoke(
+          DESKTOP_IPC_CHANNELS.captureSetSystemAudioMuted,
+          { muted },
+        ) as { muted?: unknown };
+        if (response?.muted !== muted) throw new Error('desktop_system_audio_mute_invalid');
+      });
+    },
+    setCameraHidden(hidden) {
+      return control(async () => {
+        const response = await input.bridge.invoke(
+          DESKTOP_IPC_CHANNELS.captureSetCameraVisibility,
+          { hidden },
+        ) as { hidden?: unknown };
+        if (response?.hidden !== hidden) throw new Error('desktop_camera_visibility_invalid');
+      });
+    },
+    setCameraHardwareEnabled(enabled) {
+      return control(async () => {
+        const response = await input.bridge.invoke(
+          DESKTOP_IPC_CHANNELS.captureSetCameraHardware,
+          { enabled },
+        ) as { hardwareState?: unknown; physicallyPowered?: unknown };
+        const expected = enabled ? 'active' : 'off';
+        if (response?.hardwareState !== expected || response.physicallyPowered !== enabled) {
+          throw new Error('desktop_camera_hardware_state_invalid');
+        }
+        return { hardwareState: expected, physicallyPowered: enabled };
+      });
+    },
     async stop() {
       if (stopped) return;
+      await controlTail;
       if (!stopAttempt) {
+        stoppedElapsedMs = currentElapsedMs();
         stopAttempt = input.bridge.invoke(DESKTOP_IPC_CHANNELS.captureStop)
           .then(() => { stopped = true; })
+          .catch((error) => {
+            stoppedElapsedMs = null;
+            throw error;
+          })
           .finally(() => { stopAttempt = null; });
       }
       await stopAttempt;

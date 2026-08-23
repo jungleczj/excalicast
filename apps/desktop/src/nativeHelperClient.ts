@@ -13,7 +13,7 @@ interface HelperResponse {
   ok: boolean;
   protocolVersion?: number;
   engine?: string;
-  state?: 'idle' | 'recording' | 'stopping';
+  state?: 'idle' | 'recording' | 'paused' | 'stopping';
   capability?: NativeCaptureCapability;
   sources?: NativeCaptureSources;
   devices?: NativeCaptureDevices;
@@ -22,6 +22,10 @@ interface HelperResponse {
   manifest?: NativeRecordingManifest;
   validation?: NativeRecordingValidationReport;
   materializedTrack?: NativeMaterializedTrack;
+  muted?: boolean;
+  hidden?: boolean;
+  hardwareState?: 'active' | 'off';
+  physicallyPowered?: boolean;
   error?: string;
   errorCode?: string;
   errorTrack?: NativeRecordingTrack;
@@ -216,7 +220,7 @@ export interface NativeRecordingValidationReport {
 export interface NativeHelperHandshake {
   protocolVersion: 1;
   engine: 'mac-media-engine';
-  state: 'idle' | 'recording' | 'stopping';
+  state: 'idle' | 'recording' | 'paused' | 'stopping';
 }
 
 export class NativeHelperClient {
@@ -295,8 +299,50 @@ export class NativeHelperClient {
     return response.state;
   }
 
+  async pauseCapture(): Promise<'paused'> {
+    const response = await this.request({ channel: 'capture.pause.v1' });
+    if (response.state !== 'paused') throw new Error('native_capture_pause_invalid');
+    return response.state;
+  }
+
+  async resumeCapture(): Promise<'recording'> {
+    const response = await this.request({ channel: 'capture.resume.v1' });
+    if (response.state !== 'recording') throw new Error('native_capture_resume_invalid');
+    return response.state;
+  }
+
+  async setMicrophoneMuted(muted: boolean): Promise<boolean> {
+    const response = await this.request({ channel: 'capture.microphone-muted.v1', muted });
+    if (response.muted !== muted) throw new Error('native_microphone_mute_invalid');
+    return response.muted;
+  }
+
+  async setSystemAudioMuted(muted: boolean): Promise<boolean> {
+    const response = await this.request({ channel: 'capture.system-audio-muted.v1', muted });
+    if (response.muted !== muted) throw new Error('native_system_audio_mute_invalid');
+    return response.muted;
+  }
+
+  async setCameraVisibility(hidden: boolean): Promise<boolean> {
+    const response = await this.request({ channel: 'capture.camera-visibility.v1', hidden });
+    if (response.hidden !== hidden) throw new Error('native_camera_visibility_invalid');
+    return response.hidden;
+  }
+
+  async setCameraHardwareEnabled(enabled: boolean): Promise<{
+    hardwareState: 'active' | 'off';
+    physicallyPowered: boolean;
+  }> {
+    const response = await this.request({ channel: 'capture.camera-hardware.v1', enabled });
+    const expected = enabled ? 'active' : 'off';
+    if (response.hardwareState !== expected || response.physicallyPowered !== enabled) {
+      throw new Error('native_camera_hardware_state_invalid');
+    }
+    return { hardwareState: response.hardwareState, physicallyPowered: response.physicallyPowered };
+  }
+
   async captureStatus(): Promise<{
-    state: 'idle' | 'recording' | 'stopping';
+    state: 'idle' | 'recording' | 'paused' | 'stopping';
     pressure?: NativeCapturePressure;
     error?: string;
     errorCode?: string;

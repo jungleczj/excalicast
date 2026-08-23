@@ -3,6 +3,7 @@ import Foundation
 public enum HelperState: String, Codable, Sendable {
     case idle
     case recording
+    case paused
     case stopping
 }
 
@@ -45,7 +46,7 @@ public actor HelperLifecycle {
 
     @discardableResult
     public func beginStopping() -> HelperState {
-        guard state == .recording else { return state }
+        guard state == .recording || state == .paused else { return state }
         state = .stopping
         sessionId = nil
         stopCount += 1
@@ -63,5 +64,19 @@ public actor HelperLifecycle {
     public func stop() -> HelperState {
         _ = beginStopping()
         return finishStopping()
+    }
+
+    @discardableResult
+    public func pause() -> HelperState {
+        guard state == .recording else { return state }
+        state = .paused
+        return state
+    }
+
+    @discardableResult
+    public func resume() -> HelperState {
+        guard state == .paused else { return state }
+        state = .recording
+        return state
     }
 }

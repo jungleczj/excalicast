@@ -11,7 +11,7 @@ export interface NativeCaptureSoakSample {
   pendingEncoderFrames: number;
   pendingWriteBytes: number;
   segmentWriteLatencyMs: number;
-  state: 'idle' | 'recording' | 'stopping';
+  state: 'idle' | 'recording' | 'paused' | 'stopping';
 }
 
 export interface NativeCaptureSoakSummary {

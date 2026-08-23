@@ -65,7 +65,13 @@ let inkSettings: DesktopInkSettings = normalizeDesktopInkSettings({
 let nativeHelper: NativeHelperClient | null = null;
 let nativeHelperHandshake: NativeHelperHandshake | null = null;
 let nativeHelperInitialization: Promise<void> | null = null;
-let activeNativeCapture: { recordingId: string; startedUnixMs: number; nextInkEventIndex: number } | null = null;
+let activeNativeCapture: {
+  recordingId: string;
+  startedUnixMs: number;
+  nextInkEventIndex: number;
+  pausedTotalMs: number;
+  pauseStartedUnixMs: number | null;
+} | null = null;
 let inkEventCommitTail: Promise<void> = Promise.resolve();
 const pendingInkFlushes = new Map<string, () => void>();
 const materializedTrackCache = new Map<string, Promise<{
@@ -179,10 +185,12 @@ function registerDesktopIpc(): void {
   ipcMain.handle(DESKTOP_IPC_CHANNELS.inkAppendEvents, async (_event, payload: unknown) => {
     const active = activeNativeCapture;
     if (!active) throw new Error('desktop_ink_recording_inactive');
+    if (active.pauseStartedUnixMs !== null) return { committed: false, reason: 'capture_paused' };
     const batch = createNativeInkEventBatch(
       payload,
       active.startedUnixMs,
       active.nextInkEventIndex,
+      active.pausedTotalMs,
     );
     active.nextInkEventIndex += 1;
     const helper = await requireNativeHelper();
@@ -230,6 +238,8 @@ function registerDesktopIpc(): void {
       recordingId: request.recordingId,
       startedUnixMs: Date.now(),
       nextInkEventIndex: 0,
+      pausedTotalMs: 0,
+      pauseStartedUnixMs: null,
     };
     inkEventCommitTail = Promise.resolve();
     broadcastInkSettings();
@@ -245,6 +255,46 @@ function registerDesktopIpc(): void {
       activeNativeCapture = null;
       broadcastInkSettings();
     }
+  });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.capturePause, async () => {
+    if (!activeNativeCapture) throw new Error('native_capture_inactive');
+    const state = await (await requireNativeHelper()).pauseCapture();
+    if (activeNativeCapture.pauseStartedUnixMs === null) {
+      activeNativeCapture.pauseStartedUnixMs = Date.now();
+    }
+    return { state };
+  });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureResume, async () => {
+    if (!activeNativeCapture) throw new Error('native_capture_inactive');
+    const state = await (await requireNativeHelper()).resumeCapture();
+    const pausedAt = activeNativeCapture.pauseStartedUnixMs;
+    if (pausedAt !== null) activeNativeCapture.pausedTotalMs += Date.now() - pausedAt;
+    activeNativeCapture.pauseStartedUnixMs = null;
+    return { state };
+  });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureSetMicrophoneMuted, async (_event, payload: unknown) => {
+    if (!activeNativeCapture) throw new Error('native_capture_inactive');
+    const value = objectPayload(payload, 'native_microphone_mute_invalid');
+    if (typeof value.muted !== 'boolean') throw new Error('native_microphone_mute_invalid');
+    return { muted: await (await requireNativeHelper()).setMicrophoneMuted(value.muted) };
+  });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureSetSystemAudioMuted, async (_event, payload: unknown) => {
+    if (!activeNativeCapture) throw new Error('native_capture_inactive');
+    const value = objectPayload(payload, 'native_system_audio_mute_invalid');
+    if (typeof value.muted !== 'boolean') throw new Error('native_system_audio_mute_invalid');
+    return { muted: await (await requireNativeHelper()).setSystemAudioMuted(value.muted) };
+  });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureSetCameraVisibility, async (_event, payload: unknown) => {
+    if (!activeNativeCapture) throw new Error('native_capture_inactive');
+    const value = objectPayload(payload, 'native_camera_visibility_invalid');
+    if (typeof value.hidden !== 'boolean') throw new Error('native_camera_visibility_invalid');
+    return { hidden: await (await requireNativeHelper()).setCameraVisibility(value.hidden) };
+  });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureSetCameraHardware, async (_event, payload: unknown) => {
+    if (!activeNativeCapture) throw new Error('native_capture_inactive');
+    const value = objectPayload(payload, 'native_camera_hardware_invalid');
+    if (typeof value.enabled !== 'boolean') throw new Error('native_camera_hardware_invalid');
+    return (await requireNativeHelper()).setCameraHardwareEnabled(value.enabled);
   });
   ipcMain.handle(DESKTOP_IPC_CHANNELS.captureStatus, async () => {
     if (nativeHelperInitialization) await nativeHelperInitialization;

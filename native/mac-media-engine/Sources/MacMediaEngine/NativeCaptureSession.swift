@@ -27,6 +27,7 @@ final class NativeCaptureSession: @unchecked Sendable {
     private var requiredTracks: Set<RecordingTrackKind> = [.screen]
     private var lastAvailableDiskBytes: Int64 = 0
     private let pressureLock = NSLock()
+    private let controls = CaptureControlState()
 
     func start(configuration: Configuration) async throws -> CapturePreflightReport {
         if configuration.captureMicrophone,
@@ -77,18 +78,21 @@ final class NativeCaptureSession: @unchecked Sendable {
                 store: store,
                 timeline: timeline,
                 captureSystemAudio: configuration.captureSystemAudio,
+                controls: controls,
                 excludedWindowIDs: configuration.excludedWindowIDs
             )
             try microphone?.start(
                 deviceID: configuration.microphoneDeviceID,
                 store: store,
-                timeline: timeline
+                timeline: timeline,
+                controls: controls
             )
             try camera?.start(
                 deviceID: configuration.cameraDeviceID,
                 request: configuration.cameraRequest,
                 store: store,
-                timeline: timeline
+                timeline: timeline,
+                controls: controls
             )
             self.store = store
             self.screen = screen
@@ -108,6 +112,36 @@ final class NativeCaptureSession: @unchecked Sendable {
             try? store.markInterrupted()
             throw error
         }
+    }
+
+    func pause() {
+        _ = controls.pause(atUs: currentHostTimeUs())
+    }
+
+    func resume() {
+        _ = controls.resume(atUs: currentHostTimeUs())
+    }
+
+    func setMicrophoneMuted(_ muted: Bool) throws {
+        guard microphone != nil else { throw NativeCaptureError.controlTrackUnavailable(.microphone) }
+        controls.setMicrophoneMuted(muted)
+    }
+
+    func setSystemAudioMuted(_ muted: Bool) throws {
+        guard screen?.hasSystemAudio == true else { throw NativeCaptureError.controlTrackUnavailable(.systemAudio) }
+        controls.setSystemAudioMuted(muted)
+    }
+
+    func setCameraHidden(_ hidden: Bool) throws {
+        guard camera != nil else { throw NativeCaptureError.controlTrackUnavailable(.camera) }
+        controls.setCameraHidden(hidden)
+    }
+
+    func setCameraHardwareEnabled(_ enabled: Bool) throws -> CaptureControlSnapshot {
+        guard let camera else { throw NativeCaptureError.controlTrackUnavailable(.camera) }
+        try camera.setHardwareEnabled(enabled)
+        controls.setCameraHardwareEnabled(enabled)
+        return controls.snapshot()
     }
 
     func stop(interrupted: Bool = false) async throws {
@@ -196,5 +230,11 @@ final class NativeCaptureSession: @unchecked Sendable {
         let value = lastAvailableDiskBytes
         pressureLock.unlock()
         return value
+    }
+
+    private func currentHostTimeUs() -> Int64 {
+        CMClockGetTime(CMClockGetHostTimeClock())
+            .convertScale(1_000_000, method: .roundTowardZero)
+            .value
     }
 }

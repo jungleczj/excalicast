@@ -36,4 +36,7 @@ enum NativeCaptureError: Error {
     case cameraCannotAddOutput
     case cameraStartFailed
     case mediaTrackNotReady(RecordingTrackKind)
+    case controlTrackUnavailable(RecordingTrackKind)
+    case cameraHardwareTransitionFailed
+    case audioControlTransformFailed(OSStatus)
 }

@@ -8,6 +8,7 @@ export function createNativeInkEventBatch(
   payload: unknown,
   captureStartedUnixMs: number,
   index: number,
+  pausedTotalMs = 0,
 ): NativeInkEventBatch {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('desktop_ink_event_batch_invalid');
@@ -34,7 +35,7 @@ export function createNativeInkEventBatch(
   const lastEventMs = Math.max(...eventTimes);
   return {
     index,
-    startUs: Math.max(0, Math.round((firstEventMs - captureStartedUnixMs) * 1_000)),
+    startUs: Math.max(0, Math.round((firstEventMs - captureStartedUnixMs - pausedTotalMs) * 1_000)),
     durationUs: Math.max(1, Math.round((lastEventMs - firstEventMs) * 1_000) + 1),
     payload: eventPayload,
   };

@@ -1,7 +1,7 @@
 import { DESKTOP_IPC_CHANNELS } from './productContract';
 
 export interface CaptureResourceStatus {
-  state: 'idle' | 'recording' | 'stopping';
+  state: 'idle' | 'recording' | 'paused' | 'stopping';
 }
 
 export interface CaptureResourceGateOptions {
@@ -168,7 +168,7 @@ async function readDesktopCaptureStatus(): Promise<CaptureResourceStatus> {
   const response = await bridge.invoke(DESKTOP_IPC_CHANNELS.captureStatus);
   if (!response || typeof response !== 'object') throw new Error('desktop_capture_status_unavailable');
   const state = (response as { state?: unknown }).state;
-  if (state !== 'idle' && state !== 'recording' && state !== 'stopping') {
+  if (state !== 'idle' && state !== 'recording' && state !== 'paused' && state !== 'stopping') {
     throw new Error('desktop_capture_status_unavailable');
   }
   return { state };

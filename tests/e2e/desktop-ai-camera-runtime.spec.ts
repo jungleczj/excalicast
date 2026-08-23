@@ -69,6 +69,16 @@ function nativeBridge(
       }
       if (channel === DESKTOP_IPC_CHANNELS.captureStart) return { state: 'recording' };
       if (channel === DESKTOP_IPC_CHANNELS.captureStop) return { state: 'idle' };
+      if (channel === DESKTOP_IPC_CHANNELS.capturePause) return { state: 'paused' };
+      if (channel === DESKTOP_IPC_CHANNELS.captureResume) return { state: 'recording' };
+      if (channel === DESKTOP_IPC_CHANNELS.captureSetMicrophoneMuted) return { muted: true };
+      if (channel === DESKTOP_IPC_CHANNELS.captureSetSystemAudioMuted) return { muted: true };
+      if (channel === DESKTOP_IPC_CHANNELS.captureSetCameraVisibility) return { hidden: true };
+      if (channel === DESKTOP_IPC_CHANNELS.captureSetCameraHardware) {
+        return (payload as { enabled?: boolean })?.enabled === false
+          ? { hardwareState: 'off', physicallyPowered: false }
+          : { hardwareState: 'active', physicallyPowered: true };
+      }
       throw new Error(`unexpected_channel:${channel}`);
     },
   };
@@ -115,6 +125,47 @@ test('desktop renderer starts one native AI Camera session from RecordingSetup a
   });
   if (result.pipeline === 'native') await result.session.stop();
   expect(calls.filter((call) => call.channel === DESKTOP_IPC_CHANNELS.captureStop)).toHaveLength(1);
+});
+
+test('native session controls pause clock, silent audio gates and distinct camera visibility/hardware state', async () => {
+  const calls: Array<{ channel: string; payload?: unknown }> = [];
+  const bridge = nativeBridge(calls, {
+    displays: [{ displayID: 91, width: 2560, height: 1440 }],
+    windows: [],
+  });
+  const result = await startDesktopRecordingFromSetup({
+    bridge,
+    recordingId: 'desktop-controls',
+    setup: setup({ kind: 'desktop', displaySurface: 'monitor', captureSystemAudio: true }),
+    displayStream: previewStream('video', 'screen:91:0', []),
+    microphoneStream: null,
+    cameraStream: previewStream('video', 'camera-preview', []),
+    startBrowser: async () => ({}),
+  });
+  expect(result.pipeline).toBe('native');
+  if (result.pipeline !== 'native') return;
+
+  const session = result.session;
+  await session.pause();
+  expect(session.state).toBe('paused');
+  await session.setMicrophoneMuted(true);
+  await session.setSystemAudioMuted(true);
+  await session.setCameraHidden(true);
+  const poweredOff = await session.setCameraHardwareEnabled(false);
+  expect(poweredOff).toEqual({ hardwareState: 'off', physicallyPowered: false });
+  await session.setCameraHardwareEnabled(true);
+  await session.resume();
+  expect(session.state).toBe('recording');
+
+  expect(calls.filter((call) => call.channel.startsWith('capture.')).slice(-7)).toEqual([
+    { channel: 'capture.pause.v1', payload: undefined },
+    { channel: 'capture.microphone-muted.v1', payload: { muted: true } },
+    { channel: 'capture.system-audio-muted.v1', payload: { muted: true } },
+    { channel: 'capture.camera-visibility.v1', payload: { hidden: true } },
+    { channel: 'capture.camera-hardware.v1', payload: { enabled: false } },
+    { channel: 'capture.camera-hardware.v1', payload: { enabled: true } },
+    { channel: 'capture.resume.v1', payload: undefined },
+  ]);
 });
 
 test('native startup failure is explicit and cannot silently fall back to a second browser recorder', async () => {
@@ -222,6 +273,52 @@ test('a failed native stop remains retryable instead of reporting a false stoppe
   await expect(result.session.stop()).rejects.toThrow('native_stop_io_failed');
   await expect(result.session.stop()).resolves.toBeUndefined();
   expect(stopAttempts).toBe(2);
+});
+
+test('native elapsed time freezes before helper finalization and resumes after a failed stop', async () => {
+  const originalNow = Date.now;
+  let now = 10_000;
+  Date.now = () => now;
+  try {
+    const calls: Array<{ channel: string; payload?: unknown }> = [];
+    const base = nativeBridge(calls, {
+      displays: [{ displayID: 8, width: 2560, height: 1440 }],
+      windows: [],
+    });
+    let rejectStop = true;
+    const bridge: DesktopCaptureBridge = {
+      async invoke(channel, payload) {
+        if (channel === DESKTOP_IPC_CHANNELS.captureStop) {
+          now += 5_000;
+          if (rejectStop) {
+            rejectStop = false;
+            throw new Error('native_stop_io_failed');
+          }
+          return { state: 'idle' };
+        }
+        return base.invoke(channel, payload);
+      },
+    };
+    const result = await startDesktopRecordingFromSetup({
+      bridge,
+      recordingId: 'freeze-native-duration',
+      setup: setup({ kind: 'desktop', captureSystemAudio: true }, false),
+      displayStream: previewStream('video', 'screen:8:0', []),
+      microphoneStream: null,
+      cameraStream: null,
+      startBrowser: async () => ({}),
+    });
+    expect(result.pipeline).toBe('native');
+    if (result.pipeline !== 'native') return;
+
+    now += 2_000;
+    await expect(result.session.stop()).rejects.toThrow('native_stop_io_failed');
+    expect(result.session.getElapsedMs()).toBe(7_000);
+    await result.session.stop();
+    expect(result.session.getElapsedMs()).toBe(7_000);
+  } finally {
+    Date.now = originalNow;
+  }
 });
 
 test('native renderer persists a recoverable project reference before capture can outlive the page', () => {
