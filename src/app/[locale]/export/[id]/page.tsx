@@ -319,6 +319,16 @@ export default function EditorRecordingPage(): JSX.Element {
             : '原生录制已安全恢复，但当前编辑器版本尚未接入 macOS 媒体读取适配器。');
           return;
         }
+        if (m.teachingRecipeStatus === 'pending') {
+          if (Date.now() - loadStartedAt < FINALIZE_MAX_WAIT_MS) {
+            setMeta(null);
+            setFinalizing(true);
+            retryTimer = setTimeout(load, FINALIZE_POLL_INTERVAL_MS);
+            return;
+          }
+          await getClientDb().recordings.update(id, { teachingRecipeStatus: 'error' }).catch(() => undefined);
+          m.teachingRecipeStatus = 'error';
+        }
         if (m.status !== 'done' && m.status !== 'interrupted') {
           // 录制仍在 recording/finalizing。正常数百毫秒内落定；超过上限说明收尾被卡住。
           // 本地把这条录制标记为 interrupted 后照常打开编辑器，避免用户永远停在加载态。
@@ -1116,6 +1126,12 @@ export default function EditorRecordingPage(): JSX.Element {
               keyPointGenerationPhase={keyPointGenerationPhase}
               keyPointGenerationSource={keyPointGenerationSource}
               keyPointGenerationError={keyPointGenerationError}
+              teachingPlacements={meta.teachingEditRecipe?.placements}
+              teachingLabels={{
+                motion: en ? 'Teaching motion' : '教学动效',
+                chart: en ? 'Smart charts' : '智能图表',
+                sound: en ? 'Teaching sound cues' : '教学音效',
+              }}
               onRequireCaptions={() => setTab('captions')}
               onGuide={showActionGuide}
               onLocateTask={() => openMediaTaskCenter(id)}

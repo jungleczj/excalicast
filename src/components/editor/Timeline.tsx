@@ -12,6 +12,7 @@ import type {
   KeyPointMotionSegment,
   MainTrackClip,
   NoiseReductionMode,
+  RecordingTeachingEditRecipeV1,
   SubtitleCue,
   TimeSegment,
 } from '@/types/recording';
@@ -59,6 +60,12 @@ interface Props {
   keyPointGenerationPhase?: 'idle' | 'generating' | 'ready' | 'failed';
   keyPointGenerationSource?: 'deepseek' | 'local' | null;
   keyPointGenerationError?: string | null;
+  teachingPlacements?: RecordingTeachingEditRecipeV1['placements'];
+  teachingLabels?: {
+    motion: string;
+    chart: string;
+    sound: string;
+  };
   onRequireCaptions?: () => void;
   onGuide?: (message: string) => void;
   onLocateTask?: (kind: 'auto_edit' | 'noise_reduction' | 'audio_repair' | 'key_point_motion') => void;
@@ -132,6 +139,7 @@ export function Timeline({
   keyPointMotions = [], onKeyPointMotionChange, selectedKeyPointMotionId, onKeyPointMotionSelect,
   onGenerateKeyPointMotions, keyPointGenerationPhase = 'idle', keyPointGenerationSource = null,
   keyPointGenerationError = null, onRequireCaptions, onGuide, onLocateTask, onOpenAudioRepair,
+  teachingPlacements = [], teachingLabels,
   hasEnhancedAudioTrack = false, enhancedAudioLabel, audioEnhancement,
   autoEdit,
   hasAudio, hasCaptions, audioPeaks = [], captionCues = [], labels,
@@ -148,6 +156,11 @@ export function Timeline({
   const playheadMsRef = useRef(playheadMs);
   playheadMsRef.current = playheadMs;
   const usingMainTrack = !!mainTrack?.length && !!onMainTrackChange;
+  const teachingTracks = useMemo(() => ({
+    'motion-graphics': teachingPlacements.filter((placement) => placement.track === 'motion-graphics'),
+    chart: teachingPlacements.filter((placement) => placement.track === 'chart'),
+    'sound-effect': teachingPlacements.filter((placement) => placement.track === 'sound-effect'),
+  }), [teachingPlacements]);
   const trimmed = usingMainTrack
     ? mainTrack.length > 1 || mainTrack[0].sourceStart > 0 || mainTrack[0].sourceEnd < durationMs
     : !(clips.length === 1 && clips[0].start <= 0 && clips[0].end >= durationMs);
@@ -1042,6 +1055,48 @@ export function Timeline({
                 </div>
               );
             })}
+          </EffectLane>
+        )}
+
+        {teachingTracks['motion-graphics'].length > 0 && (
+          <EffectLane label={teachingLabels?.motion ?? 'Teaching motion'} testId="teaching-motion-track">
+            {teachingTracks['motion-graphics'].map((placement, index) => (
+              <div
+                key={`${placement.assetId}-${placement.startMs}-${index}`}
+                data-testid="teaching-motion-segment"
+                className="timeline-craft-effect-segment is-keypoint"
+                style={sourceRangeLayout(placement.startMs, placement.endMs)}
+                title={placement.assetId}
+              ><span>{placement.assetId}</span></div>
+            ))}
+          </EffectLane>
+        )}
+
+        {teachingTracks.chart.length > 0 && (
+          <EffectLane label={teachingLabels?.chart ?? 'Teaching charts'} testId="teaching-chart-track">
+            {teachingTracks.chart.map((placement, index) => (
+              <div
+                key={`${placement.assetId}-${placement.startMs}-${index}`}
+                data-testid="teaching-chart-segment"
+                className="timeline-craft-effect-segment is-highlight"
+                style={sourceRangeLayout(placement.startMs, placement.endMs)}
+                title={placement.assetId}
+              ><span>{placement.assetId}</span></div>
+            ))}
+          </EffectLane>
+        )}
+
+        {teachingTracks['sound-effect'].length > 0 && (
+          <EffectLane label={teachingLabels?.sound ?? 'Teaching sound'} testId="teaching-sound-track">
+            {teachingTracks['sound-effect'].map((placement, index) => (
+              <div
+                key={`${placement.assetId}-${placement.startMs}-${index}`}
+                data-testid="teaching-sound-segment"
+                className="timeline-craft-effect-segment is-autozoom"
+                style={sourceRangeLayout(placement.startMs, placement.endMs)}
+                title={placement.assetId}
+              ><span>{placement.assetId}</span></div>
+            ))}
           </EffectLane>
         )}
 
