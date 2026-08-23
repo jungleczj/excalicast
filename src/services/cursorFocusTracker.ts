@@ -3,6 +3,7 @@
 import { getCursorFocusTrack, saveCursorFocusTrack } from '@/lib/db-client';
 import { createDisplayFrameSource } from '@/services/displayFrameSource';
 import type { CursorFocusSample, CursorFocusTrack } from '@/types/recording';
+import { waitForCaptureResourceRelease } from '@/desktop/captureResourceGate';
 
 const DETECTOR_VERSION = 1;
 const SAMPLE_INTERVAL_MS = 100;
@@ -339,6 +340,7 @@ export async function analyzeCursorFocusTrack(params: {
   onProgress?: (progress: number) => void;
   signal?: AbortSignal;
 }): Promise<CursorFocusTrack> {
+  await waitForCaptureResourceRelease({ signal: params.signal });
   const source = await createDisplayFrameSource(params.screenBlob);
   const signature = cursorFocusSourceSignature(params.screenBlob, params.durationMs, source.width, source.height);
   const cached = await getCursorFocusTrack(params.recordingId);
@@ -377,6 +379,7 @@ export async function analyzeCursorFocusTrack(params: {
     try {
       for (let index = 0; index <= sampleCount; index += 1) {
         if (params.signal?.aborted) throw new DOMException('Cursor analysis cancelled', 'AbortError');
+        await waitForCaptureResourceRelease({ signal: params.signal });
         const timestamp = Math.min(durationMs, index * SAMPLE_INTERVAL_MS);
         const frame = await source.getFrameAt(timestamp);
         if (!frame) continue;

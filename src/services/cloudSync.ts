@@ -9,6 +9,7 @@ import {
   thumbnailDataUrlToBlob,
 } from '@/lib/db-client';
 import { uploadSupabaseStorageObject } from '@/services/supabaseStorageUpload';
+import { waitForCaptureResourceRelease } from '@/desktop/captureResourceGate';
 import type {
   AudioChunk,
   BinaryFileEntry,
@@ -61,6 +62,7 @@ async function uploadObject(
   body: Blob | string,
   contentType: string,
 ): Promise<number> {
+  await waitForCaptureResourceRelease();
   const path = pathFor(userId, recordingId, name);
   const blob = typeof body === 'string'
     ? new Blob([body], { type: contentType })
@@ -110,6 +112,7 @@ export async function uploadRecording(
   recordingId: string,
   onProgress?: (p: UploadProgress) => void,
 ): Promise<{ storagePrefix: string }> {
+  await waitForCaptureResourceRelease();
   const userId = await ensureUserId();
   const { metadata, snapshots, audioBlob, cameraBlob, cameraEvents, binaryFiles } =
     await loadFullRecording(recordingId);

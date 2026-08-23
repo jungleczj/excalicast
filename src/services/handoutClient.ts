@@ -1,5 +1,7 @@
 'use client';
 
+import { waitForCaptureResourceRelease } from '@/desktop/captureResourceGate';
+
 export interface HandoutJobStatusResponse {
   status: 'pending' | 'running' | 'done' | 'failed';
   recordingId?: string;
@@ -20,6 +22,7 @@ async function readJson<T>(response: Response): Promise<T> {
 }
 
 export async function submitHandoutJob(recordingId: string, signal?: AbortSignal): Promise<{ jobId: string }> {
+  await waitForCaptureResourceRelease({ signal });
   const response = await fetch('/api/handout/submit', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -30,6 +33,7 @@ export async function submitHandoutJob(recordingId: string, signal?: AbortSignal
 }
 
 export async function pollHandoutJob(jobId: string, signal?: AbortSignal): Promise<HandoutJobStatusResponse> {
+  await waitForCaptureResourceRelease({ signal });
   const response = await fetch(`/api/handout/status?jobId=${encodeURIComponent(jobId)}`, {
     cache: 'no-store',
     signal,

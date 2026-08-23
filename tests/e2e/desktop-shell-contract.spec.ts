@@ -5,6 +5,7 @@ import {
 } from '../../apps/desktop/src/windowContract';
 import { NativeHelperClient, type HelperTransport } from '../../apps/desktop/src/nativeHelperClient';
 import { parseDesktopCapturePayload } from '../../apps/desktop/src/captureRequest';
+import { waitForCaptureResourceRelease } from '../../src/desktop/captureResourceGate';
 
 test('desktop shell uses a hardened renderer with a narrow versioned bridge', () => {
   const options = createDesktopWindowOptions('/tmp/excalicast-preload.js');
@@ -167,4 +168,16 @@ test('electron capture parsing preserves optional camera, microphone and system 
     cameraHeight: 720,
     cameraFramesPerSecond: 24,
   });
+});
+
+test('heavy work waits until native recording releases network, cpu and disk resources', async () => {
+  const states = ['recording', 'recording', 'idle'] as const;
+  let reads = 0;
+  let waits = 0;
+  await waitForCaptureResourceRelease({
+    readStatus: async () => ({ state: states[Math.min(reads++, states.length - 1)] }),
+    sleep: async () => { waits += 1; },
+  });
+  expect(reads).toBe(3);
+  expect(waits).toBe(2);
 });

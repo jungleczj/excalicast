@@ -5,6 +5,7 @@ import {
   type MediaTaskResourceClass,
 } from '@/services/mediaTaskDomain';
 import type { ExportDiagnosticReport, ExportProgressDetails } from '@/types/exportDiagnostics';
+import { waitForCaptureResourceRelease } from '@/desktop/captureResourceGate';
 
 export interface MediaTaskProgress {
   phase: string;
@@ -182,6 +183,7 @@ export class MediaTaskCoordinator {
 
     const execute = async (): Promise<MediaTaskRunResult | Blob | void> => {
       if (controller.signal.aborted) throw new DOMException('Task cancelled', 'AbortError');
+      await waitForCaptureResourceRelease({ signal: controller.signal });
       const current = this.tasks.get(task.id);
       if (current?.status === 'queued') {
         this.replaceTask({ ...current, status: 'running', updatedAt: this.now() });

@@ -13,6 +13,7 @@ import { shouldUseMediaJobMocks } from '@/services/mediaJobMode';
 import { removePrivateJobAssets, uploadPrivateJobAsset } from '@/services/privateMediaUpload';
 import { parsePcm16Wav } from '@/lib/dubbingAudio';
 import type { AzureEnglishVoice, VoiceProfile } from '@/services/voiceProfile';
+import { waitForCaptureResourceRelease } from '@/desktop/captureResourceGate';
 
 interface SubmitResponse { jobId: string; reused?: boolean }
 
@@ -124,6 +125,7 @@ async function pollDubbingJob(
 ): Promise<StatusResponse> {
   const started = Date.now();
   while (Date.now() - started < POLL_TIMEOUT_MS) {
+    await waitForCaptureResourceRelease({ signal: options.signal });
     const processResponse = await fetch('/api/dubbing/process', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -211,6 +213,7 @@ async function finishEnglishDubbingTrack(params: {
 }): Promise<LocalizedTrack> {
   const options = params.options ?? {};
   try {
+    await waitForCaptureResourceRelease({ signal: options.signal });
     options.onProgress?.({ stage: 'translating', progress: 0.1 });
     const status = await pollDubbingJob(params.recordingId, params.jobId, params.sourceAudioHash, options);
     if (!status.srtUrl) throw new Error('missing_translated_subtitles');
@@ -314,6 +317,7 @@ export async function createEnglishDubbingTrack(params: {
   voiceName: AzureEnglishVoice;
   voiceProfile?: VoiceProfile;
 } & DubbingOptions): Promise<LocalizedTrack> {
+  await waitForCaptureResourceRelease({ signal: params.signal });
   const sourceSrt = params.sourceSrt?.trim();
   if (!sourceSrt) throw new Error('dubbing_subtitles_required');
   const media = await loadRecordingMediaTracks(params.recordingId, ['audio']);

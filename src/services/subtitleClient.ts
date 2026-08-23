@@ -3,6 +3,7 @@
 import { loadRecordingMediaTracks } from '@/lib/db-client';
 import { uploadPrivateJobAsset } from '@/services/privateMediaUpload';
 import { parseMediaJobResponse } from '@/services/mediaJobClient';
+import { waitForCaptureResourceRelease } from '@/desktop/captureResourceGate';
 
 export interface SubmitResult {
   jobId: string;
@@ -14,6 +15,7 @@ export async function submitSubtitleJob(
   recordingId: string,
   options?: { signal?: AbortSignal; audioBlob?: Blob; onUploadProgress?: (uploaded: number, total: number) => void },
 ): Promise<SubmitResult> {
+  await waitForCaptureResourceRelease({ signal: options?.signal });
   const audioBlob = options?.audioBlob ?? (await loadRecordingMediaTracks(recordingId, ['audio'])).audioBlob;
   if (!audioBlob) throw new Error('该录制没有音频，无法生成字幕');
   const localMock = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname);
@@ -42,6 +44,7 @@ export interface PollResult {
 }
 
 export async function pollSubtitleJob(jobId: string): Promise<PollResult> {
+  await waitForCaptureResourceRelease();
   const res = await fetch(`/api/asr/status?jobId=${encodeURIComponent(jobId)}`, { cache: 'no-store' });
   return parseMediaJobResponse<PollResult>(res);
 }
