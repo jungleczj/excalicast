@@ -137,6 +137,32 @@ struct MacMediaEngineContractTests {
             "critical disk triggers safe interruption"
         )
 
+        let requiredTracks = CaptureTrackRequirementPolicy.requiredTracks(
+            capturesCamera: true,
+            capturesMicrophone: true
+        )
+        try expect(requiredTracks == [.screen, .camera, .microphone], "enabled device tracks are required")
+        try expect(
+            CaptureTrackRequirementPolicy.requiredTracks(
+                capturesCamera: false,
+                capturesMicrophone: false
+            ) == [.screen],
+            "disabled device tracks do not become required"
+        )
+        let readyGate = FirstMediaSampleGate()
+        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(10)) {
+            readyGate.markReady()
+        }
+        try expect(
+            readyGate.wait(timeout: 1) == .ready,
+            "capture start waits until media reaches its processing pipeline"
+        )
+        let failedGate = FirstMediaSampleGate()
+        failedGate.markFailed()
+        try expect(failedGate.wait(timeout: 1) == .failed, "startup media failure wakes the waiter")
+        let timeoutGate = FirstMediaSampleGate()
+        try expect(timeoutGate.wait(timeout: 0.01) == .timedOut, "missing media cannot fake readiness")
+
         let timeline = RecordingTimeline(originUs: 5_000_000)
         try expect(timeline.relativeUs(for: 5_250_000) == 250_000, "tracks share one relative clock")
         try expect(timeline.relativeUs(for: 4_999_000) == 0, "pre-roll timestamp clamps to zero")
@@ -223,7 +249,32 @@ struct MacMediaEngineContractTests {
         } catch RecordingStoreError.missingRequiredTrack(.screen) {
             // expected
         }
+        let missingCameraRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("excalicast-missing-camera-\(UUID().uuidString)", isDirectory: true)
+        let missingCameraStore = try SegmentedRecordingStore(
+            root: missingCameraRoot,
+            recordingId: "missing-camera"
+        )
+        try missingCameraStore.appendFinalizedSegment(
+            track: .screen,
+            index: 0,
+            data: Data([1]),
+            startUs: 0,
+            durationUs: 1_000_000
+        )
+        do {
+            try missingCameraStore.finalize(
+                requiredTracks: CaptureTrackRequirementPolicy.requiredTracks(
+                    capturesCamera: true,
+                    capturesMicrophone: false
+                )
+            )
+            throw ContractFailure.expectation("enabled camera without media must not become ready")
+        } catch RecordingStoreError.missingRequiredTrack(.camera) {
+            // expected
+        }
         try? FileManager.default.removeItem(at: emptyRoot)
+        try? FileManager.default.removeItem(at: missingCameraRoot)
         try? FileManager.default.removeItem(at: concurrentRoot)
         try? FileManager.default.removeItem(at: temporaryRoot)
 

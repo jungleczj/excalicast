@@ -21,6 +21,28 @@ interface HelperResponse {
   pressure?: NativeCapturePressure;
   manifest?: NativeRecordingManifest;
   error?: string;
+  errorCode?: string;
+  errorTrack?: NativeRecordingTrack;
+}
+
+export type NativeRecordingTrack =
+  | 'screen'
+  | 'camera'
+  | 'microphone'
+  | 'system-audio'
+  | 'excalidraw-events'
+  | 'input-telemetry';
+
+export class NativeHelperError extends Error {
+  readonly name = 'NativeHelperError';
+
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly track?: NativeRecordingTrack,
+  ) {
+    super(message);
+  }
 }
 
 export interface NativeCaptureRequest {
@@ -215,10 +237,18 @@ export class NativeHelperClient {
     state: 'idle' | 'recording' | 'stopping';
     pressure?: NativeCapturePressure;
     error?: string;
+    errorCode?: string;
+    errorTrack?: NativeRecordingTrack;
   }> {
     const response = await this.request({ channel: 'capture.status.v1' });
     if (!response.state) throw new Error('native_capture_status_missing');
-    return { state: response.state, pressure: response.pressure, error: response.error };
+    return {
+      state: response.state,
+      pressure: response.pressure,
+      error: response.error,
+      errorCode: response.errorCode,
+      errorTrack: response.errorTrack,
+    };
   }
 
   async recoverProject(projectRoot: string): Promise<NativeRecordingManifest> {
@@ -263,7 +293,11 @@ export class NativeHelperClient {
     clearTimeout(item.timeout);
     this.pending.delete(response.id);
     if (response.ok) item.resolve(response);
-    else item.reject(new Error(response.error ?? 'native_helper_request_failed'));
+    else item.reject(new NativeHelperError(
+      response.error ?? 'native_helper_request_failed',
+      response.errorCode ?? 'native_helper_request_failed',
+      response.errorTrack,
+    ));
   }
 }
 

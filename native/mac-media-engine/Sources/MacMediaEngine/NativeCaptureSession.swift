@@ -23,6 +23,7 @@ final class NativeCaptureSession: @unchecked Sendable {
     private var microphone: MicrophoneCaptureEngine?
     private var camera: CameraCaptureEngine?
     private var projectRoot: URL?
+    private var requiredTracks: Set<RecordingTrackKind> = [.screen]
     private var lastAvailableDiskBytes: Int64 = 0
     private let pressureLock = NSLock()
 
@@ -92,6 +93,10 @@ final class NativeCaptureSession: @unchecked Sendable {
             self.microphone = microphone
             self.camera = camera
             self.projectRoot = configuration.projectRoot
+            self.requiredTracks = CaptureTrackRequirementPolicy.requiredTracks(
+                capturesCamera: configuration.captureCamera,
+                capturesMicrophone: configuration.captureMicrophone
+            )
             self.lastAvailableDiskBytes = availableBytes
             return report
         } catch {
@@ -117,7 +122,7 @@ final class NativeCaptureSession: @unchecked Sendable {
             try? store.updateFinalPressure(finalPressure)
         }
         if firstError == nil, !interrupted {
-            do { try store?.finalize(requiredTracks: [.screen]) }
+            do { try store?.finalize(requiredTracks: requiredTracks) }
             catch { firstError = error }
         }
         if firstError != nil || interrupted { try? store?.markInterrupted() }
@@ -126,6 +131,7 @@ final class NativeCaptureSession: @unchecked Sendable {
         screen = nil
         store = nil
         projectRoot = nil
+        requiredTracks = [.screen]
         if let firstError { throw firstError }
     }
 

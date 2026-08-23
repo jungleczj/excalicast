@@ -41,6 +41,46 @@ private struct Response: Encodable, Sendable {
     let pressure: CapturePressureSnapshot?
     let manifest: RecoverableRecordingManifest?
     let error: String?
+    let errorCode: String?
+    let errorTrack: RecordingTrackKind?
+
+    init(
+        id: String,
+        ok: Bool,
+        protocolVersion: Int?,
+        engine: String?,
+        state: HelperState?,
+        capability: CapturePreflightReport?,
+        sources: CaptureSources?,
+        devices: CaptureDevices?,
+        permissions: CapturePermissions?,
+        pressure: CapturePressureSnapshot?,
+        manifest: RecoverableRecordingManifest?,
+        error: String?,
+        errorCode: String? = nil,
+        errorTrack: RecordingTrackKind? = nil
+    ) {
+        self.id = id
+        self.ok = ok
+        self.protocolVersion = protocolVersion
+        self.engine = engine
+        self.state = state
+        self.capability = capability
+        self.sources = sources
+        self.devices = devices
+        self.permissions = permissions
+        self.pressure = pressure
+        self.manifest = manifest
+        self.error = error
+        self.errorCode = errorCode
+        self.errorTrack = errorTrack
+    }
+}
+
+private struct CaptureFailureDescriptor {
+    let message: String
+    let code: String
+    let track: RecordingTrackKind?
 }
 
 private enum CapturePermissionState: String, Encodable, Sendable {
@@ -101,6 +141,8 @@ private actor HelperServer {
     private var pressureMonitor: Task<Void, Never>?
     private var isStoppingCapture = false
     private var lastCaptureError: String?
+    private var lastCaptureErrorCode: String?
+    private var lastCaptureErrorTrack: RecordingTrackKind?
     private var lastPressureSnapshot: CapturePressureSnapshot?
 
     func handle(_ command: Command) async -> Response {
@@ -246,6 +288,8 @@ private actor HelperServer {
                     )
                     captureEngine = engine
                     lastCaptureError = nil
+                    lastCaptureErrorCode = nil
+                    lastCaptureErrorTrack = nil
                     lastPressureSnapshot = engine.pressureSnapshot()
                     startPressureMonitor(engine)
                     return success(command.id, state: .recording, capability: report)
@@ -266,10 +310,15 @@ private actor HelperServer {
                 isStoppingCapture = false
                 let state = await lifecycle.finishStopping()
                 if let stopError {
-                    lastCaptureError = String(describing: stopError)
+                    let failure = captureFailureDescriptor(stopError)
+                    lastCaptureError = failure.message
+                    lastCaptureErrorCode = failure.code
+                    lastCaptureErrorTrack = failure.track
                     throw stopError
                 }
                 lastCaptureError = nil
+                lastCaptureErrorCode = nil
+                lastCaptureErrorTrack = nil
                 return success(command.id, state: state, capability: nil)
             case "capture.status.v1":
                 let pressure = isStoppingCapture
@@ -288,12 +337,15 @@ private actor HelperServer {
                     permissions: nil,
                     pressure: pressure,
                     manifest: nil,
-                    error: lastCaptureError
+                    error: lastCaptureError,
+                    errorCode: lastCaptureErrorCode,
+                    errorTrack: lastCaptureErrorTrack
                 )
             default:
                 throw HelperServerError.unsupportedChannel(command.channel)
             }
         } catch {
+            let failure = captureFailureDescriptor(error)
             return Response(
                 id: command.id,
                 ok: false,
@@ -306,7 +358,9 @@ private actor HelperServer {
                 permissions: nil,
                 pressure: isStoppingCapture ? lastPressureSnapshot : captureEngine?.pressureSnapshot(),
                 manifest: nil,
-                error: String(describing: error)
+                error: failure.message,
+                errorCode: failure.code,
+                errorTrack: failure.track
             )
         }
     }
@@ -349,6 +403,8 @@ private actor HelperServer {
         }
         captureEngine = nil
         lastCaptureError = reason
+        lastCaptureErrorCode = "critical_disk_space"
+        lastCaptureErrorTrack = nil
         isStoppingCapture = false
         _ = await lifecycle.finishStopping()
     }
@@ -502,6 +558,47 @@ private actor HelperServer {
     private func deviceSort(_ lhs: CaptureDeviceSource, _ rhs: CaptureDeviceSource) -> Bool {
         if lhs.isDefault != rhs.isDefault { return lhs.isDefault }
         return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+    }
+
+    private func captureFailureDescriptor(_ error: Error) -> CaptureFailureDescriptor {
+        switch error {
+        case NativeCaptureError.mediaTrackNotReady(let track):
+            return CaptureFailureDescriptor(
+                message: "The enabled \(track.rawValue) track did not deliver encodable media before startup timed out.",
+                code: "capture_track_not_ready",
+                track: track
+            )
+        case RecordingStoreError.missingRequiredTrack(let track):
+            return CaptureFailureDescriptor(
+                message: "The enabled \(track.rawValue) track produced no recoverable media segment.",
+                code: "capture_required_track_empty",
+                track: track
+            )
+        case NativeCaptureError.cameraPermissionRequired:
+            return CaptureFailureDescriptor(
+                message: "Camera permission is required before camera recording can start.",
+                code: "camera_permission_required",
+                track: .camera
+            )
+        case NativeCaptureError.microphonePermissionRequired:
+            return CaptureFailureDescriptor(
+                message: "Microphone permission is required before microphone recording can start.",
+                code: "microphone_permission_required",
+                track: .microphone
+            )
+        case NativeCaptureError.captureSourceUnavailableOrProtected:
+            return CaptureFailureDescriptor(
+                message: "The selected screen source is unavailable or protected.",
+                code: "capture_source_unavailable_or_protected",
+                track: .screen
+            )
+        default:
+            return CaptureFailureDescriptor(
+                message: String(describing: error),
+                code: "native_capture_failed",
+                track: nil
+            )
+        }
     }
 }
 

@@ -3,7 +3,11 @@ import {
   createDesktopWindowOptions,
   exposedDesktopBridgeChannels,
 } from '../../apps/desktop/src/windowContract';
-import { NativeHelperClient, type HelperTransport } from '../../apps/desktop/src/nativeHelperClient';
+import {
+  NativeHelperClient,
+  NativeHelperError,
+  type HelperTransport,
+} from '../../apps/desktop/src/nativeHelperClient';
 import { parseDesktopCapturePayload } from '../../apps/desktop/src/captureRequest';
 import { waitForCaptureResourceRelease } from '../../src/desktop/captureResourceGate';
 
@@ -138,6 +142,48 @@ test('native media devices expose stable ids before camera capture starts', asyn
     cameras: [{ id: 'cam-1', name: 'FaceTime Camera', isDefault: true }],
   });
   expect(command).toMatchObject({ channel: 'capture.devices.v1' });
+});
+
+test('native track startup failures preserve a stable code and affected track', async () => {
+  let onLine: ((line: string) => void) | null = null;
+  const transport: HelperTransport = {
+    write(line) {
+      const command = JSON.parse(line) as { id: string };
+      queueMicrotask(() => onLine?.(JSON.stringify({
+        id: command.id,
+        ok: false,
+        error: 'Camera did not deliver an encodable sample before startup timeout.',
+        errorCode: 'capture_track_not_ready',
+        errorTrack: 'camera',
+      })));
+    },
+    onLine(listener) { onLine = listener; },
+    close() {},
+  };
+  const client = new NativeHelperClient(transport);
+
+  let failure: unknown;
+  try {
+    await client.startCapture({
+      recordingId: 'missing-camera',
+      projectRoot: '/projects/missing-camera',
+      sourceKind: 'display',
+      sourceID: 1,
+      width: 1920,
+      height: 1080,
+      framesPerSecond: 30,
+      codec: 'h264',
+      captureCamera: true,
+    });
+  } catch (error) {
+    failure = error;
+  }
+
+  expect(failure).toBeInstanceOf(NativeHelperError);
+  expect(failure).toMatchObject({
+    code: 'capture_track_not_ready',
+    track: 'camera',
+  });
 });
 
 test('electron capture parsing preserves optional camera, microphone and system audio tracks', () => {

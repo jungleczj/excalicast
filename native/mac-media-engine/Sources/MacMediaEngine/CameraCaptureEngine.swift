@@ -13,6 +13,7 @@ final class CameraCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferD
     private var output: AVCaptureVideoDataOutput?
     private var encoder: HardwareVideoEncoder?
     private var terminalError: Error?
+    private let firstSampleGate = FirstMediaSampleGate()
 
     func start(
         deviceID: String?,
@@ -98,6 +99,10 @@ final class CameraCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferD
         self.session = session
         session.startRunning()
         guard session.isRunning else { throw NativeCaptureError.cameraStartFailed }
+        guard firstSampleGate.wait(timeout: 3) == .ready else {
+            try throwTerminalErrorIfNeeded()
+            throw NativeCaptureError.mediaTrackNotReady(.camera)
+        }
     }
 
     func stop() throws {
@@ -138,8 +143,12 @@ final class CameraCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferD
                 return
             }
             queueLock.unlock()
-            do { try encoder?.encode(frame) }
-            catch { recordTerminalError(error) }
+            do {
+                try encoder?.encode(frame)
+                firstSampleGate.markReady()
+            } catch {
+                recordTerminalError(error)
+            }
         }
     }
 
@@ -147,6 +156,7 @@ final class CameraCaptureEngine: NSObject, AVCaptureVideoDataOutputSampleBufferD
         queueLock.lock()
         if terminalError == nil { terminalError = error }
         queueLock.unlock()
+        firstSampleGate.markFailed()
     }
 
     private func throwTerminalErrorIfNeeded() throws {

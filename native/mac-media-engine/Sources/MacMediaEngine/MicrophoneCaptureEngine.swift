@@ -9,6 +9,7 @@ final class MicrophoneCaptureEngine: NSObject, AVCaptureAudioDataOutputSampleBuf
     private var output: AVCaptureAudioDataOutput?
     private var writer: AudioSegmentWriter?
     private var terminalError: Error?
+    private let firstSampleGate = FirstMediaSampleGate()
     var onSharedPCMSample: (@Sendable (CMSampleBuffer) -> Void)?
 
     func start(deviceID: String?, store: SegmentedRecordingStore, timeline: RecordingTimeline) throws {
@@ -46,6 +47,10 @@ final class MicrophoneCaptureEngine: NSObject, AVCaptureAudioDataOutputSampleBuf
         self.session = session
         session.startRunning()
         guard session.isRunning else { throw NativeCaptureError.microphoneStartFailed }
+        guard firstSampleGate.wait(timeout: 3) == .ready else {
+            try throwTerminalErrorIfNeeded()
+            throw NativeCaptureError.mediaTrackNotReady(.microphone)
+        }
     }
 
     func stop() throws {
@@ -68,6 +73,7 @@ final class MicrophoneCaptureEngine: NSObject, AVCaptureAudioDataOutputSampleBuf
     ) {
         do {
             try writer?.append(sampleBuffer)
+            firstSampleGate.markReady()
             onSharedPCMSample?(sampleBuffer)
         } catch {
             recordTerminalError(error)
@@ -78,6 +84,7 @@ final class MicrophoneCaptureEngine: NSObject, AVCaptureAudioDataOutputSampleBuf
         errorLock.lock()
         if terminalError == nil { terminalError = error }
         errorLock.unlock()
+        firstSampleGate.markFailed()
     }
 
     private func throwTerminalErrorIfNeeded() throws {
