@@ -22,6 +22,7 @@ public enum RecordingStoreError: Error, Equatable, Sendable {
     case invalidFileExtension
     case stagingFileOutsideProject
     case emptySegment
+    case missingRequiredTrack(RecordingTrackKind)
 }
 
 public struct FinalizedSegment: Codable, Equatable, Sendable {
@@ -44,6 +45,7 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
     private let manifestURL: URL
     private var manifest: RecoverableRecordingManifest
     private let encoder = JSONEncoder()
+    private let stateLock = NSLock()
 
     public init(root: URL, recordingId: String) throws {
         self.root = root
@@ -56,7 +58,7 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
         )
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try checkpoint()
+        try checkpointUnlocked()
     }
 
     public func appendFinalizedSegment(
@@ -93,6 +95,8 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
         durationUs: Int64,
         fileExtension: String
     ) throws {
+        stateLock.lock()
+        defer { stateLock.unlock() }
         guard index >= 0, startUs >= 0, durationUs > 0 else {
             throw RecordingStoreError.invalidSegmentMetadata
         }
@@ -133,15 +137,20 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
         segments.append(segment)
         segments.sort { $0.index < $1.index }
         manifest.tracks[track] = segments
-        try checkpoint()
+        try checkpointUnlocked()
     }
 
-    public func finalize() throws {
+    public func finalize(requiredTracks: Set<RecordingTrackKind> = [.screen]) throws {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        for track in requiredTracks where manifest.tracks[track, default: []].isEmpty {
+            throw RecordingStoreError.missingRequiredTrack(track)
+        }
         manifest.state = .ready
-        try checkpoint()
+        try checkpointUnlocked()
     }
 
-    private func checkpoint() throws {
+    private func checkpointUnlocked() throws {
         try encoder.encode(manifest).write(to: manifestURL, options: .atomic)
     }
 

@@ -1,4 +1,5 @@
 @preconcurrency import CoreMedia
+@preconcurrency import CoreVideo
 @preconcurrency import VideoToolbox
 import Foundation
 import MacMediaEngineCore
@@ -20,16 +21,28 @@ in
 final class HardwareVideoEncoder: @unchecked Sendable {
     private let request: CaptureRequest
     private let muxer: VideoSegmentMuxer
+    private let muxerQueue: DispatchQueue
     private var session: VTCompressionSession?
     private var lastForcedKeyframe: CMTime?
     private let keyframeInterval = CMTime(value: CaptureEncodingPolicy.segmentDurationUs, timescale: 1_000_000)
     private let errorLock = NSLock()
     private let inFlightSlots = DispatchSemaphore(value: CaptureEncodingPolicy.frameQueueCapacity)
     private var callbackError: Error?
+    private var submittedFrames = 0
+    private var encodedFrames = 0
 
-    init(request: CaptureRequest, store: SegmentedRecordingStore, track: RecordingTrackKind = .screen) throws {
+    init(
+        request: CaptureRequest,
+        store: SegmentedRecordingStore,
+        timeline: RecordingTimeline,
+        track: RecordingTrackKind = .screen
+    ) throws {
         self.request = request
-        self.muxer = VideoSegmentMuxer(store: store, track: track)
+        self.muxer = VideoSegmentMuxer(store: store, track: track, timeline: timeline)
+        self.muxerQueue = DispatchQueue(
+            label: "com.excalicast.mux.video.\(track.rawValue)",
+            qos: .userInitiated
+        )
         try configure()
     }
 
@@ -38,16 +51,28 @@ final class HardwareVideoEncoder: @unchecked Sendable {
     }
 
     func encode(_ sampleBuffer: CMSampleBuffer) throws {
-        try throwCallbackErrorIfNeeded()
-        inFlightSlots.wait()
-        var submitted = false
-        defer { if !submitted { inFlightSlots.signal() } }
-        guard let session else { throw NativeCaptureError.videoEncoderCreateFailed(-1) }
         guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
             throw NativeCaptureError.frameMissingPixelBuffer
         }
         let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         let duration = CMSampleBufferGetDuration(sampleBuffer)
+        try encode(
+            pixelBuffer: imageBuffer,
+            presentationTime: presentationTime,
+            duration: duration
+        )
+    }
+
+    func encode(
+        pixelBuffer: CVPixelBuffer,
+        presentationTime: CMTime,
+        duration: CMTime = .invalid
+    ) throws {
+        try throwCallbackErrorIfNeeded()
+        inFlightSlots.wait()
+        var submitted = false
+        defer { if !submitted { inFlightSlots.signal() } }
+        guard let session else { throw NativeCaptureError.videoEncoderCreateFailed(-1) }
         let forceKeyframe = lastForcedKeyframe == nil
             || presentationTime - (lastForcedKeyframe ?? .zero) >= keyframeInterval
         let frameProperties = forceKeyframe
@@ -57,7 +82,7 @@ final class HardwareVideoEncoder: @unchecked Sendable {
 
         let status = VTCompressionSessionEncodeFrame(
             session,
-            imageBuffer: imageBuffer,
+            imageBuffer: pixelBuffer,
             presentationTimeStamp: presentationTime,
             duration: duration.isValid ? duration : .invalid,
             frameProperties: frameProperties,
@@ -65,6 +90,9 @@ final class HardwareVideoEncoder: @unchecked Sendable {
             infoFlagsOut: nil
         )
         guard status == noErr else { throw NativeCaptureError.videoEncodeFailed(status) }
+        errorLock.lock()
+        submittedFrames += 1
+        errorLock.unlock()
         submitted = true
     }
 
@@ -74,21 +102,32 @@ final class HardwareVideoEncoder: @unchecked Sendable {
         guard status == noErr else { throw NativeCaptureError.videoEncodeFailed(status) }
         VTCompressionSessionInvalidate(session)
         self.session = nil
+        muxerQueue.sync {}
         try throwCallbackErrorIfNeeded()
         try muxer.finishAndWait()
     }
 
     fileprivate func receive(status: OSStatus, sampleBuffer: CMSampleBuffer?) {
         defer { inFlightSlots.signal() }
+        errorLock.lock()
+        encodedFrames += 1
+        errorLock.unlock()
         guard status == noErr, let sampleBuffer else {
             recordCallbackError(NativeCaptureError.videoEncoderOutputFailed(status))
             return
         }
         do {
-            try muxer.append(sampleBuffer)
+            try muxerQueue.sync { try muxer.append(sampleBuffer) }
         } catch {
             recordCallbackError(error)
         }
+    }
+
+    func frameCounts() -> (submitted: Int, encoded: Int) {
+        errorLock.lock()
+        let result = (submittedFrames, encodedFrames)
+        errorLock.unlock()
+        return result
     }
 
     private func configure() throws {

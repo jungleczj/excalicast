@@ -77,20 +77,35 @@ test('native capture request preserves requested quality and project file refere
   const result = await client.startCapture({
     recordingId: 'rec-4k',
     projectRoot: '/projects/rec-4k',
-    displayID: 1,
+    sourceKind: 'display',
+    sourceID: 1,
     width: 3840,
     height: 2160,
     framesPerSecond: 60,
     codec: 'h264',
+    captureSystemAudio: true,
+    captureMicrophone: true,
+    captureCamera: true,
+    cameraWidth: 1280,
+    cameraHeight: 720,
+    cameraFramesPerSecond: 24,
   });
 
   expect(command).toMatchObject({
     channel: 'capture.start.v1',
     recordingId: 'rec-4k',
     projectRoot: '/projects/rec-4k',
+    sourceKind: 'display',
+    sourceID: 1,
     width: 3840,
     height: 2160,
     framesPerSecond: 60,
+    captureSystemAudio: true,
+    captureMicrophone: true,
+    captureCamera: true,
+    cameraWidth: 1280,
+    cameraHeight: 720,
+    cameraFramesPerSecond: 24,
   });
   expect(result.capability.effective).toEqual(result.capability.requested);
   expect(result.capability.hardwareEncodingConfirmed).toBe(true);

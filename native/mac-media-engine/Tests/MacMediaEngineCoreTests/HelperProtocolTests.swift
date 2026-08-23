@@ -5,6 +5,24 @@ private enum ContractFailure: Error {
     case expectation(String)
 }
 
+private final class ConcurrentErrors: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [Error] = []
+
+    func append(_ error: Error) {
+        lock.lock()
+        values.append(error)
+        lock.unlock()
+    }
+
+    var isEmpty: Bool {
+        lock.lock()
+        let result = values.isEmpty
+        lock.unlock()
+        return result
+    }
+}
+
 private func expect(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     guard condition() else { throw ContractFailure.expectation(message) }
 }
@@ -42,6 +60,45 @@ struct MacMediaEngineContractTests {
         try expect(queue.popOldest() == 2, "kept second frame")
         try expect(queue.popOldest() == 3, "kept latest frame")
 
+        try expect(
+            InitialFrameSeedPolicy.shouldSeed(streamCompleteFrames: 0, seededFrames: 0),
+            "idle-only ScreenCaptureKit streams require one initial frame"
+        )
+        try expect(
+            !InitialFrameSeedPolicy.shouldSeed(streamCompleteFrames: 1, seededFrames: 0),
+            "a real stream frame makes a screenshot seed unnecessary"
+        )
+        try expect(
+            !InitialFrameSeedPolicy.shouldSeed(streamCompleteFrames: 0, seededFrames: 1),
+            "the initial frame is seeded at most once"
+        )
+        try expect(
+            InitialFrameSeedPolicy.shouldEmitHeartbeat(
+                elapsedSinceLastFrameUs: CaptureEncodingPolicy.segmentDurationUs
+            ),
+            "static content emits one low-frequency recovery heartbeat"
+        )
+        try expect(
+            !InitialFrameSeedPolicy.shouldEmitHeartbeat(elapsedSinceLastFrameUs: 500_000),
+            "active content is not duplicated"
+        )
+        try expect(
+            InitialFrameSeedPolicy.isLikelyProtectedBlackFrame(
+                sampledColorComponents: Array(repeating: 0, count: 48)
+            ),
+            "uniform black fallback frames are treated as protected capture sources"
+        )
+        try expect(
+            !InitialFrameSeedPolicy.isLikelyProtectedBlackFrame(
+                sampledColorComponents: [0, 0, 0, 0, 0, 24]
+            ),
+            "real image detail is accepted"
+        )
+
+        let timeline = RecordingTimeline(originUs: 5_000_000)
+        try expect(timeline.relativeUs(for: 5_250_000) == 250_000, "tracks share one relative clock")
+        try expect(timeline.relativeUs(for: 4_999_000) == 0, "pre-roll timestamp clamps to zero")
+
         let temporaryRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("excalicast-contract-\(UUID().uuidString)", isDirectory: true)
         let store = try SegmentedRecordingStore(root: temporaryRoot, recordingId: "recording-1")
@@ -65,6 +122,41 @@ struct MacMediaEngineContractTests {
         let recoveredAfterCommit = try SegmentedRecordingStore.recover(root: temporaryRoot)
         try expect(recoveredAfterCommit.tracks[.camera]?.first?.byteLength == 4, "streamed file size checkpointed")
         try expect(!FileManager.default.fileExists(atPath: cameraStaging.path), "staging file atomically promoted")
+
+        let concurrentRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("excalicast-concurrent-\(UUID().uuidString)", isDirectory: true)
+        let concurrentStore = try SegmentedRecordingStore(root: concurrentRoot, recordingId: "concurrent")
+        let concurrentErrors = ConcurrentErrors()
+        DispatchQueue.concurrentPerform(iterations: 40) { index in
+            do {
+                let track: RecordingTrackKind = index.isMultiple(of: 2) ? .screen : .camera
+                try concurrentStore.appendFinalizedSegment(
+                    track: track,
+                    index: index / 2,
+                    data: Data(repeating: UInt8(index), count: 32),
+                    startUs: Int64(index) * 100_000,
+                    durationUs: 100_000
+                )
+            } catch {
+                concurrentErrors.append(error)
+            }
+        }
+        let concurrentManifest = try SegmentedRecordingStore.recover(root: concurrentRoot)
+        try expect(concurrentErrors.isEmpty, "parallel track checkpoints do not race")
+        try expect(concurrentManifest.tracks[.screen]?.count == 20, "all parallel screen segments survive")
+        try expect(concurrentManifest.tracks[.camera]?.count == 20, "all parallel camera segments survive")
+
+        let emptyRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("excalicast-empty-\(UUID().uuidString)", isDirectory: true)
+        let emptyStore = try SegmentedRecordingStore(root: emptyRoot, recordingId: "empty")
+        do {
+            try emptyStore.finalize(requiredTracks: [.screen])
+            throw ContractFailure.expectation("empty screen track must not become ready")
+        } catch RecordingStoreError.missingRequiredTrack(.screen) {
+            // expected
+        }
+        try? FileManager.default.removeItem(at: emptyRoot)
+        try? FileManager.default.removeItem(at: concurrentRoot)
         try? FileManager.default.removeItem(at: temporaryRoot)
 
         let h264Preflight = try CapturePreflight.evaluate(

@@ -2,7 +2,7 @@
 import Foundation
 import MacMediaEngineCore
 
-final class VideoSegmentMuxer: @unchecked Sendable {
+final class AudioSegmentWriter: @unchecked Sendable {
     private struct ActiveSegment: @unchecked Sendable {
         let index: Int
         let stagingURL: URL
@@ -14,6 +14,8 @@ final class VideoSegmentMuxer: @unchecked Sendable {
 
     private let store: SegmentedRecordingStore
     private let track: RecordingTrackKind
+    private let channelCount: Int
+    private let bitRate: Int
     private let timeline: RecordingTimeline
     private let segmentDuration = CMTime(value: CaptureEncodingPolicy.segmentDurationUs, timescale: 1_000_000)
     private let finishGroup = DispatchGroup()
@@ -22,9 +24,17 @@ final class VideoSegmentMuxer: @unchecked Sendable {
     private var nextIndex = 0
     private var terminalError: Error?
 
-    init(store: SegmentedRecordingStore, track: RecordingTrackKind, timeline: RecordingTimeline) {
+    init(
+        store: SegmentedRecordingStore,
+        track: RecordingTrackKind,
+        channelCount: Int,
+        bitRate: Int,
+        timeline: RecordingTimeline
+    ) {
         self.store = store
         self.track = track
+        self.channelCount = channelCount
+        self.bitRate = bitRate
         self.timeline = timeline
     }
 
@@ -33,22 +43,18 @@ final class VideoSegmentMuxer: @unchecked Sendable {
         guard CMSampleBufferDataIsReady(sampleBuffer),
               let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
         let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-
         if active == nil {
             active = try makeSegment(formatDescription: formatDescription, start: presentationTime)
-        } else if let current = active,
-                  presentationTime - current.start >= segmentDuration,
-                  isKeyFrame(sampleBuffer) {
+        } else if let current = active, presentationTime - current.start >= segmentDuration {
             sealActiveSegment()
             active = try makeSegment(formatDescription: formatDescription, start: presentationTime)
         }
-
         guard var current = active else { return }
         guard current.input.isReadyForMoreMediaData else {
-            throw NativeCaptureError.videoMuxerBackpressure
+            throw NativeCaptureError.audioMuxerBackpressure(track)
         }
         guard current.input.append(sampleBuffer) else {
-            throw current.writer.error ?? NativeCaptureError.videoMuxerAppendFailed
+            throw current.writer.error ?? NativeCaptureError.audioMuxerAppendFailed(track)
         }
         current.lastPresentationTime = presentationTime
         active = current
@@ -64,17 +70,23 @@ final class VideoSegmentMuxer: @unchecked Sendable {
         let index = nextIndex
         nextIndex += 1
         let stagingURL = try store.makeStagingSegmentURL(track: track, index: index)
-        let writer = try AVAssetWriter(outputURL: stagingURL, fileType: .mp4)
+        let writer = try AVAssetWriter(outputURL: stagingURL, fileType: .m4a)
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: 48_000,
+            AVNumberOfChannelsKey: channelCount,
+            AVEncoderBitRateKey: bitRate,
+        ]
         let input = AVAssetWriterInput(
-            mediaType: .video,
-            outputSettings: nil,
+            mediaType: .audio,
+            outputSettings: settings,
             sourceFormatHint: formatDescription
         )
         input.expectsMediaDataInRealTime = true
-        guard writer.canAdd(input) else { throw NativeCaptureError.videoMuxerCannotAddInput }
+        guard writer.canAdd(input) else { throw NativeCaptureError.audioMuxerCannotAddInput(track) }
         writer.add(input)
         guard writer.startWriting() else {
-            throw writer.error ?? NativeCaptureError.videoMuxerStartFailed
+            throw writer.error ?? NativeCaptureError.audioMuxerStartFailed(track)
         }
         writer.startSession(atSourceTime: start)
         return ActiveSegment(
@@ -97,19 +109,19 @@ final class VideoSegmentMuxer: @unchecked Sendable {
             guard let self else { return }
             do {
                 guard segment.writer.status == .completed else {
-                    throw segment.writer.error ?? NativeCaptureError.videoMuxerFinishFailed
+                    throw segment.writer.error ?? NativeCaptureError.audioMuxerFinishFailed(self.track)
                 }
                 let absoluteStartUs = segment.start.convertScale(1_000_000, method: .roundTowardZero).value
                 let startUs = self.timeline.relativeUs(for: absoluteStartUs)
-                let duration = max(1, (segment.lastPresentationTime - segment.start)
+                let durationUs = max(1, (segment.lastPresentationTime - segment.start)
                     .convertScale(1_000_000, method: .roundAwayFromZero).value)
                 try self.store.commitStagedSegment(
                     track: self.track,
                     index: segment.index,
                     stagingURL: segment.stagingURL,
                     startUs: startUs,
-                    durationUs: duration,
-                    fileExtension: "mp4"
+                    durationUs: durationUs,
+                    fileExtension: "m4a"
                 )
             } catch {
                 self.recordTerminalError(error)
@@ -128,13 +140,5 @@ final class VideoSegmentMuxer: @unchecked Sendable {
         let error = terminalError
         errorLock.unlock()
         if let error { throw error }
-    }
-
-    private func isKeyFrame(_ sampleBuffer: CMSampleBuffer) -> Bool {
-        guard let attachments = CMSampleBufferGetSampleAttachmentsArray(
-            sampleBuffer,
-            createIfNecessary: false
-        ) as? [[CFString: Any]], let first = attachments.first else { return true }
-        return !(first[kCMSampleAttachmentKey_NotSync] as? Bool ?? false)
     }
 }

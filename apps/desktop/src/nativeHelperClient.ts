@@ -16,17 +16,28 @@ interface HelperResponse {
   state?: 'idle' | 'recording' | 'stopping';
   capability?: NativeCaptureCapability;
   sources?: NativeCaptureSources;
+  permissions?: NativeCapturePermissions;
+  pressure?: NativeCapturePressure;
   error?: string;
 }
 
 export interface NativeCaptureRequest {
   recordingId: string;
   projectRoot: string;
-  displayID: number;
+  sourceKind: 'display' | 'window';
+  sourceID: number;
   width: number;
   height: number;
   framesPerSecond: number;
   codec: 'h264' | 'hevc';
+  captureSystemAudio?: boolean;
+  captureMicrophone?: boolean;
+  microphoneDeviceID?: string;
+  captureCamera?: boolean;
+  cameraDeviceID?: string;
+  cameraWidth?: number;
+  cameraHeight?: number;
+  cameraFramesPerSecond?: number;
 }
 
 export interface NativeCaptureConfiguration {
@@ -57,6 +68,25 @@ export interface NativeCaptureSources {
     width: number;
     height: number;
   }>;
+}
+
+export interface NativeCapturePermissions {
+  screen: 'granted' | 'denied' | 'restricted' | 'not-determined';
+  microphone: 'granted' | 'denied' | 'restricted' | 'not-determined';
+  camera: 'granted' | 'denied' | 'restricted' | 'not-determined';
+}
+
+export interface NativeCapturePressure {
+  receivedScreenSamples: number;
+  submittedVideoFrames: number;
+  encodedVideoFrames: number;
+  droppedPendingFrames: number;
+  pendingEncoderFrames: number;
+  completeSamples: number;
+  idleSamples: number;
+  blankSamples: number;
+  suspendedSamples: number;
+  pixelBufferSamples: number;
 }
 
 export interface NativeHelperHandshake {
@@ -100,6 +130,21 @@ export class NativeHelperClient {
     return response.sources;
   }
 
+  async capturePermissions(): Promise<NativeCapturePermissions> {
+    const response = await this.request({ channel: 'capture.permissions.v1' });
+    if (!response.permissions) throw new Error('native_capture_permissions_missing');
+    return response.permissions;
+  }
+
+  async requestCapturePermissions(options: {
+    captureMicrophone: boolean;
+    captureCamera: boolean;
+  }): Promise<NativeCapturePermissions> {
+    const response = await this.request({ channel: 'capture.request-permissions.v1', ...options });
+    if (!response.permissions) throw new Error('native_capture_permissions_missing');
+    return response.permissions;
+  }
+
   async startCapture(request: NativeCaptureRequest): Promise<NativeCaptureResult> {
     const response = await this.request({ channel: 'capture.start.v1', ...request });
     if (response.state !== 'recording' || !response.capability) {
@@ -114,10 +159,13 @@ export class NativeHelperClient {
     return response.state;
   }
 
-  async captureStatus(): Promise<'idle' | 'recording' | 'stopping'> {
+  async captureStatus(): Promise<{
+    state: 'idle' | 'recording' | 'stopping';
+    pressure?: NativeCapturePressure;
+  }> {
     const response = await this.request({ channel: 'capture.status.v1' });
     if (!response.state) throw new Error('native_capture_status_missing');
-    return response.state;
+    return { state: response.state, pressure: response.pressure };
   }
 
   close(): void {

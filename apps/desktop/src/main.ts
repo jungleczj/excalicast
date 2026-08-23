@@ -29,6 +29,18 @@ async function initializeNativeHelper(): Promise<void> {
 }
 
 function registerDesktopIpc(): void {
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.capturePermissions, async () => {
+    const helper = await requireNativeHelper();
+    return helper.capturePermissions();
+  });
+  ipcMain.handle(DESKTOP_IPC_CHANNELS.captureRequestPermissions, async (_event, payload: unknown) => {
+    const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+    const helper = await requireNativeHelper();
+    return helper.requestCapturePermissions({
+      captureMicrophone: value.captureMicrophone === true,
+      captureCamera: value.captureCamera === true,
+    });
+  });
   ipcMain.handle(DESKTOP_IPC_CHANNELS.captureSources, async () => {
     const helper = await requireNativeHelper();
     return helper.captureSources();
@@ -48,9 +60,10 @@ function registerDesktopIpc(): void {
   ipcMain.handle(DESKTOP_IPC_CHANNELS.captureStatus, async () => {
     if (nativeHelperInitialization) await nativeHelperInitialization;
     if (!nativeHelper) return { available: false, state: 'idle', helper: null };
+    const status = await nativeHelper.captureStatus();
     return {
       available: true,
-      state: await nativeHelper.captureStatus(),
+      ...status,
       helper: nativeHelperHandshake,
     };
   });
@@ -67,8 +80,14 @@ function toNativeCaptureRequest(payload: unknown): NativeCaptureRequest {
   const value = payload as Record<string, unknown>;
   const recordingId = typeof value.recordingId === 'string' ? value.recordingId : '';
   const codec = value.codec === 'h264' || value.codec === 'hevc' ? value.codec : null;
+  const legacyDisplayID = Number.isInteger(value.displayID) ? value.displayID as number : null;
+  const sourceKind = value.sourceKind === 'display' || value.sourceKind === 'window'
+    ? value.sourceKind
+    : legacyDisplayID !== null ? 'display' : null;
+  const sourceID = Number.isInteger(value.sourceID) ? value.sourceID as number : legacyDisplayID;
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(recordingId)
-    || !Number.isInteger(value.displayID)
+    || !sourceKind
+    || sourceID === null
     || !Number.isInteger(value.width)
     || !Number.isInteger(value.height)
     || !Number.isInteger(value.framesPerSecond)
@@ -78,7 +97,8 @@ function toNativeCaptureRequest(payload: unknown): NativeCaptureRequest {
   return {
     recordingId,
     projectRoot: path.join(app.getPath('videos'), 'Excalicast Projects', recordingId),
-    displayID: value.displayID as number,
+    sourceKind,
+    sourceID,
     width: value.width as number,
     height: value.height as number,
     framesPerSecond: value.framesPerSecond as number,
