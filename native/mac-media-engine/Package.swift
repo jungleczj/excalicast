@@ -9,12 +9,14 @@ let package = Package(
         .library(name: "MacMediaEnginePlatform", targets: ["MacMediaEnginePlatform"]),
         .library(name: "MacMediaEngineChartRenderer", targets: ["MacMediaEngineChartRenderer"]),
         .library(name: "MacMediaEngineTeachingAudio", targets: ["MacMediaEngineTeachingAudio"]),
+        .library(name: "MacMediaEngineFinalCompositorStage1", targets: ["MacMediaEngineFinalCompositorStage1"]),
         .executable(name: "mac-media-engine", targets: ["MacMediaEngine"]),
         .executable(name: "mac-media-engine-contract-tests", targets: ["MacMediaEngineContractTests"]),
         .executable(name: "native-input-telemetry-contract-tests", targets: ["NativeInputTelemetryContractTests"]),
         .executable(name: "native-input-platform-contract-tests", targets: ["NativeInputPlatformContractTests"]),
         .executable(name: "native-chart-renderer-contract-tests", targets: ["NativeChartRendererContractTests"]),
         .executable(name: "native-streaming-teaching-audio-contract-tests", targets: ["NativeStreamingTeachingAudioContractTests"]),
+        .executable(name: "native-final-compositor-stage1-contract-tests", targets: ["NativeFinalCompositorStage1ContractTests"]),
     ],
     targets: [
         .target(name: "MacMediaEngineCore"),
@@ -24,6 +26,7 @@ let package = Package(
             name: "MacMediaEngineTeachingAudio",
             linkerSettings: [.linkedFramework("AVFoundation"), .linkedFramework("AudioToolbox")]
         ),
+        .target(name: "MacMediaEngineFinalCompositorStage1"),
         .executableTarget(name: "MacMediaEngine", dependencies: ["MacMediaEngineCore", "MacMediaEnginePlatform"]),
         .executableTarget(
             name: "MacMediaEngineContractTests",
@@ -49,6 +52,11 @@ let package = Package(
             name: "NativeStreamingTeachingAudioContractTests",
             dependencies: ["MacMediaEngineTeachingAudio"],
             path: "Tests/NativeStreamingTeachingAudioContractTests"
+        ),
+        .executableTarget(
+            name: "NativeFinalCompositorStage1ContractTests",
+            dependencies: ["MacMediaEngineFinalCompositorStage1"],
+            path: "Tests/NativeFinalCompositorStage1ContractTests"
         ),
     ]
 )
