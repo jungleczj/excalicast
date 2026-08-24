@@ -129,21 +129,59 @@ private final class FakeWindowProvider: NativeInputWindowProviding, @unchecked S
 }
 
 private final class TerminalRuntimeSource: NativeInputRuntimeSource, @unchecked Sendable {
+    private let lock = NSLock()
     private var handler: (@Sendable (NativeRawInputEvent) -> Void)?
     private var terminalHandler: (@Sendable (MacNativeInputError) -> Void)?
-    private(set) var terminalFailure: MacNativeInputError?
+    private var currentTerminalFailure: MacNativeInputError?
+    private let resumeEntered = DispatchSemaphore(value: 0)
+    private let resumeMayReturn = DispatchSemaphore(value: 0)
+    private var shouldBlockResume = false
     let statistics = NativeInputSourceStatistics(capturedEventCount: 0, coalescedEventCount: 0, droppedEventCount: 0)
+
+    var terminalFailure: MacNativeInputError? {
+        lock.lock()
+        defer { lock.unlock() }
+        return currentTerminalFailure
+    }
 
     func start(handler: @escaping @Sendable (NativeRawInputEvent) -> Void) throws { self.handler = handler }
     func stop() { handler = nil }
-    func setTerminalHandler(_ handler: @escaping @Sendable (MacNativeInputError) -> Void) { terminalHandler = handler }
+    func setTerminalHandler(_ handler: @escaping @Sendable (MacNativeInputError) -> Void) {
+        lock.lock()
+        terminalHandler = handler
+        lock.unlock()
+    }
     func drainEnqueuedCallbacks() {}
     func suspendCallbacksAndWait() {}
-    func resumeCallbacks() {}
+    func resumeCallbacks() throws {
+        lock.lock()
+        let block = shouldBlockResume
+        lock.unlock()
+        if block {
+            resumeEntered.signal()
+            resumeMayReturn.wait()
+        }
+        if let terminalFailure { throw terminalFailure }
+    }
+
+    func blockNextResume() {
+        lock.lock()
+        shouldBlockResume = true
+        lock.unlock()
+    }
+
+    func waitUntilResumeEntered() -> Bool {
+        resumeEntered.wait(timeout: .now() + .seconds(1)) == .success
+    }
+
+    func releaseResume() { resumeMayReturn.signal() }
 
     func fail(_ error: MacNativeInputError) {
-        terminalFailure = error
-        terminalHandler?(error)
+        lock.lock()
+        currentTerminalFailure = error
+        let callback = terminalHandler
+        lock.unlock()
+        callback?(error)
     }
 }
 
@@ -285,7 +323,7 @@ private struct NativeInputPlatformContractTests {
         lifecycleClock.set(1_070_000)
         tap.emit(.event(MacInputEventPrimitive(type: .scrollWheel, x: 11, y: 21, scrollDeltaX: 2.5, scrollDeltaY: -4)))
         lifecycleSource.suspendCallbacksAndWait()
-        lifecycleSource.resumeCallbacks()
+        try lifecycleSource.resumeCallbacks()
 
         let raw = lifecycleEvents.snapshot
         try expect(raw.count == 6, "required callback families enqueue losslessly while cursor motion coalesces")
@@ -506,6 +544,53 @@ private struct NativeInputPlatformContractTests {
         }
         try expect(terminalResumeControls.snapshot().paused, "terminal resume keeps shared capture controls paused")
         try? terminalResumeRuntime.stop()
+
+        let racingResumeSource = TerminalRuntimeSource()
+        racingResumeSource.blockNextResume()
+        let racingResumeControls = CaptureControlState()
+        let racingResumeClock = FakeClock()
+        racingResumeClock.set(3_000_000)
+        let racingResumeScheduler = ManualScheduler()
+        let racingResumeSink = NativeInputTelemetryCoordinatorSink(
+            sessionId: "racing-resume",
+            producerEpoch: "racing-resume-epoch",
+            controls: racingResumeControls,
+            timeline: RecordingTimeline(originUs: 3_000_000),
+            coordinator: InputTelemetryCoordinator(sessionId: "racing-resume"),
+            persist: { _, _, _, _ in }
+        )
+        let racingResumeRuntime = NativeInputCaptureRuntime(
+            source: racingResumeSource,
+            displays: FakeDisplayProvider(displays.geometries),
+            windows: FakeWindowProvider(),
+            clock: racingResumeClock,
+            controls: racingResumeControls,
+            sink: racingResumeSink,
+            excludedWindowIDs: [],
+            scheduling: racingResumeScheduler.scheduling,
+            onTerminal: { _, _ in }
+        )
+        try racingResumeRuntime.start()
+        racingResumeClock.set(3_100_000)
+        try racingResumeRuntime.pause()
+        let racingResumeTask = Task.detached { () -> MacNativeInputError? in
+            do {
+                try racingResumeRuntime.resume()
+                return nil
+            } catch let error as MacNativeInputError {
+                return error
+            } catch {
+                return .inputTelemetryWriteFailed
+            }
+        }
+        let enteredResume = racingResumeSource.waitUntilResumeEntered()
+        racingResumeSource.fail(.inputEventTapCreationFailed)
+        racingResumeSource.releaseResume()
+        let racingResumeFailure = await racingResumeTask.value
+        try expect(enteredResume, "resume race source enters the controlled resume critical section")
+        try expect(racingResumeFailure == .inputEventTapCreationFailed, "a source failure during resume is returned to the runtime caller")
+        try expect(racingResumeControls.snapshot().paused, "a rejected source resume cannot advance shared capture controls")
+        try? racingResumeRuntime.stop()
 
         let startupCalls = LockedBox<[String]>([])
         do {
