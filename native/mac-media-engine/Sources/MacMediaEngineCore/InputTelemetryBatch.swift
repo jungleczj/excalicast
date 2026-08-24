@@ -30,6 +30,7 @@ private struct ProducerEvent {
     let surfaceId: String
     let kind: String
     let payload: [String: Any]
+    let nativeProjectAtUs: Int64?
 }
 
 public final class InputTelemetryCoordinator: @unchecked Sendable {
@@ -91,19 +92,25 @@ public final class InputTelemetryCoordinator: @unchecked Sendable {
         let segmentIndex = nextSegmentIndex
         let startUs = max(projectAtUs, lastGlobalAtUs + 1)
         var authoritativeEvents: [[String: Any]] = []
-        for (offset, event) in unseen.enumerated() {
+        var nextAtUs = startUs
+        for event in unseen {
             var authoritative = event.payload
+            if event.producerId == "native-input" {
+                authoritative.removeValue(forKey: "nativeProjectAtUs")
+            }
+            let eventAtUs = max(event.nativeProjectAtUs ?? nextAtUs, nextAtUs)
             authoritative["schemaVersion"] = 1
             authoritative["sessionId"] = sessionId
-            authoritative["atUs"] = startUs + Int64(offset)
+            authoritative["atUs"] = eventAtUs
             authoritative["kind"] = event.kind
             authoritative["producerId"] = event.producerId
             authoritative["producerEpoch"] = event.producerEpoch
             authoritative["producerSequence"] = event.producerSequence
             authoritative["surfaceId"] = event.surfaceId
             authoritativeEvents.append(authoritative)
+            nextAtUs = eventAtUs + 1
         }
-        let endUs = startUs + Int64(authoritativeEvents.count - 1)
+        let endUs = nextAtUs - 1
         let authoritativeBatch: [String: Any] = [
             "schemaVersion": 1,
             "sessionId": sessionId,
@@ -242,7 +249,8 @@ public final class InputTelemetryCoordinator: @unchecked Sendable {
                 producerSequence: sequence,
                 surfaceId: surfaceId,
                 kind: kind,
-                payload: eventPayload
+                payload: eventPayload,
+                nativeProjectAtUs: producerId == "native-input" ? integer(eventPayload["nativeProjectAtUs"]) : nil
             ))
         }
         return result

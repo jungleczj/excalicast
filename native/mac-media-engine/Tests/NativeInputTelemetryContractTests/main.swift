@@ -11,6 +11,8 @@ private func expect(_ condition: @autoclosure () throws -> Bool, _ message: Stri
 
 private final class FakeSource: NativeInputTelemetrySource, @unchecked Sendable {
     var startError: NativeInputTelemetryMonitorError?
+    var eventDuringStart: NativeRawInputEvent?
+    var onStart: (() -> Void)?
     var startCount = 0
     var stopCount = 0
     private var handler: (@Sendable (NativeRawInputEvent) -> Void)?
@@ -19,6 +21,8 @@ private final class FakeSource: NativeInputTelemetrySource, @unchecked Sendable 
         startCount += 1
         if let startError { throw startError }
         self.handler = handler
+        if let eventDuringStart { handler(eventDuringStart) }
+        onStart?()
     }
 
     func stop() {
@@ -28,6 +32,37 @@ private final class FakeSource: NativeInputTelemetrySource, @unchecked Sendable 
 
     func emit(_ event: NativeRawInputEvent) {
         handler?(event)
+    }
+}
+
+private enum PersistenceFailure: Error {
+    case requested
+}
+
+private final class PersistedBatches: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [Data] = []
+    private var shouldFail = false
+
+    func failNext() {
+        lock.lock()
+        shouldFail = true
+        lock.unlock()
+    }
+
+    func persist(_ data: Data) throws {
+        lock.lock()
+        let fail = shouldFail
+        shouldFail = false
+        if !fail { values.append(data) }
+        lock.unlock()
+        if fail { throw PersistenceFailure.requested }
+    }
+
+    var batches: [Data] {
+        lock.lock()
+        defer { lock.unlock() }
+        return values
     }
 }
 
@@ -144,6 +179,10 @@ struct NativeInputTelemetryContractTests {
         try expect(ageBounded.flushDecision(atHostUs: 139_999) == .notDue, "a younger batch is not due")
         try expect(ageBounded.flushDecision(atHostUs: 140_000) == .maximumAge, "a 100ms-old batch is due")
 
+        let clampedAge = NativeInputTelemetryBatchAccumulator(maximumAgeUs: 1_000_000)
+        try clampedAge.offer(NativeMappedInputEvent(hostUs: 41_000, kind: "scroll", payload: ["deltaY": .number(1)]))
+        try expect(clampedAge.flushDecision(atHostUs: 141_000) == .maximumAge, "public configuration cannot extend the 100ms age maximum")
+
         let bytesBounded = NativeInputTelemetryBatchAccumulator(maximumPayloadBytes: 256)
         do {
             try bytesBounded.offer(NativeMappedInputEvent(
@@ -154,6 +193,18 @@ struct NativeInputTelemetryContractTests {
             throw TestFailure.expectation("oversized lossless payload must fail explicitly")
         } catch NativeInputTelemetryBatchAccumulatorError.losslessOverflow {
             // Expected: lossless data is never silently discarded.
+        }
+
+        let hardBytesBounded = NativeInputTelemetryBatchAccumulator(maximumPayloadBytes: 1_000_000)
+        do {
+            try hardBytesBounded.offer(NativeMappedInputEvent(
+                hostUs: 51_000,
+                kind: "click",
+                payload: ["text": .string(String(repeating: "x", count: 300_000))]
+            ))
+            throw TestFailure.expectation("public configuration cannot extend the 256KiB payload maximum")
+        } catch NativeInputTelemetryBatchAccumulatorError.losslessOverflow {
+            // Expected: the hard payload maximum wins over a larger public value.
         }
 
         let retrySafe = NativeInputTelemetryBatchAccumulator()
@@ -202,28 +253,102 @@ struct NativeInputTelemetryContractTests {
         try expect(monitor.state == .stopped, "stopped lifecycle is observable")
         try expect(sink.events.map(\.kind) == ["cursor", "click", "active-window", "window-bounds"], "monitor merges input and window changes through one sink")
 
+        let synchronousSource = FakeSource()
+        synchronousSource.eventDuringStart = .cursor(hostUs: 23_000, x: 35, y: 45)
+        let synchronousSink = CapturingSink()
+        let synchronousMonitor = NativeInputTelemetryMonitor(
+            source: synchronousSource,
+            mapper: mapper,
+            sink: synchronousSink,
+            activeWindowSnapshot: { nil }
+        )
+        try synchronousMonitor.start()
+        try synchronousMonitor.flush()
+        try expect(synchronousSink.events.map(\.kind) == ["cursor"], "a source event emitted synchronously from start is retained")
+
+        let stoppingSource = FakeSource()
+        var stoppingMonitor: NativeInputTelemetryMonitor?
+        stoppingSource.onStart = { stoppingMonitor?.stop() }
+        stoppingMonitor = NativeInputTelemetryMonitor(
+            source: stoppingSource,
+            mapper: mapper,
+            sink: CapturingSink(),
+            activeWindowSnapshot: { nil }
+        )
+        try stoppingMonitor?.start()
+        try expect(stoppingSource.stopCount == 1 && stoppingMonitor?.state == .stopped, "stop during source start completes without a racing restart")
+
+        let mappingFailureSource = FakeSource()
+        let mappingFailureMonitor = NativeInputTelemetryMonitor(
+            source: mappingFailureSource,
+            mapper: mapper,
+            sink: CapturingSink(),
+            activeWindowSnapshot: { nil }
+        )
+        try mappingFailureMonitor.start()
+        mappingFailureSource.emit(.cursor(hostUs: 24_000, x: 9_999, y: 9_999))
+        do {
+            try mappingFailureMonitor.flush()
+            throw TestFailure.expectation("unmappable lossless source input must surface to the monitor caller")
+        } catch NativeInputTelemetryMonitorError.mappingFailed(.noDisplayForPoint) {
+            // Expected: mapping failures are terminal, not ignored with try?.
+        }
+
         let controls = CaptureControlState()
         let timeline = RecordingTimeline(originUs: 1_000_000)
         let coordinator = InputTelemetryCoordinator(sessionId: "lesson")
-        var persisted: [Data] = []
+        let persisted = PersistedBatches()
         let coordinatorSink = NativeInputTelemetryCoordinatorSink(
             sessionId: "lesson",
             producerEpoch: "native-epoch",
             controls: controls,
             timeline: timeline,
             coordinator: coordinator,
-            persist: { _, _, _, data in persisted.append(data) }
+            persist: { _, _, _, data in try persisted.persist(data) }
         )
         try coordinatorSink.consume(try mapper.map(.cursor(hostUs: 1_100_000, x: 10, y: 20)))
         _ = controls.pause(atUs: 1_200_000)
         try coordinatorSink.consume(try mapper.map(.button(hostUs: 1_300_000, x: 10, y: 20, button: .primary, phase: .down)))
         _ = controls.resume(atUs: 1_500_000)
         try coordinatorSink.consume(try mapper.map(.scroll(hostUs: 1_600_000, x: 10, y: 20, deltaX: 0, deltaY: 3)))
-        try expect(persisted.count == 2, "paused native events are ignored without renderer mediation")
-        let decoded = try JSONSerialization.jsonObject(with: persisted[0]) as? [String: Any]
+        try coordinatorSink.flush()
+        try expect(persisted.batches.count == 1, "unpaused native events are persisted as one bounded producer batch")
+        let decoded = try JSONSerialization.jsonObject(with: persisted.batches[0]) as? [String: Any]
         let events = decoded?["events"] as? [[String: Any]]
         try expect(events?.first?["producerId"] as? String == "native-input", "native producer identity is owned by the helper")
         try expect(events?.first?["atUs"] as? Int == 100_000, "native input uses the media timeline clock")
+        try expect(events?.count == 2, "paused native events are omitted from the persisted batch")
+        try expect(events?.last?["atUs"] as? Int == 300_000, "batched native input preserves compacted timeline gaps")
+
+        let batchedSource = FakeSource()
+        let batchedMonitor = NativeInputTelemetryMonitor(
+            source: batchedSource,
+            mapper: mapper,
+            sink: coordinatorSink,
+            activeWindowSnapshot: { nil }
+        )
+        try batchedMonitor.start()
+        batchedSource.emit(.cursor(hostUs: 1_700_000, x: 20, y: 30))
+        batchedSource.emit(.button(hostUs: 1_700_001, x: 20, y: 30, button: .primary, phase: .down))
+        try batchedMonitor.flush()
+        try expect(persisted.batches.count == 2, "monitor flush checkpoints its input through one coordinator batch")
+        let monitoredPayload = try JSONSerialization.jsonObject(with: persisted.batches[1]) as? [String: Any]
+        try expect((monitoredPayload?["events"] as? [[String: Any]])?.count == 2, "monitor batch retains cursor and click together")
+
+        batchedSource.emit(.scroll(hostUs: 1_800_000, x: 20, y: 30, deltaX: 0, deltaY: 2))
+        batchedSource.emit(.button(hostUs: 1_800_001, x: 20, y: 30, button: .primary, phase: .up))
+        persisted.failNext()
+        do {
+            try batchedMonitor.flush()
+            throw TestFailure.expectation("a failed coordinator persistence must reach the monitor")
+        } catch PersistenceFailure.requested {
+            // Expected: monitor restores its drained events and the coordinator restores its pending batch.
+        }
+        try expect(persisted.batches.count == 2, "failed monitor persistence does not create a segment")
+        try batchedMonitor.flush()
+        try expect(persisted.batches.count == 3, "retry persists the restored monitor batch exactly once")
+        let retriedPayload = try JSONSerialization.jsonObject(with: persisted.batches[2]) as? [String: Any]
+        try expect((retriedPayload?["events"] as? [[String: Any]])?.map { $0["kind"] as? String } == ["scroll", "click"], "retry retains current and remaining failed lossless events without duplication")
 
         print("Native input telemetry contract tests passed")
     }
