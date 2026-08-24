@@ -1,4 +1,8 @@
 import type { DesktopDirectorJobStatus } from '@/desktop/productContract';
+import type {
+  TeachingCompositionOperation,
+  TeachingCompositionSourceTrack,
+} from '@/desktop/teachingCompositionExecutor';
 
 export interface PaidRecordingRow {
   recording_id: string;
@@ -31,6 +35,23 @@ export interface NativeProjectSegmentReference {
   byteLength: number;
 }
 
+export type NativeTeachingCompositionStatus =
+  | 'pending'
+  | 'generating'
+  | 'ready'
+  | 'unsupported'
+  | 'failed';
+
+export type NativeTeachingCompositionLifecycle =
+  | { status: 'pending' | 'generating' }
+  | {
+      status: 'ready';
+      sourceTracks: TeachingCompositionSourceTrack[];
+      operations: TeachingCompositionOperation[];
+    }
+  | { status: 'unsupported'; code: string }
+  | { status: 'failed'; code: string; retryable: boolean };
+
 /**
  * Reference to a ScreenCaptureKit project stored outside browser storage.
  * The browser database keeps only bounded metadata; media remains in the
@@ -46,6 +67,8 @@ export interface NativeRecordingProjectReference {
   tracks?: Record<string, NativeProjectSegmentReference[]>;
   /** Bounded main-process Director state; ready refers only to director/current.json. */
   director?: DesktopDirectorJobStatus;
+  /** Main-owned teaching composition lifecycle; media validation never implies ready. */
+  teachingComposition?: NativeTeachingCompositionLifecycle;
 }
 
 /**

@@ -564,6 +564,47 @@
     "title": "New recording",
     "close": "Close",
     "cropLocked": "CROP LOCKED",
+    "desktopStudio": {
+      "eyebrow": "MAC DESKTOP CAPTURE",
+      "title": "Hybrid teaching capture",
+      "summary": "{source} · {camera} · microphone and materials remain on separate tracks",
+      "readiness": "Desktop capture readiness",
+      "screen": "Screen recording",
+      "inputMonitoring": "Input Monitoring",
+      "microphone": "Microphone",
+      "camera": "Camera",
+      "systemAudio": "Computer audio",
+      "encoder": "Hardware encoder",
+      "granted": "Authorized",
+      "attention": "Needs attention",
+      "noDevice": "No device available",
+      "unknown": "Not checked",
+      "notSelected": "Not selected",
+      "verifiedOnStart": "Verified before capture starts",
+      "probeFailed": "Device check failed",
+      "permissionHelp": "For denied access, use the matching privacy pane below, then return here and check again.",
+      "permissionPaths": {
+        "screen": "System Settings > Privacy & Security > Screen & System Audio Recording",
+        "microphone": "System Settings > Privacy & Security > Microphone",
+        "camera": "System Settings > Privacy & Security > Camera",
+        "inputMonitoring": "System Settings > Privacy & Security > Input Monitoring"
+      },
+      "retryReadiness": "Check permissions and devices again",
+      "requestAndRetryReadiness": "Request permission and check again",
+      "checking": "Checking…",
+      "startBlocked": "Complete the permission and device check before starting native capture.",
+      "cameraOn": "camera on",
+      "cameraOff": "camera off",
+      "assetsSelected": "Auto film · {count, plural, one {# material type} other {# material types}}",
+      "autoFilmOff": "Auto film off",
+      "sources": {
+        "whiteboard": "Excalidraw whiteboard",
+        "current_tab": "current tab",
+        "window": "app window",
+        "desktop": "entire desktop",
+        "selected_area": "desktop selection"
+      }
+    },
     "recipe": {
       "eyebrow": "AI DIRECTOR · PRE-RECORD",
       "title": "Teaching film recipe",
@@ -762,6 +803,7 @@
     }
   },
   "exportPreview": {
+    "stageLabel": "Video preview",
     "watermarkBadge": "👁️ Watermarked preview",
     "cleanBadge": "✓ Clean export",
     "renderingTag": "Rendering…",
@@ -935,6 +977,31 @@
     "play": "Play",
     "pause": "Pause",
     "restart": "Restart"
+  },
+  "desktopDirector": {
+    "eyebrow": "AI DIRECTOR",
+    "phase": {
+      "pending": "Waiting to understand the lesson",
+      "generating": "Building the teaching film",
+      "ready": "Ready to preview",
+      "unsupported": "This material cannot be placed automatically yet",
+      "failed": "Automatic film creation stopped",
+      "unknown": "Director status not checked"
+    },
+    "detail": {
+      "pending": "Your original recording is safe while Director waits.",
+      "generating": "Understanding the lesson and placing only the materials you selected.",
+      "ready": "The selected teaching materials are on their tracks.",
+      "unsupported": "The original recording remains ready to edit.",
+      "failed": "The original recording is preserved.",
+      "unknown": "No verified Director result is available for this recording."
+    },
+    "placements": "{count, plural, one {# material placed} other {# materials placed}}",
+    "failedCode": "Stopped with {code}. The original recording is preserved.",
+    "unsupportedCode": "This material type is not supported yet ({code}). The original recording is preserved.",
+    "preview": "Jump to preview",
+    "retry": "Retry Director",
+    "retryComposition": "Retry composition"
   },
   "export": {
     "loading": "Loading recording…",

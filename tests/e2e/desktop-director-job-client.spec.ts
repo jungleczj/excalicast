@@ -164,5 +164,10 @@ test('native editor load wires status polling without coupling browser recording
   expect(source).toContain('nativeProject: { ...current.nativeProject, director }');
   expect(source).toContain('if (error.message !== \'desktop_director_poll_aborted\')');
   expect(source).toContain('retryDesktopDirectorJob({');
-  expect(source).toContain('data-testid="desktop-director-retry"');
+  expect(source).toContain('<DesktopDirectorProgress');
+  const progressSource = await readFile(
+    path.join(process.cwd(), 'src/components/DesktopDirectorProgress.tsx'),
+    'utf8',
+  );
+  expect(progressSource).toContain('data-testid="desktop-director-retry"');
 });

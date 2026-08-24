@@ -7,6 +7,7 @@ import {
 import type { DesktopCaptureBridge } from '../../src/desktop/aiCameraSession';
 import type { RecordingSetupConfig } from '../../src/types/recording';
 import {
+  applyNativeTeachingCompositionLifecycle,
   createNativeRecordingMetadata,
   finalizeNativeRecordingMetadata,
   nativeProjectRequiresExportAdapter,
@@ -357,6 +358,114 @@ test('native renderer persists a recoverable project reference before capture ca
       recordingId: 'native-metadata',
       captureState: 'recording',
       exportStatus: 'adapter-required',
+    },
+  });
+});
+
+test('native media finalization never claims the independent teaching composition is ready', () => {
+  const recording = createNativeRecordingMetadata({
+    recordingId: 'native-composition-pending',
+    startedAt: 1_000,
+    ownerKey: 'owner-1',
+    setup: {
+      ...setup({ kind: 'desktop', captureSystemAudio: true }, false),
+      teachingRecipe: {
+        schemaVersion: 1,
+        enabled: true,
+        teachingPackId: 'teaching-pack-1',
+        selectedAssetIds: ['lesson-pop'],
+      },
+    },
+  });
+  const finalized = finalizeNativeRecordingMetadata(recording, {
+    manifest: { schemaVersion: 1, recordingId: recording.id, state: 'ready', tracks: { screen: [] } },
+    validation: { isValid: true, manifestState: 'ready' },
+    durationMs: 4_000,
+  });
+
+  expect(finalized.status).toBe('done');
+  expect(finalized.teachingRecipeStatus).toBe('pending');
+  expect(finalized.nativeProject?.teachingComposition).toEqual({ status: 'pending' });
+});
+
+test('renderer metadata follows verified native teaching composition lifecycle states', () => {
+  const recording = createNativeRecordingMetadata({
+    recordingId: 'native-composition-lifecycle',
+    startedAt: 1_000,
+    ownerKey: 'owner-1',
+    setup: {
+      ...setup({ kind: 'desktop', captureSystemAudio: true }, false),
+      teachingRecipe: {
+        schemaVersion: 1,
+        enabled: true,
+        teachingPackId: 'teaching-pack-1',
+        selectedAssetIds: ['lesson-pop'],
+      },
+    },
+  });
+
+  const generating = applyNativeTeachingCompositionLifecycle(recording, { status: 'generating' });
+  expect(generating).toMatchObject({
+    teachingRecipeStatus: 'pending',
+    nativeProject: { teachingComposition: { status: 'generating' } },
+  });
+  const ready = applyNativeTeachingCompositionLifecycle(generating, {
+    status: 'ready',
+    sourceTracks: [{ trackId: 'microphone', kind: 'microphone' }],
+    operations: [{
+      operationId: 'teaching:sound-effect:0000:lesson-pop',
+      operation: 'mix-sound-effect', track: 'sound-effect',
+      asset: {
+        assetId: 'lesson-pop', kind: 'sound-effect', catalogVersion: 'catalog-v1',
+        assetVersion: '1.0.0', checksumAlgorithm: 'sha256', checksum: 'a'.repeat(64),
+        localUri: 'file:///tmp/lesson-pop.wav',
+      },
+      startMs: 500, endMs: 800,
+      trim: { sourceStartMs: 0, sourceEndMs: 300, playbackMode: 'once' },
+      zOrder: 0,
+      transition: { enterMs: 0, exitMs: 0, easing: 'easeInOutCubic' },
+      content: [],
+      audio: {
+        gainDb: -3, gainCeilingDb: -1,
+        ducking: { targetSourceTracks: ['microphone'], attenuationDb: -8, attackMs: 80, releaseMs: 240 },
+        mixesAsIndependentEffect: true,
+      },
+    }],
+  });
+  expect(ready).toMatchObject({
+    teachingRecipeStatus: 'ready',
+    nativeProject: { teachingComposition: { status: 'ready' } },
+    teachingEditRecipe: {
+      sourceRecordingId: 'native-composition-lifecycle',
+      teachingPackId: 'teaching-pack-1',
+      curatedAssetIds: ['lesson-pop'],
+      placements: [{ assetId: 'lesson-pop', track: 'sound-effect', startMs: 500, endMs: 800 }],
+    },
+  });
+  const downgraded = applyNativeTeachingCompositionLifecycle(ready, { status: 'pending' });
+  expect(downgraded.teachingRecipeStatus).toBe('pending');
+  expect(downgraded.nativeProject?.teachingComposition).toEqual({ status: 'pending' });
+  expect(downgraded.teachingEditRecipe).toBeUndefined();
+  const unsupported = applyNativeTeachingCompositionLifecycle(recording, {
+    status: 'unsupported', code: 'teaching_composition_unsupported_capability',
+  });
+  expect(unsupported).toMatchObject({
+    teachingRecipeStatus: 'error',
+    nativeProject: {
+      teachingComposition: {
+        status: 'unsupported', code: 'teaching_composition_unsupported_capability',
+      },
+    },
+  });
+  const failed = applyNativeTeachingCompositionLifecycle(recording, {
+    status: 'failed', code: 'teaching_composition_finalization_failed', retryable: false,
+  });
+  expect(failed).toMatchObject({
+    teachingRecipeStatus: 'error',
+    nativeProject: {
+      teachingComposition: {
+        status: 'failed', code: 'teaching_composition_finalization_failed',
+      },
     },
   });
 });

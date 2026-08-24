@@ -1,8 +1,12 @@
 'use client';
 
-import { useState, type CSSProperties, type JSX, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type JSX, type ReactNode } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { I } from '@/components/icons';
+import {
+  DesktopTeachingCaptureConsole,
+  type DesktopCaptureReadiness,
+} from '@/components/DesktopTeachingCaptureConsole';
 import { DEFAULT_VIDEO_BACKGROUND, getVideoBackgroundPreset, VIDEO_BACKGROUND_PRESETS, type VideoBackgroundPreset } from '@/config/videoBackgrounds';
 import {
   categoriesFromRecordingTeachingSelection,
@@ -73,6 +77,42 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
   const [recipeAssets, setRecipeAssets] = useState<Record<TeachingRecipeAsset, boolean>>(
     () => categoriesFromRecordingTeachingSelection(initial.teachingRecipe),
   );
+  const [desktopCaptureReadiness, setDesktopCaptureReadiness] = useState<DesktopCaptureReadiness>({ blocked: false });
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
+
+  useEffect(() => {
+    if (!open) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCancelRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener('keydown', onKeyDown);
+      previousFocus?.focus();
+    };
+  }, [open]);
 
   if (!open) return null;
 
@@ -129,6 +169,10 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
       onClick={onCancel}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="recording-setup-title"
         className="setup-craft-card max-h-[92vh] max-w-[94vw] overflow-auto"
         style={{
           width: 1180,
@@ -147,10 +191,11 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
         >
           <div>
             <div className="label-mono" style={{ fontSize: 10 }}>// {t('step')}</div>
-            <div className="setup-craft-title" style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em', marginTop: 6 }}>{t('title')}</div>
+            <h2 id="recording-setup-title" className="setup-craft-title" style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em', marginTop: 6 }}>{t('title')}</h2>
           </div>
           <button
             type="button"
+            ref={closeButtonRef}
             onClick={onCancel}
             aria-label={t('close')}
             className="grid place-items-center"
@@ -184,6 +229,15 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
             </div>
           </aside>
           <div className="recording-setup-config" style={{ padding: 28 }}>
+          <DesktopTeachingCaptureConsole onReadinessChange={setDesktopCaptureReadiness} config={{
+            framing,
+            croppingMode: framing === 'default' ? 'fit_all_content' : 'follow_viewport',
+            includeWorkspaceShell: includeShell,
+            camera: { enabled: camEnabled, sizePx: size, shape, position: pos, backgroundRemoval: bgRemove },
+            source,
+            videoBackground,
+            teachingRecipe: createRecordingTeachingSelection({ enabled: autoFilm, categories: recipeAssets }),
+          }} />
           <TeachingFilmRecipe
             open={recipeOpen}
             autoFilm={autoFilm}
@@ -336,6 +390,7 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
                       onClick={() => setFraming(id)}
                       className="press flex items-center text-left"
                       style={{
+                        minWidth: 0,
                         gap: 12,
                         padding: 12,
                         border: '1.5px solid var(--ink)',
@@ -502,12 +557,24 @@ export function RecordingSetup({ open, initial, micLabel, countdownSeconds = 3, 
           </div>
           <div className="flex" style={{ gap: 10 }}>
             <button type="button" className="btn-sketch" onClick={onCancel}>{t('footer.cancel')}</button>
-            <button type="button" className="btn-sketch btn-sketch-primary btn-stamp flex items-center" style={{ gap: 8 }} onClick={handleStart}>
+            <button
+              type="button"
+              className="btn-sketch btn-sketch-primary btn-stamp flex items-center"
+              style={{ gap: 8 }}
+              onClick={handleStart}
+              disabled={desktopCaptureReadiness.blocked}
+              aria-describedby={desktopCaptureReadiness.blocked ? 'desktop-capture-start-blocker' : undefined}
+            >
               <span className="rec-dot" style={{ width: 7, height: 7 }} />
               {t('footer.start', { sec: countdownSeconds })}
             </button>
           </div>
         </div>
+        {desktopCaptureReadiness.blocked && (
+          <p id="desktop-capture-start-blocker" data-testid="desktop-capture-start-blocker" className="desktop-capture-start-blocker">
+            {t('desktopStudio.startBlocked')}
+          </p>
+        )}
       </div>
     </div>
   );
@@ -871,6 +938,7 @@ function SourceCard({
       className="press"
       aria-pressed={selected}
       style={{
+        minWidth: 0,
         minHeight: 112,
         padding: 12,
         borderRadius: 18,

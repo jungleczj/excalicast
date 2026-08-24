@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const baseOrigin = new URL(process.env.E2E_BASE_URL ?? 'http://localhost:3002').origin;
+const baseOrigin = new URL(process.env.E2E_BASE_URL ?? 'http://localhost:3001').origin;
 const recordingId = 'e2e-teaching-director-timeline';
 
 test.use({
@@ -55,6 +55,9 @@ test('a ready one-click teaching plan appears on its corresponding editor tracks
   }, recordingId);
 
   await page.goto(`/en/export/${recordingId}`);
+  const progress = page.getByTestId('desktop-director-progress');
+  await expect(progress).toContainText('Ready to preview');
+  await expect(progress).toContainText('3 materials placed');
   await expect(page.getByTestId('teaching-motion-track')).toContainText('key-points-drawer-01');
   await expect(page.getByTestId('teaching-chart-track')).toContainText('chart-bars-01');
   await expect(page.getByTestId('teaching-sound-track')).toContainText('teaching-pop-01');

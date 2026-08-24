@@ -1,5 +1,6 @@
 import type {
   NativeProjectSegmentReference,
+  NativeTeachingCompositionLifecycle,
   NativeRecordingProjectReference,
   RecordingMetadata,
   RecordingSetupConfig,
@@ -93,6 +94,49 @@ export function createNativeRecordingMetadata(
       recordingId: input.recordingId,
       captureState: 'recording',
       exportStatus: 'adapter-required',
+      ...(input.setup.teachingRecipe?.enabled
+        ? { teachingComposition: { status: 'pending' as const } }
+        : {}),
+    },
+  };
+}
+
+export function applyNativeTeachingCompositionLifecycle(
+  recording: RecordingMetadata,
+  lifecycle: NativeTeachingCompositionLifecycle,
+): RecordingMetadata {
+  if (!recording.nativeProject) throw new Error('native_teaching_composition_project_missing');
+  const selection = recording.setup?.teachingRecipe;
+  const resolvedLifecycle: NativeTeachingCompositionLifecycle = lifecycle.status === 'ready'
+    && (!selection?.enabled || selection.teachingPackId.trim().length === 0)
+    ? {
+        status: 'failed',
+        code: 'teaching_composition_selection_missing',
+        retryable: false,
+      }
+    : lifecycle;
+  const terminalError = resolvedLifecycle.status === 'unsupported' || resolvedLifecycle.status === 'failed';
+  const recipe = resolvedLifecycle.status === 'ready' && selection?.enabled
+    ? {
+        schemaVersion: 1 as const,
+        sourceRecordingId: recording.id,
+        teachingPackId: selection.teachingPackId,
+        curatedAssetIds: [...new Set(resolvedLifecycle.operations.map((operation) => operation.asset.assetId))],
+        placements: resolvedLifecycle.operations.map((operation) => ({
+          assetId: operation.asset.assetId,
+          track: operation.track,
+          startMs: operation.startMs,
+          endMs: operation.endMs,
+        })),
+      }
+    : undefined;
+  return {
+    ...recording,
+    teachingRecipeStatus: resolvedLifecycle.status === 'ready' ? 'ready' : terminalError ? 'error' : 'pending',
+    teachingEditRecipe: recipe,
+    nativeProject: {
+      ...recording.nativeProject,
+      teachingComposition: structuredClone(resolvedLifecycle),
     },
   };
 }
@@ -132,6 +176,9 @@ export function finalizeNativeRecordingMetadata(
       validationState,
       exportStatus: editorReady ? 'ready' : 'adapter-required',
       tracks: manifestTracks(manifest),
+      ...(recording.nativeProject?.teachingComposition
+        ? { teachingComposition: { ...recording.nativeProject.teachingComposition } }
+        : {}),
       ...(director ? { director } : {}),
     },
   };

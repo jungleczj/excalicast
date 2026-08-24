@@ -564,6 +564,47 @@
     "title": "新建录制",
     "close": "关闭",
     "cropLocked": "已锁定裁切",
+    "desktopStudio": {
+      "eyebrow": "MAC 桌面录制",
+      "title": "教学混合录制",
+      "summary": "{source} · {camera} · 麦克风与素材保持独立轨道",
+      "readiness": "桌面录制就绪状态",
+      "screen": "屏幕录制",
+      "inputMonitoring": "输入监控",
+      "microphone": "麦克风",
+      "camera": "摄像头",
+      "systemAudio": "电脑声音",
+      "encoder": "硬件编码器",
+      "granted": "已授权",
+      "attention": "需要处理",
+      "noDevice": "无可用设备",
+      "unknown": "未探测",
+      "notSelected": "未选择",
+      "verifiedOnStart": "将在开始前真实探测",
+      "probeFailed": "设备探测失败",
+      "permissionHelp": "授权被拒绝时，请在下方对应的隐私设置中修改，返回这里后重新检查。",
+      "permissionPaths": {
+        "screen": "系统设置 > 隐私与安全性 > 屏幕与系统音频录制",
+        "microphone": "系统设置 > 隐私与安全性 > 麦克风",
+        "camera": "系统设置 > 隐私与安全性 > 摄像头",
+        "inputMonitoring": "系统设置 > 隐私与安全性 > 输入监控"
+      },
+      "retryReadiness": "重新检查授权与设备",
+      "requestAndRetryReadiness": "请求授权并重新检查",
+      "checking": "正在检查…",
+      "startBlocked": "请先完成授权与设备检查，再开始原生录制。",
+      "cameraOn": "摄像头开启",
+      "cameraOff": "摄像头关闭",
+      "assetsSelected": "一键成片 · {count} 类素材",
+      "autoFilmOff": "一键成片关闭",
+      "sources": {
+        "whiteboard": "Excalidraw 白板",
+        "current_tab": "当前标签页",
+        "window": "应用窗口",
+        "desktop": "整个桌面",
+        "selected_area": "桌面选区"
+      }
+    },
     "recipe": {
       "eyebrow": "AI 导演 · 录制前预选",
       "title": "教学成片配方",
@@ -762,6 +803,7 @@
     }
   },
   "exportPreview": {
+    "stageLabel": "视频预览",
     "watermarkBadge": "👁️ 含水印预览",
     "cleanBadge": "✓ 干净导出",
     "renderingTag": "渲染中…",
@@ -935,6 +977,31 @@
     "play": "播放",
     "pause": "暂停",
     "restart": "重头播放"
+  },
+  "desktopDirector": {
+    "eyebrow": "AI 导演",
+    "phase": {
+      "pending": "等待理解本次讲解",
+      "generating": "正在生成教学成片",
+      "ready": "可以预览成片",
+      "unsupported": "该素材暂时无法自动落轨",
+      "failed": "自动成片已停止",
+      "unknown": "尚未探测 Director 状态"
+    },
+    "detail": {
+      "pending": "等待期间原始录制保持安全。",
+      "generating": "正在理解讲解，并仅将你预选的素材落到轨道。",
+      "ready": "预选的教学素材已经落到对应轨道。",
+      "unsupported": "原始录制仍可正常编辑。",
+      "failed": "原始录制已保留。",
+      "unknown": "当前录制没有经过验证的 Director 结果。"
+    },
+    "placements": "已落轨 {count} 个素材",
+    "failedCode": "停止代码：{code}。原始录制已保留。",
+    "unsupportedCode": "当前暂不支持该素材类型（{code}）。原始录制已保留。",
+    "preview": "跳转预览",
+    "retry": "重试 Director",
+    "retryComposition": "重试素材落轨"
   },
   "export": {
     "loading": "正在加载录制…",

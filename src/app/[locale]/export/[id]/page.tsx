@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef, type CSSProperties, type JSX, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import { useLocale } from 'next-intl';
+import type { UpdateSpec } from 'dexie';
 import { ExportRatioPicker } from '@/components/ExportRatioPicker';
 import { ExportFormatPanel } from '@/components/ExportFormatPanel';
 import { ExportPreview } from '@/components/ExportPreview';
@@ -22,6 +23,7 @@ import { indexedDbAutoEditCache } from '@/services/autoEditCacheStore';
 import { TierBadge } from '@/components/TierBadge';
 import { ShareButton } from '@/components/ShareButton';
 import { MediaTaskCenter, announceMediaTaskCreated, openMediaTaskCenter } from '@/components/MediaTaskCenter';
+import { DesktopDirectorProgress } from '@/components/DesktopDirectorProgress';
 import { useMediaTaskActions } from '@/components/providers/MediaTaskProvider';
 import { useSubscription } from '@/hooks/useSubscription';
 import {
@@ -44,8 +46,16 @@ import {
 } from '@/lib/db-client';
 import { getCurrentOwnerKey } from '@/lib/ownerKey';
 import { projectRecordingSetupToExport } from '@/services/recordingSetupProjection';
-import { nativeProjectRequiresExportAdapter } from '@/desktop/nativeRecordingProject';
+import {
+  applyNativeTeachingCompositionLifecycle,
+  nativeProjectRequiresExportAdapter,
+} from '@/desktop/nativeRecordingProject';
 import { pollDesktopDirectorJob, retryDesktopDirectorJob } from '@/desktop/directorJobClient';
+import { pollDesktopTeachingComposition } from '@/desktop/teachingCompositionJobClient';
+import {
+  createRevisionedRecordingPatchWriter,
+  type NativeTeachingRecordingPatch,
+} from '@/desktop/recordingPatchWriter';
 import { DESKTOP_IPC_CHANNELS } from '@/desktop/productContract';
 import type {
   AutoZoomSegment,
@@ -122,6 +132,18 @@ export default function EditorRecordingPage(): JSX.Element {
   const [upgradeOpen, setUpgradeOpen] = useState<false | 'pro' | 'max'>(false);
   const [actionGuide, setActionGuide] = useState<string | null>(null);
   const [directorPollNonce, setDirectorPollNonce] = useState(0);
+  const [compositionPollNonce, setCompositionPollNonce] = useState(0);
+  const compositionPatchWriterRef = useRef<ReturnType<typeof createRevisionedRecordingPatchWriter> | null>(null);
+  if (!compositionPatchWriterRef.current) {
+    compositionPatchWriterRef.current = createRevisionedRecordingPatchWriter(async (recordingId, patch) => {
+      const changes: Record<string, unknown> = {
+        teachingRecipeStatus: patch.teachingRecipeStatus,
+        'nativeProject.teachingComposition': patch.teachingComposition,
+        teachingEditRecipe: patch.teachingEditRecipe,
+      };
+      await getClientDb().recordings.update(recordingId, changes as UpdateSpec<RecordingMetadata>);
+    });
+  }
   // 时间轴裁剪：保留段（源 ms）+ 播放头源时间
   const [segments, setSegments] = useState<TimeSegment[]>([]);
   const [mainTrack, setMainTrack] = useState<MainTrackClip[]>([]);
@@ -182,6 +204,22 @@ export default function EditorRecordingPage(): JSX.Element {
       showActionGuide(error instanceof Error ? error.message : 'desktop_director_retry_failed');
     }
   }, [id, showActionGuide]);
+  const handleRetryComposition = useCallback(() => {
+    if (!id || !meta?.nativeProject) return;
+    const lifecycle = { status: 'pending' as const };
+    const projected = applyNativeTeachingCompositionLifecycle(meta, lifecycle);
+    setMeta((current) => current?.nativeProject && current.id === id
+      ? applyNativeTeachingCompositionLifecycle(current, lifecycle)
+      : current);
+    void compositionPatchWriterRef.current?.enqueue(id, {
+      teachingRecipeStatus: 'pending',
+      teachingComposition: projected.nativeProject?.teachingComposition,
+      teachingEditRecipe: projected.teachingEditRecipe,
+    }).catch((error) => {
+      console.error('[desktop] Teaching composition retry persistence failed', error);
+    });
+    setCompositionPollNonce((value) => value + 1);
+  }, [id, meta]);
   const handleSubtitleSaved = useCallback((subtitleSrt: string) => {
     setMeta((current) => current ? { ...current, subtitleSrt } : current);
     setConfig((current) => ({ ...current }));
@@ -340,7 +378,7 @@ export default function EditorRecordingPage(): JSX.Element {
             : '原生录制已安全恢复，但当前编辑器版本尚未接入 macOS 媒体读取适配器。');
           return;
         }
-        if (m.teachingRecipeStatus === 'pending') {
+        if (m.teachingRecipeStatus === 'pending' && !m.nativeProject) {
           if (Date.now() - loadStartedAt < FINALIZE_MAX_WAIT_MS) {
             setMeta(null);
             setFinalizing(true);
@@ -396,6 +434,55 @@ export default function EditorRecordingPage(): JSX.Element {
       if (retryTimer) clearTimeout(retryTimer);
     };
   }, [id, en]);
+
+  useEffect(() => {
+    const bridge = window.excalicastDesktop;
+    const compositionStatus = meta?.nativeProject?.teachingComposition?.status;
+    if (!id || !meta?.nativeProject || !bridge
+      || (meta.teachingRecipeStatus !== 'pending' && compositionStatus !== 'ready')) return;
+    const controller = new AbortController();
+    void pollDesktopTeachingComposition({
+      bridge,
+      recordingId: id,
+      signal: controller.signal,
+      onStatus(lifecycle) {
+        const projected = applyNativeTeachingCompositionLifecycle(meta, lifecycle);
+        setMeta((current) => {
+          if (!current?.nativeProject || current.id !== id) return current;
+          return applyNativeTeachingCompositionLifecycle(current, lifecycle);
+        });
+        const patch: NativeTeachingRecordingPatch = {
+          teachingRecipeStatus: projected.teachingRecipeStatus ?? 'pending',
+          teachingComposition: projected.nativeProject?.teachingComposition,
+          teachingEditRecipe: projected.teachingEditRecipe,
+        };
+        void compositionPatchWriterRef.current?.enqueue(id, patch).catch((error) => {
+          console.error('[desktop] Teaching composition status persistence failed', error);
+        });
+      },
+    }).catch((error: unknown) => {
+      if (error instanceof Error && error.message !== 'desktop_teaching_composition_poll_aborted') {
+        console.error('[desktop] Teaching composition status polling failed', error);
+        const lifecycle = {
+          status: 'failed' as const,
+          code: 'teaching_composition_probe_error',
+          retryable: true,
+        };
+        const projected = applyNativeTeachingCompositionLifecycle(meta, lifecycle);
+        setMeta((current) => current?.nativeProject && current.id === id
+          ? applyNativeTeachingCompositionLifecycle(current, lifecycle)
+          : current);
+        void compositionPatchWriterRef.current?.enqueue(id, {
+          teachingRecipeStatus: 'error',
+          teachingComposition: projected.nativeProject?.teachingComposition,
+          teachingEditRecipe: projected.teachingEditRecipe,
+        }).catch((persistenceError) => {
+          console.error('[desktop] Teaching composition failure persistence failed', persistenceError);
+        });
+      }
+    });
+    return () => controller.abort();
+  }, [compositionPollNonce, id, meta?.nativeProject?.recordingId]);
 
   useEffect(() => {
     const bridge = window.excalicastDesktop;
@@ -1114,22 +1201,29 @@ export default function EditorRecordingPage(): JSX.Element {
         </div>
       )}
 
-      {meta?.nativeProject?.director?.status === 'failed' && (
-        <div role="status" data-testid="desktop-director-failed">
-          <span>{en
-            ? `Director generation failed: ${meta.nativeProject.director.code}`
-            : `Director 生成失败：${meta.nativeProject.director.code}`}</span>
-          {meta.nativeProject.director.retryable && (
-            <button
-              type="button"
-              className="btn-sketch"
-              data-testid="desktop-director-retry"
-              onClick={() => { void handleRetryDirector(); }}
-            >
-              {en ? 'Retry Director' : '重试 Director'}
-            </button>
-          )}
-        </div>
+      {meta && (
+        <DesktopDirectorProgress
+          teachingStatus={meta.teachingRecipeStatus}
+          director={meta.nativeProject?.director}
+          composition={meta.nativeProject?.teachingComposition}
+          placementCount={meta.teachingEditRecipe?.placements.length ?? 0}
+          onRetry={meta.nativeProject?.director?.retryable ? () => { void handleRetryDirector(); } : undefined}
+          onRetryComposition={meta.nativeProject?.teachingComposition?.status === 'failed'
+            && meta.nativeProject.teachingComposition.retryable
+            ? handleRetryComposition
+            : undefined}
+          onPreview={() => {
+            setPlayheadMs(0);
+            window.requestAnimationFrame(() => {
+              const preview = document.querySelector<HTMLElement>('[data-testid="export-preview-stage"]');
+              preview?.focus({ preventScroll: true });
+              preview?.scrollIntoView({
+                block: 'center',
+                behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+              });
+            });
+          }}
+        />
       )}
 
       {paymentDone && (

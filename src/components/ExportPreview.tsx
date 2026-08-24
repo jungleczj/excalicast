@@ -956,6 +956,8 @@ export function ExportPreview({
       >
       <div
         ref={stageRef}
+        tabIndex={-1}
+        aria-label={t('stageLabel')}
         data-testid="export-preview-stage"
         data-autozoom-scale={previewAutoZoomScale.toFixed(3)}
         data-has-subtitles={metadata.subtitleSrt ? 'true' : 'false'}
