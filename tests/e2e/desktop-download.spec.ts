@@ -18,6 +18,17 @@ test('web navigation exposes the stable macOS installer download endpoint', asyn
   await expect(download).toHaveAttribute('href', '/api/desktop/download?platform=mac');
 });
 
+test('desktop download endpoint redirects to the signed macOS release artifact', async ({ page }) => {
+  const response = await page.request.get('/api/desktop/download?platform=mac', {
+    maxRedirects: 0,
+  });
+
+  expect(response.status()).toBe(307);
+  expect(response.headers()['location']).toBe(
+    'https://github.com/jungleczj/excalicast/releases/latest/download/Excalicast-mac-arm64.dmg',
+  );
+});
+
 test('landing mobile menu keeps the macOS installer reachable by keyboard', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/zh');
