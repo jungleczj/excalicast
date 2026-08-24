@@ -18,7 +18,7 @@
     "desktop:native:build": "node scripts/build-mac-media-engine.mjs",
     "desktop:package:mac": "npm run desktop:build && npm run desktop:native:build && electron-builder --mac dmg --arm64 --publish never",
     "desktop:dev": "npm run desktop:build && electron apps/desktop/dist/apps/desktop/src/main.js",
-    "desktop:native:test": "swift run --package-path native/mac-media-engine --scratch-path native/mac-media-engine/.build-local mac-media-engine-contract-tests && swift run --package-path native/mac-media-engine --scratch-path native/mac-media-engine/.build-local native-final-compositor-stage1-contract-tests",
+    "desktop:native:test": "swift run --package-path native/mac-media-engine --scratch-path native/mac-media-engine/.build-local mac-media-engine-contract-tests && swift run --package-path native/mac-media-engine --scratch-path native/mac-media-engine/.build-local native-final-compositor-stage1-contract-tests && swift run --package-path native/mac-media-engine --scratch-path native/mac-media-engine/.build-local native-final-render-job-controller-contract-tests",
     "desktop:native:soak": "npm run desktop:build && node scripts/run-native-capture-soak.mjs",
     "geo:generate": "node scripts/geo-answer-benchmark.mjs generate",
     "geo:run": "node scripts/geo-answer-benchmark.mjs run",
