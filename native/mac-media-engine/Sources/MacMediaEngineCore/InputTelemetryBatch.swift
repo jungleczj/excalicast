@@ -6,6 +6,7 @@ public enum InputTelemetryBatchError: Error, Equatable, Sendable {
     case invalidSequence
     case tooManyProducerEpochs
     case payloadTooLarge
+    case busy
 }
 
 public struct InputTelemetryAcknowledgement: Codable, Equatable, Sendable {
@@ -39,6 +40,7 @@ public final class InputTelemetryCoordinator: @unchecked Sendable {
     private var nextSegmentIndex = 0
     private var lastGlobalAtUs: Int64 = -1
     private var acknowledgedSequences: [ProducerKey: Int] = [:]
+    private var persistenceInFlight = false
     private let lock = NSLock()
 
     public init(sessionId: String) {
@@ -57,10 +59,15 @@ public final class InputTelemetryCoordinator: @unchecked Sendable {
         let key = ProducerKey(producerId: first.producerId, producerEpoch: first.producerEpoch)
 
         lock.lock()
-        defer { lock.unlock() }
-        try admitEpoch(key)
+        do {
+            try admitEpoch(key)
+        } catch {
+            lock.unlock()
+            throw error
+        }
         let acknowledged = acknowledgedSequences[key]
         if let acknowledged, last.producerSequence <= acknowledged {
+            lock.unlock()
             return InputTelemetryAcknowledgement(
                 producerId: first.producerId,
                 producerEpoch: first.producerEpoch,
@@ -73,7 +80,12 @@ public final class InputTelemetryCoordinator: @unchecked Sendable {
         let expectedFirst = (acknowledged ?? -1) + 1
         guard first.producerSequence <= expectedFirst,
               events.contains(where: { $0.producerSequence == expectedFirst }) else {
+            lock.unlock()
             throw InputTelemetryBatchError.invalidSequence
+        }
+        guard !persistenceInFlight else {
+            lock.unlock()
+            throw InputTelemetryBatchError.busy
         }
         let unseen = events.filter { $0.producerSequence >= expectedFirst }
         let segmentIndex = nextSegmentIndex
@@ -100,12 +112,30 @@ public final class InputTelemetryCoordinator: @unchecked Sendable {
             "endUs": endUs,
             "events": authoritativeEvents,
         ]
-        let data = try JSONSerialization.data(withJSONObject: authoritativeBatch, options: [.sortedKeys])
-        try persist(segmentIndex, startUs, max(1, endUs - startUs + 1), data)
+        let data: Data
+        do {
+            data = try JSONSerialization.data(withJSONObject: authoritativeBatch, options: [.sortedKeys])
+        } catch {
+            lock.unlock()
+            throw error
+        }
+        persistenceInFlight = true
+        lock.unlock()
+        do {
+            try persist(segmentIndex, startUs, max(1, endUs - startUs + 1), data)
+        } catch {
+            lock.lock()
+            persistenceInFlight = false
+            lock.unlock()
+            throw error
+        }
 
+        lock.lock()
         nextSegmentIndex += 1
         lastGlobalAtUs = endUs
         acknowledgedSequences[key] = last.producerSequence
+        persistenceInFlight = false
+        lock.unlock()
         return InputTelemetryAcknowledgement(
             producerId: first.producerId,
             producerEpoch: first.producerEpoch,
@@ -124,6 +154,7 @@ public final class InputTelemetryCoordinator: @unchecked Sendable {
         let key = ProducerKey(producerId: first.producerId, producerEpoch: first.producerEpoch)
         lock.lock()
         defer { lock.unlock() }
+        guard !persistenceInFlight else { throw InputTelemetryBatchError.busy }
         try admitEpoch(key)
         let acknowledged = acknowledgedSequences[key]
         if let acknowledged, last.producerSequence <= acknowledged {
@@ -173,7 +204,7 @@ public final class InputTelemetryCoordinator: @unchecked Sendable {
             "schemaVersion", "sessionId", "producerId", "producerEpoch",
             "producerSequence", "surfaceId", "kind", "payload",
         ])
-        let producerIds = Set(["main-whiteboard", "desktop-ink"])
+        let producerIds = Set(["main-whiteboard", "desktop-ink", "native-input"])
         let kinds = Set([
             "active-window", "window-bounds", "cursor", "click", "dwell", "scroll",
             "ink", "undo", "mode-change", "camera-control",

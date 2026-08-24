@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "MacMediaEngineCore", targets: ["MacMediaEngineCore"]),
         .executable(name: "mac-media-engine", targets: ["MacMediaEngine"]),
         .executable(name: "mac-media-engine-contract-tests", targets: ["MacMediaEngineContractTests"]),
+        .executable(name: "native-input-telemetry-contract-tests", targets: ["NativeInputTelemetryContractTests"]),
     ],
     targets: [
         .target(name: "MacMediaEngineCore"),
@@ -16,6 +17,11 @@ let package = Package(
             name: "MacMediaEngineContractTests",
             dependencies: ["MacMediaEngineCore"],
             path: "Tests/MacMediaEngineCoreTests"
+        ),
+        .executableTarget(
+            name: "NativeInputTelemetryContractTests",
+            dependencies: ["MacMediaEngineCore"],
+            path: "Tests/NativeInputTelemetryContractTests"
         ),
     ]
 )
