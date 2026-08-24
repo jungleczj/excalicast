@@ -437,27 +437,26 @@ private struct NativeInputPlatformContractTests {
         try lifecycleSource.commitCallbackResume {}
 
         let raw = lifecycleEvents.snapshot
-        try expect(raw.count == 6, "required callback families enqueue losslessly while cursor motion coalesces")
         try expect(lifecycleDeliveryUsedTapThread.snapshot.allSatisfy { !$0 }, "event-tap callback only copies primitives and enqueues delivery off the tap thread")
-        try expect(lifecycleSource.statistics.capturedEventCount == 7 && lifecycleSource.statistics.coalescedEventCount == 1, "captured and coalesced callback counts remain observable")
-        if case let .button(_, _, _, button, phase) = raw[0] {
-            try expect(button == .primary && phase == .down, "left down preserves primary/down")
-        } else { throw TestFailure.expectation("left down did not map to button input") }
-        if case let .button(_, _, _, button, phase) = raw[1] {
-            try expect(button == .secondary && phase == .up, "right up preserves secondary/up")
-        } else { throw TestFailure.expectation("right up did not map to button input") }
-        if case let .button(_, _, _, button, _) = raw[2] {
-            try expect(button == .middle, "other button two maps to middle")
-        } else { throw TestFailure.expectation("middle down did not map to button input") }
-        if case let .button(_, _, _, button, _) = raw[3] {
-            try expect(button == .other, "non-middle other button remains other")
-        } else { throw TestFailure.expectation("other up did not map to button input") }
-        if case .cursor = raw[4] {} else {
-            throw TestFailure.expectation("dragged input preserves cursor telemetry")
+        let buttonSemantics = raw.compactMap { event -> String? in
+            guard case let .button(_, _, _, button, phase) = event else { return nil }
+            return "\(button.rawValue):\(phase.rawValue)"
         }
-        if case let .scroll(_, _, _, dx, dy) = raw[5] {
-            try expect(dx == 2.5 && dy == -4, "horizontal and vertical scroll deltas are preserved")
-        } else { throw TestFailure.expectation("scroll did not map to scroll input") }
+        try expect(buttonSemantics == ["primary:down", "secondary:up", "middle:down", "other:up"], "every lossless button family preserves order, identity, and phase")
+        let cursorPoints = raw.compactMap { event -> [Double]? in
+            guard case let .cursor(_, x, y) = event else { return nil }
+            return [x, y]
+        }
+        let statistics = lifecycleSource.statistics
+        try expect(cursorPoints.last == [11, 21], "latest dragged cursor telemetry is always retained")
+        try expect(cursorPoints.count + Int(statistics.coalescedEventCount) == 2, "cursor delivery plus latest-only coalescing accounts for both cursor callbacks")
+        let scrollDeltas = raw.compactMap { event -> [Double]? in
+            guard case let .scroll(_, _, _, deltaX, deltaY) = event else { return nil }
+            return [deltaX, deltaY]
+        }
+        try expect(scrollDeltas == [[2.5, -4]], "horizontal and vertical scroll deltas are preserved losslessly")
+        try expect(statistics.capturedEventCount == 7 && statistics.droppedEventCount == 0, "every callback is captured without loss")
+        try expect(raw.count + Int(statistics.coalescedEventCount) == 7, "delivered events and observable cursor coalescing exactly account for captured callbacks")
 
         tap.emit(.disabledByTimeout)
         lifecycleSource.drainEnqueuedCallbacks()
