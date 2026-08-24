@@ -7,7 +7,7 @@ const packageRoot = path.join(root, 'native/mac-media-engine');
 const scratchRoot = path.join(packageRoot, '.build-release');
 execFileSync('swift', [
   'build', '--configuration', 'release', '--package-path', packageRoot,
-  '--scratch-path', scratchRoot,
+  '--scratch-path', scratchRoot, '--product', 'mac-media-engine',
 ], { stdio: 'inherit' });
 
 const candidates = [

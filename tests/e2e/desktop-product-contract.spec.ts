@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 import {
   DESKTOP_FEATURE_MIGRATION_MATRIX,
   DESKTOP_IPC_CHANNELS,
@@ -72,6 +73,11 @@ test('web navigation resolves a stable signed macOS installer release URL', () =
       target: [{ target: 'dmg', arch: ['arm64'] }],
     },
   });
+});
+
+test('desktop release build compiles only the production native helper product', () => {
+  const script = readFileSync('scripts/build-mac-media-engine.mjs', 'utf8');
+  expect(script).toContain("'--product', 'mac-media-engine'");
 });
 
 test('desktop ink uses the full Excalidraw surface with independent opacity controls', () => {
