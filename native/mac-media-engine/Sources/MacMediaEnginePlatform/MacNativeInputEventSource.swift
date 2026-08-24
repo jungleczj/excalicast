@@ -74,7 +74,7 @@ public protocol NativeInputRuntimeSource: NativeInputTelemetrySource {
     func setTerminalHandler(_ handler: @escaping @Sendable (MacNativeInputError) -> Void)
     func drainEnqueuedCallbacks()
     func suspendCallbacksAndWait()
-    func resumeCallbacks() throws
+    func commitCallbackResume() throws
     var terminalFailure: MacNativeInputError? { get }
     var statistics: NativeInputSourceStatistics { get }
 }
@@ -187,7 +187,7 @@ public final class MacNativeInputEventSource: NativeInputRuntimeSource, @uncheck
         drainEnqueuedCallbacks()
     }
 
-    public func resumeCallbacks() throws {
+    public func commitCallbackResume() throws {
         lock.lock()
         if let currentTerminalFailure {
             lock.unlock()

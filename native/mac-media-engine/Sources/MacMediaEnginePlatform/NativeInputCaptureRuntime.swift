@@ -197,18 +197,22 @@ public final class NativeInputCaptureRuntime: @unchecked Sendable {
         }
         guard state == .paused else { lock.unlock(); return }
         lock.unlock()
-        do {
-            try source.resumeCallbacks()
-        } catch {
-            let stable = stableError(for: error)
-            recordTerminal(stable)
-            throw stable
-        }
         let resumeHostUs = clock.nowUs()
         _ = controls.resume(atUs: resumeHostUs)
         lock.lock()
         state = .running
         lock.unlock()
+        do {
+            try source.commitCallbackResume()
+        } catch {
+            _ = controls.pause(atUs: resumeHostUs)
+            lock.lock()
+            state = .paused
+            lock.unlock()
+            let stable = stableError(for: error)
+            recordTerminal(stable)
+            throw stable
+        }
     }
 
     public func stop() throws {

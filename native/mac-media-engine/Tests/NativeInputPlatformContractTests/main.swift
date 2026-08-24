@@ -29,8 +29,31 @@ private final class LockedBox<Value>: @unchecked Sendable {
 
 private final class FakeClock: NativeInputHostClock, @unchecked Sendable {
     private let value = LockedBox<Int64>(0)
-    func nowUs() -> Int64 { value.snapshot }
+    private let blockNextRead = LockedBox(false)
+    private let blockedReadEntered = DispatchSemaphore(value: 0)
+    private let blockedReadMayReturn = DispatchSemaphore(value: 0)
+
+    func nowUs() -> Int64 {
+        let shouldBlock = blockNextRead.withValue { armed in
+            defer { armed = false }
+            return armed
+        }
+        if shouldBlock {
+            blockedReadEntered.signal()
+            blockedReadMayReturn.wait()
+        }
+        return value.snapshot
+    }
+
     func set(_ hostUs: Int64) { value.withValue { $0 = hostUs } }
+
+    func blockNextReadUntilReleased() { blockNextRead.withValue { $0 = true } }
+
+    func waitUntilReadIsBlocked() -> Bool {
+        blockedReadEntered.wait(timeout: .now() + .seconds(1)) == .success
+    }
+
+    func releaseBlockedRead() { blockedReadMayReturn.signal() }
 }
 
 private final class FakeTapSession: MacInputEventTapSession, @unchecked Sendable {
@@ -136,6 +159,8 @@ private final class TerminalRuntimeSource: NativeInputRuntimeSource, @unchecked 
     private let resumeEntered = DispatchSemaphore(value: 0)
     private let resumeMayReturn = DispatchSemaphore(value: 0)
     private var shouldBlockResume = false
+    private var eventOnResume: NativeRawInputEvent?
+    private var afterResumeEvent: (@Sendable () -> Void)?
     let statistics = NativeInputSourceStatistics(capturedEventCount: 0, coalescedEventCount: 0, droppedEventCount: 0)
 
     var terminalFailure: MacNativeInputError? {
@@ -153,7 +178,7 @@ private final class TerminalRuntimeSource: NativeInputRuntimeSource, @unchecked 
     }
     func drainEnqueuedCallbacks() {}
     func suspendCallbacksAndWait() {}
-    func resumeCallbacks() throws {
+    func commitCallbackResume() throws {
         lock.lock()
         let block = shouldBlockResume
         lock.unlock()
@@ -162,6 +187,15 @@ private final class TerminalRuntimeSource: NativeInputRuntimeSource, @unchecked 
             resumeMayReturn.wait()
         }
         if let terminalFailure { throw terminalFailure }
+        lock.lock()
+        let event = eventOnResume
+        eventOnResume = nil
+        let afterEvent = afterResumeEvent
+        afterResumeEvent = nil
+        let activeHandler = handler
+        lock.unlock()
+        if let event { activeHandler?(event) }
+        afterEvent?()
     }
 
     func blockNextResume() {
@@ -175,6 +209,16 @@ private final class TerminalRuntimeSource: NativeInputRuntimeSource, @unchecked 
     }
 
     func releaseResume() { resumeMayReturn.signal() }
+
+    func emitOnNextResume(
+        _ event: NativeRawInputEvent,
+        afterEmission: @escaping @Sendable () -> Void
+    ) {
+        lock.lock()
+        eventOnResume = event
+        afterResumeEvent = afterEmission
+        lock.unlock()
+    }
 
     func fail(_ error: MacNativeInputError) {
         lock.lock()
@@ -323,7 +367,7 @@ private struct NativeInputPlatformContractTests {
         lifecycleClock.set(1_070_000)
         tap.emit(.event(MacInputEventPrimitive(type: .scrollWheel, x: 11, y: 21, scrollDeltaX: 2.5, scrollDeltaY: -4)))
         lifecycleSource.suspendCallbacksAndWait()
-        try lifecycleSource.resumeCallbacks()
+        try lifecycleSource.commitCallbackResume()
 
         let raw = lifecycleEvents.snapshot
         try expect(raw.count == 6, "required callback families enqueue losslessly while cursor motion coalesces")
@@ -591,6 +635,97 @@ private struct NativeInputPlatformContractTests {
         try expect(racingResumeFailure == .inputEventTapCreationFailed, "a source failure during resume is returned to the runtime caller")
         try expect(racingResumeControls.snapshot().paused, "a rejected source resume cannot advance shared capture controls")
         try? racingResumeRuntime.stop()
+
+        let returnWindowSource = TerminalRuntimeSource()
+        let returnWindowControls = CaptureControlState()
+        let returnWindowClock = FakeClock()
+        returnWindowClock.set(5_000_000)
+        let returnWindowScheduler = ManualScheduler()
+        let returnWindowSink = NativeInputTelemetryCoordinatorSink(
+            sessionId: "return-window-resume",
+            producerEpoch: "return-window-resume-epoch",
+            controls: returnWindowControls,
+            timeline: RecordingTimeline(originUs: 5_000_000),
+            coordinator: InputTelemetryCoordinator(sessionId: "return-window-resume"),
+            persist: { _, _, _, _ in }
+        )
+        let returnWindowRuntime = NativeInputCaptureRuntime(
+            source: returnWindowSource,
+            displays: FakeDisplayProvider(displays.geometries),
+            windows: FakeWindowProvider(),
+            clock: returnWindowClock,
+            controls: returnWindowControls,
+            sink: returnWindowSink,
+            excludedWindowIDs: [],
+            scheduling: returnWindowScheduler.scheduling,
+            onTerminal: { _, _ in }
+        )
+        try returnWindowRuntime.start()
+        returnWindowClock.set(5_100_000)
+        try returnWindowRuntime.pause()
+        returnWindowClock.set(5_200_000)
+        returnWindowClock.blockNextReadUntilReleased()
+        let returnWindowResumeTask = Task.detached { () -> MacNativeInputError? in
+            do {
+                try returnWindowRuntime.resume()
+                return nil
+            } catch let error as MacNativeInputError {
+                return error
+            } catch {
+                return .inputTelemetryWriteFailed
+            }
+        }
+        let enteredOldReturnWindow = returnWindowClock.waitUntilReadIsBlocked()
+        returnWindowSource.fail(.inputEventTapCreationFailed)
+        returnWindowClock.releaseBlockedRead()
+        let returnWindowFailure = await returnWindowResumeTask.value
+        let returnWindowRemainedPaused = returnWindowControls.snapshot().paused
+        try? returnWindowRuntime.stop()
+
+        let firstEventSource = TerminalRuntimeSource()
+        let firstEventControls = CaptureControlState()
+        let firstEventClock = FakeClock()
+        firstEventClock.set(6_000_000)
+        let firstEventScheduler = ManualScheduler()
+        let firstEventPersistence = PersistedPayloads()
+        let firstEventSink = NativeInputTelemetryCoordinatorSink(
+            sessionId: "first-resumed-event",
+            producerEpoch: "first-resumed-event-epoch",
+            controls: firstEventControls,
+            timeline: RecordingTimeline(originUs: 6_000_000),
+            coordinator: InputTelemetryCoordinator(sessionId: "first-resumed-event"),
+            persist: { _, _, _, data in try firstEventPersistence.persist(data) }
+        )
+        let firstEventRuntime = NativeInputCaptureRuntime(
+            source: firstEventSource,
+            displays: FakeDisplayProvider(displays.geometries),
+            windows: FakeWindowProvider(),
+            clock: firstEventClock,
+            controls: firstEventControls,
+            sink: firstEventSink,
+            excludedWindowIDs: [],
+            scheduling: firstEventScheduler.scheduling,
+            onTerminal: { _, _ in }
+        )
+        try firstEventRuntime.start()
+        firstEventClock.set(6_100_000)
+        try firstEventRuntime.pause()
+        firstEventClock.set(6_200_000)
+        firstEventSource.emitOnNextResume(
+            .button(hostUs: 6_200_000, x: 10, y: 20, button: .primary, phase: .down),
+            afterEmission: { firstEventClock.set(6_210_000) }
+        )
+        try firstEventRuntime.resume()
+        try firstEventRuntime.stop()
+        let firstResumedEvents = try firstEventPersistence.payloads.flatMap { data -> [[String: Any]] in
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            return object?["events"] as? [[String: Any]] ?? []
+        }
+
+        try expect(enteredOldReturnWindow, "resume reaches the controlled source-return to controls window")
+        try expect(returnWindowFailure == .inputEventTapCreationFailed && returnWindowRemainedPaused, "a terminal failure winning the old return window rejects resume and restores paused state")
+        try expect(firstResumedEvents.map { $0["kind"] as? String } == ["click"], "the first callback accepted after resume is retained")
+        try expect(firstResumedEvents.first?["atUs"] as? Int == 100_000, "the first resumed event uses the compacted session timeline")
 
         let startupCalls = LockedBox<[String]>([])
         do {
