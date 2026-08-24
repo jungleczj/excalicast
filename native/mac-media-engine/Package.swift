@@ -10,6 +10,7 @@ let package = Package(
         .library(name: "MacMediaEngineChartRenderer", targets: ["MacMediaEngineChartRenderer"]),
         .library(name: "MacMediaEngineTeachingAudio", targets: ["MacMediaEngineTeachingAudio"]),
         .library(name: "MacMediaEngineFinalCompositorStage1", targets: ["MacMediaEngineFinalCompositorStage1"]),
+        .library(name: "MacMediaEngineFinalCompositorStage2", targets: ["MacMediaEngineFinalCompositorStage2"]),
         .library(name: "MacMediaEngineFinalRenderJobController", targets: ["MacMediaEngineFinalRenderJobController"]),
         .executable(name: "mac-media-engine", targets: ["MacMediaEngine"]),
         .executable(name: "mac-media-engine-contract-tests", targets: ["MacMediaEngineContractTests"]),
@@ -18,6 +19,7 @@ let package = Package(
         .executable(name: "native-chart-renderer-contract-tests", targets: ["NativeChartRendererContractTests"]),
         .executable(name: "native-streaming-teaching-audio-contract-tests", targets: ["NativeStreamingTeachingAudioContractTests"]),
         .executable(name: "native-final-compositor-stage1-contract-tests", targets: ["NativeFinalCompositorStage1ContractTests"]),
+        .executable(name: "native-final-compositor-stage2-contract-tests", targets: ["NativeFinalCompositorStage2ContractTests"]),
         .executable(name: "native-final-render-job-controller-contract-tests", targets: ["NativeFinalRenderJobControllerContractTests"]),
     ],
     targets: [
@@ -29,6 +31,7 @@ let package = Package(
             linkerSettings: [.linkedFramework("AVFoundation"), .linkedFramework("AudioToolbox")]
         ),
         .target(name: "MacMediaEngineFinalCompositorStage1"),
+        .target(name: "MacMediaEngineFinalCompositorStage2"),
         .target(name: "MacMediaEngineFinalRenderJobController"),
         .executableTarget(name: "MacMediaEngine", dependencies: ["MacMediaEngineCore", "MacMediaEnginePlatform"]),
         .executableTarget(
@@ -60,6 +63,11 @@ let package = Package(
             name: "NativeFinalCompositorStage1ContractTests",
             dependencies: ["MacMediaEngineFinalCompositorStage1"],
             path: "Tests/NativeFinalCompositorStage1ContractTests"
+        ),
+        .executableTarget(
+            name: "NativeFinalCompositorStage2ContractTests",
+            dependencies: ["MacMediaEngineFinalCompositorStage2"],
+            path: "Tests/NativeFinalCompositorStage2ContractTests"
         ),
         .executableTarget(
             name: "NativeFinalRenderJobControllerContractTests",
