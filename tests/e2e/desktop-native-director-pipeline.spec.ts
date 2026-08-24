@@ -74,6 +74,13 @@ function request(root: string, recordingId = 'lesson-native'): NativeDirectorPip
   };
 }
 
+const nativeCoordinateMetadata = {
+  sourceCoordinateSpace: 'macos-global-display-points-v1',
+  coordinateSpaceVersion: 1,
+  displayId: 1,
+  scale: 2,
+};
+
 test('consumes manifest-owned mixed native, whiteboard, and desktop ink segments in global order', async () => {
   const root = await project();
   await writeRecording(root, 'lesson-native', [
@@ -109,7 +116,7 @@ test('rejects unknown tracks, producer sequence gaps, path authority, and escape
 
   const gapRoot = await project();
   await writeRecording(gapRoot, 'lesson-native', [[
-    { atUs: 1_000, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 1, surfaceId: 'macos-global', kind: 'cursor', payload: { x: 1, y: 2 } },
+    { atUs: 1_000, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 1, surfaceId: 'macos-global', kind: 'cursor', payload: { ...nativeCoordinateMetadata, x: 1, y: 2 } },
   ]]);
   await expect(runNativeDirectorArtifactPipeline(request(gapRoot))).resolves.toMatchObject({ status: 'failed', code: 'director_native_event_sequence_invalid' });
 
@@ -215,15 +222,15 @@ test('rejects corrupt batch schema, index, session, producer, duplicates, and no
 
   const duplicate = await project();
   await writeRecording(duplicate, 'lesson-native', [[
-    { atUs: 1_000, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 0, surfaceId: 'macos-global', kind: 'cursor', payload: { x: 1, y: 2 } },
-    { atUs: 1_001, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 0, surfaceId: 'macos-global', kind: 'cursor', payload: { x: 2, y: 3 } },
+    { atUs: 1_000, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 0, surfaceId: 'macos-global', kind: 'cursor', payload: { ...nativeCoordinateMetadata, x: 1, y: 2 } },
+    { atUs: 1_001, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 0, surfaceId: 'macos-global', kind: 'cursor', payload: { ...nativeCoordinateMetadata, x: 2, y: 3 } },
   ]]);
   await expect(runNativeDirectorArtifactPipeline(request(duplicate))).resolves.toMatchObject({ status: 'failed', code: 'director_native_event_sequence_invalid' });
 
   const time = await project();
   await writeRecording(time, 'lesson-native', [[
-    { atUs: 1_000, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 0, surfaceId: 'macos-global', kind: 'cursor', payload: { x: 1, y: 2 } },
-    { atUs: 1_000, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 1, surfaceId: 'macos-global', kind: 'cursor', payload: { x: 2, y: 3 } },
+    { atUs: 1_000, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 0, surfaceId: 'macos-global', kind: 'cursor', payload: { ...nativeCoordinateMetadata, x: 1, y: 2 } },
+    { atUs: 1_000, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 1, surfaceId: 'macos-global', kind: 'cursor', payload: { ...nativeCoordinateMetadata, x: 2, y: 3 } },
   ]]);
   await expect(runNativeDirectorArtifactPipeline(request(time))).resolves.toMatchObject({ status: 'failed', code: 'director_native_event_time_invalid' });
 });
@@ -306,6 +313,63 @@ test('keeps unrelated internal writer failures retryable instead of reclassifyin
   });
 });
 
+test('strictly validates native wire payload metadata while preserving a valid production sequence', async () => {
+  const validCursor = {
+    x: 100,
+    y: 200,
+    sourceCoordinateSpace: 'macos-global-display-points-v1',
+    coordinateSpaceVersion: 1,
+    displayId: 1,
+    scale: 2,
+  };
+  const invalidCases: Array<{ name: string; payload: Record<string, unknown> }> = [
+    { name: 'missing x', payload: { ...validCursor, x: undefined } },
+    { name: 'nonnumeric y', payload: { ...validCursor, y: '200' } },
+    { name: 'invalid coordinate space', payload: { ...validCursor, sourceCoordinateSpace: 'screen-points' } },
+    { name: 'invalid coordinate-space version', payload: { ...validCursor, coordinateSpaceVersion: 2 } },
+    { name: 'invalid display id', payload: { ...validCursor, displayId: 0 } },
+    { name: 'invalid scale', payload: { ...validCursor, scale: 0 } },
+    { name: 'missing application', payload: { bundleIdentifier: 'com.apple.Safari', processId: 41, windowId: 9 } },
+    { name: 'missing bundle identifier', payload: { application: 'Safari', processId: 41, windowId: 9 } },
+    { name: 'invalid process id', payload: { application: 'Safari', bundleIdentifier: 'com.apple.Safari', processId: 0, windowId: 9 } },
+    { name: 'bounds without active window', payload: { x: 0, y: 0, width: 1_000, height: 800 } },
+  ];
+
+  for (const fixture of invalidCases) {
+    const root = await project();
+    const kind = fixture.name.includes('application') || fixture.name.includes('bundle') || fixture.name.includes('process')
+      ? 'active-window'
+      : fixture.name === 'bounds without active window' ? 'window-bounds' : 'cursor';
+    await writeRecording(root, 'lesson-native', [[{
+      atUs: 1_000,
+      producerId: 'native-input',
+      producerEpoch: 'native-a',
+      producerSequence: 0,
+      surfaceId: 'macos-global',
+      kind,
+      payload: fixture.payload,
+    }]]);
+    await expect(runNativeDirectorArtifactPipeline(request(root)), fixture.name).resolves.toEqual(expect.objectContaining({
+      status: 'failed',
+      retryable: false,
+      code: 'director_native_event_schema_invalid',
+    }));
+  }
+
+  const validRoot = await project();
+  await writeRecording(validRoot, 'lesson-native', [[
+    { atUs: 1_000, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 0, surfaceId: 'macos-global', kind: 'active-window', payload: { application: 'Safari', bundleIdentifier: 'com.apple.Safari', processId: 41, windowId: 9, title: 'Lesson' } },
+    { atUs: 1_001, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 1, surfaceId: 'macos-global', kind: 'window-bounds', payload: { x: 0, y: 0, width: 1_000, height: 800 } },
+    { atUs: 1_002, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 2, surfaceId: 'macos-global', kind: 'cursor', payload: validCursor },
+    { atUs: 1_003, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 3, surfaceId: 'macos-global', kind: 'click', payload: { ...validCursor, button: 'other', phase: 'down' } },
+    { atUs: 1_004, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 4, surfaceId: 'macos-global', kind: 'scroll', payload: { ...validCursor, deltaX: 0, deltaY: 12 } },
+  ]]);
+  await expect(runNativeDirectorArtifactPipeline(request(validRoot))).resolves.toMatchObject({
+    status: 'ready',
+    evidence: { eventCount: 5, roiObservationCount: 3 },
+  });
+});
+
 test('stream-reduces thousands of high-frequency events with bounded retained planner state', async () => {
   const root = await project();
   const raw: EventInput[] = [
@@ -321,8 +385,8 @@ test('stream-reduces thousands of high-frequency events with bounded retained pl
       surfaceId: 'macos-global',
       kind: index % 2 === 0 ? 'cursor' : 'scroll',
       payload: index % 2 === 0
-        ? { x: 300 + (index % 5), y: 200 + (index % 5) }
-        : { x: 300, y: 200, deltaX: 0, deltaY: 1 },
+        ? { ...nativeCoordinateMetadata, x: 300 + (index % 5), y: 200 + (index % 5) }
+        : { ...nativeCoordinateMetadata, x: 300, y: 200, deltaX: 0, deltaY: 1 },
     });
   }
   const batches: EventInput[][] = [];

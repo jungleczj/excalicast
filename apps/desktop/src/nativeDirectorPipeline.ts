@@ -230,6 +230,51 @@ interface EventAdaptationState {
   activeWindowId: number | null;
 }
 
+function validateNativeWirePayload(value: Record<string, unknown>, adaptation: EventAdaptationState): void {
+  switch (value.kind) {
+    case 'active-window':
+      if (typeof value.application !== 'string' || value.application.length === 0
+        || typeof value.bundleIdentifier !== 'string' || value.bundleIdentifier.length === 0
+        || !safeInteger(value.processId) || value.processId <= 0
+        || !safeInteger(value.windowId) || value.windowId <= 0
+        || (value.title !== undefined && typeof value.title !== 'string')) {
+        fail('director_native_event_schema_invalid');
+      }
+      return;
+    case 'window-bounds':
+      if ((value.windowId !== undefined
+        && (!safeInteger(value.windowId) || value.windowId <= 0))
+        || (value.windowId === undefined && adaptation.activeWindowId === null)
+        || !finite(value.x) || !finite(value.y)
+        || !finite(value.width) || value.width <= 0
+        || !finite(value.height) || value.height <= 0) {
+        fail('director_native_event_schema_invalid');
+      }
+      return;
+    case 'cursor':
+    case 'click':
+    case 'scroll':
+      if (!finite(value.x) || !finite(value.y)
+        || value.sourceCoordinateSpace !== 'macos-global-display-points-v1'
+        || value.coordinateSpaceVersion !== 1
+        || !safeInteger(value.displayId) || value.displayId <= 0
+        || !finite(value.scale) || value.scale <= 0) {
+        fail('director_native_event_schema_invalid');
+      }
+      if (value.kind === 'click'
+        && !['primary', 'secondary', 'middle', 'other'].includes(value.button as string)
+        || value.kind === 'click' && !['down', 'up'].includes(value.phase as string)) {
+        fail('director_native_event_schema_invalid');
+      }
+      if (value.kind === 'scroll' && (!finite(value.deltaX) || !finite(value.deltaY))) {
+        fail('director_native_event_schema_invalid');
+      }
+      return;
+    default:
+      return;
+  }
+}
+
 function adaptEvent(
   value: unknown,
   request: NativeDirectorPipelineRequest,
@@ -252,6 +297,7 @@ function adaptEvent(
   if (Object.keys(value).some((key) => !COMMON_KEYS.has(key) && !allowed.has(key))) {
     fail('director_native_event_schema_invalid');
   }
+  if (value.producerId === 'native-input') validateNativeWirePayload(value, adaptation);
   const producerKey = `${value.producerId}\u0000${value.producerEpoch}`;
   const sequence = value.producerSequence as number;
   const previous = producerState.get(producerKey)?.lastSequence;
