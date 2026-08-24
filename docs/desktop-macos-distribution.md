@@ -32,6 +32,8 @@
 
 正式工作流不存在“未签名继续发布”的降级路径：任一签名或公证 secret 缺失、签名校验失败、公证票据缺失时，任务立即失败，GitHub Release 不会执行。
 
+原生包使用 Swift Tools 6.0，因此 GitHub runner 必须使用带 Swift 6 的 `macos-15`（或显式安装并选择 Swift 6 工具链）。`macos-14` 默认 Swift 5.10，无法解析当前 package，不能通过降低 `swift-tools-version` 规避。
+
 ## GitHub 环境和 Secrets
 
 在仓库 Settings → Environments 创建受保护环境 `macos-production`，建议要求 maintainer 审批，并把下列 secrets 放在该环境中：
@@ -46,6 +48,14 @@
 
 证书应为 `Developer ID Application` 类型。API key 只授予完成 notarization 所需的最低权限。不要把 `.p12`、`.p8`、密码或解码后的临时文件提交到仓库，也不要在 Actions 日志中打印它们。
 
+配置前可在准备导出证书的 Mac 上只读检查签名身份：
+
+```bash
+security find-identity -v -p codesigning
+```
+
+输出必须至少包含一个有效的 `Developer ID Application` 身份。若显示 `0 valid identities found`，需要先在 Apple Developer Certificates 创建并下载该证书，并确保对应私钥同时存在于钥匙串；只有证书而没有匹配私钥也无法导出可用的 `.p12`。
+
 生成证书 secret 的示例（在可信 Mac 本地执行）：
 
 ```bash
@@ -53,6 +63,8 @@ base64 -i DeveloperIDApplication.p12 | pbcopy
 ```
 
 流水线仅在 runner 临时目录解码密钥，设置权限为 `0600`，结束时无论成功或失败都会删除临时文件。
+
+全部 secrets 配置在 `macos-production` 的 **Environment secrets** 后，可以在失败的 Actions run 中选择 `Re-run jobs → Re-run failed jobs`。若环境启用了 Required reviewers，还需在 `Review deployments` 中人工批准；私钥和密码不要发送到 issue、PR、聊天或普通仓库变量。
 
 ## 发布操作
 
@@ -64,6 +76,8 @@ git push origin desktop-v0.2.0
 ```
 
 测试版本使用带后缀 tag，并在手动触发时勾选 pre-release，例如 `desktop-v0.2.0-beta.1`。
+
+GitHub 的 `releases/latest/download/...` 通常只解析最新正式 Release，不保证指向 pre-release。Beta 验收应使用该 tag 对应的直接 asset URL；Web 导航继续只暴露已签名、公证的稳定版本。
 
 发布后至少核对：
 
