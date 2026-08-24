@@ -17,12 +17,15 @@ const coordinator = new MediaTaskCoordinator({
   persist: saveMediaTask,
   runExport: async (input, report, signal) => {
     const { exportRecording } = await import('@/services/exportPipeline');
+    const { resolveDesktopTeachingSoundEffectExportOptions } = await import('@/services/teachingSoundEffectExportRuntime');
     const config = input.configSnapshot as unknown as ExportConfig;
+    const teachingSoundEffects = await resolveDesktopTeachingSoundEffectExportOptions(input.recordingId);
     let phase = 'preparing';
     let ratio = 0;
     return exportRecording({
       ...config,
       recordingId: input.recordingId,
+      ...(teachingSoundEffects ? { teachingSoundEffects } : {}),
       signal,
       onPhase: (nextPhase) => {
         phase = nextPhase;

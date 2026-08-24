@@ -168,6 +168,7 @@ export const DESKTOP_IPC_CHANNELS = {
   projectDirectorRetry: 'project.director-retry.v1',
   projectReadMediaSegment: 'project.read-media-segment.v1',
   projectReadInkEvents: 'project.read-ink-events.v1',
+  projectReadTeachingCompositionExport: 'project.read-teaching-composition-export.v1',
   renderPreview: 'render.preview.v1',
   renderExport: 'render.export.v1',
 } as const;

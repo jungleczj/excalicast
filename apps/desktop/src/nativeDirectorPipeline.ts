@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { AttentionFeatureVector, AttentionObservation, NormalizedRoi } from '../../../src/desktop/attentionEngine';
 import type { SpeechActivityInterval } from '../../../src/desktop/autoCleanupPlanner';
 import type { CameraPlannerProfile } from '../../../src/desktop/cameraPlanner';
+import type { TeachingRecordingEvent } from '../../../src/desktop/teachingRecipePlanner';
 import {
   DirectorArtifactPersistenceService,
   type DirectorArtifactIndexV1,
@@ -28,6 +29,14 @@ export const NATIVE_DIRECTOR_MAX_TELEMETRY_BYTES = 128 * 1024 * 1024;
 export const NATIVE_DIRECTOR_MAX_EVENTS = 5_000_000;
 export const NATIVE_DIRECTOR_MAX_RETAINED_PLANNER_EVENTS = 50_000;
 export const NATIVE_DIRECTOR_MAX_ROI_OBSERVATIONS = 20_000;
+export const MAX_TEACHING_RECORDING_EVENTS = 1_024;
+/** Raw telemetry is streamed/forgotten; this is intentionally independent of output operations. */
+export const MAX_TEACHING_RAW_TELEMETRY_EVENTS = 250_000;
+// A 60-minute session with coalesced 30 Hz cursor telemetry can exceed 8 MiB.
+// This remains a strict streaming budget, while raw records are not retained.
+export const MAX_TEACHING_TELEMETRY_BYTES = 128 * 1024 * 1024;
+/** Native input capture flushes at 100 ms; 50k safely covers a 60-minute session. */
+export const MAX_TEACHING_TELEMETRY_SEGMENTS = 50_000;
 
 interface ManifestSegment {
   index: number;
@@ -47,6 +56,7 @@ export interface NativeDirectorPipelineLimits {
   maximumSegmentBytes?: number;
   maximumTelemetryBytes?: number;
   maximumEvents?: number;
+  signal?: AbortSignal;
   maximumRetainedPlannerEvents?: number;
   maximumRoiObservations?: number;
 }
@@ -75,6 +85,107 @@ export interface NativeDirectorPipelineEvidence {
   retainedPlannerEventCount: number;
   roiObservationCount: number;
   preservedMedia: true;
+}
+
+/**
+ * Reads the durable native input-telemetry track after capture has ended and
+ * maps only observed interaction events to the teaching compiler's narrow
+ * semantic vocabulary. No inferred timeline positions are created here.
+ */
+export async function loadNativeTeachingRecordingEvents(input: {
+  projectRoot: string;
+  recordingId: string;
+  durationUs: number;
+  maximumTelemetryBytes?: number;
+  maximumEvents?: number;
+  signal?: AbortSignal;
+}): Promise<TeachingRecordingEvent[]> {
+  const request: NativeDirectorPipelineRequest = {
+    projectRoot: input.projectRoot,
+    sourceRecordingId: input.recordingId,
+    sessionId: input.recordingId,
+    durationUs: input.durationUs,
+    profile: 'Balanced',
+    speechActivity: [],
+  };
+  validateRequest(request);
+  throwIfAborted(input.signal);
+  const maximumTelemetryBytes = validateLimit(input.maximumTelemetryBytes, MAX_TEACHING_TELEMETRY_BYTES);
+  const maximumEvents = validateLimit(input.maximumEvents, MAX_TEACHING_RAW_TELEMETRY_EVENTS);
+  const rootStat = await lstat(input.projectRoot).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') fail('director_native_project_missing');
+    fail('director_native_manifest_read_failed', true);
+  });
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) fail('director_native_project_path_invalid');
+  const projectRoot = await realpath(input.projectRoot);
+  const manifest = await loadManifest(request, projectRoot);
+  if (manifest.segments.length > MAX_TEACHING_TELEMETRY_SEGMENTS) fail('teaching_composition_telemetry_segment_limit');
+  const producerState = new Map<string, ProducerCursor>();
+  const adaptation: EventAdaptationState = { activeWindowId: null };
+  const result: TeachingRecordingEvent[] = [];
+  let telemetryBytes = 0;
+  let rawEventCount = 0;
+  let previousAtUs = -1;
+  let previousBatchIndex = -1;
+  let ordinal = 0;
+
+  for (const segment of manifest.segments) {
+    throwIfAborted(input.signal);
+    if (segment.byteLength > NATIVE_DIRECTOR_MAX_SEGMENT_BYTES) fail('director_native_segment_oversized');
+    const candidate = path.resolve(projectRoot, segment.relativePath);
+    if (!candidate.startsWith(`${projectRoot}${path.sep}`)) fail('director_native_segment_path_invalid');
+    await requireNoSymlinkPath(projectRoot, candidate);
+    const actualSize = await requireRegularFile(candidate, 'director_native_segment_missing');
+    if (actualSize !== segment.byteLength) fail('director_native_segment_size_mismatch');
+    telemetryBytes += actualSize;
+    if (telemetryBytes > maximumTelemetryBytes) fail('director_native_telemetry_budget_exceeded');
+    let batches: unknown[];
+    try { batches = parseTelemetryChunk(await readFile(candidate, 'utf8')); }
+    catch (error) {
+      if (error instanceof NativeDirectorPipelineError) throw error;
+      fail('director_native_telemetry_read_failed', true);
+    }
+    for (const batch of batches) {
+      const rawEvents = validateBatch(batch, segment, request);
+      const batchIndex = (batch as Record<string, unknown>).index as number;
+      if (batchIndex !== previousBatchIndex + 1) fail('director_native_batch_schema_invalid');
+      previousBatchIndex = batchIndex;
+      rawEventCount += rawEvents.length;
+      if (rawEventCount > maximumEvents) fail('teaching_composition_telemetry_event_limit');
+      let batchProducer: string | null = null;
+      let batchEpoch: string | null = null;
+      for (let rawIndex = 0; rawIndex < rawEvents.length; rawIndex += 1) {
+        throwIfAborted(input.signal);
+        const rawEvent = rawEvents[rawIndex];
+        const event = adaptEvent(rawEvent, request, producerState, adaptation, rawIndex === 0);
+        const producer = rawEvent.producerId as string;
+        const epoch = rawEvent.producerEpoch as string;
+        batchProducer ??= producer;
+        batchEpoch ??= epoch;
+        if (producer !== batchProducer || epoch !== batchEpoch
+          || event.atUs <= previousAtUs
+          || event.atUs < segment.startUs || event.atUs >= segment.startUs + segment.durationUs) {
+          fail('director_native_event_time_invalid');
+        }
+        previousAtUs = event.atUs;
+        const atMs = Math.floor(event.atUs / 1_000);
+        const kind = event.kind === 'click' && event.phase === 'down'
+          ? 'emphasis'
+          : event.kind === 'ink' && event.operation === 'stroke'
+            ? 'data-point'
+            : null;
+        if (kind !== null && atMs >= 0 && atMs < input.durationUs / 1_000) {
+          if (result.length >= MAX_TEACHING_RECORDING_EVENTS) fail('teaching_composition_operation_limit');
+          result.push({ id: `native-${kind}-${String(ordinal).padStart(6, '0')}`, kind, atMs });
+          ordinal += 1;
+        }
+      }
+    }
+    // Yield between bounded segments so post-stop analysis cannot monopolize
+    // Electron's event loop while the Director job is also progressing.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  return result;
 }
 
 export type NativeDirectorPipelineResult =
@@ -398,13 +509,25 @@ function validateBatch(value: unknown, segment: ManifestSegment, request: Native
   if (!isRecord(value)
     || Object.keys(value).some((key) => !['schemaVersion', 'sessionId', 'index', 'startUs', 'endUs', 'events'].includes(key))
     || value.schemaVersion !== 1 || value.sessionId !== request.sessionId
-    || value.index !== segment.index || value.startUs !== segment.startUs
+    || !safeInteger(value.index) || value.index < 0
+    || !safeInteger(value.startUs) || value.startUs < segment.startUs
     || !safeInteger(value.endUs)
-    || value.endUs !== segment.startUs + segment.durationUs - 1
+    || value.endUs < value.startUs
+    || value.endUs >= segment.startUs + segment.durationUs
     || !Array.isArray(value.events) || value.events.length < 1 || value.events.length > 256) {
     fail('director_native_batch_schema_invalid');
   }
   return value.events as Record<string, unknown>[];
+}
+
+function parseTelemetryChunk(bytes: string): unknown[] {
+  try { return [JSON.parse(bytes)]; }
+  catch {
+    const lines = bytes.split('\n').filter((line) => line.length > 0);
+    if (lines.length < 1) fail('director_native_segment_corrupt');
+    try { return lines.map((line) => JSON.parse(line) as unknown); }
+    catch { return fail('director_native_segment_corrupt'); }
+  }
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -669,6 +792,7 @@ export async function runNativeDirectorArtifactPipeline(
     const plannerEvents = new PlannerEventReducer(maximumRetainedPlannerEvents);
     const roiReducer = new RoiObservationReducer(request.speechActivity, maximumRoiObservations);
     let previousAtUs = -1;
+    let previousBatchIndex = -1;
 
     for (const segment of manifest.segments) {
       throwIfAborted(request.signal);
@@ -683,38 +807,43 @@ export async function runNativeDirectorArtifactPipeline(
       evidence.telemetryBytesRead += actualSize;
       evidence.maximumSegmentBytesRead = Math.max(evidence.maximumSegmentBytesRead, actualSize);
       if (evidence.telemetryBytesRead > maximumTelemetryBytes) fail('director_native_telemetry_budget_exceeded');
-      let batch: unknown;
+      let batches: unknown[];
       try {
-        batch = JSON.parse(await readFile(candidate, 'utf8'));
+        batches = parseTelemetryChunk(await readFile(candidate, 'utf8'));
       } catch (error) {
-        if (error instanceof SyntaxError) fail('director_native_segment_corrupt');
+        if (error instanceof NativeDirectorPipelineError) throw error;
         fail('director_native_telemetry_read_failed', true);
       }
       throwIfAborted(request.signal);
-      const rawEvents = validateBatch(batch, segment, request);
-      let segmentProducer: string | null = null;
-      let segmentEpoch: string | null = null;
-      for (let rawIndex = 0; rawIndex < rawEvents.length; rawIndex += 1) {
-        throwIfAborted(request.signal);
-        const rawEvent = rawEvents[rawIndex];
-        const event = adaptEvent(rawEvent, request, producerState, adaptation, rawIndex === 0);
-        const producer = rawEvent.producerId as string;
-        const epoch = rawEvent.producerEpoch as string;
-        segmentProducer ??= producer;
-        segmentEpoch ??= epoch;
-        if (producer !== segmentProducer || epoch !== segmentEpoch) fail('director_native_batch_producer_mixed');
-        if (event.atUs <= previousAtUs) fail('director_native_event_time_invalid');
-        if (event.atUs < segment.startUs || event.atUs >= segment.startUs + segment.durationUs) {
-          fail('director_native_event_time_invalid');
+      for (const batch of batches) {
+        const rawEvents = validateBatch(batch, segment, request);
+        const batchIndex = (batch as Record<string, unknown>).index as number;
+        if (batchIndex !== previousBatchIndex + 1) fail('director_native_batch_schema_invalid');
+        previousBatchIndex = batchIndex;
+        let batchProducer: string | null = null;
+        let batchEpoch: string | null = null;
+        for (let rawIndex = 0; rawIndex < rawEvents.length; rawIndex += 1) {
+          throwIfAborted(request.signal);
+          const rawEvent = rawEvents[rawIndex];
+          const event = adaptEvent(rawEvent, request, producerState, adaptation, rawIndex === 0);
+          const producer = rawEvent.producerId as string;
+          const epoch = rawEvent.producerEpoch as string;
+          batchProducer ??= producer;
+          batchEpoch ??= epoch;
+          if (producer !== batchProducer || epoch !== batchEpoch) fail('director_native_batch_producer_mixed');
+          if (event.atUs <= previousAtUs) fail('director_native_event_time_invalid');
+          if (event.atUs < segment.startUs || event.atUs >= segment.startUs + segment.durationUs) {
+            fail('director_native_event_time_invalid');
+          }
+          previousAtUs = event.atUs;
+          const rawPointer = rawEvent.kind === 'scroll' && finite(rawEvent.x) && finite(rawEvent.y)
+            ? { x: rawEvent.x, y: rawEvent.y }
+            : undefined;
+          roiReducer.consume(event, rawPointer);
+          plannerEvents.consume(event);
+          evidence.eventCount += 1;
+          if (evidence.eventCount > maximumEvents) fail('director_native_event_budget_exceeded');
         }
-        previousAtUs = event.atUs;
-        const rawPointer = rawEvent.kind === 'scroll' && finite(rawEvent.x) && finite(rawEvent.y)
-          ? { x: rawEvent.x, y: rawEvent.y }
-          : undefined;
-        roiReducer.consume(event, rawPointer);
-        plannerEvents.consume(event);
-        evidence.eventCount += 1;
-        if (evidence.eventCount > maximumEvents) fail('director_native_event_budget_exceeded');
       }
       evidence.telemetrySegmentsRead += 1;
     }

@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, protocol, screen, shell } from 'electron';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import type { RecordingTeachingRecipeSelectionV1 } from '../../../src/types/recording';
 import {
   DESKTOP_IPC_CHANNELS,
   mergeDesktopInkSettings,
@@ -46,6 +47,25 @@ import {
   parseNativeMediaUrl,
 } from './nativeMediaProtocol';
 import {
+  createTeachingAssetResponse,
+  TEACHING_ASSET_SCHEME,
+  type TeachingAssetLease,
+} from './teachingAssetProtocol';
+import type { TeachingAssetIdentity } from '../../../src/desktop/teachingAssetProtocol';
+import {
+  resolveTeachingAssetFromManifest,
+  readReadyTeachingCompositionManifest,
+  type ResolvedTeachingCompositionAsset,
+} from './teachingCompositionManifest';
+import {
+  persistDesktopTeachingPreselection,
+  readDesktopTeachingPreselection,
+} from './teachingPreselectionManifest';
+import {
+  finalizeDesktopTeachingComposition,
+  type DesktopTeachingCompositionFinalizeResult,
+} from './teachingCompositionLifecycle';
+import {
   DesktopNativeCaptureStopCoordinator,
   DesktopDirectorJobService,
   parseDesktopDirectorJobPayload,
@@ -55,6 +75,15 @@ import {
 
 protocol.registerSchemesAsPrivileged([{
   scheme: NATIVE_MEDIA_SCHEME,
+  privileges: {
+    standard: true,
+    secure: true,
+    supportFetchAPI: true,
+    stream: true,
+    corsEnabled: true,
+  },
+}, {
+  scheme: TEACHING_ASSET_SCHEME,
   privileges: {
     standard: true,
     secure: true,
@@ -95,6 +124,24 @@ const materializedTrackCache = new Map<string, Promise<{
   relativePath: string;
   mimeType: string;
 }>>();
+// Keep checked descriptors, not raw bytes. Range requests then stream the same
+// verified inode instead of re-reading and re-hashing a whole asset per seek.
+interface TeachingAssetCacheEntry {
+  asset: ResolvedTeachingCompositionAsset;
+  activeLeases: number;
+}
+const teachingAssetCache = new Map<string, TeachingAssetCacheEntry>();
+const teachingAssetResolutionFlights = new Map<string, Promise<ResolvedTeachingCompositionAsset>>();
+const overflowTeachingAssetLeases = new Map<string, TeachingAssetCacheEntry>();
+type TeachingCompositionJobState = 'pending' | 'ready' | 'unsupported' | 'absent' | 'failed';
+interface TeachingCompositionJob {
+  state: TeachingCompositionJobState;
+  code?: string;
+  controller: AbortController;
+  completion: Promise<DesktopTeachingCompositionFinalizeResult>;
+}
+const teachingCompositionJobs = new Map<string, TeachingCompositionJob>();
+const TEACHING_COMPOSITION_EXPORT_WAIT_MS = 15_000;
 const desktopRendererRoles = new Map<number, DesktopRendererRole>();
 
 function handleDesktopIpc(channel: string, handler: DesktopIpcInvokeHandler): void {
@@ -274,6 +321,19 @@ function registerDesktopIpc(): void {
     if (nativeCaptureStarting || activeNativeCapture) throw new Error('native_capture_already_active');
     nativeCaptureStarting = true;
     try {
+      await prepareTeachingCompositionForCapture();
+      const rawPayload = objectPayload(payload, 'native_capture_request_invalid');
+      const teachingRecipe = teachingRecipeFromCapturePayload(rawPayload.teachingRecipe);
+      // This is deliberately non-fatal: unsupported teaching assets never
+      // prevent the selected media capture from starting.
+      await persistDesktopTeachingPreselection({
+        projectRoot: request.projectRoot,
+        catalogPath: path.join(app.getPath('userData'), 'Teaching Assets', 'catalog.json'),
+        cacheRoot: path.join(app.getPath('userData'), 'Teaching Assets'),
+        recordingId: request.recordingId,
+        recipe: teachingRecipe,
+        recipeInvalid: rawPayload.teachingRecipe !== undefined && !teachingRecipe,
+      }).catch((error) => console.error('[desktop] teaching preselection failed', error));
       await directorJobs.prepareForCapture(3_000);
       directorJobs.assertCaptureMayStart();
       const helper = await requireNativeHelper();
@@ -307,6 +367,9 @@ function registerDesktopIpc(): void {
         onCaptureEnded: () => {
           if (activeNativeCapture === active) activeNativeCapture = null;
           broadcastInkSettings();
+          // Director telemetry may continue to enrich a later rerun, but the
+          // deterministic first compile starts only after durable media stop.
+          beginTeachingCompositionFinalization(active.recordingId);
         },
         enqueueDirector: () => directorJobs.enqueue(active.recordingId),
       });
@@ -388,6 +451,7 @@ function registerDesktopIpc(): void {
       resolveDesktopDirectorProjectRoot(app.getPath('videos'), recordingId),
     );
     const director = enqueueDirectorAfterRecovery(recordingId);
+    if (!activeNativeCapture && !nativeCaptureStarting) beginTeachingCompositionFinalization(recordingId);
     return { ...manifest, ...(director ? { director } : {}) };
   });
   handleDesktopIpc(DESKTOP_IPC_CHANNELS.projectValidate, async (_event, payload: unknown) => {
@@ -401,6 +465,7 @@ function registerDesktopIpc(): void {
       resolveDesktopDirectorProjectRoot(app.getPath('videos'), recordingId),
     );
     const director = enqueueDirectorAfterRecovery(recordingId);
+    if (!activeNativeCapture && !nativeCaptureStarting) beginTeachingCompositionFinalization(recordingId);
     return { ...validation, ...(director ? { director } : {}) };
   });
   handleDesktopIpc(DESKTOP_IPC_CHANNELS.projectDirectorStatus, async (_event, payload: unknown) => {
@@ -439,6 +504,47 @@ function registerDesktopIpc(): void {
     const manifest = await helper.recoverProject(projectRoot);
     return { segments: await readNativeInkEventSegments(projectRoot, manifest) };
   });
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.projectReadTeachingCompositionExport, async (_event, payload: unknown) => {
+    if (activeNativeCapture || nativeCaptureStarting) throw new Error('teaching_composition_read_during_capture');
+    const { recordingId } = parseDesktopDirectorJobPayload(payload);
+    let job = teachingCompositionJobs.get(recordingId);
+    if (!job) {
+      const preselection = await readDesktopTeachingPreselection({
+        projectRoot: resolveDesktopDirectorProjectRoot(app.getPath('videos'), recordingId),
+        recordingId,
+      });
+      if (preselection) job = beginTeachingCompositionFinalization(recordingId);
+    }
+    if (job) {
+      if (job.state === 'pending') {
+        const settled = await Promise.race([
+          job.completion.then(() => true, () => true),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), TEACHING_COMPOSITION_EXPORT_WAIT_MS)),
+        ]);
+        if (!settled && job.state === 'pending') return { state: 'pending' as const };
+      }
+      if (job.state === 'unsupported') return { state: 'unsupported' as const, code: job.code ?? 'teaching_composition_unsupported' };
+      if (job.state === 'failed') return { state: 'failed' as const, code: job.code ?? 'teaching_composition_finalization_failed' };
+      if (job.state === 'absent') return { state: 'absent' as const };
+    }
+    let manifest;
+    try {
+      manifest = await readReadyTeachingCompositionManifest({
+        projectRoot: resolveDesktopDirectorProjectRoot(app.getPath('videos'), recordingId),
+        recordingId,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'teaching_composition_manifest_missing') {
+        return { state: 'absent' as const };
+      }
+      throw error;
+    }
+    if (manifest.plan.operations.some((operation) => operation.operation !== 'mix-sound-effect')) {
+      throw new Error('teaching_composition_export_unsupported_capability');
+    }
+    // Return execution metadata only. Asset bytes stay behind excalicast-asset.
+    return { state: 'ready' as const, sourceTracks: manifest.plan.sourceTracks, operations: manifest.plan.operations };
+  });
 }
 
 function enqueueDirectorAfterRecovery(recordingId: string) {
@@ -449,6 +555,61 @@ function enqueueDirectorAfterRecovery(recordingId: string) {
     console.error('[desktop] Director recovery enqueue failed', error);
     return undefined;
   }
+}
+
+async function finalizeDesktopTeachingCompositionAfterNativeStop(
+  recordingId: string,
+  signal: AbortSignal,
+): Promise<DesktopTeachingCompositionFinalizeResult> {
+  const projectRoot = resolveDesktopDirectorProjectRoot(app.getPath('videos'), recordingId);
+  const helper = await requireNativeHelper();
+  const [manifest, validation] = await Promise.all([
+    helper.recoverProject(projectRoot),
+    helper.validateProject(projectRoot),
+  ]);
+  const outcome = await finalizeDesktopTeachingComposition({
+    projectRoot,
+    cacheRoot: path.join(app.getPath('userData'), 'Teaching Assets'),
+    recordingId,
+    manifest,
+    validation,
+    signal,
+  });
+  return outcome;
+}
+
+function beginTeachingCompositionFinalization(recordingId: string): TeachingCompositionJob {
+  const existing = teachingCompositionJobs.get(recordingId);
+  if (existing?.state === 'pending') return existing;
+  let job!: TeachingCompositionJob;
+  const controller = new AbortController();
+  const completion = finalizeDesktopTeachingCompositionAfterNativeStop(recordingId, controller.signal).then(
+    (outcome) => {
+      job.state = outcome.state;
+      if (outcome.state === 'unsupported') job.code = outcome.code;
+      return outcome;
+    },
+    (error) => {
+      job.state = 'failed';
+      job.code = error instanceof Error ? error.message : 'teaching_composition_finalization_failed';
+      throw error;
+    },
+  );
+  job = { state: 'pending', controller, completion };
+  teachingCompositionJobs.set(recordingId, job);
+  void completion.catch((error) => console.error('[desktop] teaching composition finalization failed', error));
+  return job;
+}
+
+async function prepareTeachingCompositionForCapture(): Promise<void> {
+  const pending = [...teachingCompositionJobs.values()].filter((job) => job.state === 'pending');
+  for (const job of pending) job.controller.abort();
+  if (pending.length === 0) return;
+  const drained = await Promise.race([
+    Promise.allSettled(pending.map((job) => job.completion)).then(() => true),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3_000)),
+  ]);
+  if (!drained) throw new Error('teaching_composition_drain_timeout');
 }
 
 async function requireNativeHelper(): Promise<NativeHelperClient> {
@@ -485,6 +646,100 @@ function registerNativeMediaProtocol(): void {
   });
 }
 
+/** The renderer may name an asset identity, but never a filesystem path. */
+function registerTeachingAssetProtocol(): void {
+  protocol.handle(TEACHING_ASSET_SCHEME, async (request) => {
+    try {
+      // No asset read/decode while real-time capture owns CPU, storage, and I/O.
+      if (activeNativeCapture || nativeCaptureStarting) return new Response('capture active', { status: 409 });
+      return await createTeachingAssetResponse(request, resolveCachedTeachingAsset);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'teaching_asset_protocol_failed';
+      const status = message === 'native_media_range_invalid' ? 416 : 404;
+      return new Response(message, { status });
+    }
+  });
+}
+
+function teachingAssetCacheKey(identity: TeachingAssetIdentity): string {
+  return `${identity.recordingId}\u0000${identity.assetId}\u0000${identity.assetVersion}\u0000${identity.checksum}`;
+}
+
+function leaseTeachingAsset(key: string, entry: TeachingAssetCacheEntry): TeachingAssetLease {
+  entry.activeLeases += 1;
+  // Map reinsertion makes recent requests least likely to be evicted.
+  teachingAssetCache.delete(key);
+  teachingAssetCache.set(key, entry);
+  let released = false;
+  return {
+    ...entry.asset,
+    release: () => {
+      if (released) return;
+      released = true;
+      entry.activeLeases = Math.max(0, entry.activeLeases - 1);
+    },
+  };
+}
+
+function leaseOverflowTeachingAsset(key: string, entry: TeachingAssetCacheEntry): TeachingAssetLease {
+  entry.activeLeases += 1;
+  let released = false;
+  return {
+    ...entry.asset,
+    release: async () => {
+      if (released) return;
+      released = true;
+      entry.activeLeases = Math.max(0, entry.activeLeases - 1);
+      if (entry.activeLeases === 0 && overflowTeachingAssetLeases.get(key) === entry) {
+        overflowTeachingAssetLeases.delete(key);
+        await entry.asset.fileHandle?.close();
+      }
+    },
+  };
+}
+
+async function resolveCachedTeachingAsset(identity: TeachingAssetIdentity): Promise<TeachingAssetLease> {
+  const key = teachingAssetCacheKey(identity);
+  const existing = teachingAssetCache.get(key);
+  if (existing) return leaseTeachingAsset(key, existing);
+  const overflow = overflowTeachingAssetLeases.get(key);
+  if (overflow) return leaseOverflowTeachingAsset(key, overflow);
+  let flight = teachingAssetResolutionFlights.get(key);
+  if (!flight) {
+    flight = resolveTeachingAssetFromManifest({
+      projectRoot: resolveDesktopDirectorProjectRoot(app.getPath('videos'), identity.recordingId),
+      cacheRoot: path.join(app.getPath('userData'), 'Teaching Assets'),
+      ...identity,
+    });
+    teachingAssetResolutionFlights.set(key, flight);
+    void flight.finally(() => teachingAssetResolutionFlights.delete(key)).catch(() => undefined);
+  }
+  const resolved = await flight;
+  const completedExisting = teachingAssetCache.get(key);
+  if (completedExisting) {
+    // Concurrent callers share the singleflight result already inserted by the
+    // first continuation; take a lease on that same verified descriptor.
+    return leaseTeachingAsset(key, completedExisting);
+  }
+  const completedOverflow = overflowTeachingAssetLeases.get(key);
+  if (completedOverflow) return leaseOverflowTeachingAsset(key, completedOverflow);
+  while (teachingAssetCache.size >= 64) {
+    const evictable = [...teachingAssetCache.entries()].find(([, entry]) => entry.activeLeases === 0);
+    if (!evictable) {
+      // All cached descriptors are streaming. Concurrent callers share one
+      // overflow lease and the descriptor closes after the final body closes.
+      const overflowEntry: TeachingAssetCacheEntry = { asset: resolved, activeLeases: 0 };
+      overflowTeachingAssetLeases.set(key, overflowEntry);
+      return leaseOverflowTeachingAsset(key, overflowEntry);
+    }
+    teachingAssetCache.delete(evictable[0]);
+    await evictable[1].asset.fileHandle?.close().catch(() => undefined);
+  }
+  const entry: TeachingAssetCacheEntry = { asset: resolved, activeLeases: 0 };
+  teachingAssetCache.set(key, entry);
+  return leaseTeachingAsset(key, entry);
+}
+
 function toNativeCaptureRequest(payload: unknown) {
   const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
   const recordingId = typeof value.recordingId === 'string' ? value.recordingId : '';
@@ -492,6 +747,27 @@ function toNativeCaptureRequest(payload: unknown) {
     mergeDesktopCaptureExclusions(payload, privateOverlayWindowIDs()),
     path.join(app.getPath('videos'), 'Excalicast Projects', recordingId),
   );
+}
+
+function teachingRecipeFromCapturePayload(value: unknown): RecordingTeachingRecipeSelectionV1 | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const recipe = value as Record<string, unknown>;
+  if (Object.keys(recipe).some((key) => !['schemaVersion', 'enabled', 'teachingPackId', 'selectedAssetIds'].includes(key))
+    || recipe.schemaVersion !== 1
+    || typeof recipe.enabled !== 'boolean'
+    || typeof recipe.teachingPackId !== 'string'
+    || !/^[a-zA-Z0-9_-]{1,128}$/.test(recipe.teachingPackId)
+    || !Array.isArray(recipe.selectedAssetIds)
+    || recipe.selectedAssetIds.length > 128
+    || !recipe.selectedAssetIds.every((assetId) => typeof assetId === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(assetId))) {
+    return undefined;
+  }
+  return {
+    schemaVersion: 1,
+    enabled: recipe.enabled,
+    teachingPackId: recipe.teachingPackId,
+    selectedAssetIds: [...recipe.selectedAssetIds],
+  };
 }
 
 function createOrMoveInkWindow(displayID?: number): BrowserWindow {
@@ -667,6 +943,7 @@ void app.whenReady().then(() => {
     validateProject: async (projectRoot) => (await requireNativeHelper()).validateProject(projectRoot),
   });
   registerNativeMediaProtocol();
+  registerTeachingAssetProtocol();
   registerDesktopIpc();
   nativeHelperInitialization = initializeNativeHelper().catch((error: unknown) => {
     nativeHelper?.close();
@@ -690,6 +967,10 @@ app.on('before-quit', () => {
   teleprompterWindow?.destroy();
   teleprompterWindow = null;
   desktopRendererRoles.clear();
+  for (const entry of teachingAssetCache.values()) void entry.asset.fileHandle?.close();
+  teachingAssetCache.clear();
+  for (const entry of overflowTeachingAssetLeases.values()) void entry.asset.fileHandle?.close();
+  overflowTeachingAssetLeases.clear();
   nativeHelper?.close();
   nativeHelper = null;
   nativeHelperHandshake = null;

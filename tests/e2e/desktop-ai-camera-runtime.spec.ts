@@ -93,10 +93,17 @@ test('desktop renderer starts one native AI Camera session from RecordingSetup a
     windows: [],
   });
 
+  const configuredSetup = setup({ kind: 'desktop', displaySurface: 'monitor', captureSystemAudio: true });
+  configuredSetup.teachingRecipe = {
+    schemaVersion: 1,
+    enabled: true,
+    teachingPackId: 'teaching-pack-1',
+    selectedAssetIds: ['lesson-pop'],
+  };
   const result = await startDesktopRecordingFromSetup({
     bridge,
     recordingId: 'desktop-runtime',
-    setup: setup({ kind: 'desktop', displaySurface: 'monitor', captureSystemAudio: true }),
+    setup: configuredSetup,
     displayStream: previewStream('video', 'screen:91:0', stopped),
     microphoneStream: previewStream('audio', 'browser-mic-preview', stopped),
     cameraStream: previewStream('video', 'browser-camera-preview', stopped),
@@ -122,6 +129,12 @@ test('desktop renderer starts one native AI Camera session from RecordingSetup a
     captureSystemAudio: true,
     captureMicrophone: true,
     captureCamera: true,
+    teachingRecipe: {
+      schemaVersion: 1,
+      enabled: true,
+      teachingPackId: 'teaching-pack-1',
+      selectedAssetIds: ['lesson-pop'],
+    },
   });
   if (result.pipeline === 'native') await result.session.stop();
   expect(calls.filter((call) => call.channel === DESKTOP_IPC_CHANNELS.captureStop)).toHaveLength(1);

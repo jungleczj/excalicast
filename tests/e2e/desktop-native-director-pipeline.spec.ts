@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  loadNativeTeachingRecordingEvents,
   runNativeDirectorArtifactPipeline,
   type NativeDirectorPipelineRequest,
 } from '../../apps/desktop/src/nativeDirectorPipeline';
@@ -105,6 +106,48 @@ test('consumes manifest-owned mixed native, whiteboard, and desktop ink segments
   expect(pointer.checkpointId).toBe(result.checkpoint.checkpointId);
   const attention = JSON.parse(await readFile(path.join(root, 'director', pointer.checkpointId ? 'checkpoints' : '', pointer.checkpointId, 'attention.json'), 'utf8')) as { payload: { windows: unknown[] } };
   expect(attention.payload.windows.length).toBeGreaterThan(0);
+});
+
+test('consumes multiple authoritative 100 ms batches from one append-only telemetry chunk', async () => {
+  const root = await project();
+  const recordingId = 'lesson-chunked';
+  const firstEvents = [authoritativeEvent(recordingId, {
+    atUs: 1_000, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 0,
+    surfaceId: 'macos-global', kind: 'click',
+    payload: { x: 20, y: 30, button: 'primary', phase: 'down', ...nativeCoordinateMetadata },
+  })];
+  const secondEvents = [authoritativeEvent(recordingId, {
+    atUs: 101_000, producerId: 'main-whiteboard', producerEpoch: 'board-a', producerSequence: 0,
+    surfaceId: 'whiteboard-1', kind: 'ink', payload: { operation: 'stroke', payload: { points: [[1, 2]] } },
+  })];
+  const body = [
+    JSON.stringify({ schemaVersion: 1, sessionId: recordingId, index: 0, startUs: 1_000, endUs: 1_000, events: firstEvents }),
+    JSON.stringify({ schemaVersion: 1, sessionId: recordingId, index: 1, startUs: 101_000, endUs: 101_000, events: secondEvents }),
+  ].join('\n') + '\n';
+  const relativePath = 'segments/input-telemetry/000000.segment';
+  await writeFile(path.join(root, relativePath), body);
+  await writeFile(path.join(root, 'manifest.json'), JSON.stringify({
+    schemaVersion: 1,
+    recordingId,
+    state: 'ready',
+    tracks: {
+      screen: [], camera: [], microphone: [], 'system-audio': [], 'excalidraw-events': [],
+      'input-telemetry': [{ index: 0, relativePath, startUs: 1_000, durationUs: 100_001, byteLength: Buffer.byteLength(body) }],
+    },
+  }));
+
+  await expect(loadNativeTeachingRecordingEvents({
+    projectRoot: root, recordingId, durationUs: 200_000,
+  })).resolves.toMatchObject([
+    { kind: 'emphasis', atMs: 1 },
+    { kind: 'data-point', atMs: 101 },
+  ]);
+  await expect(runNativeDirectorArtifactPipeline({
+    ...request(root, recordingId), durationUs: 200_000,
+  })).resolves.toMatchObject({
+    status: 'ready',
+    evidence: { telemetrySegmentsRead: 1, eventCount: 2 },
+  });
 });
 
 test('rejects unknown tracks, producer sequence gaps, path authority, and escaped manifest paths', async () => {

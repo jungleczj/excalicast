@@ -91,9 +91,8 @@ final class NativeCaptureSession: @unchecked Sendable {
             timeline: timeline,
             coordinatorSession: inputTelemetryCoordinator
         ) { index, startUs, durationUs, data in
-            try store.appendFinalizedSegment(
-                track: .inputTelemetry,
-                index: index,
+            try store.appendInputTelemetryBatch(
+                batchIndex: index,
                 data: data,
                 startUs: startUs,
                 durationUs: durationUs
@@ -299,9 +298,8 @@ final class NativeCaptureSession: @unchecked Sendable {
             payload: data,
             projectAtUs: projectAtUs
         ) { index, startUs, durationUs, authoritativePayload in
-            try store.appendFinalizedSegment(
-                track: .inputTelemetry,
-                index: index,
+            try store.appendInputTelemetryBatch(
+                batchIndex: index,
                 data: authoritativePayload,
                 startUs: startUs,
                 durationUs: durationUs

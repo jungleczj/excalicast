@@ -34,6 +34,7 @@ export const desktopRendererInvokeChannelsByRole = {
     DESKTOP_IPC_CHANNELS.projectDirectorRetry,
     DESKTOP_IPC_CHANNELS.projectReadMediaSegment,
     DESKTOP_IPC_CHANNELS.projectReadInkEvents,
+    DESKTOP_IPC_CHANNELS.projectReadTeachingCompositionExport,
     DESKTOP_IPC_CHANNELS.renderPreview,
     DESKTOP_IPC_CHANNELS.renderExport,
   ],

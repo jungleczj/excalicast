@@ -1,5 +1,6 @@
 import { startDesktopCaptureWithResourcePriority } from './captureResourceGate';
 import { DESKTOP_IPC_CHANNELS } from './productContract';
+import type { RecordingTeachingRecipeSelectionV1 } from '@/types/recording';
 
 export interface DesktopCaptureBridge {
   invoke(channel: string, payload?: unknown): Promise<unknown>;
@@ -27,6 +28,7 @@ export interface DesktopAiCameraSessionInput {
     framesPerSecond?: number;
   };
   screenFramesPerSecond?: number;
+  teachingRecipe?: RecordingTeachingRecipeSelectionV1;
 }
 
 export interface DesktopAiCameraSession {
@@ -172,6 +174,7 @@ export async function startDesktopAiCameraSession(
       cameraHeight: input.camera.height ?? 720,
       cameraFramesPerSecond: input.camera.framesPerSecond ?? 24,
     } : {}),
+    ...(input.teachingRecipe ? { teachingRecipe: input.teachingRecipe } : {}),
   };
   const capability = await input.bridge.invoke(DESKTOP_IPC_CHANNELS.capturePreflight, request);
   if (!capability || typeof capability !== 'object'

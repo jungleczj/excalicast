@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 public enum RecordingTrackKind: String, Codable, CaseIterable, Hashable, Sendable {
     case screen
@@ -139,7 +140,27 @@ public struct RecoverableRecordingManifest: Codable, Sendable {
     }
 }
 
+public struct InputTelemetryPersistenceSnapshot: Equatable, Sendable {
+    public let batchCount: Int
+    public let chunkCount: Int
+    public let telemetryBytes: Int
+    public let manifestCheckpointCount: Int
+    public let manifestCheckpointBytes: Int
+    public let maximumManifestBytes: Int
+}
+
 public final class SegmentedRecordingStore: @unchecked Sendable {
+    private struct TelemetryChunkState {
+        var index: Int
+        var url: URL
+        var handle: FileHandle
+        var startUs: Int64
+        var endUs: Int64
+        var byteLength: Int
+    }
+    public static let inputTelemetryChunkMaximumBytes = 2 * 1_024 * 1_024
+    public static let inputTelemetryChunkMaximumDurationUs: Int64 = 2_000_000
+    public static let inputTelemetryManifestCheckpointInterval = 128
     private let root: URL
     private let manifestURL: URL
     private var manifest: RecoverableRecordingManifest
@@ -150,6 +171,14 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
     private var committedBytes = 0
     private var lastCommitLatencyMs: Double = 0
     private var maximumCommitLatencyMs: Double = 0
+    private var telemetryChunk: TelemetryChunkState?
+    private var telemetryChunksSinceCheckpoint = 0
+    private var telemetryBatchCount = 0
+    private var telemetryChunkCount = 0
+    private var telemetryBytes = 0
+    private var manifestCheckpointCount = 0
+    private var manifestCheckpointBytes = 0
+    private var maximumManifestBytes = 0
 
     public init(root: URL, recordingId: String) throws {
         self.root = root
@@ -183,6 +212,75 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
             durationUs: durationUs,
             fileExtension: "segment"
         )
+    }
+
+    /// Appends one authoritative telemetry batch to a bounded JSONL chunk.
+    /// The hot path never rewrites the full project manifest per 100 ms batch.
+    public func appendInputTelemetryBatch(
+        batchIndex: Int,
+        data: Data,
+        startUs: Int64,
+        durationUs: Int64
+    ) throws {
+        guard batchIndex >= 0, !data.isEmpty, startUs >= 0, durationUs > 0,
+              data.count < Self.inputTelemetryChunkMaximumBytes else {
+            throw RecordingStoreError.invalidSegmentMetadata
+        }
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        let lineBytes = data.count + 1
+        if let current = telemetryChunk,
+           current.byteLength + lineBytes > Self.inputTelemetryChunkMaximumBytes
+            || startUs + durationUs - current.startUs > Self.inputTelemetryChunkMaximumDurationUs {
+            try sealTelemetryChunkUnlocked(checkpoint: false)
+        }
+        if telemetryChunk == nil {
+            let chunkIndex = (manifest.tracks[.inputTelemetry] ?? []).count
+            let directory = root.appendingPathComponent("segments/input-telemetry", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let url = directory.appendingPathComponent(String(format: "%06d.segment", chunkIndex))
+            if !FileManager.default.fileExists(atPath: url.path) {
+                FileManager.default.createFile(atPath: url.path, contents: nil)
+            }
+            let handle = try FileHandle(forWritingTo: url)
+            try handle.seekToEnd()
+            telemetryChunk = TelemetryChunkState(
+                index: chunkIndex, url: url, handle: handle, startUs: startUs,
+                endUs: startUs + durationUs, byteLength: 0
+            )
+        }
+        guard var chunk = telemetryChunk else { throw RecordingStoreError.invalidSegmentMetadata }
+        try chunk.handle.write(contentsOf: data)
+        try chunk.handle.write(contentsOf: Data([0x0a]))
+        chunk.endUs = max(chunk.endUs, startUs + durationUs)
+        chunk.byteLength += lineBytes
+        telemetryChunk = chunk
+        telemetryBatchCount += 1
+        telemetryBytes += lineBytes
+        pressureLock.lock()
+        committedBytes += lineBytes
+        pressureLock.unlock()
+    }
+
+    private func sealTelemetryChunkUnlocked(checkpoint: Bool) throws {
+        guard let chunk = telemetryChunk else { return }
+        try chunk.handle.synchronize()
+        try chunk.handle.close()
+        let segment = FinalizedSegment(
+            index: chunk.index,
+            relativePath: "segments/input-telemetry/" + String(format: "%06d.segment", chunk.index),
+            startUs: chunk.startUs,
+            durationUs: max(1, chunk.endUs - chunk.startUs),
+            byteLength: chunk.byteLength
+        )
+        manifest.tracks[.inputTelemetry, default: []].append(segment)
+        telemetryChunk = nil
+        telemetryChunkCount += 1
+        telemetryChunksSinceCheckpoint += 1
+        if checkpoint || telemetryChunksSinceCheckpoint >= Self.inputTelemetryManifestCheckpointInterval {
+            try checkpointUnlocked()
+            telemetryChunksSinceCheckpoint = 0
+        }
     }
 
     public func makeStagingSegmentURL(track: RecordingTrackKind, index: Int) throws -> URL {
@@ -280,6 +378,7 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
     public func finalize(requiredTracks: Set<RecordingTrackKind> = [.screen]) throws {
         stateLock.lock()
         defer { stateLock.unlock() }
+        try sealTelemetryChunkUnlocked(checkpoint: false)
         for track in requiredTracks where manifest.tracks[track, default: []].isEmpty {
             throw RecordingStoreError.missingRequiredTrack(track)
         }
@@ -311,7 +410,24 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
     }
 
     private func checkpointUnlocked() throws {
-        try encoder.encode(manifest).write(to: manifestURL, options: .atomic)
+        let bytes = try encoder.encode(manifest)
+        try bytes.write(to: manifestURL, options: .atomic)
+        manifestCheckpointCount += 1
+        manifestCheckpointBytes += bytes.count
+        maximumManifestBytes = max(maximumManifestBytes, bytes.count)
+    }
+
+    public func inputTelemetryPersistenceSnapshot() -> InputTelemetryPersistenceSnapshot {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return InputTelemetryPersistenceSnapshot(
+            batchCount: telemetryBatchCount,
+            chunkCount: telemetryChunkCount,
+            telemetryBytes: telemetryBytes,
+            manifestCheckpointCount: manifestCheckpointCount,
+            manifestCheckpointBytes: manifestCheckpointBytes,
+            maximumManifestBytes: maximumManifestBytes
+        )
     }
 
     public func pressureSnapshot() -> RecordingStorePressureSnapshot {
@@ -329,6 +445,7 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
     public func markInterrupted() throws {
         stateLock.lock()
         defer { stateLock.unlock() }
+        try sealTelemetryChunkUnlocked(checkpoint: false)
         manifest.state = .interrupted
         try checkpointUnlocked()
     }
@@ -341,6 +458,7 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
         )
         var removedInvalidSegment = false
         for track in RecordingTrackKind.allCases {
+            if track == .inputTelemetry { continue }
             let original = manifest.tracks[track] ?? []
             let valid = original.filter { segment in
                 let url = root.appendingPathComponent(segment.relativePath)
@@ -352,6 +470,9 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
             removedInvalidSegment = removedInvalidSegment || valid.count != original.count
             manifest.tracks[track] = valid
         }
+        if recoverTelemetryChunks(root: root, manifest: &manifest) {
+            removedInvalidSegment = true
+        }
         let replayedCommit = try replayPendingCommits(
             root: root,
             manifest: &manifest,
@@ -362,6 +483,159 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
             manifest.state = .interrupted
         }
         return manifest
+    }
+
+    private static func recoverTelemetryChunks(
+        root: URL,
+        manifest: inout RecoverableRecordingManifest
+    ) -> Bool {
+        let directory = root.appendingPathComponent("segments/input-telemetry", isDirectory: true)
+        let original = manifest.tracks[.inputTelemetry] ?? []
+        var directoryStat = stat()
+        guard lstat(directory.path, &directoryStat) == 0,
+              (directoryStat.st_mode & S_IFMT) == S_IFDIR else {
+            manifest.tracks[.inputTelemetry] = []
+            return !original.isEmpty
+        }
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ) else {
+            manifest.tracks[.inputTelemetry] = []
+            return !original.isEmpty
+        }
+        var candidates: [Int: URL] = [:]
+        var rejectedCandidate = false
+        for file in files where file.lastPathComponent.hasSuffix(".segment") {
+            let name = file.lastPathComponent
+            let stem = String(name.dropLast(".segment".count))
+            guard stem.count == 6,
+                  stem.allSatisfy({ $0.isNumber }),
+                  let index = Int(stem),
+                  name == String(format: "%06d.segment", index) else {
+                rejectedCandidate = true
+                continue
+            }
+            candidates[index] = file
+        }
+        for segment in original {
+            let expectedPath = "segments/input-telemetry/" + String(format: "%06d.segment", segment.index)
+            if segment.index < 0 || segment.relativePath != expectedPath { rejectedCandidate = true }
+            candidates[segment.index] = directory.appendingPathComponent(
+                String(format: "%06d.segment", segment.index)
+            )
+        }
+        let ordered = candidates.keys.sorted()
+        var recovered: [FinalizedSegment] = []
+        var expectedBatchIndex = 0
+        var previousEndUs: Int64 = -1
+        for (position, index) in ordered.enumerated() {
+            guard index == recovered.count,
+                  let file = candidates[index],
+                  let chunk = readValidatedTelemetryChunk(
+                    file: file,
+                    recordingId: manifest.recordingId,
+                    expectedBatchIndex: expectedBatchIndex,
+                    minimumStartUs: previousEndUs + 1,
+                    allowPartialTail: position == ordered.count - 1
+                  ) else {
+                rejectedCandidate = true
+                continue
+            }
+            recovered.append(FinalizedSegment(
+                index: index,
+                relativePath: "segments/input-telemetry/" + String(format: "%06d.segment", index),
+                startUs: chunk.startUs,
+                durationUs: max(1, chunk.endUs - chunk.startUs + 1),
+                byteLength: chunk.byteLength
+            ))
+            expectedBatchIndex = chunk.nextBatchIndex
+            previousEndUs = chunk.endUs
+        }
+        manifest.tracks[.inputTelemetry] = recovered
+        return rejectedCandidate || recovered != original
+    }
+
+    private static func readValidatedTelemetryChunk(
+        file: URL,
+        recordingId: String,
+        expectedBatchIndex: Int,
+        minimumStartUs: Int64,
+        allowPartialTail: Bool
+    ) -> (startUs: Int64, endUs: Int64, byteLength: Int, nextBatchIndex: Int)? {
+        let descriptor = Darwin.open(file.path, O_RDWR | O_NOFOLLOW | O_CLOEXEC)
+        guard descriptor >= 0 else { return nil }
+        defer { Darwin.close(descriptor) }
+        var before = stat()
+        guard fstat(descriptor, &before) == 0,
+              (before.st_mode & S_IFMT) == S_IFREG,
+              before.st_size > 0,
+              before.st_size <= inputTelemetryChunkMaximumBytes else { return nil }
+        let byteCount = Int(before.st_size)
+        var bytes = Data(count: byteCount)
+        let didReadAll = bytes.withUnsafeMutableBytes { rawBuffer -> Bool in
+            guard let base = rawBuffer.baseAddress else { return false }
+            var offset = 0
+            while offset < byteCount {
+                let count = Darwin.pread(
+                    descriptor,
+                    base.advanced(by: offset),
+                    byteCount - offset,
+                    off_t(offset)
+                )
+                if count <= 0 { return false }
+                offset += count
+            }
+            return true
+        }
+        var after = stat()
+        guard didReadAll,
+              fstat(descriptor, &after) == 0,
+              after.st_dev == before.st_dev,
+              after.st_ino == before.st_ino,
+              after.st_size == before.st_size else { return nil }
+
+        let wholeIsLegacyBatch = bytes.last != 0x0a
+            && (try? JSONSerialization.jsonObject(with: bytes)) != nil
+        let durableByteCount: Int
+        if bytes.last == 0x0a || wholeIsLegacyBatch {
+            durableByteCount = bytes.count
+        } else if allowPartialTail, let newline = bytes.lastIndex(of: 0x0a) {
+            durableByteCount = bytes.distance(from: bytes.startIndex, to: newline) + 1
+        } else {
+            return nil
+        }
+        let durableBytes = bytes.prefix(durableByteCount)
+        let lines = durableBytes.split(separator: 0x0a, omittingEmptySubsequences: true)
+        guard !lines.isEmpty else { return nil }
+        let allowedKeys = Set(["schemaVersion", "sessionId", "index", "startUs", "endUs", "events"])
+        var nextBatchIndex = expectedBatchIndex
+        var firstStartUs: Int64?
+        var lastEndUs = minimumStartUs - 1
+        for line in lines {
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                  Set(object.keys).isSubset(of: allowedKeys),
+                  object["schemaVersion"] as? Int == 1,
+                  object["sessionId"] as? String == recordingId,
+                  object["index"] as? Int == nextBatchIndex,
+                  let start = object["startUs"] as? NSNumber,
+                  let end = object["endUs"] as? NSNumber,
+                  start.int64Value >= minimumStartUs,
+                  start.int64Value > lastEndUs,
+                  end.int64Value >= start.int64Value,
+                  let events = object["events"] as? [Any],
+                  !events.isEmpty,
+                  events.count <= InputTelemetryCoordinator.maximumEventCount else { return nil }
+            firstStartUs = firstStartUs ?? start.int64Value
+            lastEndUs = end.int64Value
+            nextBatchIndex += 1
+        }
+        guard let startUs = firstStartUs else { return nil }
+        if durableByteCount != bytes.count {
+            guard ftruncate(descriptor, off_t(durableByteCount)) == 0,
+                  fsync(descriptor) == 0 else { return nil }
+        }
+        return (startUs, lastEndUs, durableByteCount, nextBatchIndex)
     }
 
     public static func recoverAndCheckpoint(root: URL) throws -> RecoverableRecordingManifest {

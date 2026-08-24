@@ -576,6 +576,258 @@ struct MacMediaEngineContractTests {
         try expect(concurrentManifest.tracks[.screen]?.count == 20, "all parallel screen segments survive")
         try expect(concurrentManifest.tracks[.camera]?.count == 20, "all parallel camera segments survive")
 
+        let longTelemetryRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("excalicast-telemetry-60m-\(UUID().uuidString)", isDirectory: true)
+        let longTelemetryStore = try SegmentedRecordingStore(
+            root: longTelemetryRoot,
+            recordingId: "telemetry-60m"
+        )
+        try longTelemetryStore.appendFinalizedSegment(
+            track: .screen,
+            index: 0,
+            data: Data([1]),
+            startUs: 0,
+            durationUs: 3_600_000_000
+        )
+        for batchIndex in 0..<36_000 {
+            let startUs = Int64(batchIndex) * 100_000
+            let payload = Data(
+                "{\"schemaVersion\":1,\"sessionId\":\"telemetry-60m\",\"index\":\(batchIndex),\"startUs\":\(startUs),\"endUs\":\(startUs + 99_999),\"events\":[{}]}".utf8
+            )
+            try longTelemetryStore.appendInputTelemetryBatch(
+                batchIndex: batchIndex,
+                data: payload,
+                startUs: startUs,
+                durationUs: 100_000
+            )
+        }
+        try longTelemetryStore.finalize(requiredTracks: [.screen])
+        let telemetryPersistence = longTelemetryStore.inputTelemetryPersistenceSnapshot()
+        let longTelemetryManifestURL = longTelemetryRoot.appendingPathComponent("manifest.json")
+        let longTelemetryManifestBytes = try Data(contentsOf: longTelemetryManifestURL)
+        let recoveredLongTelemetry = try SegmentedRecordingStore.recover(root: longTelemetryRoot)
+        let recoveredTelemetryChunks = recoveredLongTelemetry.tracks[.inputTelemetry] ?? []
+        try expect(recoveredLongTelemetry.state == .ready, "60 minute telemetry project remains recoverable after stop")
+        try expect(recoveredTelemetryChunks.count <= 1_800, "100 ms batches are coalesced into bounded two-second chunks")
+        try expect(longTelemetryManifestBytes.count < 1_024 * 1_024, "60 minute telemetry manifest stays below a fixed 1 MiB budget")
+        try expect(telemetryPersistence.batchCount == 36_000, "all 60 minute telemetry batches are appended")
+        try expect(telemetryPersistence.chunkCount == recoveredTelemetryChunks.count, "checkpoint index contains exactly the sealed chunks")
+        try expect(telemetryPersistence.manifestCheckpointCount <= 32, "manifest checkpoints stay bounded instead of following batch count")
+        try expect(
+            telemetryPersistence.manifestCheckpointBytes <= telemetryPersistence.telemetryBytes * 2,
+            "manifest checkpoint write amplification remains linear and below telemetry payload volume"
+        )
+
+        func telemetryBatchLine(index: Int, startUs: Int64) -> Data {
+            Data(
+                "{\"schemaVersion\":1,\"sessionId\":\"recovery\",\"index\":\(index),\"startUs\":\(startUs),\"endUs\":\(startUs),\"events\":[{}]}".utf8
+            )
+        }
+        func unlistedTelemetryRoot(_ suffix: String) throws -> (URL, URL) {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("excalicast-telemetry-recovery-\(suffix)-\(UUID().uuidString)", isDirectory: true)
+            _ = try SegmentedRecordingStore(root: root, recordingId: "recovery")
+            let directory = root.appendingPathComponent("segments/input-telemetry", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            return (root, directory.appendingPathComponent("000000.segment"))
+        }
+        func listedTelemetryRoot(_ suffix: String) throws -> (URL, URL) {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent("excalicast-listed-telemetry-\(suffix)-\(UUID().uuidString)", isDirectory: true)
+            let store = try SegmentedRecordingStore(root: root, recordingId: "recovery")
+            let line = telemetryBatchLine(index: 0, startUs: 1_000)
+            try store.appendInputTelemetryBatch(
+                batchIndex: 0,
+                data: line,
+                startUs: 1_000,
+                durationUs: 1
+            )
+            try store.markInterrupted()
+            return (
+                root,
+                root.appendingPathComponent("segments/input-telemetry/000000.segment")
+            )
+        }
+
+        let (partialTailRoot, partialTailURL) = try unlistedTelemetryRoot("partial-tail")
+        let completeRecoveryLine = telemetryBatchLine(index: 0, startUs: 1_000)
+        var partialTailBytes = completeRecoveryLine
+        partialTailBytes.append(0x0a)
+        partialTailBytes.append(Data("{\"schemaVersion\":".utf8))
+        try partialTailBytes.write(to: partialTailURL)
+        let partialTailRecovery = try SegmentedRecordingStore.recoverAndCheckpoint(root: partialTailRoot)
+        try expect(
+            partialTailRecovery.tracks[.inputTelemetry]?.first?.byteLength == completeRecoveryLine.count + 1,
+            "recovery truncates an incomplete JSONL tail to the last durable newline"
+        )
+        let recoveredPartialTailBytes = try Data(contentsOf: partialTailURL)
+        try expect(
+            recoveredPartialTailBytes.count == completeRecoveryLine.count + 1,
+            "recovered telemetry byteLength matches the fsynced truncated file"
+        )
+
+        let (corruptMiddleRoot, corruptMiddleURL) = try unlistedTelemetryRoot("corrupt-middle")
+        var corruptMiddleBytes = telemetryBatchLine(index: 0, startUs: 1_000)
+        corruptMiddleBytes.append(0x0a)
+        corruptMiddleBytes.append(Data("not-json\n".utf8))
+        corruptMiddleBytes.append(telemetryBatchLine(index: 1, startUs: 2_000))
+        corruptMiddleBytes.append(0x0a)
+        try corruptMiddleBytes.write(to: corruptMiddleURL)
+        let corruptMiddleRecovery = try SegmentedRecordingStore.recover(root: corruptMiddleRoot)
+        try expect(
+            corruptMiddleRecovery.state == .interrupted
+                && corruptMiddleRecovery.tracks[.inputTelemetry]?.isEmpty == true,
+            "a corrupt complete line is never published as a recoverable telemetry chunk"
+        )
+
+        let (indexGapRoot, indexGapURL) = try unlistedTelemetryRoot("index-gap")
+        var indexGapBytes = telemetryBatchLine(index: 0, startUs: 1_000)
+        indexGapBytes.append(0x0a)
+        indexGapBytes.append(telemetryBatchLine(index: 2, startUs: 2_000))
+        indexGapBytes.append(0x0a)
+        try indexGapBytes.write(to: indexGapURL)
+        let indexGapRecovery = try SegmentedRecordingStore.recover(root: indexGapRoot)
+        try expect(
+            indexGapRecovery.tracks[.inputTelemetry]?.isEmpty == true,
+            "batch index gaps are rejected during telemetry recovery"
+        )
+
+        let (duplicateIndexRoot, duplicateIndexURL) = try unlistedTelemetryRoot("duplicate-index")
+        var duplicateIndexBytes = telemetryBatchLine(index: 0, startUs: 1_000)
+        duplicateIndexBytes.append(0x0a)
+        duplicateIndexBytes.append(telemetryBatchLine(index: 0, startUs: 2_000))
+        duplicateIndexBytes.append(0x0a)
+        try duplicateIndexBytes.write(to: duplicateIndexURL)
+        let duplicateIndexRecovery = try SegmentedRecordingStore.recover(root: duplicateIndexRoot)
+        try expect(
+            duplicateIndexRecovery.tracks[.inputTelemetry]?.isEmpty == true,
+            "duplicate batch indices are rejected during telemetry recovery"
+        )
+
+        let (nearLimitRoot, nearLimitURL) = try unlistedTelemetryRoot("near-limit")
+        let nearLimitPadding = String(
+            repeating: "x",
+            count: SegmentedRecordingStore.inputTelemetryChunkMaximumBytes - 512
+        )
+        var nearLimitBytes = Data(
+            "{\"schemaVersion\":1,\"sessionId\":\"recovery\",\"index\":0,\"startUs\":1000,\"endUs\":1000,\"events\":[{\"payload\":{\"padding\":\"\(nearLimitPadding)\"}}]}".utf8
+        )
+        nearLimitBytes.append(0x0a)
+        try expect(
+            nearLimitBytes.count <= SegmentedRecordingStore.inputTelemetryChunkMaximumBytes,
+            "near-limit fixture stays within the production chunk boundary"
+        )
+        try nearLimitBytes.write(to: nearLimitURL)
+        let nearLimitRecovery = try SegmentedRecordingStore.recover(root: nearLimitRoot)
+        try expect(
+            nearLimitRecovery.tracks[.inputTelemetry]?.first?.byteLength == nearLimitBytes.count,
+            "a valid telemetry chunk near the 2 MiB write boundary remains recoverable"
+        )
+
+        let (oversizedTelemetryRoot, oversizedTelemetryURL) = try unlistedTelemetryRoot("oversized")
+        try Data(
+            repeating: 0x61,
+            count: SegmentedRecordingStore.inputTelemetryChunkMaximumBytes + 1
+        ).write(to: oversizedTelemetryURL)
+        let oversizedTelemetryRecovery = try SegmentedRecordingStore.recover(root: oversizedTelemetryRoot)
+        try expect(
+            oversizedTelemetryRecovery.tracks[.inputTelemetry]?.isEmpty == true,
+            "recovery rejects telemetry files beyond the exact production chunk boundary"
+        )
+
+        let (symlinkTelemetryRoot, symlinkTelemetryURL) = try unlistedTelemetryRoot("symlink")
+        let externalTelemetry = FileManager.default.temporaryDirectory
+            .appendingPathComponent("excalicast-external-telemetry-\(UUID().uuidString)")
+        var externalBytes = telemetryBatchLine(index: 0, startUs: 1_000)
+        externalBytes.append(0x0a)
+        try externalBytes.write(to: externalTelemetry)
+        try FileManager.default.createSymbolicLink(at: symlinkTelemetryURL, withDestinationURL: externalTelemetry)
+        let symlinkTelemetryRecovery = try SegmentedRecordingStore.recover(root: symlinkTelemetryRoot)
+        try expect(
+            symlinkTelemetryRecovery.tracks[.inputTelemetry]?.isEmpty == true,
+            "telemetry recovery never follows symlinks or non-regular files"
+        )
+
+        let (listedSymlinkRoot, listedSymlinkURL) = try listedTelemetryRoot("symlink")
+        let listedSymlinkTarget = FileManager.default.temporaryDirectory
+            .appendingPathComponent("excalicast-listed-symlink-target-\(UUID().uuidString)")
+        var listedSymlinkTargetBytes = telemetryBatchLine(index: 0, startUs: 1_000)
+        listedSymlinkTargetBytes.append(0x0a)
+        try listedSymlinkTargetBytes.write(to: listedSymlinkTarget)
+        try FileManager.default.removeItem(at: listedSymlinkURL)
+        try FileManager.default.createSymbolicLink(at: listedSymlinkURL, withDestinationURL: listedSymlinkTarget)
+        let listedSymlinkManifestURL = listedSymlinkRoot.appendingPathComponent("manifest.json")
+        var listedSymlinkManifest = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: listedSymlinkManifestURL)
+        ) as! [String: Any]
+        listedSymlinkManifest["state"] = "ready"
+        try JSONSerialization.data(withJSONObject: listedSymlinkManifest)
+            .write(to: listedSymlinkManifestURL, options: .atomic)
+        let listedSymlinkRecovery = try SegmentedRecordingStore.recover(root: listedSymlinkRoot)
+        try expect(
+            listedSymlinkRecovery.state == .interrupted
+                && listedSymlinkRecovery.tracks[.inputTelemetry]?.isEmpty == true,
+            "manifest-listed telemetry symlinks are revalidated and removed"
+        )
+
+        let (listedCorruptRoot, listedCorruptURL) = try listedTelemetryRoot("corrupt")
+        try Data("not-json\n".utf8).write(to: listedCorruptURL)
+        let listedCorruptRecovery = try SegmentedRecordingStore.recover(root: listedCorruptRoot)
+        try expect(
+            listedCorruptRecovery.state == .interrupted
+                && listedCorruptRecovery.tracks[.inputTelemetry]?.isEmpty == true,
+            "manifest-listed telemetry with a corrupt complete line is removed"
+        )
+
+        let (listedOversizedRoot, listedOversizedURL) = try listedTelemetryRoot("oversized")
+        try Data(
+            repeating: 0x61,
+            count: SegmentedRecordingStore.inputTelemetryChunkMaximumBytes + 1
+        ).write(to: listedOversizedURL)
+        let listedOversizedRecovery = try SegmentedRecordingStore.recover(root: listedOversizedRoot)
+        try expect(
+            listedOversizedRecovery.state == .interrupted
+                && listedOversizedRecovery.tracks[.inputTelemetry]?.isEmpty == true,
+            "manifest-listed telemetry over the production bound is removed"
+        )
+
+        let (listedGapRoot, _) = try listedTelemetryRoot("orphan-gap")
+        let listedGapOrphan = listedGapRoot
+            .appendingPathComponent("segments/input-telemetry/000001.segment")
+        var listedGapBytes = telemetryBatchLine(index: 2, startUs: 2_000)
+        listedGapBytes.append(0x0a)
+        try listedGapBytes.write(to: listedGapOrphan)
+        let listedGapRecovery = try SegmentedRecordingStore.recover(root: listedGapRoot)
+        try expect(
+            listedGapRecovery.tracks[.inputTelemetry]?.count == 1,
+            "an orphan whose first batch skips the listed global index is not recovered"
+        )
+
+        let (listedDuplicateRoot, _) = try listedTelemetryRoot("cross-chunk-duplicate")
+        let listedDuplicateOrphan = listedDuplicateRoot
+            .appendingPathComponent("segments/input-telemetry/000001.segment")
+        var listedDuplicateBytes = telemetryBatchLine(index: 0, startUs: 2_000)
+        listedDuplicateBytes.append(0x0a)
+        try listedDuplicateBytes.write(to: listedDuplicateOrphan)
+        let listedDuplicateRecovery = try SegmentedRecordingStore.recover(root: listedDuplicateRoot)
+        try expect(
+            listedDuplicateRecovery.tracks[.inputTelemetry]?.count == 1,
+            "a duplicate batch index across listed and orphan chunks is not recovered"
+        )
+
+        let (listedContinuousRoot, _) = try listedTelemetryRoot("orphan-continuous")
+        let listedContinuousOrphan = listedContinuousRoot
+            .appendingPathComponent("segments/input-telemetry/000001.segment")
+        var listedContinuousBytes = telemetryBatchLine(index: 1, startUs: 2_000)
+        listedContinuousBytes.append(0x0a)
+        try listedContinuousBytes.write(to: listedContinuousOrphan)
+        let listedContinuousRecovery = try SegmentedRecordingStore.recover(root: listedContinuousRoot)
+        try expect(
+            listedContinuousRecovery.state == .interrupted
+                && listedContinuousRecovery.tracks[.inputTelemetry]?.count == 2,
+            "a contiguous orphan is recovered after a revalidated listed chunk"
+        )
+
         let emptyRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("excalicast-empty-\(UUID().uuidString)", isDirectory: true)
         let emptyStore = try SegmentedRecordingStore(root: emptyRoot, recordingId: "empty")
@@ -615,6 +867,22 @@ struct MacMediaEngineContractTests {
         try? FileManager.default.removeItem(at: prePromotionRoot)
         try? FileManager.default.removeItem(at: traversalRoot)
         try? FileManager.default.removeItem(at: concurrentRoot)
+        try? FileManager.default.removeItem(at: longTelemetryRoot)
+        try? FileManager.default.removeItem(at: partialTailRoot)
+        try? FileManager.default.removeItem(at: corruptMiddleRoot)
+        try? FileManager.default.removeItem(at: indexGapRoot)
+        try? FileManager.default.removeItem(at: duplicateIndexRoot)
+        try? FileManager.default.removeItem(at: nearLimitRoot)
+        try? FileManager.default.removeItem(at: oversizedTelemetryRoot)
+        try? FileManager.default.removeItem(at: symlinkTelemetryRoot)
+        try? FileManager.default.removeItem(at: externalTelemetry)
+        try? FileManager.default.removeItem(at: listedSymlinkRoot)
+        try? FileManager.default.removeItem(at: listedSymlinkTarget)
+        try? FileManager.default.removeItem(at: listedCorruptRoot)
+        try? FileManager.default.removeItem(at: listedOversizedRoot)
+        try? FileManager.default.removeItem(at: listedGapRoot)
+        try? FileManager.default.removeItem(at: listedDuplicateRoot)
+        try? FileManager.default.removeItem(at: listedContinuousRoot)
         try? FileManager.default.removeItem(at: temporaryRoot)
 
         let h264Preflight = try CapturePreflight.evaluate(

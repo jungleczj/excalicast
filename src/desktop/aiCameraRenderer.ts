@@ -168,6 +168,7 @@ export async function startDesktopRecordingFromSetup<TBrowserSession>(
       ...(typeof cameraSettings.frameRate === 'number' ? { framesPerSecond: cameraSettings.frameRate } : {}),
     },
     screenFramesPerSecond: Math.min(30, source.sourceSize?.frameRate ?? 30),
+    teachingRecipe: input.setup.teachingRecipe,
   });
   return { pipeline: 'native', session };
 }

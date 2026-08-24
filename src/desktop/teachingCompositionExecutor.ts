@@ -150,7 +150,16 @@ const Z_ORDER_BY_KIND: Record<TeachingAssetKind, number> = {
   'sound-effect': 0,
 };
 
-const LOCAL_URI_PATTERN = /^(?:file:\/\/\/|excalicast-asset:\/\/)[\S]+$/;
+const EXCALICAST_ASSET_URI_PATTERN = /^excalicast-asset:\/\/[\S]+$/;
+
+function hasSupportedLocalUri(value: string | undefined): boolean {
+  if (!value) return false;
+  if (EXCALICAST_ASSET_URI_PATTERN.test(value)) return true;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'file:' && parsed.hostname === '' && parsed.pathname.length > 1;
+  } catch { return false; }
+}
 
 function fail(code: string): never {
   throw new Error(code);
@@ -274,7 +283,7 @@ function validateSelection(params: TeachingCompositionInput): {
       || authoritative.cache.checksum?.toLowerCase() !== authoritative.checksum.value.toLowerCase()) {
       fail('teaching_composition_cache_unverified');
     }
-    if (!authoritative.cache.localUri || !LOCAL_URI_PATTERN.test(authoritative.cache.localUri)) {
+    if (!hasSupportedLocalUri(authoritative.cache.localUri)) {
       fail('teaching_composition_local_asset_missing');
     }
     if (!sameAssetSnapshot(selected, authoritative)) {
