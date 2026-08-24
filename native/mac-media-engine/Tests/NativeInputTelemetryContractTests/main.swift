@@ -531,16 +531,30 @@ struct NativeInputTelemetryContractTests {
             persist: { _, _, _, data in try authoritativeSplitPersisted.persist(data) }
         )
         let authoritativeSplitEvents = (0..<256).map { index in
-            NativeMappedInputEvent(hostUs: Int64(index), kind: "click", payload: ["text": .string(String(repeating: "z", count: 800))])
+            NativeMappedInputEvent(hostUs: Int64(index), kind: "click", payload: [
+                "index": .integer(index),
+                "text": .string(String(repeating: "z", count: 800)),
+            ])
         }
+        authoritativeSplitPersisted.failNext()
+        do {
+            try authoritativeSplitSink.consumeBatch(authoritativeSplitEvents)
+            throw TestFailure.expectation("the first authoritative split prefix persistence must fail")
+        } catch PersistenceFailure.requested {
+            // Expected: the failed prefix must be restored ahead of its retained suffix.
+        }
+        try expect(authoritativeSplitPersisted.batches.isEmpty, "a failed authoritative split prefix creates no segment")
         try authoritativeSplitSink.consumeBatch(authoritativeSplitEvents)
         try expect(authoritativeSplitPersisted.batches.count > 1, "an authoritative-size rejection deterministically splits a fitted native producer batch")
         try expect(authoritativeSplitPersisted.batches.allSatisfy { $0.count <= 256 * 1_024 }, "authoritative split segments stay within 256KiB")
-        let authoritativeSequences = try authoritativeSplitPersisted.batches.flatMap { data -> [Int] in
+        let authoritativeEvents = try authoritativeSplitPersisted.batches.flatMap { data -> [[String: Any]] in
             let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            return (payload?["events"] as? [[String: Any]])?.compactMap { $0["producerSequence"] as? Int } ?? []
+            return payload?["events"] as? [[String: Any]] ?? []
         }
+        let authoritativeSequences = authoritativeEvents.compactMap { $0["producerSequence"] as? Int }
+        let authoritativeIndexes = authoritativeEvents.compactMap { $0["index"] as? Int }
         try expect(authoritativeSequences == Array(0..<256), "authoritative splitting preserves every lossless event sequence exactly once")
+        try expect(authoritativeIndexes == Array(0..<256), "failed authoritative split prefix retry preserves every event exactly once and in order")
 
         print("Native input telemetry contract tests passed")
     }

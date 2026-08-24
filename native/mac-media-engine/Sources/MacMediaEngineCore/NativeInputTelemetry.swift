@@ -422,7 +422,8 @@ public final class NativeInputTelemetryBatchAccumulator: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard inFlightBatch == batch else { throw NativeInputTelemetryBatchAccumulatorError.unexpectedBatch }
-        events = batch.events
+        // A split parks its suffix in events; the failed in-flight prefix must remain first.
+        events = batch.events + events
         cursorIndex = events.lastIndex(where: { $0.kind == "cursor" })
         inFlightBatch = nil
     }
