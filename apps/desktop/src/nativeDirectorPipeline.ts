@@ -61,6 +61,7 @@ export interface NativeDirectorPipelineRequest {
   attentionWindowMs?: number;
   limits?: NativeDirectorPipelineLimits;
   writerFaults?: DirectorArtifactWriterFaults;
+  signal?: AbortSignal;
 }
 
 export interface NativeDirectorPipelineEvidence {
@@ -98,6 +99,10 @@ class NativeDirectorPipelineError extends Error {
 
 function fail(code: string, retryable = false): never {
   throw new NativeDirectorPipelineError(code, retryable);
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) fail('director_native_cancelled', true);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -635,6 +640,7 @@ export async function runNativeDirectorArtifactPipeline(
     preservedMedia: true,
   };
   try {
+    throwIfAborted(request.signal);
     validateRequest(request);
     const maximumSegmentBytes = validateLimit(request.limits?.maximumSegmentBytes, NATIVE_DIRECTOR_MAX_SEGMENT_BYTES);
     const maximumTelemetryBytes = validateLimit(request.limits?.maximumTelemetryBytes, NATIVE_DIRECTOR_MAX_TELEMETRY_BYTES);
@@ -651,9 +657,12 @@ export async function runNativeDirectorArtifactPipeline(
       if (error.code === 'ENOENT') fail('director_native_project_missing');
       fail('director_native_manifest_read_failed', true);
     });
+    throwIfAborted(request.signal);
     if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) fail('director_native_project_path_invalid');
     const projectRoot = await realpath(request.projectRoot);
+    throwIfAborted(request.signal);
     const manifest = await loadManifest(request, projectRoot);
+    throwIfAborted(request.signal);
     evidence.manifestState = manifest.state;
     const producerState = new Map<string, ProducerCursor>();
     const adaptation: EventAdaptationState = { activeWindowId: null };
@@ -662,11 +671,14 @@ export async function runNativeDirectorArtifactPipeline(
     let previousAtUs = -1;
 
     for (const segment of manifest.segments) {
+      throwIfAborted(request.signal);
       if (segment.byteLength > maximumSegmentBytes) fail('director_native_segment_oversized');
       const candidate = path.resolve(projectRoot, segment.relativePath);
       if (!candidate.startsWith(`${projectRoot}${path.sep}`)) fail('director_native_segment_path_invalid');
       await requireNoSymlinkPath(projectRoot, candidate);
+      throwIfAborted(request.signal);
       const actualSize = await requireRegularFile(candidate, 'director_native_segment_missing');
+      throwIfAborted(request.signal);
       if (actualSize !== segment.byteLength) fail('director_native_segment_size_mismatch');
       evidence.telemetryBytesRead += actualSize;
       evidence.maximumSegmentBytesRead = Math.max(evidence.maximumSegmentBytesRead, actualSize);
@@ -678,10 +690,12 @@ export async function runNativeDirectorArtifactPipeline(
         if (error instanceof SyntaxError) fail('director_native_segment_corrupt');
         fail('director_native_telemetry_read_failed', true);
       }
+      throwIfAborted(request.signal);
       const rawEvents = validateBatch(batch, segment, request);
       let segmentProducer: string | null = null;
       let segmentEpoch: string | null = null;
       for (let rawIndex = 0; rawIndex < rawEvents.length; rawIndex += 1) {
+        throwIfAborted(request.signal);
         const rawEvent = rawEvents[rawIndex];
         const event = adaptEvent(rawEvent, request, producerState, adaptation, rawIndex === 0);
         const producer = rawEvent.producerId as string;
@@ -704,8 +718,10 @@ export async function runNativeDirectorArtifactPipeline(
       }
       evidence.telemetrySegmentsRead += 1;
     }
+    throwIfAborted(request.signal);
     const events = plannerEvents.finish();
     const roiObservations = roiReducer.snapshot();
+    throwIfAborted(request.signal);
     evidence.retainedPlannerEventCount = events.length;
     evidence.roiObservationCount = roiObservations.length;
 
@@ -715,6 +731,7 @@ export async function runNativeDirectorArtifactPipeline(
       sessionId: request.sessionId,
       maxTotalBytes: DIRECTOR_ARTIFACT_MAX_TOTAL_BYTES,
       ...(request.writerFaults === undefined ? {} : { faults: request.writerFaults }),
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
     });
     const persistence = new DirectorArtifactPersistenceService(writer);
     let checkpoint: DirectorArtifactIndexV1;
@@ -731,8 +748,14 @@ export async function runNativeDirectorArtifactPipeline(
         speechActivity: request.speechActivity.map((interval) => ({ ...interval })),
         roiObservations,
       });
+      throwIfAborted(request.signal);
     } catch (error) {
       const code = error instanceof Error ? error.message : '';
+      if (code === 'director_artifact_cancelled'
+        || code === 'director_native_cancelled'
+        || request.signal?.aborted) {
+        fail('director_native_cancelled', true);
+      }
       if (code.startsWith('director_artifact_')
         && (code.includes('invalid') || code.includes('exceeded') || code.includes('mismatch'))) {
         fail('director_native_artifact_validation_failed');

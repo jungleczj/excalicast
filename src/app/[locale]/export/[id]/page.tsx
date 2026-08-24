@@ -45,6 +45,8 @@ import {
 import { getCurrentOwnerKey } from '@/lib/ownerKey';
 import { projectRecordingSetupToExport } from '@/services/recordingSetupProjection';
 import { nativeProjectRequiresExportAdapter } from '@/desktop/nativeRecordingProject';
+import { pollDesktopDirectorJob, retryDesktopDirectorJob } from '@/desktop/directorJobClient';
+import { DESKTOP_IPC_CHANNELS } from '@/desktop/productContract';
 import type {
   AutoZoomSegment,
   ExportConfig,
@@ -119,6 +121,7 @@ export default function EditorRecordingPage(): JSX.Element {
   const [title, setTitle] = useState('');
   const [upgradeOpen, setUpgradeOpen] = useState<false | 'pro' | 'max'>(false);
   const [actionGuide, setActionGuide] = useState<string | null>(null);
+  const [directorPollNonce, setDirectorPollNonce] = useState(0);
   // 时间轴裁剪：保留段（源 ms）+ 播放头源时间
   const [segments, setSegments] = useState<TimeSegment[]>([]);
   const [mainTrack, setMainTrack] = useState<MainTrackClip[]>([]);
@@ -161,6 +164,24 @@ export default function EditorRecordingPage(): JSX.Element {
     setActionGuide(message);
     window.setTimeout(() => setActionGuide((current) => current === message ? null : current), 3_200);
   }, []);
+  const handleRetryDirector = useCallback(async () => {
+    const bridge = window.excalicastDesktop;
+    if (!id || !bridge) return;
+    try {
+      const director = await retryDesktopDirectorJob({ bridge, recordingId: id });
+      setMeta((current) => current?.nativeProject && current.id === id
+        ? {
+            ...current,
+            nativeProject: { ...current.nativeProject, director },
+          }
+        : current);
+      if (director.status === 'pending' || director.status === 'generating') {
+        setDirectorPollNonce((value) => value + 1);
+      }
+    } catch (error) {
+      showActionGuide(error instanceof Error ? error.message : 'desktop_director_retry_failed');
+    }
+  }, [id, showActionGuide]);
   const handleSubtitleSaved = useCallback((subtitleSrt: string) => {
     setMeta((current) => current ? { ...current, subtitleSrt } : current);
     setConfig((current) => ({ ...current }));
@@ -375,6 +396,39 @@ export default function EditorRecordingPage(): JSX.Element {
       if (retryTimer) clearTimeout(retryTimer);
     };
   }, [id, en]);
+
+  useEffect(() => {
+    const bridge = window.excalicastDesktop;
+    if (!id || !meta?.nativeProject || !bridge) return;
+    const controller = new AbortController();
+    const reflectDirectorStatus = async () => {
+      // Recovery is idempotent and lets a restarted desktop main process adopt
+      // or enqueue the manifest-owned checkpoint before polling its status.
+      await bridge.invoke(DESKTOP_IPC_CHANNELS.projectRecover, { recordingId: id })
+        .catch(() => undefined);
+      await pollDesktopDirectorJob({
+        bridge,
+        recordingId: id,
+        signal: controller.signal,
+        onStatus(director) {
+          setMeta((current) => current?.nativeProject && current.id === id
+            ? {
+                ...current,
+                nativeProject: { ...current.nativeProject, director },
+              }
+            : current);
+        },
+      });
+    };
+    void reflectDirectorStatus().catch((error: unknown) => {
+      if (error instanceof Error) {
+        if (error.message !== 'desktop_director_poll_aborted') {
+          console.error('[desktop] Director status polling failed', error);
+        }
+      }
+    });
+    return () => controller.abort();
+  }, [directorPollNonce, id, meta?.nativeProject?.recordingId]);
 
   const handlePaidChange = useCallback((isPaidNow: boolean) => {
     if (isPaidNow) setConfig((c) => ({ ...c, withWatermark: false }));
@@ -1057,6 +1111,24 @@ export default function EditorRecordingPage(): JSX.Element {
         <div className="editor-action-guide" role="status" data-testid="editor-action-guide">
           {actionGuide}
           <button type="button" aria-label={en ? 'Dismiss' : '关闭'} onClick={() => setActionGuide(null)}><I.Close size={13} /></button>
+        </div>
+      )}
+
+      {meta?.nativeProject?.director?.status === 'failed' && (
+        <div role="status" data-testid="desktop-director-failed">
+          <span>{en
+            ? `Director generation failed: ${meta.nativeProject.director.code}`
+            : `Director 生成失败：${meta.nativeProject.director.code}`}</span>
+          {meta.nativeProject.director.retryable && (
+            <button
+              type="button"
+              className="btn-sketch"
+              data-testid="desktop-director-retry"
+              onClick={() => { void handleRetryDirector(); }}
+            >
+              {en ? 'Retry Director' : '重试 Director'}
+            </button>
+          )}
         </div>
       )}
 

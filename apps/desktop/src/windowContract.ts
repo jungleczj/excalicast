@@ -30,6 +30,8 @@ export const desktopRendererInvokeChannelsByRole = {
     DESKTOP_IPC_CHANNELS.teleprompterGetState,
     DESKTOP_IPC_CHANNELS.projectRecover,
     DESKTOP_IPC_CHANNELS.projectValidate,
+    DESKTOP_IPC_CHANNELS.projectDirectorStatus,
+    DESKTOP_IPC_CHANNELS.projectDirectorRetry,
     DESKTOP_IPC_CHANNELS.projectReadMediaSegment,
     DESKTOP_IPC_CHANNELS.projectReadInkEvents,
     DESKTOP_IPC_CHANNELS.renderPreview,

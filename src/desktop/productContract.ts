@@ -13,6 +13,103 @@ export type DesktopFeatureId =
 
 export type DesktopFeatureImplementation = 'shared' | 'web-adapter' | 'desktop-native' | 'omitted';
 
+export type DesktopDirectorJobPhase = 'pending' | 'generating' | 'ready' | 'failed';
+
+export interface DesktopDirectorCheckpointReference {
+  owner: 'recording-manifest';
+  reference: 'director/current.json';
+  checkpointId: string;
+}
+
+export interface DesktopDirectorJobEvidence {
+  profile: 'Balanced';
+  speechActivity: 'unavailable';
+  speechIntervalCount: 0;
+  preservedMedia: true;
+  recoveredCheckpoint: boolean;
+  durationUs?: number;
+  observedEndUs?: number;
+  durationSource?: 'native-manifest-segments' | 'native-validation-continuity';
+  manifestState?: 'ready' | 'interrupted' | 'unknown';
+  telemetrySegmentsRead?: number;
+  telemetryBytesRead?: number;
+  maximumSegmentBytesRead?: number;
+  eventCount?: number;
+  retainedPlannerEventCount?: number;
+  roiObservationCount?: number;
+}
+
+export interface DesktopDirectorJobStatus {
+  recordingId: string;
+  status: DesktopDirectorJobPhase;
+  code: string;
+  retryable: boolean;
+  checkpoint?: DesktopDirectorCheckpointReference;
+  evidence: DesktopDirectorJobEvidence;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isOptionalSafeInteger(value: unknown, minimum: number): boolean {
+  return value === undefined || (Number.isSafeInteger(value) && (value as number) >= minimum);
+}
+
+export function isDesktopDirectorJobStatus(value: unknown): value is DesktopDirectorJobStatus {
+  if (!isRecord(value)
+    || typeof value.recordingId !== 'string'
+    || !/^[a-zA-Z0-9_-]{1,128}$/.test(value.recordingId)
+    || !['pending', 'generating', 'ready', 'failed'].includes(value.status as string)
+    || typeof value.code !== 'string'
+    || !value.code.startsWith('director_')
+    || typeof value.retryable !== 'boolean'
+    || !isRecord(value.evidence)
+    || value.evidence.profile !== 'Balanced'
+    || value.evidence.speechActivity !== 'unavailable'
+    || value.evidence.speechIntervalCount !== 0
+    || value.evidence.preservedMedia !== true
+    || typeof value.evidence.recoveredCheckpoint !== 'boolean'
+    || !isOptionalSafeInteger(value.evidence.durationUs, 1)
+    || !isOptionalSafeInteger(value.evidence.observedEndUs, 1)
+    || (value.evidence.durationSource !== undefined
+      && value.evidence.durationSource !== 'native-manifest-segments'
+      && value.evidence.durationSource !== 'native-validation-continuity')
+    || (value.evidence.manifestState !== undefined
+      && value.evidence.manifestState !== 'ready'
+      && value.evidence.manifestState !== 'interrupted'
+      && value.evidence.manifestState !== 'unknown')
+    || !isOptionalSafeInteger(value.evidence.telemetrySegmentsRead, 0)
+    || !isOptionalSafeInteger(value.evidence.telemetryBytesRead, 0)
+    || !isOptionalSafeInteger(value.evidence.maximumSegmentBytesRead, 0)
+    || !isOptionalSafeInteger(value.evidence.eventCount, 0)
+    || !isOptionalSafeInteger(value.evidence.retainedPlannerEventCount, 0)
+    || !isOptionalSafeInteger(value.evidence.roiObservationCount, 0)) return false;
+  const hasAnyDurationEvidence = value.evidence.durationUs !== undefined
+    || value.evidence.observedEndUs !== undefined
+    || value.evidence.durationSource !== undefined;
+  if (hasAnyDurationEvidence && (value.evidence.durationUs === undefined
+    || value.evidence.observedEndUs === undefined
+    || value.evidence.durationSource === undefined)) return false;
+  if (value.checkpoint !== undefined) {
+    if (!isRecord(value.checkpoint)
+      || value.checkpoint.owner !== 'recording-manifest'
+      || value.checkpoint.reference !== 'director/current.json'
+      || typeof value.checkpoint.checkpointId !== 'string'
+      || !/^director-[a-f0-9]{64}$/.test(value.checkpoint.checkpointId)) return false;
+  }
+  if (value.status === 'pending') {
+    return value.code === 'director_job_pending' && value.retryable === false && value.checkpoint === undefined;
+  }
+  if (value.status === 'generating') {
+    return value.code === 'director_job_generating' && value.retryable === false && value.checkpoint === undefined;
+  }
+  if (value.status === 'ready') {
+    return value.code === 'director_job_ready' && value.retryable === false && value.checkpoint !== undefined;
+  }
+  return value.checkpoint === undefined;
+}
+
 export interface DesktopFeatureMigration {
   id: DesktopFeatureId;
   desktop: DesktopFeatureImplementation;
@@ -67,6 +164,8 @@ export const DESKTOP_IPC_CHANNELS = {
   teleprompterStateChanged: 'teleprompter.state-changed.v1',
   projectRecover: 'project.recover.v1',
   projectValidate: 'project.validate.v1',
+  projectDirectorStatus: 'project.director-status.v1',
+  projectDirectorRetry: 'project.director-retry.v1',
   projectReadMediaSegment: 'project.read-media-segment.v1',
   projectReadInkEvents: 'project.read-ink-events.v1',
   renderPreview: 'render.preview.v1',

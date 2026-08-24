@@ -45,6 +45,13 @@ import {
   NATIVE_MEDIA_SCHEME,
   parseNativeMediaUrl,
 } from './nativeMediaProtocol';
+import {
+  DesktopNativeCaptureStopCoordinator,
+  DesktopDirectorJobService,
+  parseDesktopDirectorJobPayload,
+  resolveDesktopDirectorProjectRoot,
+  stopNativeCaptureAndEnqueueDirector,
+} from './directorJobService';
 
 protocol.registerSchemesAsPrivileged([{
   scheme: NATIVE_MEDIA_SCHEME,
@@ -70,6 +77,9 @@ let inkSettings: DesktopInkSettings = normalizeDesktopInkSettings({
 let nativeHelper: NativeHelperClient | null = null;
 let nativeHelperHandshake: NativeHelperHandshake | null = null;
 let nativeHelperInitialization: Promise<void> | null = null;
+let directorJobs: DesktopDirectorJobService;
+const nativeCaptureStopCoordinator = new DesktopNativeCaptureStopCoordinator();
+let nativeCaptureStarting = false;
 let activeNativeCapture: {
   recordingId: string;
   startedUnixMs: number;
@@ -260,33 +270,47 @@ function registerDesktopIpc(): void {
     return helper.preflightCapture(toNativeCaptureRequest(payload));
   });
   handleDesktopIpc(DESKTOP_IPC_CHANNELS.captureStart, async (_event, payload: unknown) => {
-    const helper = await requireNativeHelper();
     const request = toNativeCaptureRequest(payload);
-    const result = await helper.startCapture(request);
-    activeNativeCapture = {
-      recordingId: request.recordingId,
-      startedUnixMs: Date.now(),
-      nextInkEventIndex: 0,
-      pausedTotalMs: 0,
-      pauseStartedUnixMs: null,
-      pausePending: false,
-    };
-    inkEventCommitTail = Promise.resolve();
-    inputTelemetryCommitTail = Promise.resolve();
-    broadcastInkSettings();
-    return result;
+    if (nativeCaptureStarting || activeNativeCapture) throw new Error('native_capture_already_active');
+    nativeCaptureStarting = true;
+    try {
+      await directorJobs.prepareForCapture(3_000);
+      directorJobs.assertCaptureMayStart();
+      const helper = await requireNativeHelper();
+      const result = await helper.startCapture(request);
+      activeNativeCapture = {
+        recordingId: request.recordingId,
+        startedUnixMs: Date.now(),
+        nextInkEventIndex: 0,
+        pausedTotalMs: 0,
+        pauseStartedUnixMs: null,
+        pausePending: false,
+      };
+      inkEventCommitTail = Promise.resolve();
+      inputTelemetryCommitTail = Promise.resolve();
+      broadcastInkSettings();
+      return result;
+    } finally {
+      nativeCaptureStarting = false;
+    }
   });
   handleDesktopIpc(DESKTOP_IPC_CHANNELS.captureStop, async () => {
-    const helper = await requireNativeHelper();
-    await requestInkWindowFlush();
-    await inkEventCommitTail;
-    await inputTelemetryCommitTail;
-    try {
-      return await helper.stopCapture();
-    } finally {
-      activeNativeCapture = null;
-      broadcastInkSettings();
-    }
+    const active = activeNativeCapture;
+    if (!active) throw new Error('native_capture_inactive');
+    return nativeCaptureStopCoordinator.run(async () => {
+      const helper = await requireNativeHelper();
+      return stopNativeCaptureAndEnqueueDirector({
+        flushInk: requestInkWindowFlush,
+        waitForInkTail: () => inkEventCommitTail,
+        waitForInputTail: () => inputTelemetryCommitTail,
+        stopCapture: () => helper.stopCapture(),
+        onCaptureEnded: () => {
+          if (activeNativeCapture === active) activeNativeCapture = null;
+          broadcastInkSettings();
+        },
+        enqueueDirector: () => directorJobs.enqueue(active.recordingId),
+      });
+    });
   });
   handleDesktopIpc(DESKTOP_IPC_CHANNELS.capturePause, async () => {
     if (!activeNativeCapture) throw new Error('native_capture_inactive');
@@ -360,9 +384,11 @@ function registerDesktopIpc(): void {
       throw new Error('native_recovery_request_invalid');
     }
     const helper = await requireNativeHelper();
-    return helper.recoverProject(
-      path.join(app.getPath('videos'), 'Excalicast Projects', recordingId),
+    const manifest = await helper.recoverProject(
+      resolveDesktopDirectorProjectRoot(app.getPath('videos'), recordingId),
     );
+    const director = enqueueDirectorAfterRecovery(recordingId);
+    return { ...manifest, ...(director ? { director } : {}) };
   });
   handleDesktopIpc(DESKTOP_IPC_CHANNELS.projectValidate, async (_event, payload: unknown) => {
     const value = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
@@ -371,9 +397,19 @@ function registerDesktopIpc(): void {
       throw new Error('native_validation_request_invalid');
     }
     const helper = await requireNativeHelper();
-    return helper.validateProject(
-      path.join(app.getPath('videos'), 'Excalicast Projects', recordingId),
+    const validation = await helper.validateProject(
+      resolveDesktopDirectorProjectRoot(app.getPath('videos'), recordingId),
     );
+    const director = enqueueDirectorAfterRecovery(recordingId);
+    return { ...validation, ...(director ? { director } : {}) };
+  });
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.projectDirectorStatus, async (_event, payload: unknown) => {
+    const { recordingId } = parseDesktopDirectorJobPayload(payload);
+    return directorJobs.status(recordingId);
+  });
+  handleDesktopIpc(DESKTOP_IPC_CHANNELS.projectDirectorRetry, (_event, payload: unknown) => {
+    const { recordingId } = parseDesktopDirectorJobPayload(payload);
+    return directorJobs.retry(recordingId).status;
   });
   handleDesktopIpc(DESKTOP_IPC_CHANNELS.projectReadMediaSegment, async (_event, payload: unknown) => {
     if (activeNativeCapture) throw new Error('native_media_read_during_capture');
@@ -403,6 +439,16 @@ function registerDesktopIpc(): void {
     const manifest = await helper.recoverProject(projectRoot);
     return { segments: await readNativeInkEventSegments(projectRoot, manifest) };
   });
+}
+
+function enqueueDirectorAfterRecovery(recordingId: string) {
+  try {
+    return directorJobs.enqueue(recordingId).status;
+  } catch (error) {
+    if (error instanceof Error && error.message === 'director_generation_capture_active') return undefined;
+    console.error('[desktop] Director recovery enqueue failed', error);
+    return undefined;
+  }
 }
 
 async function requireNativeHelper(): Promise<NativeHelperClient> {
@@ -614,6 +660,12 @@ function createMainWindow(): BrowserWindow {
 }
 
 void app.whenReady().then(() => {
+  directorJobs = new DesktopDirectorJobService({
+    videosDirectory: app.getPath('videos'),
+    isCaptureActive: () => nativeCaptureStarting || activeNativeCapture !== null,
+    recoverProject: async (projectRoot) => (await requireNativeHelper()).recoverProject(projectRoot),
+    validateProject: async (projectRoot) => (await requireNativeHelper()).validateProject(projectRoot),
+  });
   registerNativeMediaProtocol();
   registerDesktopIpc();
   nativeHelperInitialization = initializeNativeHelper().catch((error: unknown) => {
@@ -629,6 +681,7 @@ void app.whenReady().then(() => {
 });
 
 app.on('before-quit', () => {
+  nativeCaptureStarting = false;
   activeNativeCapture = null;
   for (const resolve of pendingInkFlushes.values()) resolve();
   pendingInkFlushes.clear();

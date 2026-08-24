@@ -36,6 +36,7 @@ export interface NodeDirectorArtifactWriterOptions {
   sessionId: string;
   maxTotalBytes?: number;
   faults?: DirectorArtifactWriterFaults;
+  signal?: AbortSignal;
 }
 
 interface DirectorCurrentPointerV1 {
@@ -111,6 +112,7 @@ export class NodeDirectorArtifactWriter implements DirectorArtifactWriter {
   private readonly sessionId: string;
   private readonly maxTotalBytes: number;
   private readonly faults?: DirectorArtifactWriterFaults;
+  private readonly signal?: AbortSignal;
   private tail: Promise<void> = Promise.resolve();
 
   constructor(options: NodeDirectorArtifactWriterOptions) {
@@ -126,6 +128,7 @@ export class NodeDirectorArtifactWriter implements DirectorArtifactWriter {
     this.sessionId = options.sessionId;
     this.maxTotalBytes = options.maxTotalBytes ?? DIRECTOR_ARTIFACT_MAX_TOTAL_BYTES;
     this.faults = options.faults;
+    this.signal = options.signal;
   }
 
   checkpoint(value: DirectorArtifactCheckpoint): Promise<void> {
@@ -238,8 +241,11 @@ export class NodeDirectorArtifactWriter implements DirectorArtifactWriter {
   }
 
   private async checkpointNow(value: DirectorArtifactCheckpoint): Promise<void> {
+    this.throwIfAborted();
     this.validate(value);
+    this.throwIfAborted();
     const { directorRoot, stagingRoot, checkpointsRoot } = await this.prepareDirectories();
+    this.throwIfAborted();
     const stagingPath = path.join(stagingRoot, value.checkpointId);
     const checkpointPath = path.join(checkpointsRoot, value.checkpointId);
     if (!isPathInside(stagingRoot, stagingPath) || !isPathInside(checkpointsRoot, checkpointPath)) {
@@ -269,8 +275,10 @@ export class NodeDirectorArtifactWriter implements DirectorArtifactWriter {
         if (stagingType === 'directory') await rm(stagingPath, { recursive: true, force: true });
         await mkdir(stagingPath);
         for (const file of value.files) {
+          this.throwIfAborted();
           await writeSyncedFile(path.join(stagingPath, file.fileName), file.bytes);
         }
+        this.throwIfAborted();
         await writeSyncedFile(path.join(stagingPath, 'index.json'), jsonBytes(value.index));
         await syncDirectory(stagingPath);
         await rename(stagingPath, checkpointPath);
@@ -279,12 +287,19 @@ export class NodeDirectorArtifactWriter implements DirectorArtifactWriter {
       }
 
       const currentType = await pathType(currentPath);
+      this.throwIfAborted();
       if (currentType === 'invalid' || currentType === 'directory') fail('director_artifact_path_invalid');
-      if (currentType === 'file' && bytesEqual(await readFile(currentPath), pointerBytes)) return;
+      if (currentType === 'file') {
+        const alreadyPublished = bytesEqual(await readFile(currentPath), pointerBytes);
+        this.throwIfAborted();
+        if (alreadyPublished) return;
+      }
 
       await this.faults?.beforePublishCurrent?.();
+      this.throwIfAborted();
       currentTempPath = path.join(directorRoot, `.current-${randomUUID()}.tmp`);
       await writeSyncedFile(currentTempPath, pointerBytes);
+      this.throwIfAborted();
       await rename(currentTempPath, currentPath);
       currentTempPath = null;
       await syncDirectory(directorRoot);
@@ -293,5 +308,9 @@ export class NodeDirectorArtifactWriter implements DirectorArtifactWriter {
       if (!checkpointReady) await rm(stagingPath, { recursive: true, force: true }).catch(() => undefined);
       throw error;
     }
+  }
+
+  private throwIfAborted(): void {
+    if (this.signal?.aborted) fail('director_artifact_cancelled');
   }
 }

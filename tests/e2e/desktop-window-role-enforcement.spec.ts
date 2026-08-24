@@ -86,6 +86,8 @@ test('main registers every invoke handler through the authorized wrapper', async
     'captureResume',
     'projectReadMediaSegment',
     'projectReadInkEvents',
+    'projectDirectorStatus',
+    'projectDirectorRetry',
     'inkAppendEvents',
     'inputTelemetryAppend',
     'teleprompterConfigure',

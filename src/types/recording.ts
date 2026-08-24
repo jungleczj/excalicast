@@ -1,3 +1,5 @@
+import type { DesktopDirectorJobStatus } from '@/desktop/productContract';
+
 export interface PaidRecordingRow {
   recording_id: string;
   paid_at: number;
@@ -42,6 +44,8 @@ export interface NativeRecordingProjectReference {
   validationState?: 'valid' | 'invalid' | 'unavailable';
   exportStatus: 'adapter-required' | 'ready';
   tracks?: Record<string, NativeProjectSegmentReference[]>;
+  /** Bounded main-process Director state; ready refers only to director/current.json. */
+  director?: DesktopDirectorJobStatus;
 }
 
 /**

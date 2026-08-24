@@ -89,6 +89,10 @@ test('desktop shell uses a hardened renderer with a narrow versioned bridge', ()
   expect(webPreferences?.sandbox).toBe(true);
   expect(webPreferences?.preload).toBe('/tmp/excalicast-preload.js');
   expect(exposedDesktopBridgeChannels.every((channel) => channel.endsWith('.v1'))).toBe(true);
+  expect(exposedDesktopBridgeChannels).toEqual(expect.arrayContaining([
+    'project.director-status.v1',
+    'project.director-retry.v1',
+  ]));
 });
 
 test('AI Camera starts native capture with independent system audio and recording microphone', async () => {

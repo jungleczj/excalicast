@@ -4,6 +4,10 @@ import type {
   RecordingMetadata,
   RecordingSetupConfig,
 } from '@/types/recording';
+import {
+  isDesktopDirectorJobStatus,
+  type DesktopDirectorJobStatus,
+} from '@/desktop/productContract';
 
 interface CreateNativeRecordingMetadataInput {
   recordingId: string;
@@ -53,6 +57,19 @@ function manifestTracks(manifest: unknown): Record<string, NativeProjectSegmentR
   return tracks;
 }
 
+function manifestDirector(
+  manifest: Record<string, unknown>,
+  recordingId: string,
+): DesktopDirectorJobStatus | undefined {
+  if (!isDesktopDirectorJobStatus(manifest.director)
+    || manifest.director.recordingId !== recordingId) return undefined;
+  return {
+    ...manifest.director,
+    ...(manifest.director.checkpoint ? { checkpoint: { ...manifest.director.checkpoint } } : {}),
+    evidence: { ...manifest.director.evidence },
+  };
+}
+
 export function createNativeRecordingMetadata(
   input: CreateNativeRecordingMetadataInput,
 ): RecordingMetadata {
@@ -100,6 +117,7 @@ export function finalizeNativeRecordingMetadata(
 
   const editorReady = recoveredState === 'ready' && validationState === 'valid';
   if (!editorReady) warnings.add('native_media_adapter_required');
+  const director = manifestDirector(manifest, recording.id);
 
   return {
     ...recording,
@@ -114,6 +132,7 @@ export function finalizeNativeRecordingMetadata(
       validationState,
       exportStatus: editorReady ? 'ready' : 'adapter-required',
       tracks: manifestTracks(manifest),
+      ...(director ? { director } : {}),
     },
   };
 }

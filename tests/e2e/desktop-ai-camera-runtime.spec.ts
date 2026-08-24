@@ -384,6 +384,53 @@ test('validated native media becomes editor-ready after the native segment adapt
   });
 });
 
+test('native metadata keeps Director pending evidence without delaying editor readiness', () => {
+  const recording = createNativeRecordingMetadata({
+    recordingId: 'native-director-pending',
+    startedAt: 1_000,
+    ownerKey: 'owner-1',
+    setup: setup({ kind: 'desktop', captureSystemAudio: true }, false),
+  });
+  const finalized = finalizeNativeRecordingMetadata(recording, {
+    manifest: {
+      schemaVersion: 1,
+      recordingId: 'native-director-pending',
+      state: 'ready',
+      tracks: {
+        screen: [{
+          index: 0,
+          relativePath: 'segments/screen/000000.mp4',
+          startUs: 0,
+          durationUs: 4_000_000,
+          byteLength: 4_096,
+        }],
+      },
+      director: {
+        recordingId: 'native-director-pending',
+        status: 'pending',
+        code: 'director_job_pending',
+        retryable: false,
+        evidence: {
+          profile: 'Balanced',
+          speechActivity: 'unavailable',
+          speechIntervalCount: 0,
+          preservedMedia: true,
+          recoveredCheckpoint: false,
+        },
+      },
+    },
+    validation: { isValid: true, manifestState: 'ready' },
+    durationMs: 4_000,
+  });
+
+  expect(finalized.status).toBe('done');
+  expect(finalized.nativeProject?.exportStatus).toBe('ready');
+  expect(finalized.nativeProject?.director).toMatchObject({
+    status: 'pending',
+    code: 'director_job_pending',
+  });
+});
+
 test('invalid native recovery is marked interrupted with validation evidence', () => {
   const recording = createNativeRecordingMetadata({
     recordingId: 'native-invalid',
