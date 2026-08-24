@@ -434,6 +434,27 @@ public final class NativeInputTelemetryBatchAccumulator: @unchecked Sendable {
         inFlightBatch = nil
     }
 
+    public func splitInFlight(_ batch: NativeInputTelemetryBatch) throws -> NativeInputTelemetryBatch {
+        lock.lock()
+        defer { lock.unlock() }
+        guard inFlightBatch == batch, batch.events.count > 1 else {
+            throw NativeInputTelemetryBatchAccumulatorError.unexpectedBatch
+        }
+        let splitIndex = batch.events.count / 2
+        let prefixEvents = Array(batch.events[..<splitIndex])
+        let suffixEvents = Array(batch.events[splitIndex...])
+        let prefix = NativeInputTelemetryBatch(
+            events: prefixEvents,
+            serializedPayload: try serializedPayload(for: prefixEvents),
+            firstHostUs: prefixEvents[0].hostUs,
+            lastHostUs: prefixEvents[prefixEvents.count - 1].hostUs
+        )
+        events = suffixEvents + events
+        cursorIndex = events.lastIndex(where: { $0.kind == "cursor" })
+        inFlightBatch = prefix
+        return prefix
+    }
+
     private func serializedPayload(for events: [NativeMappedInputEvent]) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -477,6 +498,7 @@ public final class NativeInputTelemetryMonitor: @unchecked Sendable {
     private let windowMapper: NativeActiveWindowChangeMapper
     private let coalescer: NativeInputTelemetryCoalescer
     private let lock = NSLock()
+    private let windowSamplingLock = NSLock()
     private let sourceLifecycleLock = NSRecursiveLock()
     private var currentState: NativeInputTelemetryMonitorState = .stopped
     private var pendingError: NativeInputTelemetryMonitorError?
@@ -522,14 +544,25 @@ public final class NativeInputTelemetryMonitor: @unchecked Sendable {
             try source.start { [weak self] event in self?.receive(event) }
             lock.lock()
             let shouldStop = stopRequestedDuringStart
-            let shouldRestart = restartAfterStop
-            currentState = shouldStop ? .stopped : .running
+            if shouldStop { currentState = .stopping }
+            else {
+                currentState = .running
+                restartAfterStop = false
+            }
             stopRequestedDuringStart = false
-            restartAfterStop = false
             lock.unlock()
-            if shouldStop { source.stop() }
+            if shouldStop {
+                source.stop()
+                lock.lock()
+                let shouldRestart = restartAfterStop
+                currentState = .stopped
+                restartAfterStop = false
+                lock.unlock()
+                sourceLifecycleLock.unlock()
+                if shouldRestart { try start() }
+                return
+            }
             sourceLifecycleLock.unlock()
-            if shouldRestart { try start() }
         } catch {
             lock.lock()
             currentState = stopRequestedDuringStart ? .stopped : .failed
@@ -578,7 +611,14 @@ public final class NativeInputTelemetryMonitor: @unchecked Sendable {
     }
 
     public func sampleActiveWindow() throws {
-        guard state == .running, let snapshot = activeWindowSnapshot() else { return }
+        guard let snapshot = activeWindowSnapshot() else { return }
+        try sampleActiveWindow(snapshot)
+    }
+
+    public func sampleActiveWindow(_ snapshot: NativeActiveWindowSnapshot) throws {
+        windowSamplingLock.lock()
+        defer { windowSamplingLock.unlock() }
+        guard state == .running else { return }
         for event in windowMapper.mapChanged(snapshot) { try coalescer.offer(event) }
     }
 
@@ -730,21 +770,23 @@ public final class NativeInputTelemetryCoordinatorSink: NativeInputTelemetryBatc
         lock.lock()
         guard !writeInFlight else { lock.unlock(); throw InputTelemetryBatchError.busy }
         writeInFlight = true
-        let sequence = nextSequence
+        let initialSequence = nextSequence
         lock.unlock()
         defer {
             lock.lock()
             writeInFlight = false
             lock.unlock()
         }
-        guard let batch = try accumulator.drain() else { return }
+        guard var batch = try accumulator.drain() else { return }
+        var activeSequence = initialSequence
+        while true {
         let rawEvents: [[String: Any]] = batch.events.enumerated().map { offset, event in
             [
                 "schemaVersion": 1,
                 "sessionId": sessionId,
                 "producerId": "native-input",
                 "producerEpoch": producerEpoch,
-                "producerSequence": sequence + offset,
+                "producerSequence": activeSequence + offset,
                 "surfaceId": "macos-global",
                 "kind": event.kind,
                 "payload": event.payload
@@ -759,12 +801,22 @@ public final class NativeInputTelemetryCoordinatorSink: NativeInputTelemetryBatc
             }
             _ = try coordinator.append(payload: payload, projectAtUs: batch.firstHostUs, persist: persist)
             try accumulator.acknowledgePersisted(batch)
+        } catch InputTelemetryBatchError.payloadTooLarge where batch.events.count > 1 {
+            batch = try accumulator.splitInFlight(batch)
+            continue
+        } catch NativeInputTelemetryBatchAccumulatorError.losslessOverflow where batch.events.count > 1 {
+            batch = try accumulator.splitInFlight(batch)
+            continue
         } catch {
             try accumulator.restore(batch)
             throw error
         }
         lock.lock()
-        nextSequence += batch.events.count
+        activeSequence += batch.events.count
+        nextSequence = activeSequence
         lock.unlock()
+        guard let nextBatch = try accumulator.drain() else { return }
+        batch = nextBatch
+        }
     }
 }

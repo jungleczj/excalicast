@@ -16,9 +16,12 @@ private final class FakeSource: NativeInputTelemetrySource, @unchecked Sendable 
     var onStop: (() -> Void)?
     var startCount = 0
     var stopCount = 0
+    private var sourceStopInProgress = false
+    private(set) var startCalledDuringStop = false
     private var handler: (@Sendable (NativeRawInputEvent) -> Void)?
 
     func start(handler: @escaping @Sendable (NativeRawInputEvent) -> Void) throws {
+        if sourceStopInProgress { startCalledDuringStop = true }
         startCount += 1
         if let startError { throw startError }
         self.handler = handler
@@ -28,8 +31,10 @@ private final class FakeSource: NativeInputTelemetrySource, @unchecked Sendable 
 
     func stop() {
         stopCount += 1
+        sourceStopInProgress = true
         handler = nil
         onStop?()
+        sourceStopInProgress = false
     }
 
     func emit(_ event: NativeRawInputEvent) {
@@ -320,6 +325,40 @@ struct NativeInputTelemetryContractTests {
         try expect(monitor.state == .stopped, "stopped lifecycle is observable")
         try expect(sink.events.map(\.kind) == ["cursor", "click", "active-window", "window-bounds"], "monitor merges input and window changes through one sink")
 
+        let orderedWindowSource = FakeSource()
+        let orderedWindowSink = CapturingSink()
+        let orderedWindowMonitor = NativeInputTelemetryMonitor(
+            source: orderedWindowSource,
+            mapper: mapper,
+            sink: orderedWindowSink,
+            activeWindowSnapshot: { nil }
+        )
+        let orderedFirst = NativeActiveWindowSnapshot(hostUs: 22_100, application: "Alpha", bundleIdentifier: "app.alpha", processId: 71, windowId: 81, title: "A", bounds: NativeGlobalRect(x: 10, y: 10, width: 100, height: 100))
+        let orderedSecond = NativeActiveWindowSnapshot(hostUs: 22_101, application: "Beta", bundleIdentifier: "app.beta", processId: 72, windowId: 82, title: "B", bounds: NativeGlobalRect(x: 20, y: 20, width: 100, height: 100))
+        try orderedWindowMonitor.start()
+        let orderedGroup = DispatchGroup()
+        let orderedReady = DispatchGroup()
+        let orderedBarrier = DispatchSemaphore(value: 0)
+        for snapshot in [orderedFirst, orderedSecond] {
+            orderedGroup.enter()
+            orderedReady.enter()
+            DispatchQueue.global().async {
+                orderedReady.leave()
+                orderedBarrier.wait()
+                try? orderedWindowMonitor.sampleActiveWindow(snapshot)
+                orderedGroup.leave()
+            }
+        }
+        orderedReady.wait()
+        orderedBarrier.signal()
+        orderedBarrier.signal()
+        orderedGroup.wait()
+        try orderedWindowMonitor.flush()
+        let orderedKinds = orderedWindowSink.events.map(\.kind)
+        try expect(orderedKinds == ["active-window", "window-bounds", "active-window", "window-bounds"], "concurrent monitor window samples enqueue each mapped snapshot batch atomically")
+        let orderedApplications = orderedWindowSink.events.compactMap { event -> String? in event.kind == "active-window" ? { if case let .string(value)? = event.payload["application"] { return value }; return nil }() : nil }
+        try expect(orderedApplications == ["Alpha", "Beta"] || orderedApplications == ["Beta", "Alpha"], "window delivery order follows one serialized mapping order")
+
         let partialSource = FakeSource()
         let partialSink = FailingCapturingSink(failsAfterSuccessfulEvents: 1)
         let partialMonitor = NativeInputTelemetryMonitor(
@@ -379,7 +418,7 @@ struct NativeInputTelemetryContractTests {
         raceMonitor?.stop()
         raceSource.emit(.cursor(hostUs: 23_500, x: 35, y: 45))
         try raceMonitor?.flush()
-        try expect(raceSource.startCount == 2 && raceSource.stopCount == 1 && raceMonitor?.state == .running, "stop overlapping a queued restart cannot shut down the new source generation")
+        try expect(raceSource.startCount == 2 && raceSource.stopCount == 1 && raceMonitor?.state == .running && !raceSource.startCalledDuringStop, "stop callback restart is deferred until old source stop returns")
         try expect(raceSink.events.map(\.kind) == ["cursor"], "new source generation remains live after old stop completes")
 
         let mappingFailureSource = FakeSource()
@@ -480,6 +519,28 @@ struct NativeInputTelemetryContractTests {
         try expect(nearLimitPersisted.batches.allSatisfy { $0.count <= 256 * 1_024 }, "every final authoritative native JSON segment stays within 256KiB")
         let nearLimitLast = try JSONSerialization.jsonObject(with: nearLimitPersisted.batches[1]) as? [String: Any]
         try expect((nearLimitLast?["events"] as? [[String: Any]])?.map { $0["kind"] as? String } == ["scroll"], "the event after the near-limit boundary is retained and retried")
+
+        let authoritativeSplitCoordinator = InputTelemetryCoordinator(sessionId: "authoritative-split")
+        let authoritativeSplitPersisted = PersistedBatches()
+        let authoritativeSplitSink = NativeInputTelemetryCoordinatorSink(
+            sessionId: "authoritative-split",
+            producerEpoch: "authoritative-split-epoch",
+            controls: CaptureControlState(),
+            timeline: RecordingTimeline(originUs: 0),
+            coordinator: authoritativeSplitCoordinator,
+            persist: { _, _, _, data in try authoritativeSplitPersisted.persist(data) }
+        )
+        let authoritativeSplitEvents = (0..<256).map { index in
+            NativeMappedInputEvent(hostUs: Int64(index), kind: "click", payload: ["text": .string(String(repeating: "z", count: 800))])
+        }
+        try authoritativeSplitSink.consumeBatch(authoritativeSplitEvents)
+        try expect(authoritativeSplitPersisted.batches.count > 1, "an authoritative-size rejection deterministically splits a fitted native producer batch")
+        try expect(authoritativeSplitPersisted.batches.allSatisfy { $0.count <= 256 * 1_024 }, "authoritative split segments stay within 256KiB")
+        let authoritativeSequences = try authoritativeSplitPersisted.batches.flatMap { data -> [Int] in
+            let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            return (payload?["events"] as? [[String: Any]])?.compactMap { $0["producerSequence"] as? Int } ?? []
+        }
+        try expect(authoritativeSequences == Array(0..<256), "authoritative splitting preserves every lossless event sequence exactly once")
 
         print("Native input telemetry contract tests passed")
     }
