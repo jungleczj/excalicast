@@ -36,6 +36,7 @@ private struct ProducerEvent {
 public final class InputTelemetryCoordinator: @unchecked Sendable {
     public static let maximumEventCount = 256
     public static let maximumPayloadBytes = 4 * 1_024 * 1_024
+    public static let maximumNativeInputAuthoritativePayloadBytes = 256 * 1_024
 
     private let sessionId: String
     private var nextSegmentIndex = 0
@@ -125,6 +126,10 @@ public final class InputTelemetryCoordinator: @unchecked Sendable {
         } catch {
             lock.unlock()
             throw error
+        }
+        guard first.producerId != "native-input" || data.count <= Self.maximumNativeInputAuthoritativePayloadBytes else {
+            lock.unlock()
+            throw InputTelemetryBatchError.payloadTooLarge
         }
         persistenceInFlight = true
         lock.unlock()

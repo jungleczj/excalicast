@@ -13,6 +13,7 @@ private final class FakeSource: NativeInputTelemetrySource, @unchecked Sendable 
     var startError: NativeInputTelemetryMonitorError?
     var eventDuringStart: NativeRawInputEvent?
     var onStart: (() -> Void)?
+    var onStop: (() -> Void)?
     var startCount = 0
     var stopCount = 0
     private var handler: (@Sendable (NativeRawInputEvent) -> Void)?
@@ -28,6 +29,7 @@ private final class FakeSource: NativeInputTelemetrySource, @unchecked Sendable 
     func stop() {
         stopCount += 1
         handler = nil
+        onStop?()
     }
 
     func emit(_ event: NativeRawInputEvent) {
@@ -71,6 +73,40 @@ private final class CapturingSink: NativeInputTelemetrySink, @unchecked Sendable
 
     func consume(_ event: NativeMappedInputEvent) throws {
         events.append(event)
+    }
+}
+
+private final class FailingCapturingSink: NativeInputTelemetrySink, @unchecked Sendable {
+    private(set) var events: [NativeMappedInputEvent] = []
+    private var failsAfterSuccessfulEvents: Int
+
+    init(failsAfterSuccessfulEvents: Int) {
+        self.failsAfterSuccessfulEvents = failsAfterSuccessfulEvents
+    }
+
+    func consume(_ event: NativeMappedInputEvent) throws {
+        if events.count == failsAfterSuccessfulEvents {
+            failsAfterSuccessfulEvents = .max
+            throw PersistenceFailure.requested
+        }
+        events.append(event)
+    }
+}
+
+private final class ConcurrentWindowEvents: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [[NativeMappedInputEvent]] = []
+
+    func append(_ events: [NativeMappedInputEvent]) {
+        lock.lock()
+        values.append(events)
+        lock.unlock()
+    }
+
+    var flattened: [NativeMappedInputEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return values.flatMap { $0 }
     }
 }
 
@@ -139,6 +175,28 @@ struct NativeInputTelemetryContractTests {
         )
         try expect(windowMapper.mapChanged(moved).map(\.kind) == ["window-bounds"], "bounds-only changes do not repeat active app")
 
+        let concurrentWindowMapper = NativeActiveWindowChangeMapper(mapper: mapper)
+        let concurrentEvents = ConcurrentWindowEvents()
+        let concurrentWindow = NativeActiveWindowSnapshot(
+            hostUs: 5_500,
+            application: "Preview",
+            bundleIdentifier: "com.apple.Preview",
+            processId: 45,
+            windowId: 56,
+            title: "Reference",
+            bounds: NativeGlobalRect(x: 70, y: 80, width: 600, height: 400)
+        )
+        let concurrentGroup = DispatchGroup()
+        for _ in 0..<2 {
+            concurrentGroup.enter()
+            DispatchQueue.global().async {
+                concurrentEvents.append(concurrentWindowMapper.mapChanged(concurrentWindow))
+                concurrentGroup.leave()
+            }
+        }
+        concurrentGroup.wait()
+        try expect(concurrentEvents.flattened.map(\.kind) == ["active-window", "window-bounds"], "concurrent window sampling emits one linearized initial change")
+
         let coalescer = NativeInputTelemetryCoalescer(maximumLosslessEvents: 4)
         try coalescer.offer(try mapper.map(.cursor(hostUs: 10_000, x: 1, y: 1)))
         try coalescer.offer(try mapper.map(.cursor(hostUs: 11_000, x: 2, y: 2)))
@@ -147,6 +205,15 @@ struct NativeInputTelemetryContractTests {
         let coalesced = coalescer.drain()
         try expect(coalesced.map(\.kind) == ["cursor", "click"], "latest cursor is coalesced before lossless click")
         try expect(coalesced[0].payload["x"] == .number(3), "coalescer retains the latest cursor")
+
+        let inFlightCoalescer = NativeInputTelemetryCoalescer()
+        let inFlightClick = try mapper.map(.button(hostUs: 13_000, x: 3, y: 3, button: .primary, phase: .down))
+        try inFlightCoalescer.offer(inFlightClick)
+        let inFlightDelivery = try inFlightCoalescer.prepareDrain()
+        try inFlightCoalescer.offer(try mapper.map(.cursor(hostUs: 13_001, x: 4, y: 4)))
+        try inFlightCoalescer.offer(try mapper.map(.scroll(hostUs: 13_002, x: 4, y: 4, deltaX: 0, deltaY: 1)))
+        try inFlightCoalescer.acknowledgeDelivered(inFlightDelivery)
+        try expect(try inFlightCoalescer.prepareDrain().map(\.kind) == ["cursor", "scroll"], "new input remains bounded and lossless while an earlier delivery is in flight")
 
         let accumulator = NativeInputTelemetryBatchAccumulator()
         for sequence in 0..<255 {
@@ -253,6 +320,26 @@ struct NativeInputTelemetryContractTests {
         try expect(monitor.state == .stopped, "stopped lifecycle is observable")
         try expect(sink.events.map(\.kind) == ["cursor", "click", "active-window", "window-bounds"], "monitor merges input and window changes through one sink")
 
+        let partialSource = FakeSource()
+        let partialSink = FailingCapturingSink(failsAfterSuccessfulEvents: 1)
+        let partialMonitor = NativeInputTelemetryMonitor(
+            source: partialSource,
+            mapper: mapper,
+            sink: partialSink,
+            activeWindowSnapshot: { nil }
+        )
+        try partialMonitor.start()
+        partialSource.emit(.cursor(hostUs: 22_500, x: 30, y: 40))
+        partialSource.emit(.button(hostUs: 22_501, x: 30, y: 40, button: .primary, phase: .down))
+        do {
+            try partialMonitor.flush()
+            throw TestFailure.expectation("generic sink failure must surface")
+        } catch PersistenceFailure.requested {
+            // Expected: first event was consumed, remaining suffix stays pending.
+        }
+        try partialMonitor.flush()
+        try expect(partialSink.events.map(\.kind) == ["cursor", "click"], "generic fallback retries only the unconsumed suffix")
+
         let synchronousSource = FakeSource()
         synchronousSource.eventDuringStart = .cursor(hostUs: 23_000, x: 35, y: 45)
         let synchronousSink = CapturingSink()
@@ -277,6 +364,23 @@ struct NativeInputTelemetryContractTests {
         )
         try stoppingMonitor?.start()
         try expect(stoppingSource.stopCount == 1 && stoppingMonitor?.state == .stopped, "stop during source start completes without a racing restart")
+
+        let raceSource = FakeSource()
+        var raceMonitor: NativeInputTelemetryMonitor?
+        raceSource.onStop = { try? raceMonitor?.start() }
+        let raceSink = CapturingSink()
+        raceMonitor = NativeInputTelemetryMonitor(
+            source: raceSource,
+            mapper: mapper,
+            sink: raceSink,
+            activeWindowSnapshot: { nil }
+        )
+        try raceMonitor?.start()
+        raceMonitor?.stop()
+        raceSource.emit(.cursor(hostUs: 23_500, x: 35, y: 45))
+        try raceMonitor?.flush()
+        try expect(raceSource.startCount == 2 && raceSource.stopCount == 1 && raceMonitor?.state == .running, "stop overlapping a queued restart cannot shut down the new source generation")
+        try expect(raceSink.events.map(\.kind) == ["cursor"], "new source generation remains live after old stop completes")
 
         let mappingFailureSource = FakeSource()
         let mappingFailureMonitor = NativeInputTelemetryMonitor(
@@ -349,6 +453,33 @@ struct NativeInputTelemetryContractTests {
         try expect(persisted.batches.count == 3, "retry persists the restored monitor batch exactly once")
         let retriedPayload = try JSONSerialization.jsonObject(with: persisted.batches[2]) as? [String: Any]
         try expect((retriedPayload?["events"] as? [[String: Any]])?.map { $0["kind"] as? String } == ["scroll", "click"], "retry retains current and remaining failed lossless events without duplication")
+
+        let nearLimitCoordinator = InputTelemetryCoordinator(sessionId: "near-limit")
+        let nearLimitPersisted = PersistedBatches()
+        let nearLimitSink = NativeInputTelemetryCoordinatorSink(
+            sessionId: "near-limit",
+            producerEpoch: "near-limit-epoch",
+            controls: CaptureControlState(),
+            timeline: RecordingTimeline(originUs: 0),
+            coordinator: nearLimitCoordinator,
+            persist: { _, _, _, data in try nearLimitPersisted.persist(data) }
+        )
+        let nearLimitEvents = [
+            NativeMappedInputEvent(hostUs: 10, kind: "click", payload: ["text": .string(String(repeating: "x", count: 260_000))]),
+            NativeMappedInputEvent(hostUs: 11, kind: "scroll", payload: ["text": .string(String(repeating: "y", count: 4_096))]),
+        ]
+        nearLimitPersisted.failNext()
+        do {
+            try nearLimitSink.consumeBatch(nearLimitEvents)
+            throw TestFailure.expectation("near-limit persistence failure must be retryable")
+        } catch PersistenceFailure.requested {
+            // Expected: the first bounded output batch is restored before the next event is admitted.
+        }
+        try nearLimitSink.consumeBatch(nearLimitEvents)
+        try expect(nearLimitPersisted.batches.count == 2, "near-limit next event remains queued across retry and persists in a later batch")
+        try expect(nearLimitPersisted.batches.allSatisfy { $0.count <= 256 * 1_024 }, "every final authoritative native JSON segment stays within 256KiB")
+        let nearLimitLast = try JSONSerialization.jsonObject(with: nearLimitPersisted.batches[1]) as? [String: Any]
+        try expect((nearLimitLast?["events"] as? [[String: Any]])?.map { $0["kind"] as? String } == ["scroll"], "the event after the near-limit boundary is retained and retried")
 
         print("Native input telemetry contract tests passed")
     }
