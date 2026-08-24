@@ -55,15 +55,31 @@ import { cameraPlacementFromEvent, projectCameraPlacement } from '@/services/cam
 import type { ExportDiagnosticReport, ExportProgressDetails } from '@/types/exportDiagnostics';
 import { previewPlaybackRegistry } from '@/services/previewPlaybackRegistry';
 import { resolveFrameTransform } from '@/services/frameTransform';
+import type {
+  TeachingCompositionOperation,
+  TeachingCompositionSourceTrack,
+} from '@/desktop/teachingCompositionExecutor';
 import {
-  concatenatePreparedExportAudio,
+  assembleRawCanonicalExportAudio,
+  concatenateRawCanonicalExportAudio,
+  createRawSilentExportAudio,
   createSilentExportAudio,
   EXPORT_AUDIO_BITRATE,
   EXPORT_AUDIO_SAMPLE_RATE,
-  prepareExportAudio,
-  mixPreparedExportAudio,
+  normalizeRawCanonicalExportAudio,
+  prepareRawExportAudio,
+  TEACHING_SFX_RAW_CANONICAL_FALLBACK_LIMITS,
   type PreparedExportAudio,
+  type RawCanonicalExportAudio,
+  type RawCanonicalExportLimits,
 } from '@/services/exportAudio';
+import {
+  prepareTeachingSoundEffectExportAudio,
+} from '@/services/teachingSoundEffectExport';
+import type {
+  TeachingSoundEffectAssetProvider,
+  TeachingSoundEffectMixLimits,
+} from '@/services/teachingSoundEffectMixer';
 import { mapProjectRangeToClip, normalizeMainTrack } from '@/services/mainTrack';
 import {
   localizedTimelineDuration,
@@ -91,6 +107,134 @@ export interface ExportOptions extends ExportConfig {
   forceSilentAudio?: boolean;
   /** Internal: render video only; the main track muxes one canonical audio timeline afterwards. */
   suppressAudio?: boolean;
+  /**
+   * Runtime-only offline SFX dependencies. Functions are intentionally injected
+   * and are not a claim that composition plans/providers are persisted yet.
+   */
+  teachingSoundEffects?: ExportTeachingSoundEffectOptions;
+}
+
+export interface ExportTeachingSoundEffectOptions {
+  readonly sourceTracks: readonly TeachingCompositionSourceTrack[];
+  readonly operations: readonly TeachingCompositionOperation[];
+  readonly assetProvider: TeachingSoundEffectAssetProvider;
+  readonly limits?: Partial<TeachingSoundEffectMixLimits>;
+}
+
+interface IdentifiedRawExportAudio {
+  readonly trackId: string;
+  readonly audio: RawCanonicalExportAudio;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function assertTeachingSoundEffectRuntimeInput(
+  value: unknown,
+): asserts value is ExportTeachingSoundEffectOptions {
+  if (!isRecord(value)
+    || !Array.isArray(value.sourceTracks)
+    || !Array.isArray(value.operations)
+    || !isRecord(value.assetProvider)
+    || typeof value.assetProvider.loadLocalPcm !== 'function'
+    || (value.limits !== undefined && !isRecord(value.limits))) {
+    throw new Error('teaching_sfx_export_runtime_input_invalid');
+  }
+  const sourceKinds: readonly TeachingCompositionSourceTrack['kind'][] = [
+    'screen', 'camera', 'microphone', 'system-audio',
+  ];
+  if (value.sourceTracks.some((source) => (
+    !isRecord(source)
+    || typeof source.trackId !== 'string'
+    || typeof source.kind !== 'string'
+    || !sourceKinds.includes(source.kind as TeachingCompositionSourceTrack['kind'])
+  )) || value.operations.some((operation) => !isRecord(operation))) {
+    throw new Error('teaching_sfx_export_runtime_input_invalid');
+  }
+}
+
+function validateTeachingSourceTracks(
+  teaching: ExportTeachingSoundEffectOptions,
+  microphone: IdentifiedRawExportAudio | undefined,
+  systemAudio: IdentifiedRawExportAudio | undefined,
+): void {
+  const ids = new Set<string>();
+  for (const source of teaching.sourceTracks) {
+    if (!source.trackId.trim() || ids.has(source.trackId)) {
+      throw new Error('teaching_sfx_export_source_tracks_invalid');
+    }
+    ids.add(source.trackId);
+  }
+  const declaredAudio = teaching.sourceTracks
+    .filter((source) => source.kind === 'microphone' || source.kind === 'system-audio')
+    .map((source) => `${source.kind}\u0000${source.trackId}`)
+    .sort();
+  const actualAudio = [
+    microphone ? `microphone\u0000${microphone.trackId}` : null,
+    systemAudio ? `system-audio\u0000${systemAudio.trackId}` : null,
+  ].filter((value): value is string => value !== null).sort();
+  if (declaredAudio.length !== actualAudio.length
+    || declaredAudio.some((value, index) => value !== actualAudio[index])) {
+    throw new Error('teaching_sfx_export_source_tracks_invalid');
+  }
+}
+
+function rawLimitsForTeaching(
+  teaching: ExportTeachingSoundEffectOptions | undefined,
+): Partial<RawCanonicalExportLimits> | undefined {
+  if (!teaching) return undefined;
+  return {
+    maxFrames: Math.min(
+      TEACHING_SFX_RAW_CANONICAL_FALLBACK_LIMITS.maxFrames,
+      teaching.limits?.maxTotalSamples ?? Number.POSITIVE_INFINITY,
+    ),
+    maxBytes: Math.min(
+      TEACHING_SFX_RAW_CANONICAL_FALLBACK_LIMITS.maxBytes,
+      teaching.limits?.maxOutputBytes ?? Number.POSITIVE_INFINITY,
+    ),
+  };
+}
+
+/** Actual export-pipeline boundary used after local media has decoded to raw PCM. */
+export async function prepareCanonicalExportAudioTimeline(input: {
+  microphone?: IdentifiedRawExportAudio;
+  systemAudio?: IdentifiedRawExportAudio;
+  durationMs?: number;
+  teachingSoundEffects?: ExportTeachingSoundEffectOptions;
+  signal?: AbortSignal;
+}): Promise<PreparedExportAudio> {
+  const rawTracks = [input.microphone?.audio, input.systemAudio?.audio]
+    .filter((track): track is RawCanonicalExportAudio => track !== undefined);
+  if (input.teachingSoundEffects === undefined) {
+    return normalizeRawCanonicalExportAudio(assembleRawCanonicalExportAudio(rawTracks, input.signal));
+  }
+  assertTeachingSoundEffectRuntimeInput(input.teachingSoundEffects);
+  validateTeachingSourceTracks(input.teachingSoundEffects, input.microphone, input.systemAudio);
+  const result = await prepareTeachingSoundEffectExportAudio({
+    baseTracks: [
+      ...(input.microphone ? [{
+        trackId: input.microphone.trackId,
+        kind: 'microphone' as const,
+        audio: input.microphone.audio,
+      }] : []),
+      ...(input.systemAudio ? [{
+        trackId: input.systemAudio.trackId,
+        kind: 'system-audio' as const,
+        audio: input.systemAudio.audio,
+      }] : []),
+    ],
+    baseDurationMs: input.durationMs,
+    operations: input.teachingSoundEffects.operations,
+    assetProvider: input.teachingSoundEffects.assetProvider,
+    limits: input.teachingSoundEffects.limits,
+    signal: input.signal,
+  });
+  if (result.status === 'unsupported-capability') {
+    throw new Error(`teaching_sfx_export_unsupported_capability:${result.unsupported
+      .map((item) => item.capability).join(',')}`);
+  }
+  return result.audio;
 }
 
 export type DeterministicExportFailureStage = 'frame_composition' | 'audio_preparation';
@@ -231,8 +375,9 @@ function mapProjectEffectsToClip(opts: ExportOptions, clip: MainTrackClip, outpu
 }
 
 async function exportMainTrack(opts: ExportOptions, clips: MainTrackClip[]): Promise<Blob> {
+  if (opts.teachingSoundEffects) throw new Error('teaching_sfx_export_main_track_unsupported');
   const rendered: Blob[] = [];
-  const preparedAudioTracks: PreparedExportAudio[] = [];
+  const preparedAudioTracks: RawCanonicalExportAudio[] = [];
   let outputStartMs = 0;
   for (let index = 0; index < clips.length; index += 1) {
     if (opts.signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
@@ -269,8 +414,8 @@ async function exportMainTrack(opts: ExportOptions, clips: MainTrackClip[]): Pro
           : selection.track?.mode === 'repair' ? 'repair' : selection.track ? 'enhanced' : 'original';
         sourceTrackId = useLocalized ? localized.id : selection.track?.id;
       }
-      const simultaneousTracks: PreparedExportAudio[] = [];
-      if (sourceAudio) simultaneousTracks.push(await prepareExportAudio({
+      const simultaneousTracks: RawCanonicalExportAudio[] = [];
+      if (sourceAudio) simultaneousTracks.push(await prepareRawExportAudio({
           blob: sourceAudio,
           segments: audioSegments,
           sourceKind,
@@ -278,15 +423,15 @@ async function exportMainTrack(opts: ExportOptions, clips: MainTrackClip[]): Pro
           signal: opts.signal,
         }));
       const systemAudio = media.systemAudioBlob ?? media.nativeMedia?.systemAudio ?? null;
-      if (systemAudio) simultaneousTracks.push(await prepareExportAudio({
+      if (systemAudio) simultaneousTracks.push(await prepareRawExportAudio({
         blob: systemAudio,
         segments: [{ start: clip.sourceStart, end: clip.sourceEnd }],
         sourceKind: 'original',
         signal: opts.signal,
       }));
       preparedAudioTracks.push(simultaneousTracks.length > 0
-        ? mixPreparedExportAudio(simultaneousTracks)
-        : createSilentExportAudio(clipOutputDurationMs));
+        ? assembleRawCanonicalExportAudio(simultaneousTracks, opts.signal)
+        : createRawSilentExportAudio(clipOutputDurationMs));
     }
     const segmentOptions = mapProjectEffectsToClip(opts, clip, outputStartMs);
     rendered.push(await exportRecording({
@@ -308,7 +453,9 @@ async function exportMainTrack(opts: ExportOptions, clips: MainTrackClip[]): Pro
   if (format !== 'gif') {
     opts.onPhase?.('main_track_muxing_audio');
     opts.onProgress?.(0.96);
-    const continuousAudio = concatenatePreparedExportAudio(preparedAudioTracks);
+    const continuousAudio = normalizeRawCanonicalExportAudio(
+      concatenateRawCanonicalExportAudio(preparedAudioTracks, 5, opts.signal),
+    );
     result = await remuxEncodedVideoWithAudio(result, continuousAudio.getWavBlob(), format, opts.onLog);
   }
   opts.onProgress?.(1);
@@ -1080,6 +1227,9 @@ function buildGhostRect(crop: SceneRect): Record<string, unknown> {
 }
 
 export async function exportRecording(opts: ExportOptions): Promise<Blob> {
+  if (opts.teachingSoundEffects !== undefined) {
+    assertTeachingSoundEffectRuntimeInput(opts.teachingSoundEffects);
+  }
   const mainTrack = normalizeMainTrack(opts.mainTrack);
   if (mainTrack.length > 0) return exportMainTrack(opts, mainTrack);
   const diagnostics = createExportDiagnostics({ recordingId: opts.recordingId, totalFrames: 0 });
@@ -1163,6 +1313,9 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
   const sceneSnapshots = desktopInkSource?.contentSnapshots ?? snapshots;
   const desktopInkStyle = resolveDesktopInkExportStyle(opts.desktopInkStyle, screenSource ? 0 : 1);
   const format: ExportFormat = opts.format ?? 'mp4';
+  if (opts.teachingSoundEffects && (format === 'gif' || opts.suppressAudio)) {
+    throw new Error('teaching_sfx_export_audio_output_required');
+  }
   const quality: ExportQuality = opts.quality ?? 'auto';
   // 质量档 → ffmpeg CRF（越小越清晰/越大）。WebCodecs 用倍率乘 estimateBitrate。
   const crfFor: Record<ExportQuality, number> = { auto: 23, high: 20, medium: 26, low: 30 };
@@ -1189,28 +1342,52 @@ export async function exportRecording(opts: ExportOptions): Promise<Blob> {
       : enhancedSelection.track
         ? 'enhanced' as const
         : 'original' as const;
+  const rawAudioLimits = rawLimitsForTeaching(opts.teachingSoundEffects);
   // Decode/resample once while the video renderer is preparing. Both encoders
   // consume this exact PCM timeline, so fallback cannot change the audio.
   const preparedAudioPromise = normalizeExportPreparation(format === 'gif' || opts.suppressAudio
     ? null
-    : effectiveAudioBlob || effectiveSystemAudio
+    : effectiveAudioBlob || effectiveSystemAudio || opts.teachingSoundEffects
       ? Promise.all([
-        effectiveAudioBlob ? prepareExportAudio({
+        effectiveAudioBlob ? prepareRawExportAudio({
           blob: effectiveAudioBlob,
           segments: trimmed ? presentationKept : undefined,
           sourceKind: audioSourceKind,
           sourceTrackId: useLocalizedTrack ? localizedTrack.id : enhancedSelection.track?.id,
           signal: opts.signal,
+          limits: rawAudioLimits,
         }) : null,
-        effectiveSystemAudio ? prepareExportAudio({
+        effectiveSystemAudio ? prepareRawExportAudio({
           blob: effectiveSystemAudio,
           segments: trimmed ? kept : undefined,
           sourceKind: 'original',
           signal: opts.signal,
+          limits: rawAudioLimits,
         }) : null,
-      ]).then((tracks) => mixPreparedExportAudio(
-        tracks.filter((track): track is PreparedExportAudio => track !== null),
-      )).then((audio) => {
+      ]).then(([microphone, systemAudio]) => {
+        const sourceTrackId = (
+          kind: 'microphone' | 'system-audio',
+          fallback: string,
+        ): string => {
+          if (!opts.teachingSoundEffects) return fallback;
+          const matching = opts.teachingSoundEffects.sourceTracks.filter((track) => track.kind === kind);
+          if (matching.length !== 1) throw new Error('teaching_sfx_export_source_tracks_invalid');
+          return matching[0].trackId;
+        };
+        return prepareCanonicalExportAudioTimeline({
+          microphone: microphone ? {
+            trackId: sourceTrackId('microphone', 'export:microphone'),
+            audio: microphone,
+          } : undefined,
+          systemAudio: systemAudio ? {
+            trackId: sourceTrackId('system-audio', 'export:system-audio'),
+            audio: systemAudio,
+          } : undefined,
+          durationMs: outDurationMs,
+          teachingSoundEffects: opts.teachingSoundEffects,
+          signal: opts.signal,
+        });
+      }).then((audio) => {
         diagnostics.setAudio({
           sourceKind: audio.sourceKind,
           sourceTrackId: audio.sourceTrackId,

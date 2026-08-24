@@ -115,6 +115,7 @@ test('microphone and system audio mix into one continuous non-clipping export tr
       peak: Math.max(...samples.map(Math.abs)),
       originalPeak: Math.max(...samples.map(Math.abs)),
       appliedGainDb: 0,
+      normalizationPasses: 1,
     },
     getWavBlob: () => new Blob(),
     sourceKind: 'original' as const,
