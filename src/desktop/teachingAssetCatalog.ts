@@ -33,6 +33,8 @@ export interface TeachingAssetCatalogEntry {
   cache: {
     status: TeachingAssetCacheStatus;
     checksum?: string;
+    /** Immutable local cache address resolved before recording; never fetched while recording. */
+    localUri?: string;
   };
   durationMs: number;
   contentSlots: TeachingAssetContentSlot[];
@@ -117,6 +119,7 @@ function validCatalogEntry(entry: TeachingAssetCatalogEntry, catalogVersion: str
     && Boolean(entry.cache)
     && CACHE_STATUSES.includes(entry.cache?.status)
     && (entry.cache.checksum === undefined || SHA256_PATTERN.test(entry.cache.checksum))
+    && (entry.cache.localUri === undefined || (typeof entry.cache.localUri === 'string' && entry.cache.localUri.length > 0))
     && Number.isFinite(entry.durationMs)
     && entry.durationMs > 0
     && validContentSlots(entry.contentSlots);
