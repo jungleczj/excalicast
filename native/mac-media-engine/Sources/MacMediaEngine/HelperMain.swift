@@ -1,6 +1,8 @@
 import Foundation
 import MacMediaEngineCore
 import MacMediaEnginePlatform
+import MacMediaEngineFinalRenderHelperRuntime
+import MacMediaEngineFinalRenderJobController
 import AppKit
 @preconcurrency import AVFoundation
 import CoreGraphics
@@ -37,6 +39,8 @@ private struct Command: Decodable, Sendable {
     let muted: Bool?
     let hidden: Bool?
     let enabled: Bool?
+    let requestID: String?
+    let requestSHA256: String?
 }
 
 private struct Response: Encodable, Sendable {
@@ -58,6 +62,7 @@ private struct Response: Encodable, Sendable {
     let hardwareState: CameraHardwareState?
     let physicallyPowered: Bool?
     let telemetryAck: InputTelemetryAcknowledgement?
+    let finalRender: NativeFinalRenderHelperStatus?
     let error: String?
     let errorCode: String?
     let errorTrack: RecordingTrackKind?
@@ -81,6 +86,7 @@ private struct Response: Encodable, Sendable {
         hardwareState: CameraHardwareState? = nil,
         physicallyPowered: Bool? = nil,
         telemetryAck: InputTelemetryAcknowledgement? = nil,
+        finalRender: NativeFinalRenderHelperStatus? = nil,
         error: String?,
         errorCode: String? = nil,
         errorTrack: RecordingTrackKind? = nil
@@ -103,6 +109,7 @@ private struct Response: Encodable, Sendable {
         self.hardwareState = hardwareState
         self.physicallyPowered = physicallyPowered
         self.telemetryAck = telemetryAck
+        self.finalRender = finalRender
         self.error = error
         self.errorCode = errorCode
         self.errorTrack = errorTrack
@@ -170,8 +177,10 @@ private enum HelperServerError: Error {
 @available(macOS 13.0, *)
 private actor HelperServer {
     private let lifecycle = HelperLifecycle()
+    private let finalRenderRuntime = NativeFinalRenderHelperRuntime.productionUnsupported()
     private var captureEngine: NativeCaptureSession?
     private var pressureMonitor: Task<Void, Never>?
+    private var captureAdmission = HelperCaptureCommandAdmission()
     private var isStoppingCapture = false
     private var lastCaptureError: String?
     private var lastCaptureErrorCode: String?
@@ -352,13 +361,16 @@ private actor HelperServer {
                 )
                 return success(command.id, state: await lifecycle.state, capability: report)
             case "capture.start.v1":
-                guard captureEngine == nil, !isStoppingCapture else {
+                guard captureEngine == nil, !isStoppingCapture,
+                      await lifecycle.state == .idle else {
                     throw HelperServerError.captureAlreadyActive
                 }
-                let parameters = try captureParameters(from: command)
-                let engine = NativeCaptureSession()
-                try await lifecycle.start(sessionId: parameters.recordingId)
+                try captureAdmission.beginStart()
                 do {
+                    _ = try await finalRenderRuntime.prepareCaptureStart(drainTimeout: .seconds(5))
+                    let parameters = try captureParameters(from: command)
+                    let engine = NativeCaptureSession()
+                    try await lifecycle.start(sessionId: parameters.recordingId)
                     let report = try await engine.start(
                         configuration: NativeCaptureSession.Configuration(
                             recordingId: parameters.recordingId,
@@ -375,6 +387,7 @@ private actor HelperServer {
                         )
                     )
                     captureEngine = engine
+                    captureAdmission.startSucceeded()
                     lastCaptureError = nil
                     lastCaptureErrorCode = nil
                     lastCaptureErrorTrack = nil
@@ -382,9 +395,36 @@ private actor HelperServer {
                     startPressureMonitor(engine)
                     return success(command.id, state: .recording, capability: report)
                 } catch {
+                    captureAdmission.startFailed()
                     _ = await lifecycle.stop()
+                    await finalRenderRuntime.captureDidStop()
                     throw error
                 }
+            case "final-render.start.v1":
+                guard let requestID = command.requestID,
+                      let requestSHA256 = command.requestSHA256 else {
+                    throw HelperServerError.missingCaptureParameters
+                }
+                let status = try await finalRenderRuntime.start(.init(
+                    requestID: requestID,
+                    requestSHA256: requestSHA256
+                ))
+                return finalRenderResponse(command.id, status: status)
+            case "final-render.status.v1":
+                return finalRenderResponse(
+                    command.id,
+                    status: await finalRenderRuntime.status()
+                )
+            case "final-render.cancel.v1":
+                guard let requestID = command.requestID,
+                      let requestSHA256 = command.requestSHA256 else {
+                    throw HelperServerError.missingCaptureParameters
+                }
+                let status = try await finalRenderRuntime.cancel(.init(
+                    requestID: requestID,
+                    requestSHA256: requestSHA256
+                ))
+                return finalRenderResponse(command.id, status: status)
             case "capture.pause.v1":
                 guard let captureEngine, await lifecycle.state == .recording else {
                     throw HelperServerError.missingCaptureParameters
@@ -470,6 +510,7 @@ private actor HelperServer {
                 )
             case "capture.stop.v1":
                 guard !isStoppingCapture else { throw HelperServerError.captureAlreadyStopping }
+                try captureAdmission.beginStop()
                 pressureMonitor?.cancel()
                 pressureMonitor = nil
                 isStoppingCapture = true
@@ -478,6 +519,8 @@ private actor HelperServer {
                 do { if let captureEngine { try await captureEngine.stop() } }
                 catch { stopError = error }
                 captureEngine = nil
+                await finalRenderRuntime.captureDidStop()
+                captureAdmission.stopFinished()
                 isStoppingCapture = false
                 let state = await lifecycle.finishStopping()
                 if let stopError {
@@ -544,6 +587,8 @@ private actor HelperServer {
         _ = await lifecycle.beginStopping()
         try? await captureEngine?.stop(interrupted: true)
         captureEngine = nil
+        await finalRenderRuntime.captureDidStop()
+        captureAdmission.stopFinished()
         isStoppingCapture = false
         _ = await lifecycle.finishStopping()
     }
@@ -575,6 +620,8 @@ private actor HelperServer {
             reason = "critical_disk_space: \(error)"
         }
         captureEngine = nil
+        await finalRenderRuntime.captureDidStop()
+        captureAdmission.stopFinished()
         lastCaptureError = reason
         lastCaptureErrorCode = "critical_disk_space"
         lastCaptureErrorTrack = nil
@@ -696,6 +743,27 @@ private actor HelperServer {
         )
     }
 
+    private func finalRenderResponse(
+        _ id: String,
+        status: NativeFinalRenderJobStatus
+    ) -> Response {
+        Response(
+            id: id,
+            ok: true,
+            protocolVersion: HelperHandshake.currentProtocolVersion,
+            engine: "mac-media-engine",
+            state: nil,
+            capability: nil,
+            sources: nil,
+            devices: nil,
+            permissions: nil,
+            pressure: nil,
+            manifest: nil,
+            finalRender: NativeFinalRenderHelperStatus(status),
+            error: nil
+        )
+    }
+
     private func permissionResponse(_ id: String) async -> Response {
         Response(
             id: id,
@@ -768,6 +836,48 @@ private actor HelperServer {
 
     private func captureFailureDescriptor(_ error: Error) -> CaptureFailureDescriptor {
         switch error {
+        case HelperCaptureCommandAdmissionError.startInProgress:
+            return CaptureFailureDescriptor(
+                message: "Native capture is still starting.",
+                code: "capture-start-in-progress",
+                track: nil
+            )
+        case HelperCaptureCommandAdmissionError.captureAlreadyActive:
+            return CaptureFailureDescriptor(
+                message: "Native capture is already active.",
+                code: "capture-already-active",
+                track: nil
+            )
+        case HelperCaptureCommandAdmissionError.stopInProgress:
+            return CaptureFailureDescriptor(
+                message: "Native capture is already stopping.",
+                code: "capture-stop-in-progress",
+                track: nil
+            )
+        case NativeFinalRenderHelperRuntimeError.captureActive:
+            return CaptureFailureDescriptor(
+                message: "Native capture is active or reserved.",
+                code: "capture-active",
+                track: nil
+            )
+        case NativeFinalRenderJobControllerError.busy(let requestID):
+            return CaptureFailureDescriptor(
+                message: "Native final render is busy: \(requestID)",
+                code: "final-render-busy",
+                track: nil
+            )
+        case NativeFinalRenderJobControllerError.drainTimedOut(let requestID):
+            return CaptureFailureDescriptor(
+                message: "Native final render did not drain before capture: \(requestID)",
+                code: "final-render-drain-timeout",
+                track: nil
+            )
+        case NativeFinalRenderJobControllerError.invalidRequestIdentity:
+            return CaptureFailureDescriptor(
+                message: "Native final render request identity is invalid.",
+                code: "final-render-request-invalid",
+                track: nil
+            )
         case let nativeInputError as MacNativeInputError:
             return CaptureFailureDescriptor(
                 message: nativeInputFailureMessage(nativeInputError),
@@ -833,6 +943,22 @@ private actor HelperServer {
     }
 }
 
+private actor ResponseWriter {
+    private let encoder = JSONEncoder()
+    private var failed = false
+
+    func write(_ response: Response) {
+        guard !failed else { return }
+        do {
+            let data = try encoder.encode(response)
+            print(String(decoding: data, as: UTF8.self))
+            fflush(stdout)
+        } catch {
+            failed = true
+        }
+    }
+}
+
 @main
 private struct MacMediaEngineMain {
     @MainActor
@@ -851,37 +977,40 @@ private struct MacMediaEngineMain {
 
     @available(macOS 13.0, *)
     private static func runCommandLoop(server: HelperServer) async {
-        let decoder = JSONDecoder()
-        let encoder = JSONEncoder()
-
-        while let line = readLine() {
-            let response: Response
-            do {
-                let command = try decoder.decode(Command.self, from: Data(line.utf8))
-                response = await server.handle(command)
-            } catch {
-                response = Response(
-                    id: "unknown",
-                    ok: false,
-                    protocolVersion: nil,
-                    engine: nil,
-                    state: nil,
-                    capability: nil,
-                    sources: nil,
-                    devices: nil,
-                    permissions: nil,
-                    pressure: nil,
-                    manifest: nil,
-                    error: "invalid_command"
-                )
+        let writer = ResponseWriter()
+        await withTaskGroup(of: Void.self) { group in
+            var pending = 0
+            while let line = readLine() {
+                group.addTask {
+                    let response: Response
+                    do {
+                        let command = try JSONDecoder().decode(Command.self, from: Data(line.utf8))
+                        response = await server.handle(command)
+                    } catch {
+                        response = Response(
+                            id: "unknown",
+                            ok: false,
+                            protocolVersion: nil,
+                            engine: nil,
+                            state: nil,
+                            capability: nil,
+                            sources: nil,
+                            devices: nil,
+                            permissions: nil,
+                            pressure: nil,
+                            manifest: nil,
+                            error: "invalid_command"
+                        )
+                    }
+                    await writer.write(response)
+                }
+                pending += 1
+                if pending >= 64 {
+                    _ = await group.next()
+                    pending -= 1
+                }
             }
-            do {
-                let data = try encoder.encode(response)
-                print(String(decoding: data, as: UTF8.self))
-                fflush(stdout)
-            } catch {
-                break
-            }
+            while await group.next() != nil {}
         }
     }
 }

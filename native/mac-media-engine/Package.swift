@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "MacMediaEngineFinalCompositorStage1", targets: ["MacMediaEngineFinalCompositorStage1"]),
         .library(name: "MacMediaEngineFinalCompositorStage2", targets: ["MacMediaEngineFinalCompositorStage2"]),
         .library(name: "MacMediaEngineFinalRenderJobController", targets: ["MacMediaEngineFinalRenderJobController"]),
+        .library(name: "MacMediaEngineFinalRenderHelperRuntime", targets: ["MacMediaEngineFinalRenderHelperRuntime"]),
         .executable(name: "mac-media-engine", targets: ["MacMediaEngine"]),
         .executable(name: "mac-media-engine-contract-tests", targets: ["MacMediaEngineContractTests"]),
         .executable(name: "native-input-telemetry-contract-tests", targets: ["NativeInputTelemetryContractTests"]),
@@ -21,6 +22,7 @@ let package = Package(
         .executable(name: "native-final-compositor-stage1-contract-tests", targets: ["NativeFinalCompositorStage1ContractTests"]),
         .executable(name: "native-final-compositor-stage2-contract-tests", targets: ["NativeFinalCompositorStage2ContractTests"]),
         .executable(name: "native-final-render-job-controller-contract-tests", targets: ["NativeFinalRenderJobControllerContractTests"]),
+        .executable(name: "native-final-render-helper-runtime-contract-tests", targets: ["NativeFinalRenderHelperRuntimeContractTests"]),
     ],
     targets: [
         .target(name: "MacMediaEngineCore"),
@@ -33,7 +35,19 @@ let package = Package(
         .target(name: "MacMediaEngineFinalCompositorStage1"),
         .target(name: "MacMediaEngineFinalCompositorStage2"),
         .target(name: "MacMediaEngineFinalRenderJobController"),
-        .executableTarget(name: "MacMediaEngine", dependencies: ["MacMediaEngineCore", "MacMediaEnginePlatform"]),
+        .target(
+            name: "MacMediaEngineFinalRenderHelperRuntime",
+            dependencies: ["MacMediaEngineFinalRenderJobController"]
+        ),
+        .executableTarget(
+            name: "MacMediaEngine",
+            dependencies: [
+                "MacMediaEngineCore",
+                "MacMediaEnginePlatform",
+                "MacMediaEngineFinalRenderJobController",
+                "MacMediaEngineFinalRenderHelperRuntime",
+            ]
+        ),
         .executableTarget(
             name: "MacMediaEngineContractTests",
             dependencies: ["MacMediaEngineCore"],
@@ -73,6 +87,11 @@ let package = Package(
             name: "NativeFinalRenderJobControllerContractTests",
             dependencies: ["MacMediaEngineFinalRenderJobController"],
             path: "Tests/NativeFinalRenderJobControllerContractTests"
+        ),
+        .executableTarget(
+            name: "NativeFinalRenderHelperRuntimeContractTests",
+            dependencies: ["MacMediaEngineFinalRenderHelperRuntime", "MacMediaEngineFinalRenderJobController"],
+            path: "Tests/NativeFinalRenderHelperRuntimeContractTests"
         ),
     ]
 )

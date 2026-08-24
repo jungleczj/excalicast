@@ -12,6 +12,63 @@ public enum HelperProtocolError: Error, Equatable, Sendable {
     case sessionAlreadyActive
 }
 
+public enum HelperCaptureCommandAdmissionState: Equatable, Sendable {
+    case idle
+    case starting
+    case active
+    case stopping
+}
+
+public enum HelperCaptureCommandAdmissionError: Error, Equatable, Sendable {
+    case startInProgress
+    case captureAlreadyActive
+    case stopInProgress
+}
+
+public struct HelperCaptureCommandAdmission: Sendable {
+    public private(set) var state: HelperCaptureCommandAdmissionState = .idle
+
+    public init() {}
+
+    public mutating func beginStart() throws {
+        switch state {
+        case .idle:
+            state = .starting
+        case .starting:
+            throw HelperCaptureCommandAdmissionError.startInProgress
+        case .active, .stopping:
+            throw HelperCaptureCommandAdmissionError.captureAlreadyActive
+        }
+    }
+
+    public mutating func startSucceeded() {
+        guard state == .starting else { return }
+        state = .active
+    }
+
+    public mutating func startFailed() {
+        guard state == .starting else { return }
+        state = .idle
+    }
+
+    public mutating func beginStop() throws {
+        switch state {
+        case .idle:
+            return
+        case .starting:
+            throw HelperCaptureCommandAdmissionError.startInProgress
+        case .active:
+            state = .stopping
+        case .stopping:
+            throw HelperCaptureCommandAdmissionError.stopInProgress
+        }
+    }
+
+    public mutating func stopFinished() {
+        state = .idle
+    }
+}
+
 public struct HelperHandshake: Codable, Equatable, Sendable {
     public static let currentProtocolVersion = 1
 

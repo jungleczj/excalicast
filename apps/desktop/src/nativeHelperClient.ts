@@ -27,6 +27,7 @@ interface HelperResponse {
   hardwareState?: 'active' | 'off';
   physicallyPowered?: boolean;
   telemetryAck?: NativeInputTelemetryAcknowledgement;
+  finalRender?: unknown;
   error?: string;
   errorCode?: string;
   errorTrack?: NativeRecordingTrack;
@@ -101,6 +102,17 @@ export interface NativeCaptureResult {
   state: 'idle' | 'recording' | 'stopping';
   capability: NativeCaptureCapability;
 }
+
+export interface NativeFinalRenderJobRequest {
+  requestID: string;
+  requestSHA256: string;
+}
+
+export type NativeFinalRenderJobStatus =
+  | { state: 'idle' }
+  | (NativeFinalRenderJobRequest & { state: 'rendering' | 'cancelled' })
+  | (NativeFinalRenderJobRequest & { state: 'ready'; outputIdentity: string })
+  | (NativeFinalRenderJobRequest & { state: 'failed'; errorCode: string });
 
 export interface NativeInkEventBatch {
   index: number;
@@ -308,6 +320,36 @@ export class NativeHelperClient {
     return { state: response.state, capability: response.capability };
   }
 
+  async startFinalRender(
+    request: NativeFinalRenderJobRequest,
+  ): Promise<NativeFinalRenderJobStatus> {
+    const response = await this.request({
+      channel: 'final-render.start.v1',
+      requestID: request.requestID,
+      requestSHA256: request.requestSHA256,
+    });
+    return requireFinalRenderStatus(response.finalRender);
+  }
+
+  async finalRenderStatus(): Promise<NativeFinalRenderJobStatus> {
+    const response = await this.request({ channel: 'final-render.status.v1' });
+    return requireFinalRenderStatus(response.finalRender);
+  }
+
+  async cancelFinalRender(
+    request: NativeFinalRenderJobRequest,
+  ): Promise<NativeFinalRenderJobStatus> {
+    const response = await this.request(
+      {
+        channel: 'final-render.cancel.v1',
+        requestID: request.requestID,
+        requestSHA256: request.requestSHA256,
+      },
+      30_000,
+    );
+    return requireFinalRenderStatus(response.finalRender);
+  }
+
   async stopCapture(): Promise<'idle'> {
     const response = await this.request({ channel: 'capture.stop.v1' });
     if (response.state !== 'idle') throw new Error('native_capture_stop_invalid');
@@ -465,6 +507,76 @@ export class NativeHelperClient {
       response.errorTrack,
     ));
   }
+}
+
+function requireFinalRenderStatus(
+  value: unknown,
+): NativeFinalRenderJobStatus {
+  if (!isRecord(value) || typeof value.state !== 'string') {
+    throw new Error('native_final_render_status_invalid');
+  }
+  if (value.state === 'idle') {
+    if (!hasExactKeys(value, ['state'])) throw new Error('native_final_render_status_invalid');
+    return { state: 'idle' };
+  }
+  if (!validFinalRenderRequestIdentity(value)) {
+    throw new Error('native_final_render_status_invalid');
+  }
+  if (value.state === 'ready') {
+    if (!hasExactKeys(value, ['state', 'requestID', 'requestSHA256', 'outputIdentity'])
+      || typeof value.outputIdentity !== 'string'
+      || !/^[a-f0-9]{64}$/.test(value.outputIdentity)) {
+      throw new Error('native_final_render_status_invalid');
+    }
+    return {
+      state: value.state,
+      requestID: value.requestID,
+      requestSHA256: value.requestSHA256,
+      outputIdentity: value.outputIdentity,
+    };
+  }
+  if (value.state === 'failed') {
+    if (!hasExactKeys(value, ['state', 'requestID', 'requestSHA256', 'errorCode'])
+      || typeof value.errorCode !== 'string'
+      || !/^[a-z0-9._-]{1,128}$/.test(value.errorCode)) {
+      throw new Error('native_final_render_status_invalid');
+    }
+    return {
+      state: value.state,
+      requestID: value.requestID,
+      requestSHA256: value.requestSHA256,
+      errorCode: value.errorCode,
+    };
+  }
+  if (value.state === 'rendering' || value.state === 'cancelled') {
+    if (!hasExactKeys(value, ['state', 'requestID', 'requestSHA256'])) {
+      throw new Error('native_final_render_status_invalid');
+    }
+    return {
+      state: value.state,
+      requestID: value.requestID,
+      requestSHA256: value.requestSHA256,
+    };
+  }
+  throw new Error('native_final_render_status_invalid');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === allowed.length && keys.every((key) => allowed.includes(key));
+}
+
+function validFinalRenderRequestIdentity(
+  value: Record<string, unknown>,
+): value is Record<string, unknown> & NativeFinalRenderJobRequest {
+  return typeof value.requestID === 'string'
+    && typeof value.requestSHA256 === 'string'
+    && /^[A-Za-z0-9_-]{1,128}$/.test(value.requestID)
+    && /^[a-f0-9]{64}$/.test(value.requestSHA256);
 }
 
 export function spawnNativeHelper(executablePath: string): NativeHelperClient {

@@ -58,6 +58,21 @@ struct MacMediaEngineContractTests {
         try expect(stoppingState == .stopping, "safe stop exposes stopping state")
         try expect(stoppedState == .idle, "safe stop returns to idle after flush")
 
+        var admission = HelperCaptureCommandAdmission()
+        try admission.beginStart()
+        do {
+            try admission.beginStop()
+            throw ContractFailure.expectation("capture stop interleaved with unfinished capture start")
+        } catch HelperCaptureCommandAdmissionError.startInProgress {
+            // expected: the in-flight start must settle before stop can release render reservations
+        }
+        admission.startFailed()
+        try admission.beginStart()
+        admission.startSucceeded()
+        try admission.beginStop()
+        admission.stopFinished()
+        try expect(admission.state == .idle, "capture admission returns to idle after a complete stop")
+
         let controls = CaptureControlState()
         try expect(controls.pause(atUs: 2_000_000), "first pause changes state")
         try expect(controls.adjustedPresentationUs(2_500_000) == nil, "paused samples are dropped")
