@@ -1,0 +1,445 @@
+import CoreGraphics
+import Darwin
+import Foundation
+import MacMediaEngineCore
+import MacMediaEnginePlatform
+
+private enum TestFailure: Error {
+    case expectation(String)
+}
+
+private func expect(_ condition: @autoclosure () throws -> Bool, _ message: String) throws {
+    guard try condition() else { throw TestFailure.expectation(message) }
+}
+
+private final class LockedBox<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) { self.value = value }
+
+    func withValue<Result>(_ body: (inout Value) throws -> Result) rethrows -> Result {
+        lock.lock()
+        defer { lock.unlock() }
+        return try body(&value)
+    }
+
+    var snapshot: Value { withValue { $0 } }
+}
+
+private final class FakeClock: NativeInputHostClock, @unchecked Sendable {
+    private let value = LockedBox<Int64>(0)
+    func nowUs() -> Int64 { value.snapshot }
+    func set(_ hostUs: Int64) { value.withValue { $0 = hostUs } }
+}
+
+private final class FakeTapSession: MacInputEventTapSession, @unchecked Sendable {
+    private let handler: @Sendable (MacInputEventTapMessage) -> Void
+    private(set) var reenableCount = 0
+    private(set) var barrierCount = 0
+    private(set) var stopCount = 0
+
+    init(handler: @escaping @Sendable (MacInputEventTapMessage) -> Void) {
+        self.handler = handler
+    }
+
+    func emit(_ message: MacInputEventTapMessage) { handler(message) }
+    func reenable() { reenableCount += 1 }
+    func callbackBarrier() { barrierCount += 1 }
+    func stop() { stopCount += 1 }
+}
+
+private final class FakeTapBackend: MacInputEventTapBackend, @unchecked Sendable {
+    var permissionGranted = true
+    var startError: MacNativeInputError?
+    private(set) var masks: [CGEventMask] = []
+    private(set) var sessions: [FakeTapSession] = []
+    private(set) var startReturnedReady = false
+
+    func preflightListenEventAccess() -> Bool { permissionGranted }
+
+    func start(
+        mask: CGEventMask,
+        handler: @escaping @Sendable (MacInputEventTapMessage) -> Void
+    ) throws -> any MacInputEventTapSession {
+        masks.append(mask)
+        if let startError { throw startError }
+        let session = FakeTapSession(handler: handler)
+        sessions.append(session)
+        startReturnedReady = true
+        return session
+    }
+}
+
+private final class FakeDisplayProvider: NativeInputDisplayProviding, @unchecked Sendable {
+    let geometries: [NativeDisplayGeometry]
+    private(set) var callCount = 0
+
+    init(_ geometries: [NativeDisplayGeometry]) { self.geometries = geometries }
+    func activeDisplays() -> [NativeDisplayGeometry] { callCount += 1; return geometries }
+}
+
+private final class FakeWindowProvider: NativeInputWindowProviding, @unchecked Sendable {
+    var snapshot: NativeActiveWindowSnapshot?
+    private(set) var callCount = 0
+    private(set) var exclusions: [Set<UInt32>] = []
+
+    func activeWindow(hostUs: Int64, excludingWindowIDs: Set<UInt32>) -> NativeActiveWindowSnapshot? {
+        callCount += 1
+        exclusions.append(excludingWindowIDs)
+        guard let snapshot else { return nil }
+        return NativeActiveWindowSnapshot(
+            hostUs: hostUs,
+            application: snapshot.application,
+            bundleIdentifier: snapshot.bundleIdentifier,
+            processId: snapshot.processId,
+            windowId: snapshot.windowId,
+            title: snapshot.title,
+            bounds: snapshot.bounds
+        )
+    }
+}
+
+private final class ManualScheduler: @unchecked Sendable {
+    private let handler = LockedBox<(@Sendable () -> Void)?>(nil)
+    private(set) var intervalUs: Int64?
+    private(set) var cancelCount = 0
+
+    var scheduling: NativeInputRuntimeScheduling {
+        NativeInputRuntimeScheduling { [weak self] intervalUs, handler in
+            self?.intervalUs = intervalUs
+            self?.handler.withValue { $0 = handler }
+            return { [weak self] in self?.cancelCount += 1 }
+        }
+    }
+
+    func fire() { handler.snapshot?() }
+}
+
+private enum PersistenceFailure: Error { case requested }
+
+private final class PersistedPayloads: @unchecked Sendable {
+    private let values = LockedBox<[Data]>([])
+    private let fail = LockedBox(false)
+    func failNext() { fail.withValue { $0 = true } }
+    func persist(_ data: Data) throws {
+        let shouldFail = fail.withValue { value in defer { value = false }; return value }
+        if shouldFail { throw PersistenceFailure.requested }
+        values.withValue { $0.append(data) }
+    }
+    var payloads: [Data] { values.snapshot }
+}
+
+private func eventMask(_ types: [CGEventType]) -> CGEventMask {
+    types.reduce(0) { $0 | (CGEventMask(1) << CGEventMask($1.rawValue)) }
+}
+
+private func makeRuntime(
+    clock: FakeClock,
+    backend: FakeTapBackend,
+    displays: FakeDisplayProvider,
+    windows: FakeWindowProvider,
+    scheduler: ManualScheduler,
+    controls: CaptureControlState,
+    persistence: PersistedPayloads,
+    terminal: LockedBox<[MacNativeInputError]>
+) -> NativeInputCaptureRuntime {
+    let source = MacNativeInputEventSource(backend: backend, clock: clock)
+    let coordinator = InputTelemetryCoordinator(sessionId: "platform-contract")
+    let sink = NativeInputTelemetryCoordinatorSink(
+        sessionId: "platform-contract",
+        producerEpoch: "platform-epoch",
+        controls: controls,
+        timeline: RecordingTimeline(originUs: 1_000_000),
+        coordinator: coordinator,
+        persist: { _, _, _, data in try persistence.persist(data) }
+    )
+    return NativeInputCaptureRuntime(
+        source: source,
+        displays: displays,
+        windows: windows,
+        clock: clock,
+        controls: controls,
+        sink: sink,
+        excludedWindowIDs: [77, 88],
+        scheduling: scheduler.scheduling,
+        onTerminal: { error, _ in terminal.withValue { values in values.append(error) } }
+    )
+}
+
+@main
+private struct NativeInputPlatformContractTests {
+    static func main() async throws {
+        let requiredTypes: [CGEventType] = [
+            .mouseMoved,
+            .leftMouseDown, .leftMouseUp,
+            .rightMouseDown, .rightMouseUp,
+            .otherMouseDown, .otherMouseUp,
+            .leftMouseDragged, .rightMouseDragged, .otherMouseDragged,
+            .scrollWheel,
+        ]
+        try expect(
+            MacNativeInputEventSource.requiredEventMask == eventMask(requiredTypes),
+            "event tap mask includes move, every down/up, every drag, and scroll exactly"
+        )
+
+        let deniedBackend = FakeTapBackend()
+        deniedBackend.permissionGranted = false
+        let deniedSource = MacNativeInputEventSource(backend: deniedBackend, clock: FakeClock())
+        do {
+            try deniedSource.start { _ in }
+            throw TestFailure.expectation("permission denial must fail before tap creation")
+        } catch MacNativeInputError.inputMonitoringPermissionRequired {
+            try expect(deniedBackend.masks.isEmpty, "permission denial never attempts tap creation")
+        }
+
+        let failedBackend = FakeTapBackend()
+        failedBackend.startError = .inputEventTapCreationFailed
+        do {
+            try MacNativeInputEventSource(backend: failedBackend, clock: FakeClock()).start { _ in }
+            throw TestFailure.expectation("tap creation failure must be explicit")
+        } catch MacNativeInputError.inputEventTapCreationFailed {
+            // Expected.
+        }
+
+        let lifecycleClock = FakeClock()
+        let lifecycleBackend = FakeTapBackend()
+        let lifecycleEvents = LockedBox<[NativeRawInputEvent]>([])
+        let lifecycleTerminal = LockedBox<[MacNativeInputError]>([])
+        let lifecycleDeliveryUsedTapThread = LockedBox<[Bool]>([])
+        let fakeTapThread = pthread_mach_thread_np(pthread_self())
+        let lifecycleSource = MacNativeInputEventSource(backend: lifecycleBackend, clock: lifecycleClock)
+        lifecycleSource.setTerminalHandler { error in
+            lifecycleTerminal.withValue { values in values.append(error) }
+        }
+        try lifecycleSource.start { event in
+            lifecycleDeliveryUsedTapThread.withValue { values in
+                values.append(pthread_mach_thread_np(pthread_self()) == fakeTapThread)
+            }
+            lifecycleEvents.withValue { values in values.append(event) }
+        }
+        try lifecycleSource.start { _ in }
+        try expect(lifecycleBackend.startReturnedReady, "source start returns only after backend readiness")
+        try expect(lifecycleBackend.sessions.count == 1, "source start is idempotent")
+        let tap = lifecycleBackend.sessions[0]
+
+        lifecycleClock.set(1_010_000)
+        tap.emit(.event(MacInputEventPrimitive(type: .mouseMoved, x: -300, y: 1_200)))
+        lifecycleClock.set(1_020_000)
+        tap.emit(.event(MacInputEventPrimitive(type: .leftMouseDown, x: 10, y: 20)))
+        lifecycleClock.set(1_030_000)
+        tap.emit(.event(MacInputEventPrimitive(type: .rightMouseUp, x: 10, y: 20)))
+        lifecycleClock.set(1_040_000)
+        tap.emit(.event(MacInputEventPrimitive(type: .otherMouseDown, x: 10, y: 20, buttonNumber: 2)))
+        lifecycleClock.set(1_050_000)
+        tap.emit(.event(MacInputEventPrimitive(type: .otherMouseUp, x: 10, y: 20, buttonNumber: 7)))
+        lifecycleClock.set(1_060_000)
+        tap.emit(.event(MacInputEventPrimitive(type: .leftMouseDragged, x: 11, y: 21)))
+        lifecycleClock.set(1_070_000)
+        tap.emit(.event(MacInputEventPrimitive(type: .scrollWheel, x: 11, y: 21, scrollDeltaX: 2.5, scrollDeltaY: -4)))
+        lifecycleSource.suspendCallbacksAndWait()
+        lifecycleSource.resumeCallbacks()
+
+        let raw = lifecycleEvents.snapshot
+        try expect(raw.count == 6, "required callback families enqueue losslessly while cursor motion coalesces")
+        try expect(lifecycleDeliveryUsedTapThread.snapshot.allSatisfy { !$0 }, "event-tap callback only copies primitives and enqueues delivery off the tap thread")
+        try expect(lifecycleSource.statistics.capturedEventCount == 7 && lifecycleSource.statistics.coalescedEventCount == 1, "captured and coalesced callback counts remain observable")
+        if case let .button(_, _, _, button, phase) = raw[0] {
+            try expect(button == .primary && phase == .down, "left down preserves primary/down")
+        } else { throw TestFailure.expectation("left down did not map to button input") }
+        if case let .button(_, _, _, button, phase) = raw[1] {
+            try expect(button == .secondary && phase == .up, "right up preserves secondary/up")
+        } else { throw TestFailure.expectation("right up did not map to button input") }
+        if case let .button(_, _, _, button, _) = raw[2] {
+            try expect(button == .middle, "other button two maps to middle")
+        } else { throw TestFailure.expectation("middle down did not map to button input") }
+        if case let .button(_, _, _, button, _) = raw[3] {
+            try expect(button == .other, "non-middle other button remains other")
+        } else { throw TestFailure.expectation("other up did not map to button input") }
+        if case .cursor = raw[4] {} else {
+            throw TestFailure.expectation("dragged input preserves cursor telemetry")
+        }
+        if case let .scroll(_, _, _, dx, dy) = raw[5] {
+            try expect(dx == 2.5 && dy == -4, "horizontal and vertical scroll deltas are preserved")
+        } else { throw TestFailure.expectation("scroll did not map to scroll input") }
+
+        tap.emit(.disabledByTimeout)
+        try expect(tap.reenableCount == 1 && lifecycleTerminal.snapshot.isEmpty, "first disabled callback explicitly re-enables once")
+        tap.emit(.disabledByUserInput)
+        lifecycleSource.drainEnqueuedCallbacks()
+        try expect(
+            lifecycleTerminal.snapshot == [.inputEventTapCreationFailed],
+            "a second disabled callback is terminal and observable"
+        )
+        lifecycleSource.stop()
+        lifecycleSource.stop()
+        try expect(tap.stopCount == 1, "source stop is idempotent and waits for the backend stop barrier")
+
+        let selected = MacActiveWindowSelector.select(
+            frontmost: MacFrontmostApplication(processId: 501, application: "Slides", bundleIdentifier: "com.example.slides"),
+            windows: [
+                MacWindowSnapshot(processId: 999, windowId: 1, layer: 0, isOnscreen: true, title: "Other", bounds: NativeGlobalRect(x: 0, y: 0, width: 300, height: 200)),
+                MacWindowSnapshot(processId: 501, windowId: 77, layer: 0, isOnscreen: true, title: "Ink", bounds: NativeGlobalRect(x: 10, y: 10, width: 300, height: 200)),
+                MacWindowSnapshot(processId: 501, windowId: 3, layer: 1, isOnscreen: true, title: "Menu", bounds: NativeGlobalRect(x: 20, y: 20, width: 300, height: 200)),
+                MacWindowSnapshot(processId: 501, windowId: 4, layer: 0, isOnscreen: true, title: "Lesson", bounds: NativeGlobalRect(x: -800, y: 100, width: 700, height: 500)),
+            ],
+            excludingWindowIDs: [77],
+            hostUs: 2_000_000
+        )
+        try expect(selected?.windowId == 4 && selected?.title == "Lesson", "selector returns only the valid frontmost PID layer-zero non-overlay window")
+
+        let displays = FakeDisplayProvider([
+            NativeDisplayGeometry(displayId: 7, bounds: NativeGlobalRect(x: -1_440, y: -900, width: 1_440, height: 900), scale: 2),
+            NativeDisplayGeometry(displayId: 9, bounds: NativeGlobalRect(x: 0, y: 0, width: 1_920, height: 1_080), scale: 1),
+        ])
+        let geometryMapper = NativeInputTelemetryMapper(displays: { displays.activeDisplays() })
+        let verticalPoint = try geometryMapper.map(.cursor(hostUs: 2_100_000, x: -720, y: -450))
+        try expect(verticalPoint.payload["displayId"] == .integer(7), "negative vertical mixed-scale display geometry is retained")
+        try expect(verticalPoint.payload["scale"] == .number(2), "mixed Retina scale remains point metadata")
+
+        let runtimeClock = FakeClock()
+        runtimeClock.set(1_100_000)
+        let runtimeBackend = FakeTapBackend()
+        let runtimeWindows = FakeWindowProvider()
+        runtimeWindows.snapshot = NativeActiveWindowSnapshot(
+            hostUs: 0,
+            application: "Slides",
+            bundleIdentifier: "com.example.slides",
+            processId: 501,
+            windowId: 4,
+            title: "Lesson",
+            bounds: NativeGlobalRect(x: 0, y: 0, width: 1_000, height: 700)
+        )
+        let runtimeScheduler = ManualScheduler()
+        let runtimeControls = CaptureControlState()
+        let runtimePersistence = PersistedPayloads()
+        let runtimeTerminal = LockedBox<[MacNativeInputError]>([])
+        let runtimeDisplays = FakeDisplayProvider(displays.geometries)
+        let runtime = makeRuntime(
+            clock: runtimeClock,
+            backend: runtimeBackend,
+            displays: runtimeDisplays,
+            windows: runtimeWindows,
+            scheduler: runtimeScheduler,
+            controls: runtimeControls,
+            persistence: runtimePersistence,
+            terminal: runtimeTerminal
+        )
+        try runtime.start()
+        try expect(runtimeScheduler.intervalUs == 100_000, "runtime timer cadence is exactly 100ms")
+        try expect(runtimeWindows.callCount == 1, "start immediately samples the active window")
+        let runtimeTap = runtimeBackend.sessions[0]
+        runtimeClock.set(1_110_000)
+        runtimeTap.emit(.event(MacInputEventPrimitive(type: .mouseMoved, x: 20, y: 30)))
+        try expect(runtimeDisplays.callCount == 1 && runtimeWindows.callCount == 1 && runtimePersistence.payloads.isEmpty, "event callback performs no provider, window, or persistence work")
+        runtimeClock.set(1_200_000)
+        runtimeScheduler.fire()
+        try expect(runtimePersistence.payloads.count == 1, "100ms tick flushes one native batch instead of persisting per event")
+        try expect(runtimeWindows.callCount == 1, "active window is not sampled at 100ms")
+        runtimeClock.set(1_300_000)
+        runtimeScheduler.fire()
+        try expect(runtimeWindows.callCount == 2, "active window is sampled every 200ms")
+        try expect(runtimeWindows.exclusions.allSatisfy { $0 == [77, 88] }, "every window sample excludes capture overlays")
+
+        runtimeClock.set(1_350_000)
+        runtimeTap.emit(.event(MacInputEventPrimitive(type: .leftMouseDown, x: 40, y: 50)))
+        runtimeClock.set(1_400_000)
+        try runtime.pause()
+        try expect(runtimeTap.barrierCount == 1, "pause blocks callbacks and drains a callback barrier")
+        try expect(runtimeControls.snapshot().paused, "controls pause only after pre-pause input flushes")
+        runtimeClock.set(1_500_000)
+        runtimeTap.emit(.event(MacInputEventPrimitive(type: .leftMouseUp, x: 40, y: 50)))
+        runtimeClock.set(1_600_000)
+        runtime.resume()
+        runtimeClock.set(1_700_000)
+        runtimeTap.emit(.event(MacInputEventPrimitive(type: .scrollWheel, x: 40, y: 50, scrollDeltaY: 3)))
+        try runtime.stop()
+        try expect(runtimeScheduler.cancelCount == 1 && runtimeTap.stopCount == 1, "stop cancels timer, blocks callbacks, waits, and stops the tap")
+        try expect(runtimePersistence.payloads.count == 3, "pause and stop each perform a final bounded flush")
+        let allEvents = try runtimePersistence.payloads.flatMap { data -> [[String: Any]] in
+            let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            return object?["events"] as? [[String: Any]] ?? []
+        }
+        let runtimeEventTimes = allEvents.map { $0["atUs"] as? Int }
+        try expect(runtimeEventTimes == [100_000, 100_001, 110_000, 350_000, 500_000], "pause interval is compacted and paused callbacks never enter project time: \(runtimeEventTimes)")
+
+        let failingClock = FakeClock()
+        failingClock.set(1_100_000)
+        let failingBackend = FakeTapBackend()
+        let failingPersistence = PersistedPayloads()
+        failingPersistence.failNext()
+        let failingScheduler = ManualScheduler()
+        let failureTerminal = LockedBox<[MacNativeInputError]>([])
+        let failingRuntime = makeRuntime(
+            clock: failingClock,
+            backend: failingBackend,
+            displays: FakeDisplayProvider(displays.geometries),
+            windows: FakeWindowProvider(),
+            scheduler: failingScheduler,
+            controls: CaptureControlState(),
+            persistence: failingPersistence,
+            terminal: failureTerminal
+        )
+        try failingRuntime.start()
+        failingBackend.sessions[0].emit(.event(MacInputEventPrimitive(type: .leftMouseDown, x: 10, y: 10)))
+        failingClock.set(1_200_000)
+        failingScheduler.fire()
+        try expect(failureTerminal.snapshot == [.inputTelemetryWriteFailed], "timer write failure becomes a stable terminal session error")
+        try expect(failingRuntime.terminalFailure == .inputTelemetryWriteFailed, "terminal failure is queryable and cannot report healthy")
+        do {
+            try failingRuntime.stop()
+            throw TestFailure.expectation("terminal input failure must fail stop and prevent ready finalization")
+        } catch MacNativeInputError.inputTelemetryWriteFailed {
+            // Expected.
+        }
+
+        let startupCalls = LockedBox<[String]>([])
+        do {
+            try await NativeInputSessionStartup.start(
+                startMedia: { startupCalls.withValue { $0.append("media-start") } },
+                startInput: {
+                    startupCalls.withValue { $0.append("input-start") }
+                    throw MacNativeInputError.inputEventTapCreationFailed
+                },
+                stopMedia: { startupCalls.withValue { $0.append("media-stop") } },
+                markInterrupted: { startupCalls.withValue { $0.append("interrupted") } }
+            )
+            throw TestFailure.expectation("input startup failure must roll media back")
+        } catch MacNativeInputError.inputEventTapCreationFailed {
+            try expect(startupCalls.snapshot == ["media-start", "input-start", "media-stop", "interrupted"], "startup rollback stops started media and marks the project interrupted")
+        }
+
+        let oldManifestJSON = #"{"schemaVersion":1,"recordingId":"old","state":"interrupted","tracks":{},"capture":{"screen":{"width":1920,"height":1080,"framesPerSecond":30,"codec":"h264"},"capturesSystemAudio":false,"capturesMicrophone":false,"hardwareEncodingConfirmed":true,"initialAvailableBytes":100}}"#
+        let oldManifest = try JSONDecoder().decode(RecoverableRecordingManifest.self, from: Data(oldManifestJSON.utf8))
+        try expect(oldManifest.capture?.inputTelemetry == nil, "old manifests decode without native telemetry metadata")
+
+        let telemetryMetadata = NativeInputTelemetryCaptureMetadata(
+            requested: true,
+            available: false,
+            producerSchemaVersion: 1,
+            coordinateSpaceVersion: 1,
+            terminalError: MacNativeInputError.inputTelemetryBufferOverflow.rawValue,
+            capturedEventCount: 120,
+            coalescedEventCount: 80,
+            droppedEventCount: 2
+        )
+        let newMetadata = RecordingCaptureMetadata(
+            screen: CaptureRequest(width: 1_920, height: 1_080, framesPerSecond: 30, codec: .h264),
+            camera: nil,
+            capturesSystemAudio: false,
+            capturesMicrophone: false,
+            hardwareEncodingConfirmed: true,
+            initialAvailableBytes: 100,
+            finalPressure: nil,
+            inputTelemetry: telemetryMetadata
+        )
+        let roundTrip = try JSONDecoder().decode(RecordingCaptureMetadata.self, from: JSONEncoder().encode(newMetadata))
+        try expect(roundTrip.inputTelemetry == telemetryMetadata, "new telemetry capability and count metadata round-trips")
+        try expect(MacNativeInputError.inputMonitoringPermissionRequired.rawValue == "input_monitoring_permission_required", "permission error code is stable")
+        try expect(MacNativeInputError.inputEventTapCreationFailed.rawValue == "input_event_tap_creation_failed", "tap error code is stable")
+        try expect(MacNativeInputError.inputTelemetryBufferOverflow.rawValue == "input_telemetry_buffer_overflow", "overflow error code is stable")
+        try expect(MacNativeInputError.inputTelemetryWriteFailed.rawValue == "input_telemetry_write_failed", "write error code is stable")
+
+        print("Native input platform contract tests passed")
+    }
+}

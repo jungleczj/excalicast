@@ -231,6 +231,10 @@ public enum NativeInputTelemetryCoalescerError: Error, Equatable, Sendable {
     case unexpectedDrain
 }
 
+public struct NativeInputTelemetryCoalescerStatistics: Equatable, Sendable {
+    public let coalescedEventCount: Int64
+}
+
 public final class NativeInputTelemetryCoalescer: @unchecked Sendable {
     private let maximumLosslessEvents: Int
     private let maximumEventCount = NativeInputTelemetryBatchAccumulator.maximumEventCount
@@ -240,6 +244,7 @@ public final class NativeInputTelemetryCoalescer: @unchecked Sendable {
     private var losslessCount = 0
     private var inFlightEvents: [NativeMappedInputEvent]?
     private var deliveryIsActive = false
+    private var coalescedEventCount: Int64 = 0
 
     public init(maximumLosslessEvents: Int = 256) {
         self.maximumLosslessEvents = min(max(0, maximumLosslessEvents), NativeInputTelemetryBatchAccumulator.maximumEventCount)
@@ -249,7 +254,10 @@ public final class NativeInputTelemetryCoalescer: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         if event.kind == "cursor" {
-            if let cursorIndex { events.remove(at: cursorIndex) }
+            if let cursorIndex {
+                events.remove(at: cursorIndex)
+                coalescedEventCount += 1
+            }
             else if events.count >= maximumEventCount { throw NativeInputTelemetryCoalescerError.eventLimitExceeded }
             cursorIndex = events.count
             events.append(event)
@@ -260,6 +268,14 @@ public final class NativeInputTelemetryCoalescer: @unchecked Sendable {
         }
         events.append(event)
         losslessCount += 1
+    }
+
+    public var statistics: NativeInputTelemetryCoalescerStatistics {
+        lock.lock()
+        defer { lock.unlock() }
+        return NativeInputTelemetryCoalescerStatistics(
+            coalescedEventCount: coalescedEventCount
+        )
     }
 
     public func prepareDrain() throws -> [NativeMappedInputEvent] {
@@ -520,6 +536,10 @@ public final class NativeInputTelemetryMonitor: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return currentState
+    }
+
+    public var coalescerStatistics: NativeInputTelemetryCoalescerStatistics {
+        coalescer.statistics
     }
 
     public func start() throws {

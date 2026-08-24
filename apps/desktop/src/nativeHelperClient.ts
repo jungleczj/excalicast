@@ -137,6 +137,7 @@ export interface NativeCapturePermissions {
   screen: 'granted' | 'denied' | 'restricted' | 'not-determined';
   microphone: 'granted' | 'denied' | 'restricted' | 'not-determined';
   camera: 'granted' | 'denied' | 'restricted' | 'not-determined';
+  inputMonitoring: 'granted' | 'denied' | 'restricted' | 'not-determined';
 }
 
 export interface NativeCaptureDevice {

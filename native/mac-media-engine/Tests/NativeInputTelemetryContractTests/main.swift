@@ -210,6 +210,7 @@ struct NativeInputTelemetryContractTests {
         let coalesced = coalescer.drain()
         try expect(coalesced.map(\.kind) == ["cursor", "click"], "latest cursor is coalesced before lossless click")
         try expect(coalesced[0].payload["x"] == .number(3), "coalescer retains the latest cursor")
+        try expect(coalescer.statistics.coalescedEventCount == 2, "coalescer reports each replaced cursor for capture metadata")
 
         let inFlightCoalescer = NativeInputTelemetryCoalescer()
         let inFlightClick = try mapper.map(.button(hostUs: 13_000, x: 3, y: 3, button: .primary, phase: .down))

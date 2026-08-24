@@ -1,5 +1,6 @@
 import Foundation
 import MacMediaEngineCore
+import MacMediaEnginePlatform
 import AppKit
 @preconcurrency import AVFoundation
 import CoreGraphics
@@ -125,6 +126,7 @@ private struct CapturePermissions: Encodable, Sendable {
     let screen: CapturePermissionState
     let microphone: CapturePermissionState
     let camera: CapturePermissionState
+    let inputMonitoring: CapturePermissionState
 }
 
 private struct CaptureDisplaySource: Encodable, Sendable {
@@ -387,7 +389,7 @@ private actor HelperServer {
                 guard let captureEngine, await lifecycle.state == .recording else {
                     throw HelperServerError.missingCaptureParameters
                 }
-                captureEngine.pause()
+                try captureEngine.pause()
                 return success(command.id, state: await lifecycle.pause(), capability: nil)
             case "capture.resume.v1":
                 guard let captureEngine, await lifecycle.state == .paused else {
@@ -494,6 +496,8 @@ private actor HelperServer {
                     ? lastPressureSnapshot
                     : captureEngine?.pressureSnapshot() ?? lastPressureSnapshot
                 if let pressure { lastPressureSnapshot = pressure }
+                let activeInputFailure = captureEngine?.inputTerminalFailure()
+                let activeInputDescriptor = activeInputFailure.map(captureFailureDescriptor)
                 return Response(
                     id: command.id,
                     ok: true,
@@ -506,9 +510,9 @@ private actor HelperServer {
                     permissions: nil,
                     pressure: pressure,
                     manifest: nil,
-                    error: lastCaptureError,
-                    errorCode: lastCaptureErrorCode,
-                    errorTrack: lastCaptureErrorTrack
+                    error: activeInputDescriptor?.message ?? lastCaptureError,
+                    errorCode: activeInputDescriptor?.code ?? lastCaptureErrorCode,
+                    errorTrack: activeInputDescriptor?.track ?? lastCaptureErrorTrack
                 )
             default:
                 throw HelperServerError.unsupportedChannel(command.channel)
@@ -705,7 +709,8 @@ private actor HelperServer {
             permissions: CapturePermissions(
                 screen: CGPreflightScreenCaptureAccess() ? .granted : .notDetermined,
                 microphone: permissionState(for: .audio),
-                camera: permissionState(for: .video)
+                camera: permissionState(for: .video),
+                inputMonitoring: CGPreflightListenEventAccess() ? .granted : .notDetermined
             ),
             pressure: nil,
             manifest: nil,
@@ -763,6 +768,12 @@ private actor HelperServer {
 
     private func captureFailureDescriptor(_ error: Error) -> CaptureFailureDescriptor {
         switch error {
+        case let nativeInputError as MacNativeInputError:
+            return CaptureFailureDescriptor(
+                message: nativeInputFailureMessage(nativeInputError),
+                code: nativeInputError.rawValue,
+                track: .inputTelemetry
+            )
         case NativeCaptureError.mediaTrackNotReady(let track):
             return CaptureFailureDescriptor(
                 message: "The enabled \(track.rawValue) track did not deliver encodable media before startup timed out.",
@@ -805,6 +816,19 @@ private actor HelperServer {
                 code: "native_capture_failed",
                 track: nil
             )
+        }
+    }
+
+    private func nativeInputFailureMessage(_ error: MacNativeInputError) -> String {
+        switch error {
+        case .inputMonitoringPermissionRequired:
+            return "Input Monitoring permission is required before native teaching telemetry can start."
+        case .inputEventTapCreationFailed:
+            return "The macOS input event tap could not be created or became unavailable."
+        case .inputTelemetryBufferOverflow:
+            return "Native input telemetry exceeded its bounded lossless buffer."
+        case .inputTelemetryWriteFailed:
+            return "Native input telemetry could not be written to the recording project."
         }
     }
 }

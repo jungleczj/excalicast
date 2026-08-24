@@ -56,7 +56,7 @@ function nativeBridge(
       calls.push({ channel, payload });
       if (channel === DESKTOP_IPC_CHANNELS.captureSources) return sources;
       if (channel === DESKTOP_IPC_CHANNELS.capturePermissions) {
-        return { screen: 'granted', microphone: 'granted', camera: 'granted' };
+        return { screen: 'granted', microphone: 'granted', camera: 'granted', inputMonitoring: 'granted' };
       }
       if (channel === DESKTOP_IPC_CHANNELS.captureDevices) {
         return {

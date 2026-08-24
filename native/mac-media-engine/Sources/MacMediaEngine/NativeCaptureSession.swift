@@ -1,11 +1,12 @@
 import Foundation
 import MacMediaEngineCore
+import MacMediaEnginePlatform
 @preconcurrency import CoreMedia
 @preconcurrency import AVFoundation
 
 @available(macOS 13.0, *)
 final class NativeCaptureSession: @unchecked Sendable {
-    struct Configuration {
+    struct Configuration: Sendable {
         let recordingId: String
         let projectRoot: URL
         let source: CaptureSourceSelection
@@ -26,6 +27,7 @@ final class NativeCaptureSession: @unchecked Sendable {
     private var projectRoot: URL?
     private var timeline: RecordingTimeline?
     private var inputTelemetryCoordinator: InputTelemetryCoordinator?
+    private var inputRuntime: NativeInputCaptureRuntime?
     private var requiredTracks: Set<RecordingTrackKind> = [.screen]
     private var lastAvailableDiskBytes: Int64 = 0
     private let pressureLock = NSLock()
@@ -64,37 +66,102 @@ final class NativeCaptureSession: @unchecked Sendable {
             capturesMicrophone: configuration.captureMicrophone,
             hardwareEncodingConfirmed: report.hardwareEncodingConfirmed,
             initialAvailableBytes: availableBytes,
-            finalPressure: nil
+            finalPressure: nil,
+            inputTelemetry: NativeInputTelemetryCaptureMetadata(
+                requested: true,
+                available: false,
+                producerSchemaVersion: 1,
+                coordinateSpaceVersion: NativeInputTelemetryMapper.coordinateSpaceVersion,
+                terminalError: nil,
+                capturedEventCount: 0,
+                coalescedEventCount: 0,
+                droppedEventCount: 0
+            )
         ))
-        let hostTime = CMClockGetTime(CMClockGetHostTimeClock())
-            .convertScale(1_000_000, method: .roundTowardZero)
-            .value
+        let clock = CoreMediaHostClock()
+        let hostTime = clock.nowUs()
         let timeline = RecordingTimeline(originUs: hostTime)
+        let inputTelemetryCoordinator = InputTelemetryCoordinator(sessionId: configuration.recordingId)
+        let inputSink = NativeInputTelemetryCoordinatorSink(
+            sessionId: configuration.recordingId,
+            producerEpoch: UUID().uuidString,
+            controls: controls,
+            timeline: timeline,
+            coordinator: inputTelemetryCoordinator
+        ) { index, startUs, durationUs, data in
+            try store.appendFinalizedSegment(
+                track: .inputTelemetry,
+                index: index,
+                data: data,
+                startUs: startUs,
+                durationUs: durationUs
+            )
+        }
+        let inputRuntime = NativeInputCaptureRuntime(
+            source: MacNativeInputEventSource(backend: MacCGEventTapBackend(), clock: clock),
+            displays: MacDisplayGeometryProvider(),
+            windows: MacActiveWindowProvider(),
+            clock: clock,
+            controls: controls,
+            sink: inputSink,
+            excludedWindowIDs: Set(configuration.excludedWindowIDs)
+        ) { _, metadata in
+            try? store.updateInputTelemetry(metadata)
+            try? store.markInterrupted()
+        }
         let screen = ScreenCaptureEngine()
         let microphone = configuration.captureMicrophone ? MicrophoneCaptureEngine() : nil
         let camera = configuration.captureCamera ? CameraCaptureEngine() : nil
         do {
-            try await screen.start(
-                source: configuration.source,
-                request: configuration.request,
-                store: store,
-                timeline: timeline,
-                captureSystemAudio: configuration.captureSystemAudio,
-                controls: controls,
-                excludedWindowIDs: configuration.excludedWindowIDs
-            )
-            try microphone?.start(
-                deviceID: configuration.microphoneDeviceID,
-                store: store,
-                timeline: timeline,
-                controls: controls
-            )
-            try camera?.start(
-                deviceID: configuration.cameraDeviceID,
-                request: configuration.cameraRequest,
-                store: store,
-                timeline: timeline,
-                controls: controls
+            try await NativeInputSessionStartup.start(
+                startMedia: {
+                    try await screen.start(
+                        source: configuration.source,
+                        request: configuration.request,
+                        store: store,
+                        timeline: timeline,
+                        captureSystemAudio: configuration.captureSystemAudio,
+                        controls: self.controls,
+                        excludedWindowIDs: configuration.excludedWindowIDs
+                    )
+                    try microphone?.start(
+                        deviceID: configuration.microphoneDeviceID,
+                        store: store,
+                        timeline: timeline,
+                        controls: self.controls
+                    )
+                    try camera?.start(
+                        deviceID: configuration.cameraDeviceID,
+                        request: configuration.cameraRequest,
+                        store: store,
+                        timeline: timeline,
+                        controls: self.controls
+                    )
+                },
+                startInput: {
+                    try inputRuntime.start()
+                    do { try store.updateInputTelemetry(inputRuntime.captureMetadata) }
+                    catch { throw MacNativeInputError.inputTelemetryWriteFailed }
+                },
+                stopMedia: {
+                    try? camera?.stop()
+                    try? microphone?.stop()
+                    try? await screen.stop()
+                },
+                markInterrupted: {
+                    let error = inputRuntime.terminalFailure
+                    try? store.updateInputTelemetry(NativeInputTelemetryCaptureMetadata(
+                        requested: true,
+                        available: false,
+                        producerSchemaVersion: 1,
+                        coordinateSpaceVersion: NativeInputTelemetryMapper.coordinateSpaceVersion,
+                        terminalError: error?.rawValue,
+                        capturedEventCount: inputRuntime.captureMetadata.capturedEventCount,
+                        coalescedEventCount: inputRuntime.captureMetadata.coalescedEventCount,
+                        droppedEventCount: inputRuntime.captureMetadata.droppedEventCount
+                    ))
+                    try? store.markInterrupted()
+                }
             )
             self.store = store
             self.screen = screen
@@ -102,7 +169,8 @@ final class NativeCaptureSession: @unchecked Sendable {
             self.camera = camera
             self.projectRoot = configuration.projectRoot
             self.timeline = timeline
-            self.inputTelemetryCoordinator = InputTelemetryCoordinator(sessionId: configuration.recordingId)
+            self.inputTelemetryCoordinator = inputTelemetryCoordinator
+            self.inputRuntime = inputRuntime
             self.requiredTracks = CaptureTrackRequirementPolicy.requiredTracks(
                 capturesCamera: configuration.captureCamera,
                 capturesMicrophone: configuration.captureMicrophone
@@ -110,20 +178,28 @@ final class NativeCaptureSession: @unchecked Sendable {
             self.lastAvailableDiskBytes = availableBytes
             return report
         } catch {
-            try? camera?.stop()
-            try? microphone?.stop()
-            try? await screen.stop()
-            try? store.markInterrupted()
+            if let nativeInputError = error as? MacNativeInputError {
+                try? store.updateInputTelemetry(NativeInputTelemetryCaptureMetadata(
+                    requested: true,
+                    available: false,
+                    producerSchemaVersion: 1,
+                    coordinateSpaceVersion: NativeInputTelemetryMapper.coordinateSpaceVersion,
+                    terminalError: nativeInputError.rawValue,
+                    capturedEventCount: inputRuntime.captureMetadata.capturedEventCount,
+                    coalescedEventCount: inputRuntime.captureMetadata.coalescedEventCount,
+                    droppedEventCount: inputRuntime.captureMetadata.droppedEventCount
+                ))
+            }
             throw error
         }
     }
 
-    func pause() {
-        _ = controls.pause(atUs: currentHostTimeUs())
+    func pause() throws {
+        try inputRuntime?.pause()
     }
 
     func resume() {
-        _ = controls.resume(atUs: currentHostTimeUs())
+        inputRuntime?.resume()
     }
 
     func setMicrophoneMuted(_ muted: Bool) throws {
@@ -151,7 +227,12 @@ final class NativeCaptureSession: @unchecked Sendable {
     func stop(interrupted: Bool = false) async throws {
         let finalMediaPressure = screen?.pressureSnapshot()
         var firstError: Error?
-        do { try camera?.stop() } catch { firstError = error }
+        do { try inputRuntime?.stop() } catch { firstError = error }
+        if let inputRuntime, let store {
+            do { try store.updateInputTelemetry(inputRuntime.captureMetadata) }
+            catch { if firstError == nil { firstError = MacNativeInputError.inputTelemetryWriteFailed } }
+        }
+        do { try camera?.stop() } catch { if firstError == nil { firstError = error } }
         do { try microphone?.stop() } catch { if firstError == nil { firstError = error } }
         do { try await screen?.stop() } catch { if firstError == nil { firstError = error } }
         if let finalMediaPressure, let store {
@@ -173,6 +254,7 @@ final class NativeCaptureSession: @unchecked Sendable {
         projectRoot = nil
         timeline = nil
         inputTelemetryCoordinator = nil
+        inputRuntime = nil
         requiredTracks = [.screen]
         if let firstError { throw firstError }
     }
@@ -243,6 +325,10 @@ final class NativeCaptureSession: @unchecked Sendable {
             availableDiskBytes: availableBytes,
             store: store.pressureSnapshot()
         )
+    }
+
+    func inputTerminalFailure() -> MacNativeInputError? {
+        inputRuntime?.terminalFailure
     }
 
     private func currentAvailableDiskBytes() -> Int64 {

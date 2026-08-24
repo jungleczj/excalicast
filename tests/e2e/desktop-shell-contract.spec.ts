@@ -97,7 +97,7 @@ test('AI Camera starts native capture with independent system audio and recordin
     async invoke(channel, payload) {
       calls.push({ channel, payload });
       if (channel === 'capture.permissions.v1') {
-        return { screen: 'granted', microphone: 'granted', camera: 'granted' };
+        return { screen: 'granted', microphone: 'granted', camera: 'granted', inputMonitoring: 'granted' };
       }
       if (channel === 'capture.devices.v1') {
         return {
@@ -170,10 +170,10 @@ test('AI Camera requests only the missing native permissions before device acqui
     async invoke(channel, payload) {
       calls.push({ channel, payload });
       if (channel === 'capture.permissions.v1') {
-        return { screen: 'granted', microphone: 'not-determined', camera: 'not-determined' };
+        return { screen: 'granted', microphone: 'not-determined', camera: 'not-determined', inputMonitoring: 'granted' };
       }
       if (channel === 'capture.request-permissions.v1') {
-        return { screen: 'granted', microphone: 'granted', camera: 'granted' };
+        return { screen: 'granted', microphone: 'granted', camera: 'granted', inputMonitoring: 'granted' };
       }
       if (channel === 'capture.devices.v1') {
         return {
@@ -211,6 +211,48 @@ test('AI Camera requests only the missing native permissions before device acqui
     captureCamera: true,
   });
   await session.stop();
+});
+
+test('AI Camera reports Input Monitoring preflight without trying to request it', async () => {
+  const calls: Array<{ channel: string; payload?: unknown }> = [];
+  const bridge: DesktopCaptureBridge = {
+    async invoke(channel, payload) {
+      calls.push({ channel, payload });
+      if (channel === 'capture.permissions.v1') {
+        return {
+          screen: 'granted',
+          microphone: 'granted',
+          camera: 'granted',
+          inputMonitoring: 'not-determined',
+        };
+      }
+      throw new Error(`unexpected_channel:${channel}`);
+    },
+  };
+
+  await expect(startDesktopAiCameraSession({
+    bridge,
+    recordingId: 'input-monitoring-denied',
+    source: { kind: 'display', id: 1, width: 1920, height: 1080 },
+    captureSystemAudio: true,
+    captureMicrophone: false,
+    camera: { enabled: false },
+  })).rejects.toThrow('input_monitoring_permission_required');
+  expect(calls).toEqual([{ channel: 'capture.permissions.v1', payload: undefined }]);
+});
+
+test('AI Camera rejects incomplete native permission reports', async () => {
+  const bridge: DesktopCaptureBridge = {
+    invoke: async () => ({ screen: 'granted', microphone: 'granted', camera: 'granted' }),
+  };
+  await expect(startDesktopAiCameraSession({
+    bridge,
+    recordingId: 'invalid-permissions',
+    source: { kind: 'display', id: 1, width: 1920, height: 1080 },
+    captureSystemAudio: false,
+    captureMicrophone: false,
+    camera: { enabled: false },
+  })).rejects.toThrow('desktop_capture_permissions_invalid');
 });
 
 test('packaged desktop preload cannot navigate onto an untrusted web origin', () => {

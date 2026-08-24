@@ -302,6 +302,14 @@ public final class SegmentedRecordingStore: @unchecked Sendable {
         try checkpointUnlocked()
     }
 
+    public func updateInputTelemetry(_ telemetry: NativeInputTelemetryCaptureMetadata) throws {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard let capture = manifest.capture else { return }
+        manifest.capture = capture.withInputTelemetry(telemetry)
+        try checkpointUnlocked()
+    }
+
     private func checkpointUnlocked() throws {
         try encoder.encode(manifest).write(to: manifestURL, options: .atomic)
     }

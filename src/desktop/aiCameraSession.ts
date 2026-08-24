@@ -47,10 +47,13 @@ export interface DesktopAiCameraSession {
   stop(): Promise<void>;
 }
 
+type NativePermissionState = 'granted' | 'denied' | 'restricted' | 'not-determined';
+
 interface CapturePermissions {
-  screen: PermissionState;
-  microphone: PermissionState;
-  camera: PermissionState;
+  screen: NativePermissionState;
+  microphone: NativePermissionState;
+  camera: NativePermissionState;
+  inputMonitoring: NativePermissionState;
 }
 
 interface CaptureDevice {
@@ -66,7 +69,17 @@ interface CaptureDevices {
 
 function asPermissions(value: unknown): CapturePermissions {
   if (!value || typeof value !== 'object') throw new Error('desktop_capture_permissions_invalid');
-  return value as CapturePermissions;
+  const permissions = value as Record<string, unknown>;
+  const states = new Set<NativePermissionState>([
+    'granted', 'denied', 'restricted', 'not-determined',
+  ]);
+  if (!states.has(permissions.screen as NativePermissionState)
+    || !states.has(permissions.microphone as NativePermissionState)
+    || !states.has(permissions.camera as NativePermissionState)
+    || !states.has(permissions.inputMonitoring as NativePermissionState)) {
+    throw new Error('desktop_capture_permissions_invalid');
+  }
+  return permissions as unknown as CapturePermissions;
 }
 
 function asDevices(value: unknown): CaptureDevices {
@@ -109,6 +122,9 @@ export async function startDesktopAiCameraSession(
   input: DesktopAiCameraSessionInput,
 ): Promise<DesktopAiCameraSession> {
   let permissions = asPermissions(await input.bridge.invoke(DESKTOP_IPC_CHANNELS.capturePermissions));
+  if (permissions.inputMonitoring !== 'granted') {
+    throw new Error('input_monitoring_permission_required');
+  }
   const needsPermission = permissions.screen !== 'granted'
     || (input.captureMicrophone && permissions.microphone !== 'granted')
     || (input.camera.enabled && permissions.camera !== 'granted');
@@ -117,6 +133,9 @@ export async function startDesktopAiCameraSession(
       DESKTOP_IPC_CHANNELS.captureRequestPermissions,
       { captureMicrophone: input.captureMicrophone, captureCamera: input.camera.enabled },
     ));
+    if (permissions.inputMonitoring !== 'granted') {
+      throw new Error('input_monitoring_permission_required');
+    }
   }
   if (permissions.screen !== 'granted'
     || (input.captureMicrophone && permissions.microphone !== 'granted')
