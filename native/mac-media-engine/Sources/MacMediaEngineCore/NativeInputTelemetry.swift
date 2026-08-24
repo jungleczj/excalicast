@@ -515,13 +515,14 @@ public final class NativeInputTelemetryMonitor: @unchecked Sendable {
     private let windowMapper: NativeActiveWindowChangeMapper
     private let coalescer: NativeInputTelemetryCoalescer
     private let lock = NSLock()
-    private let windowSamplingLock = NSLock()
+    private let eventOrderingLock = NSLock()
     private let sourceLifecycleLock = NSRecursiveLock()
     private var currentState: NativeInputTelemetryMonitorState = .stopped
     private var pendingError: NativeInputTelemetryMonitorError?
     private var stopRequestedDuringStart = false
     private var restartAfterStop = false
     private var generation: UInt64 = 0
+    private var latestOfferedHostUs: Int64?
 
     public init(source: any NativeInputTelemetrySource, mapper: NativeInputTelemetryMapper, sink: any NativeInputTelemetrySink, activeWindowSnapshot: @escaping @Sendable () -> NativeActiveWindowSnapshot?) {
         self.source = source
@@ -637,10 +638,12 @@ public final class NativeInputTelemetryMonitor: @unchecked Sendable {
     }
 
     public func sampleActiveWindow(_ snapshot: NativeActiveWindowSnapshot) throws {
-        windowSamplingLock.lock()
-        defer { windowSamplingLock.unlock() }
+        eventOrderingLock.lock()
+        defer { eventOrderingLock.unlock() }
         guard state == .running else { return }
-        for event in windowMapper.mapChanged(snapshot) { try coalescer.offer(event) }
+        for event in windowMapper.mapChanged(snapshot) {
+            try offerInIngestionOrder(event)
+        }
     }
 
     public func flush() throws {
@@ -690,12 +693,20 @@ public final class NativeInputTelemetryMonitor: @unchecked Sendable {
         guard acceptsEvent, terminalError == nil else { return }
         do {
             let mapped = try mapper.map(event)
-            try coalescer.offer(mapped)
+            eventOrderingLock.lock()
+            defer { eventOrderingLock.unlock() }
+            try offerInIngestionOrder(mapped)
         } catch let error as NativeInputTelemetryMappingError {
             recordTerminal(.mappingFailed(error))
         } catch {
             recordTerminal(.losslessOverflow)
         }
+    }
+
+    private func offerInIngestionOrder(_ event: NativeMappedInputEvent) throws {
+        let hostUs = max(event.hostUs, latestOfferedHostUs ?? event.hostUs)
+        try coalescer.offer(NativeMappedInputEvent(hostUs: hostUs, kind: event.kind, payload: event.payload))
+        latestOfferedHostUs = hostUs
     }
 
     private func recordTerminal(_ error: NativeInputTelemetryMonitorError) {
@@ -715,7 +726,7 @@ public final class NativeInputTelemetryCoordinatorSink: NativeInputTelemetryBatc
     private let producerEpoch: String
     private let controls: CaptureControlState
     private let timeline: RecordingTimeline
-    private let coordinator: InputTelemetryCoordinator
+    private let coordinatorSession: InputTelemetryCoordinatorSession
     private let persist: @Sendable (_ index: Int, _ startUs: Int64, _ durationUs: Int64, _ data: Data) throws -> Void
     private let accumulator = NativeInputTelemetryBatchAccumulator()
     private let lock = NSLock()
@@ -729,7 +740,16 @@ public final class NativeInputTelemetryCoordinatorSink: NativeInputTelemetryBatc
         self.producerEpoch = producerEpoch
         self.controls = controls
         self.timeline = timeline
-        self.coordinator = coordinator
+        self.coordinatorSession = InputTelemetryCoordinatorSession(coordinator: coordinator)
+        self.persist = persist
+    }
+
+    public init(sessionId: String, producerEpoch: String, controls: CaptureControlState, timeline: RecordingTimeline, coordinatorSession: InputTelemetryCoordinatorSession, persist: @escaping @Sendable (_ index: Int, _ startUs: Int64, _ durationUs: Int64, _ data: Data) throws -> Void) {
+        self.sessionId = sessionId
+        self.producerEpoch = producerEpoch
+        self.controls = controls
+        self.timeline = timeline
+        self.coordinatorSession = coordinatorSession
         self.persist = persist
     }
 
@@ -820,7 +840,7 @@ public final class NativeInputTelemetryCoordinatorSink: NativeInputTelemetryBatc
             guard payload.count <= NativeInputTelemetryBatchAccumulator.maximumPayloadBytes else {
                 throw NativeInputTelemetryBatchAccumulatorError.losslessOverflow
             }
-            _ = try coordinator.append(payload: payload, projectAtUs: batch.firstHostUs, persist: persist)
+            _ = try coordinatorSession.append(payload: payload, projectAtUs: batch.firstHostUs, persist: persist)
             try accumulator.acknowledgePersisted(batch)
         } catch InputTelemetryBatchError.payloadTooLarge where batch.events.count > 1 {
             batch = try accumulator.splitInFlight(batch)

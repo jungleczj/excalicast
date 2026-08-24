@@ -395,7 +395,7 @@ private actor HelperServer {
                 guard let captureEngine, await lifecycle.state == .paused else {
                     throw HelperServerError.missingCaptureParameters
                 }
-                captureEngine.resume()
+                try captureEngine.resume()
                 return success(command.id, state: await lifecycle.resume(), capability: nil)
             case "capture.microphone-muted.v1":
                 guard let captureEngine, let muted = command.muted else {

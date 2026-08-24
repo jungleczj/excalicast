@@ -115,6 +115,47 @@ private final class ConcurrentWindowEvents: @unchecked Sendable {
     }
 }
 
+private final class ConcurrentAppendResults: @unchecked Sendable {
+    private let lock = NSLock()
+    private var capturedErrors: [String] = []
+    private var capturedSegmentIndexes: [Int] = []
+
+    func record(_ result: Result<InputTelemetryAcknowledgement, Error>) {
+        lock.lock()
+        switch result {
+        case let .success(acknowledgement):
+            if let segmentIndex = acknowledgement.segmentIndex { capturedSegmentIndexes.append(segmentIndex) }
+        case let .failure(error):
+            capturedErrors.append(String(describing: error))
+        }
+        lock.unlock()
+    }
+
+    func record(error: Error) {
+        lock.lock()
+        capturedErrors.append(String(describing: error))
+        lock.unlock()
+    }
+
+    func record(segmentIndex: Int) {
+        lock.lock()
+        capturedSegmentIndexes.append(segmentIndex)
+        lock.unlock()
+    }
+
+    var errors: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return capturedErrors
+    }
+
+    var segmentIndexes: [Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return capturedSegmentIndexes.sorted()
+    }
+}
+
 @main
 struct NativeInputTelemetryContractTests {
     static func main() throws {
@@ -360,6 +401,37 @@ struct NativeInputTelemetryContractTests {
         let orderedApplications = orderedWindowSink.events.compactMap { event -> String? in event.kind == "active-window" ? { if case let .string(value)? = event.payload["application"] { return value }; return nil }() : nil }
         try expect(orderedApplications == ["Alpha", "Beta"] || orderedApplications == ["Beta", "Alpha"], "window delivery order follows one serialized mapping order")
 
+        let samplingRaceSource = FakeSource()
+        let samplingRacePersisted = PersistedBatches()
+        let samplingRaceSink = NativeInputTelemetryCoordinatorSink(
+            sessionId: "sampling-race",
+            producerEpoch: "sampling-race-epoch",
+            controls: CaptureControlState(),
+            timeline: RecordingTimeline(originUs: 0),
+            coordinator: InputTelemetryCoordinator(sessionId: "sampling-race"),
+            persist: { _, _, _, data in try samplingRacePersisted.persist(data) }
+        )
+        let samplingRaceMonitor = NativeInputTelemetryMonitor(
+            source: samplingRaceSource,
+            mapper: mapper,
+            sink: samplingRaceSink,
+            activeWindowSnapshot: { nil }
+        )
+        try samplingRaceMonitor.start()
+        try samplingRaceMonitor.sampleActiveWindow(
+            NativeActiveWindowSnapshot(hostUs: 100, application: "Alpha", bundleIdentifier: "app.alpha", processId: 71, windowId: 81, title: "A", bounds: NativeGlobalRect(x: 10, y: 10, width: 100, height: 100))
+        )
+        try samplingRaceMonitor.flush()
+        samplingRaceSource.emit(.cursor(hostUs: 300, x: 30, y: 40))
+        try samplingRaceMonitor.sampleActiveWindow(
+            NativeActiveWindowSnapshot(hostUs: 200, application: "Alpha", bundleIdentifier: "app.alpha", processId: 71, windowId: 81, title: "A", bounds: NativeGlobalRect(x: 20, y: 20, width: 100, height: 100))
+        )
+        try samplingRaceMonitor.flush()
+        let samplingRacePayload = try JSONSerialization.jsonObject(with: samplingRacePersisted.batches[1]) as? [String: Any]
+        let samplingRaceEvents = samplingRacePayload?["events"] as? [[String: Any]]
+        try expect(samplingRaceEvents?.map { $0["kind"] as? String } == ["cursor", "window-bounds"], "a slow window sample remains ordered behind input accepted during enumeration")
+        try expect(samplingRaceEvents?.compactMap { $0["atUs"] as? Int } == [300, 301], "window race timestamps are normalized through the shared input order")
+
         let partialSource = FakeSource()
         let partialSink = FailingCapturingSink(failsAfterSuccessfulEvents: 1)
         let partialMonitor = NativeInputTelemetryMonitor(
@@ -478,6 +550,54 @@ struct NativeInputTelemetryContractTests {
         try expect(persisted.batches.count == 2, "monitor flush checkpoints its input through one coordinator batch")
         let monitoredPayload = try JSONSerialization.jsonObject(with: persisted.batches[1]) as? [String: Any]
         try expect((monitoredPayload?["events"] as? [[String: Any]])?.count == 2, "monitor batch retains cursor and click together")
+
+        let sharedCoordinator = InputTelemetryCoordinatorSession(
+            coordinator: InputTelemetryCoordinator(sessionId: "shared-session")
+        )
+        let rendererPayload = Data(#"{"schemaVersion":1,"events":[{"schemaVersion":1,"sessionId":"shared-session","producerId":"main-whiteboard","producerEpoch":"renderer-shared","producerSequence":0,"surfaceId":"whiteboard","kind":"click","payload":{"x":1,"y":2}}]}"#.utf8)
+        let firstPersistenceEntered = DispatchSemaphore(value: 0)
+        let releaseFirstPersistence = DispatchSemaphore(value: 0)
+        let secondAppendStarted = DispatchSemaphore(value: 0)
+        let secondAppendFinished = DispatchSemaphore(value: 0)
+        let concurrentAppendGroup = DispatchGroup()
+        let concurrentAppendResults = ConcurrentAppendResults()
+        let sharedNativeSink = NativeInputTelemetryCoordinatorSink(
+            sessionId: "shared-session",
+            producerEpoch: "native-shared",
+            controls: CaptureControlState(),
+            timeline: RecordingTimeline(originUs: 0),
+            coordinatorSession: sharedCoordinator,
+            persist: { index, _, _, _ in
+                firstPersistenceEntered.signal()
+                releaseFirstPersistence.wait()
+                concurrentAppendResults.record(segmentIndex: index)
+            }
+        )
+        try sharedNativeSink.consume(NativeMappedInputEvent(hostUs: 100, kind: "cursor", payload: ["x": .number(1), "y": .number(2)]))
+        concurrentAppendGroup.enter()
+        DispatchQueue.global().async {
+            do { try sharedNativeSink.flush() }
+            catch { concurrentAppendResults.record(error: error) }
+            concurrentAppendGroup.leave()
+        }
+        firstPersistenceEntered.wait()
+        concurrentAppendGroup.enter()
+        DispatchQueue.global().async {
+            secondAppendStarted.signal()
+            let result = Result {
+                try sharedCoordinator.append(payload: rendererPayload, projectAtUs: 100) { _, _, _, _ in }
+            }
+            concurrentAppendResults.record(result)
+            secondAppendFinished.signal()
+            concurrentAppendGroup.leave()
+        }
+        secondAppendStarted.wait()
+        let rendererReturnedWhileNativeWasPersisting = secondAppendFinished.wait(timeout: .now() + .milliseconds(50)) == .success
+        releaseFirstPersistence.signal()
+        concurrentAppendGroup.wait()
+        try expect(!rendererReturnedWhileNativeWasPersisting, "renderer telemetry waits for an overlapping native persistence checkpoint")
+        try expect(concurrentAppendResults.errors.isEmpty, "shared telemetry persistence never leaks coordinator busy as a producer failure")
+        try expect(concurrentAppendResults.segmentIndexes == [0, 1], "native and renderer producers share one serialized segment order")
 
         batchedSource.emit(.scroll(hostUs: 1_800_000, x: 20, y: 30, deltaX: 0, deltaY: 2))
         batchedSource.emit(.button(hostUs: 1_800_001, x: 20, y: 30, button: .primary, phase: .up))

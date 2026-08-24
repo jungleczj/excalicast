@@ -62,6 +62,12 @@ public struct NativeInputSourceStatistics: Equatable, Sendable {
     public let capturedEventCount: Int64
     public let coalescedEventCount: Int64
     public let droppedEventCount: Int64
+
+    public init(capturedEventCount: Int64, coalescedEventCount: Int64, droppedEventCount: Int64) {
+        self.capturedEventCount = capturedEventCount
+        self.coalescedEventCount = coalescedEventCount
+        self.droppedEventCount = droppedEventCount
+    }
 }
 
 public protocol NativeInputRuntimeSource: NativeInputTelemetrySource {
@@ -108,6 +114,8 @@ public final class MacNativeInputEventSource: NativeInputRuntimeSource, @uncheck
     private var pendingEvents: [QueuedEvent] = []
     private var pendingCursorIndex: Int?
     private var drainScheduled = false
+    private var pendingDisabledNotifications = 0
+    private var disabledDrainScheduled = false
     private var capturedEventCount: Int64 = 0
     private var coalescedEventCount: Int64 = 0
     private var droppedEventCount: Int64 = 0
@@ -137,6 +145,8 @@ public final class MacNativeInputEventSource: NativeInputRuntimeSource, @uncheck
         pendingEvents.removeAll(keepingCapacity: true)
         pendingCursorIndex = nil
         drainScheduled = false
+        pendingDisabledNotifications = 0
+        disabledDrainScheduled = false
         lock.unlock()
 
         guard backend.preflightListenEventAccess() else {
@@ -219,9 +229,41 @@ public final class MacNativeInputEventSource: NativeInputRuntimeSource, @uncheck
     private func receive(_ message: MacInputEventTapMessage) {
         switch message {
         case .disabledByTimeout, .disabledByUserInput:
-            handleDisabledTap()
+            enqueueDisabledTapNotification()
         case let .event(primitive):
             enqueue(primitive)
+        }
+    }
+
+    private func enqueueDisabledTapNotification() {
+        lock.lock()
+        guard currentTerminalFailure == nil, state == .starting || state == .running else {
+            lock.unlock()
+            return
+        }
+        // Two notifications are sufficient to preserve the bounded policy:
+        // first re-enable, second terminal failure. Further disabled callbacks
+        // cannot add information and never grow the callback queue.
+        pendingDisabledNotifications = min(2, pendingDisabledNotifications + 1)
+        let shouldSchedule = !disabledDrainScheduled
+        disabledDrainScheduled = true
+        lock.unlock()
+        if shouldSchedule {
+            processingQueue.async { [weak self] in self?.drainDisabledTapNotifications() }
+        }
+    }
+
+    private func drainDisabledTapNotifications() {
+        while true {
+            lock.lock()
+            guard pendingDisabledNotifications > 0 else {
+                disabledDrainScheduled = false
+                lock.unlock()
+                return
+            }
+            pendingDisabledNotifications -= 1
+            lock.unlock()
+            handleDisabledTap()
         }
     }
 
@@ -292,10 +334,13 @@ public final class MacNativeInputEventSource: NativeInputRuntimeSource, @uncheck
             return
         }
         lock.unlock()
-        recordTerminal(.inputEventTapCreationFailed)
+        recordTerminal(.inputEventTapCreationFailed, notificationIsAlreadyEnqueued: true)
     }
 
-    private func recordTerminal(_ error: MacNativeInputError) {
+    private func recordTerminal(
+        _ error: MacNativeInputError,
+        notificationIsAlreadyEnqueued: Bool = false
+    ) {
         lock.lock()
         guard currentTerminalFailure == nil else { lock.unlock(); return }
         currentTerminalFailure = error
@@ -303,7 +348,8 @@ public final class MacNativeInputEventSource: NativeInputRuntimeSource, @uncheck
         let callback = terminalHandler
         lock.unlock()
         if let callback {
-            processingQueue.async { callback(error) }
+            if notificationIsAlreadyEnqueued { callback(error) }
+            else { processingQueue.async { callback(error) } }
         }
     }
 

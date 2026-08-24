@@ -35,7 +35,10 @@ private final class FakeClock: NativeInputHostClock, @unchecked Sendable {
 
 private final class FakeTapSession: MacInputEventTapSession, @unchecked Sendable {
     private let handler: @Sendable (MacInputEventTapMessage) -> Void
+    private let callbackThreadLock = NSLock()
+    private var callbackThread: mach_port_t?
     private(set) var reenableCount = 0
+    private(set) var reenabledOnCallbackThread = false
     private(set) var barrierCount = 0
     private(set) var stopCount = 0
 
@@ -43,8 +46,33 @@ private final class FakeTapSession: MacInputEventTapSession, @unchecked Sendable
         self.handler = handler
     }
 
-    func emit(_ message: MacInputEventTapMessage) { handler(message) }
-    func reenable() { reenableCount += 1 }
+    func emit(_ message: MacInputEventTapMessage) {
+        guard case .disabledByTimeout = message else {
+            if case .disabledByUserInput = message {
+                emitDisabled(message)
+            } else {
+                handler(message)
+            }
+            return
+        }
+        emitDisabled(message)
+    }
+
+    private func emitDisabled(_ message: MacInputEventTapMessage) {
+        callbackThreadLock.lock()
+        callbackThread = pthread_mach_thread_np(pthread_self())
+        callbackThreadLock.unlock()
+        handler(message)
+        callbackThreadLock.lock()
+        callbackThread = nil
+        callbackThreadLock.unlock()
+    }
+    func reenable() {
+        callbackThreadLock.lock()
+        reenabledOnCallbackThread = callbackThread == pthread_mach_thread_np(pthread_self())
+        callbackThreadLock.unlock()
+        reenableCount += 1
+    }
     func callbackBarrier() { barrierCount += 1 }
     func stop() { stopCount += 1 }
 }
@@ -97,6 +125,25 @@ private final class FakeWindowProvider: NativeInputWindowProviding, @unchecked S
             title: snapshot.title,
             bounds: snapshot.bounds
         )
+    }
+}
+
+private final class TerminalRuntimeSource: NativeInputRuntimeSource, @unchecked Sendable {
+    private var handler: (@Sendable (NativeRawInputEvent) -> Void)?
+    private var terminalHandler: (@Sendable (MacNativeInputError) -> Void)?
+    private(set) var terminalFailure: MacNativeInputError?
+    let statistics = NativeInputSourceStatistics(capturedEventCount: 0, coalescedEventCount: 0, droppedEventCount: 0)
+
+    func start(handler: @escaping @Sendable (NativeRawInputEvent) -> Void) throws { self.handler = handler }
+    func stop() { handler = nil }
+    func setTerminalHandler(_ handler: @escaping @Sendable (MacNativeInputError) -> Void) { terminalHandler = handler }
+    func drainEnqueuedCallbacks() {}
+    func suspendCallbacksAndWait() {}
+    func resumeCallbacks() {}
+
+    func fail(_ error: MacNativeInputError) {
+        terminalFailure = error
+        terminalHandler?(error)
     }
 }
 
@@ -264,7 +311,8 @@ private struct NativeInputPlatformContractTests {
         } else { throw TestFailure.expectation("scroll did not map to scroll input") }
 
         tap.emit(.disabledByTimeout)
-        try expect(tap.reenableCount == 1 && lifecycleTerminal.snapshot.isEmpty, "first disabled callback explicitly re-enables once")
+        lifecycleSource.drainEnqueuedCallbacks()
+        try expect(tap.reenableCount == 1 && !tap.reenabledOnCallbackThread && lifecycleTerminal.snapshot.isEmpty, "first disabled callback enqueues exactly one off-callback re-enable")
         tap.emit(.disabledByUserInput)
         lifecycleSource.drainEnqueuedCallbacks()
         try expect(
@@ -350,7 +398,7 @@ private struct NativeInputPlatformContractTests {
         runtimeClock.set(1_500_000)
         runtimeTap.emit(.event(MacInputEventPrimitive(type: .leftMouseUp, x: 40, y: 50)))
         runtimeClock.set(1_600_000)
-        runtime.resume()
+        try runtime.resume()
         runtimeClock.set(1_700_000)
         runtimeTap.emit(.event(MacInputEventPrimitive(type: .scrollWheel, x: 40, y: 50, scrollDeltaY: 3)))
         try runtime.stop()
@@ -393,6 +441,72 @@ private struct NativeInputPlatformContractTests {
             // Expected.
         }
 
+        let finalFlushClock = FakeClock()
+        finalFlushClock.set(1_100_000)
+        let finalFlushBackend = FakeTapBackend()
+        let finalFlushPersistence = PersistedPayloads()
+        let finalFlushTerminal = LockedBox<[MacNativeInputError]>([])
+        let finalFlushScheduler = ManualScheduler()
+        let finalFlushRuntime = makeRuntime(
+            clock: finalFlushClock,
+            backend: finalFlushBackend,
+            displays: FakeDisplayProvider(displays.geometries),
+            windows: FakeWindowProvider(),
+            scheduler: finalFlushScheduler,
+            controls: CaptureControlState(),
+            persistence: finalFlushPersistence,
+            terminal: finalFlushTerminal
+        )
+        try finalFlushRuntime.start()
+        finalFlushBackend.sessions[0].emit(.event(MacInputEventPrimitive(type: .leftMouseDown, x: 10, y: 10)))
+        finalFlushPersistence.failNext()
+        do {
+            try finalFlushRuntime.stop()
+            throw TestFailure.expectation("final flush persistence failure must fail stop")
+        } catch MacNativeInputError.inputTelemetryWriteFailed {
+            // Expected.
+        }
+        try expect(finalFlushTerminal.snapshot == [.inputTelemetryWriteFailed], "final flush failure is recorded through the terminal callback")
+        try expect(finalFlushRuntime.terminalFailure == .inputTelemetryWriteFailed, "final flush failure remains queryable after stop")
+        try expect(!finalFlushRuntime.captureMetadata.available && finalFlushRuntime.captureMetadata.terminalError == MacNativeInputError.inputTelemetryWriteFailed.rawValue, "final flush metadata cannot report native telemetry healthy")
+
+        let terminalResumeSource = TerminalRuntimeSource()
+        let terminalResumeControls = CaptureControlState()
+        let terminalResumeClock = FakeClock()
+        terminalResumeClock.set(2_000_000)
+        let terminalResumeSink = NativeInputTelemetryCoordinatorSink(
+            sessionId: "terminal-resume",
+            producerEpoch: "terminal-resume-epoch",
+            controls: terminalResumeControls,
+            timeline: RecordingTimeline(originUs: 2_000_000),
+            coordinator: InputTelemetryCoordinator(sessionId: "terminal-resume"),
+            persist: { _, _, _, _ in }
+        )
+        let terminalResumeScheduler = ManualScheduler()
+        let terminalResumeRuntime = NativeInputCaptureRuntime(
+            source: terminalResumeSource,
+            displays: FakeDisplayProvider(displays.geometries),
+            windows: FakeWindowProvider(),
+            clock: terminalResumeClock,
+            controls: terminalResumeControls,
+            sink: terminalResumeSink,
+            excludedWindowIDs: [],
+            scheduling: terminalResumeScheduler.scheduling,
+            onTerminal: { _, _ in }
+        )
+        try terminalResumeRuntime.start()
+        terminalResumeClock.set(2_100_000)
+        try terminalResumeRuntime.pause()
+        terminalResumeSource.fail(.inputEventTapCreationFailed)
+        do {
+            try terminalResumeRuntime.resume()
+            throw TestFailure.expectation("resume must surface an existing terminal native-input failure")
+        } catch MacNativeInputError.inputEventTapCreationFailed {
+            // Expected.
+        }
+        try expect(terminalResumeControls.snapshot().paused, "terminal resume keeps shared capture controls paused")
+        try? terminalResumeRuntime.stop()
+
         let startupCalls = LockedBox<[String]>([])
         do {
             try await NativeInputSessionStartup.start(
@@ -401,12 +515,13 @@ private struct NativeInputPlatformContractTests {
                     startupCalls.withValue { $0.append("input-start") }
                     throw MacNativeInputError.inputEventTapCreationFailed
                 },
+                stopInput: { startupCalls.withValue { $0.append("input-stop") } },
                 stopMedia: { startupCalls.withValue { $0.append("media-stop") } },
                 markInterrupted: { startupCalls.withValue { $0.append("interrupted") } }
             )
             throw TestFailure.expectation("input startup failure must roll media back")
         } catch MacNativeInputError.inputEventTapCreationFailed {
-            try expect(startupCalls.snapshot == ["media-start", "input-start", "media-stop", "interrupted"], "startup rollback stops started media and marks the project interrupted")
+            try expect(startupCalls.snapshot == ["media-start", "input-start", "input-stop", "media-stop", "interrupted"], "startup rollback stops input before media and marks the project interrupted")
         }
 
         let oldManifestJSON = #"{"schemaVersion":1,"recordingId":"old","state":"interrupted","tracks":{},"capture":{"screen":{"width":1920,"height":1080,"framesPerSecond":30,"codec":"h264"},"capturesSystemAudio":false,"capturesMicrophone":false,"hardwareEncodingConfirmed":true,"initialAvailableBytes":100}}"#

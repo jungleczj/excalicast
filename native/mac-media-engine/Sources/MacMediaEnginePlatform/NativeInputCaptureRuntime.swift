@@ -115,9 +115,18 @@ public final class NativeInputCaptureRuntime: @unchecked Sendable {
             mapper: mapper,
             sink: sink,
             activeWindowSnapshot: {
-                windows.activeWindow(
+                guard let snapshot = windows.activeWindow(
                     hostUs: clock.nowUs(),
                     excludingWindowIDs: excludedWindowIDs
+                ) else { return nil }
+                return NativeActiveWindowSnapshot(
+                    hostUs: max(snapshot.hostUs, clock.nowUs()),
+                    application: snapshot.application,
+                    bundleIdentifier: snapshot.bundleIdentifier,
+                    processId: snapshot.processId,
+                    windowId: snapshot.windowId,
+                    title: snapshot.title,
+                    bounds: snapshot.bounds
                 )
             }
         )
@@ -176,11 +185,17 @@ public final class NativeInputCaptureRuntime: @unchecked Sendable {
         lock.unlock()
     }
 
-    public func resume() {
+    public func resume() throws {
         lifecycleLock.lock()
         defer { lifecycleLock.unlock() }
         lock.lock()
-        guard state == .paused, currentTerminalFailure == nil else { lock.unlock(); return }
+        let terminal = currentTerminalFailure ?? source.terminalFailure
+        if let terminal {
+            lock.unlock()
+            recordTerminal(terminal)
+            throw terminal
+        }
+        guard state == .paused else { lock.unlock(); return }
         lock.unlock()
         let resumeHostUs = clock.nowUs()
         _ = controls.resume(atUs: resumeHostUs)
@@ -211,6 +226,7 @@ public final class NativeInputCaptureRuntime: @unchecked Sendable {
         var flushFailure: MacNativeInputError?
         do { try monitor.flush() }
         catch { flushFailure = stableError(for: error) }
+        if let flushFailure { recordTerminal(flushFailure) }
 
         lock.lock()
         state = .stopped
@@ -292,6 +308,7 @@ public enum NativeInputSessionStartup {
     public static func start(
         startMedia: @escaping @Sendable () async throws -> Void,
         startInput: @escaping @Sendable () throws -> Void,
+        stopInput: @escaping @Sendable () -> Void,
         stopMedia: @escaping @Sendable () async -> Void,
         markInterrupted: @escaping @Sendable () -> Void
     ) async throws {
@@ -299,6 +316,7 @@ public enum NativeInputSessionStartup {
             try await startMedia()
             try startInput()
         } catch {
+            stopInput()
             await stopMedia()
             markInterrupted()
             throw error

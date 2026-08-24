@@ -287,3 +287,32 @@ public final class InputTelemetryCoordinator: @unchecked Sendable {
         return false
     }
 }
+
+/// Serializes every producer that shares one recording's telemetry coordinator.
+/// Persistence remains outside `InputTelemetryCoordinator`'s state lock, so this
+/// session-level gate prevents a normal native/renderer overlap from surfacing as
+/// `InputTelemetryBatchError.busy`.
+public final class InputTelemetryCoordinatorSession: @unchecked Sendable {
+    private let coordinator: InputTelemetryCoordinator
+    private let accessLock = NSLock()
+
+    public init(coordinator: InputTelemetryCoordinator) {
+        self.coordinator = coordinator
+    }
+
+    public func append(
+        payload: Data,
+        projectAtUs: Int64,
+        persist: (_ index: Int, _ startUs: Int64, _ durationUs: Int64, _ data: Data) throws -> Void
+    ) throws -> InputTelemetryAcknowledgement {
+        accessLock.lock()
+        defer { accessLock.unlock() }
+        return try coordinator.append(payload: payload, projectAtUs: projectAtUs, persist: persist)
+    }
+
+    public func acknowledgeDropped(payload: Data) throws -> InputTelemetryAcknowledgement {
+        accessLock.lock()
+        defer { accessLock.unlock() }
+        return try coordinator.acknowledgeDropped(payload: payload)
+    }
+}

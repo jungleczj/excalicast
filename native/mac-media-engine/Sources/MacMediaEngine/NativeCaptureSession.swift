@@ -26,7 +26,7 @@ final class NativeCaptureSession: @unchecked Sendable {
     private var camera: CameraCaptureEngine?
     private var projectRoot: URL?
     private var timeline: RecordingTimeline?
-    private var inputTelemetryCoordinator: InputTelemetryCoordinator?
+    private var inputTelemetryCoordinator: InputTelemetryCoordinatorSession?
     private var inputRuntime: NativeInputCaptureRuntime?
     private var requiredTracks: Set<RecordingTrackKind> = [.screen]
     private var lastAvailableDiskBytes: Int64 = 0
@@ -81,13 +81,15 @@ final class NativeCaptureSession: @unchecked Sendable {
         let clock = CoreMediaHostClock()
         let hostTime = clock.nowUs()
         let timeline = RecordingTimeline(originUs: hostTime)
-        let inputTelemetryCoordinator = InputTelemetryCoordinator(sessionId: configuration.recordingId)
+        let inputTelemetryCoordinator = InputTelemetryCoordinatorSession(
+            coordinator: InputTelemetryCoordinator(sessionId: configuration.recordingId)
+        )
         let inputSink = NativeInputTelemetryCoordinatorSink(
             sessionId: configuration.recordingId,
             producerEpoch: UUID().uuidString,
             controls: controls,
             timeline: timeline,
-            coordinator: inputTelemetryCoordinator
+            coordinatorSession: inputTelemetryCoordinator
         ) { index, startUs, durationUs, data in
             try store.appendFinalizedSegment(
                 track: .inputTelemetry,
@@ -143,6 +145,7 @@ final class NativeCaptureSession: @unchecked Sendable {
                     do { try store.updateInputTelemetry(inputRuntime.captureMetadata) }
                     catch { throw MacNativeInputError.inputTelemetryWriteFailed }
                 },
+                stopInput: { try? inputRuntime.stop() },
                 stopMedia: {
                     try? camera?.stop()
                     try? microphone?.stop()
@@ -198,8 +201,8 @@ final class NativeCaptureSession: @unchecked Sendable {
         try inputRuntime?.pause()
     }
 
-    func resume() {
-        inputRuntime?.resume()
+    func resume() throws {
+        try inputRuntime?.resume()
     }
 
     func setMicrophoneMuted(_ muted: Bool) throws {
