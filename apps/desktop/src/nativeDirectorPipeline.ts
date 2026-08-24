@@ -231,6 +231,10 @@ interface EventAdaptationState {
 }
 
 function validateNativeWirePayload(value: Record<string, unknown>, adaptation: EventAdaptationState): void {
+  if (value.surfaceId !== 'macos-global'
+    || !['active-window', 'window-bounds', 'cursor', 'click', 'scroll'].includes(value.kind as string)) {
+    fail('director_native_event_schema_invalid');
+  }
   switch (value.kind) {
     case 'active-window':
       if (typeof value.application !== 'string' || value.application.length === 0
@@ -262,8 +266,8 @@ function validateNativeWirePayload(value: Record<string, unknown>, adaptation: E
         fail('director_native_event_schema_invalid');
       }
       if (value.kind === 'click'
-        && !['primary', 'secondary', 'middle', 'other'].includes(value.button as string)
-        || value.kind === 'click' && !['down', 'up'].includes(value.phase as string)) {
+        && (!['primary', 'secondary', 'middle', 'other'].includes(value.button as string)
+          || !['down', 'up'].includes(value.phase as string))) {
         fail('director_native_event_schema_invalid');
       }
       if (value.kind === 'scroll' && (!finite(value.deltaX) || !finite(value.deltaY))) {
@@ -271,7 +275,7 @@ function validateNativeWirePayload(value: Record<string, unknown>, adaptation: E
       }
       return;
     default:
-      return;
+      fail('director_native_event_schema_invalid');
   }
 }
 

@@ -356,6 +356,42 @@ test('strictly validates native wire payload metadata while preserving a valid p
     }));
   }
 
+  const invalidWireIdentityCases: Array<{ name: string; event: EventInput }> = [
+    {
+      name: 'native producer cannot impersonate a whiteboard event kind',
+      event: {
+        atUs: 1_000,
+        producerId: 'native-input',
+        producerEpoch: 'native-a',
+        producerSequence: 0,
+        surfaceId: 'macos-global',
+        kind: 'ink',
+        payload: { operation: 'stroke', payload: { bbox: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 } } },
+      },
+    },
+    {
+      name: 'native pointer must use the Swift macos-global surface',
+      event: {
+        atUs: 1_000,
+        producerId: 'native-input',
+        producerEpoch: 'native-a',
+        producerSequence: 0,
+        surfaceId: 'whiteboard-1',
+        kind: 'cursor',
+        payload: validCursor,
+      },
+    },
+  ];
+  for (const fixture of invalidWireIdentityCases) {
+    const root = await project();
+    await writeRecording(root, 'lesson-native', [[fixture.event]]);
+    await expect(runNativeDirectorArtifactPipeline(request(root)), fixture.name).resolves.toEqual(expect.objectContaining({
+      status: 'failed',
+      retryable: false,
+      code: 'director_native_event_schema_invalid',
+    }));
+  }
+
   const validRoot = await project();
   await writeRecording(validRoot, 'lesson-native', [[
     { atUs: 1_000, producerId: 'native-input', producerEpoch: 'native-a', producerSequence: 0, surfaceId: 'macos-global', kind: 'active-window', payload: { application: 'Safari', bundleIdentifier: 'com.apple.Safari', processId: 41, windowId: 9, title: 'Lesson' } },
