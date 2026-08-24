@@ -189,26 +189,27 @@ public final class NativeInputCaptureRuntime: @unchecked Sendable {
         lifecycleLock.lock()
         defer { lifecycleLock.unlock() }
         lock.lock()
-        let terminal = currentTerminalFailure ?? source.terminalFailure
+        let recordedTerminal = currentTerminalFailure
+        let isPaused = state == .paused
+        lock.unlock()
+        let terminal = recordedTerminal ?? source.terminalFailure
         if let terminal {
-            lock.unlock()
             recordTerminal(terminal)
             throw terminal
         }
-        guard state == .paused else { lock.unlock(); return }
-        lock.unlock()
+        guard isPaused else { return }
         let resumeHostUs = clock.nowUs()
-        _ = controls.resume(atUs: resumeHostUs)
-        lock.lock()
-        state = .running
-        lock.unlock()
         do {
-            try source.commitCallbackResume()
+            try source.commitCallbackResume { [self] in
+                // The source invokes this non-fallible commit while its
+                // terminal decision is locked. Runtime state is visible
+                // before media controls reopen; source callbacks open last.
+                lock.lock()
+                state = .running
+                lock.unlock()
+                _ = controls.resume(atUs: resumeHostUs)
+            }
         } catch {
-            _ = controls.pause(atUs: resumeHostUs)
-            lock.lock()
-            state = .paused
-            lock.unlock()
             let stable = stableError(for: error)
             recordTerminal(stable)
             throw stable
@@ -240,15 +241,17 @@ public final class NativeInputCaptureRuntime: @unchecked Sendable {
 
         lock.lock()
         state = .stopped
-        let terminal = currentTerminalFailure ?? source.terminalFailure ?? flushFailure
+        let recordedTerminal = currentTerminalFailure
         lock.unlock()
+        let terminal = recordedTerminal ?? source.terminalFailure ?? flushFailure
         if let terminal { throw terminal }
     }
 
     public var terminalFailure: MacNativeInputError? {
         lock.lock()
-        defer { lock.unlock() }
-        return currentTerminalFailure ?? source.terminalFailure
+        let recordedTerminal = currentTerminalFailure
+        lock.unlock()
+        return recordedTerminal ?? source.terminalFailure
     }
 
     public var captureMetadata: NativeInputTelemetryCaptureMetadata {

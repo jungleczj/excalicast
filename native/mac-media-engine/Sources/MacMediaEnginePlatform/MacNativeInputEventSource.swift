@@ -74,7 +74,7 @@ public protocol NativeInputRuntimeSource: NativeInputTelemetrySource {
     func setTerminalHandler(_ handler: @escaping @Sendable (MacNativeInputError) -> Void)
     func drainEnqueuedCallbacks()
     func suspendCallbacksAndWait()
-    func commitCallbackResume() throws
+    func commitCallbackResume(_ commit: @Sendable () -> Void) throws
     var terminalFailure: MacNativeInputError? { get }
     var statistics: NativeInputSourceStatistics { get }
 }
@@ -187,14 +187,20 @@ public final class MacNativeInputEventSource: NativeInputRuntimeSource, @uncheck
         drainEnqueuedCallbacks()
     }
 
-    public func commitCallbackResume() throws {
+    public func commitCallbackResume(_ commit: @Sendable () -> Void) throws {
         lock.lock()
+        defer { lock.unlock() }
         if let currentTerminalFailure {
-            lock.unlock()
             throw currentTerminalFailure
         }
-        if state == .running { acceptingCallbacks = true }
-        lock.unlock()
+        guard state == .running else {
+            throw MacNativeInputError.inputEventTapCreationFailed
+        }
+        // This lock is the resume transaction boundary: terminal recording
+        // cannot win after the caller publishes its non-fallible state, and
+        // callbacks open only after runtime state and shared controls agree.
+        commit()
+        acceptingCallbacks = true
     }
 
     public func stop() {

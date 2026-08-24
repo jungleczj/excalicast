@@ -178,7 +178,7 @@ private final class TerminalRuntimeSource: NativeInputRuntimeSource, @unchecked 
     }
     func drainEnqueuedCallbacks() {}
     func suspendCallbacksAndWait() {}
-    func commitCallbackResume() throws {
+    func commitCallbackResume(_ commit: @Sendable () -> Void) throws {
         lock.lock()
         let block = shouldBlockResume
         lock.unlock()
@@ -186,8 +186,12 @@ private final class TerminalRuntimeSource: NativeInputRuntimeSource, @unchecked 
             resumeEntered.signal()
             resumeMayReturn.wait()
         }
-        if let terminalFailure { throw terminalFailure }
         lock.lock()
+        if let currentTerminalFailure {
+            lock.unlock()
+            throw currentTerminalFailure
+        }
+        commit()
         let event = eventOnResume
         eventOnResume = nil
         let afterEvent = afterResumeEvent
@@ -227,6 +231,69 @@ private final class TerminalRuntimeSource: NativeInputRuntimeSource, @unchecked 
         lock.unlock()
         callback?(error)
     }
+}
+
+private final class LockOrderingRuntimeSource: NativeInputRuntimeSource, @unchecked Sendable {
+    private let sourceGate = DispatchSemaphore(value: 1)
+    private let commitEntered = DispatchSemaphore(value: 0)
+    private let commitMayContinue = DispatchSemaphore(value: 0)
+    private let observedTerminalReadEntered = DispatchSemaphore(value: 0)
+    private let observeTerminalRead = LockedBox(false)
+    private let terminalReadTimedOut = LockedBox(false)
+
+    let statistics = NativeInputSourceStatistics(
+        capturedEventCount: 0,
+        coalescedEventCount: 0,
+        droppedEventCount: 0
+    )
+
+    var terminalFailure: MacNativeInputError? {
+        let isObservedRead = observeTerminalRead.withValue { value in
+            defer { value = false }
+            return value
+        }
+        if isObservedRead {
+            observedTerminalReadEntered.signal()
+            guard sourceGate.wait(timeout: .now() + .milliseconds(250)) == .success else {
+                terminalReadTimedOut.withValue { $0 = true }
+                return nil
+            }
+        } else {
+            sourceGate.wait()
+        }
+        sourceGate.signal()
+        return nil
+    }
+
+    func start(handler: @escaping @Sendable (NativeRawInputEvent) -> Void) throws {}
+    func stop() {}
+    func setTerminalHandler(_ handler: @escaping @Sendable (MacNativeInputError) -> Void) {}
+    func drainEnqueuedCallbacks() {}
+    func suspendCallbacksAndWait() {}
+
+    func commitCallbackResume(_ commit: @Sendable () -> Void) throws {
+        sourceGate.wait()
+        commitEntered.signal()
+        commitMayContinue.wait()
+        commit()
+        sourceGate.signal()
+    }
+
+    func waitUntilCommitEntered() -> Bool {
+        commitEntered.wait(timeout: .now() + .seconds(1)) == .success
+    }
+
+    func observeNextTerminalRead() {
+        observeTerminalRead.withValue { $0 = true }
+    }
+
+    func waitUntilObservedTerminalReadEntered() -> Bool {
+        observedTerminalReadEntered.wait(timeout: .now() + .seconds(1)) == .success
+    }
+
+    func releaseCommit() { commitMayContinue.signal() }
+
+    var detectedLockInversion: Bool { terminalReadTimedOut.snapshot }
 }
 
 private final class ManualScheduler: @unchecked Sendable {
@@ -367,7 +434,7 @@ private struct NativeInputPlatformContractTests {
         lifecycleClock.set(1_070_000)
         tap.emit(.event(MacInputEventPrimitive(type: .scrollWheel, x: 11, y: 21, scrollDeltaX: 2.5, scrollDeltaY: -4)))
         lifecycleSource.suspendCallbacksAndWait()
-        try lifecycleSource.commitCallbackResume()
+        try lifecycleSource.commitCallbackResume {}
 
         let raw = lifecycleEvents.snapshot
         try expect(raw.count == 6, "required callback families enqueue losslessly while cursor motion coalesces")
@@ -635,6 +702,101 @@ private struct NativeInputPlatformContractTests {
         try expect(racingResumeFailure == .inputEventTapCreationFailed, "a source failure during resume is returned to the runtime caller")
         try expect(racingResumeControls.snapshot().paused, "a rejected source resume cannot advance shared capture controls")
         try? racingResumeRuntime.stop()
+
+        let mediaResumeSource = TerminalRuntimeSource()
+        mediaResumeSource.blockNextResume()
+        let mediaResumeControls = CaptureControlState()
+        let mediaResumeClock = FakeClock()
+        mediaResumeClock.set(4_000_000)
+        let mediaResumeScheduler = ManualScheduler()
+        let mediaResumeSink = NativeInputTelemetryCoordinatorSink(
+            sessionId: "media-resume",
+            producerEpoch: "media-resume-epoch",
+            controls: mediaResumeControls,
+            timeline: RecordingTimeline(originUs: 4_000_000),
+            coordinator: InputTelemetryCoordinator(sessionId: "media-resume"),
+            persist: { _, _, _, _ in }
+        )
+        let mediaResumeRuntime = NativeInputCaptureRuntime(
+            source: mediaResumeSource,
+            displays: FakeDisplayProvider(displays.geometries),
+            windows: FakeWindowProvider(),
+            clock: mediaResumeClock,
+            controls: mediaResumeControls,
+            sink: mediaResumeSink,
+            excludedWindowIDs: [],
+            scheduling: mediaResumeScheduler.scheduling,
+            onTerminal: { _, _ in }
+        )
+        try mediaResumeRuntime.start()
+        mediaResumeClock.set(4_100_000)
+        try mediaResumeRuntime.pause()
+        mediaResumeClock.set(4_200_000)
+        let mediaResumeTask = Task.detached { () -> MacNativeInputError? in
+            do {
+                try mediaResumeRuntime.resume()
+                return nil
+            } catch let error as MacNativeInputError {
+                return error
+            } catch {
+                return .inputTelemetryWriteFailed
+            }
+        }
+        let enteredBlockedMediaResume = mediaResumeSource.waitUntilResumeEntered()
+        let persistedMediaSamples = LockedBox<[Int64]>([])
+        let adjustedDuringBlockedResume = mediaResumeControls.adjustedPresentationUs(4_250_000)
+        if let adjustedDuringBlockedResume {
+            persistedMediaSamples.withValue { $0.append(adjustedDuringBlockedResume) }
+        }
+        mediaResumeSource.fail(.inputEventTapCreationFailed)
+        mediaResumeSource.releaseResume()
+        let mediaResumeFailure = await mediaResumeTask.value
+        try expect(enteredBlockedMediaResume, "resume reaches the blocked source commit before the media callback")
+        try expect(adjustedDuringBlockedResume == nil && persistedMediaSamples.snapshot.isEmpty, "media callbacks remain paused and cannot persist while source resume is uncommitted")
+        try expect(mediaResumeFailure == .inputEventTapCreationFailed, "failed source commit rejects the media-safe resume transaction")
+        try expect(mediaResumeControls.snapshot().paused, "failed media-safe resume leaves shared controls paused")
+        try? mediaResumeRuntime.stop()
+
+        let lockOrderingSource = LockOrderingRuntimeSource()
+        let lockOrderingControls = CaptureControlState()
+        let lockOrderingClock = FakeClock()
+        lockOrderingClock.set(4_500_000)
+        let lockOrderingScheduler = ManualScheduler()
+        let lockOrderingRuntime = NativeInputCaptureRuntime(
+            source: lockOrderingSource,
+            displays: FakeDisplayProvider(displays.geometries),
+            windows: FakeWindowProvider(),
+            clock: lockOrderingClock,
+            controls: lockOrderingControls,
+            sink: NativeInputTelemetryCoordinatorSink(
+                sessionId: "lock-ordering-resume",
+                producerEpoch: "lock-ordering-resume-epoch",
+                controls: lockOrderingControls,
+                timeline: RecordingTimeline(originUs: 4_500_000),
+                coordinator: InputTelemetryCoordinator(sessionId: "lock-ordering-resume"),
+                persist: { _, _, _, _ in }
+            ),
+            excludedWindowIDs: [],
+            scheduling: lockOrderingScheduler.scheduling,
+            onTerminal: { _, _ in }
+        )
+        try lockOrderingRuntime.start()
+        lockOrderingClock.set(4_600_000)
+        try lockOrderingRuntime.pause()
+        lockOrderingClock.set(4_700_000)
+        let lockOrderingResumeTask = Task.detached {
+            try lockOrderingRuntime.resume()
+        }
+        let enteredLockedCommit = lockOrderingSource.waitUntilCommitEntered()
+        lockOrderingSource.observeNextTerminalRead()
+        let terminalReadTask = Task.detached { lockOrderingRuntime.terminalFailure }
+        let enteredCompetingTerminalRead = lockOrderingSource.waitUntilObservedTerminalReadEntered()
+        lockOrderingSource.releaseCommit()
+        try await lockOrderingResumeTask.value
+        _ = await terminalReadTask.value
+        try expect(enteredLockedCommit && enteredCompetingTerminalRead, "lock-ordering contract overlaps source commit and runtime terminal inspection")
+        try expect(!lockOrderingSource.detectedLockInversion, "resume commit does not invert source and runtime locks")
+        try? lockOrderingRuntime.stop()
 
         let returnWindowSource = TerminalRuntimeSource()
         let returnWindowControls = CaptureControlState()
