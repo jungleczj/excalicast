@@ -1,8 +1,8 @@
 {
   "landing": {
     "meta": {
-      "title": "Excalicast — 白板录制工具：录屏、剪辑、多比例视频导出",
-      "description": "录制 Excalidraw 风格白板操作或所选屏幕来源，在浏览器中剪辑，并将同一来源导出为多种比例的 MP4。"
+      "title": "Excalicast：可编辑的白板视觉讲解录制工具",
+      "description": "在线录制白板讲解与语音，在浏览器中剪辑，同一段录制导出横屏、竖屏、方形或自定义 MP4。免费开始，无需注册。"
     },
     "craft": {
       "nav": {
@@ -16,12 +16,12 @@
         "start": "开始录制"
       },
       "hero": {
-        "eyebrow": "浏览器内运行 · 本地优先",
-        "title": "录制视觉讲解，\n不只是录下屏幕",
-        "body": "Excalicast 记录白板操作与旁白，在浏览器里编辑讲解，并把同一来源重新渲染为多种视频画幅。",
-        "primary": "开始录制",
-        "secondary": "查看价格",
-        "microcopy": "无需下载。无需把内容交出去。",
+        "eyebrow": "白板录制 · 浏览器剪辑 · 本地优先",
+        "title": "把白板讲解，\n录成更容易看懂的视频",
+        "body": "边画边讲，在浏览器里剪辑，同一段录制可导出横屏、竖屏、方形或自定义视频。",
+        "primary": "免费开始录制",
+        "secondary": "查看工作方式",
+        "microcopy": "免费开始 · 无需注册 · 无需下载",
         "toolbarLabel": "录制白板工具栏",
         "productAlt": "Excalicast 录制工作台矢量演示图"
       },

@@ -1,9 +1,10 @@
 # PRD：白板录制工具
-**版本**：v0.9.5
+**版本**：v0.9.6
 **状态**：开发中
 **作者**：—
 **最后更新**：2026-08-26
-**变更**：v0.9.5 - SEO/GEO 窄类目权威基础：英文默认、About 品牌消歧、三大 Pillar、统一实体 Schema、真实 sitemap 时间、搜索/训练爬虫分流、动态 pricing.md、Blog 来源字段、首页素材 WebP 与完整自然流量归因。详见「## 十一」最新一条与「## 十二」。
+**变更**：v0.9.6 - 搜索点击率与 Hero 信息匹配：主页 title/description/H1 统一为视觉讲解录制意图，Pillar 增独立紧凑 SERP 标题，品牌标题防重复追加；Hero 改为结果优先文案、免费主 CTA、工作方式次 CTA，并恢复移动端正文与无注册提示。详见「## 十一」最新一条与「## 十二」。
+**历史变更**：v0.9.5 - SEO/GEO 窄类目权威基础：英文默认、About 品牌消歧、三大 Pillar、统一实体 Schema、真实 sitemap 时间、搜索/训练爬虫分流、动态 pricing.md、Blog 来源字段、首页素材 WebP 与完整自然流量归因。详见「## 十一」最新一条与「## 十二」。
 **历史变更**：v0.9.4 - 大纲/讲义改为数据库持久化后台任务并接入统一任务中心；长录制云备份改用 Supabase TUS 分片上传且 recordings bucket 单对象上限提升至 1GB；补生产配音字段修复迁移。详见「## 十一」最新一条。
 **历史变更**：v0.9.3 - 翻译配音语音合成新增 edge-tts 作为主用（微软 Edge 免费神经 TTS，无需 key，本地生成 Sec-MS-GEC token + WebSocket 直连），失败自动回退 Azure Speech（已配置时）再回退浏览器本地 Kokoro。详见「## 十一」最新一条。
 **历史变更**：v0.9.2 - SEO 关键词扩量：首页标题补「白板录制 / Whiteboard Recorder」关键词，llms.txt 增品牌 logo 与中英文关键词簇，use-cases 新增 5 个中文流量词长尾页（白板录视频工具 / 在线录屏 / Excalidraw 录屏 / 网课录屏 / 免费免注册录屏）。详见「## 十一」最新一条。
@@ -940,6 +941,7 @@ Excalicast 落地页以 Craft.do 当前官网首页为硬参考进行重构，�
 
 > 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
 
+- **2026-08-26｜搜索 CTR 与 Hero 信息匹配优化**：① 英文首页 title 调整为 `Excalicast: Record Visual Explanations in Your Browser`，中文首页 title 调整为 `Excalicast：可编辑的白板视觉讲解录制工具`；description 同步补具体输出格式、免费开始与无需注册，避免 title/H1/摘要分别讲不同产品。② Hero 从“not just a screen”机制导向改为“用户能录出易理解的视觉讲解”结果导向，正文再解释白板+旁白、浏览器剪辑与一次录制多比例导出；主 CTA 明确免费开始，次 CTA 从价格改为 `/whiteboard-recorder` 工作方式页。③ 移动端不再隐藏 Hero 正文、免注册/免下载提示和次 CTA，并缩小生成式工作流图裁切，保证冷访客首屏能在 5 秒内理解产品与下一步。④ Pillar 数据增加独立 `seoTitle`，搜索标题保持紧凑，页面 H1 保留完整叙事；`pageMetadata()` 遇到已含 Excalicast 的 Compare/About 标题时使用 absolute，防全局模板重复品牌。⑤ 视觉审计确认当前 Hero 图是工作流示意图而非真实产品截图；本轮保留其装饰用途，后续应以真实录制短演示/真实 UI 证据替换，并用 GSC CTR 与 CTA→录制启动率验证效果。涉及 `src/messages/{en,zh}.json`、`src/app/[locale]/{page,[pillar]}/page.tsx`、`src/content/{types,pillars}.ts`、`src/lib/seo/meta.ts`、`src/app/globals.css` 与 SEO E2E。
 - **2026-08-26｜SEO/GEO 窄类目权威与技术 P0**：① 默认市场切为英文，关闭 next-intl HTTP `Link` alternates，由 HTML metadata 单一生成 canonical/hreflang（`zh-CN/en/x-default`）；sitemap 使用内容真实更新时间。② 新增双语 `/about`，明确 `excalicast.cc` 官方实体，并与同名播客、`excalicast.com` iOS App 消歧。③ 新增 `/excalidraw-recorder`、`/whiteboard-recorder`、`/event-based-recording` 三个 answer-first Pillar，明确白板 operation stream 与 tab/window/desktop display capture 的边界并形成互链。④ Schema 统一为稳定 `@id` 的 Organization/WebSite/SoftwareApplication graph，BlogPosting 增可验证作者、`dateModified`、主图与来源；FAQ 可见正文保留，但首页不再把 FAQPage 当增长杠杆。⑤ robots 允许搜索/用户触发抓取器，显式拒绝训练爬虫；`/pricing.md` 与活跃价格配置共源。⑥ 5 篇 Blog 增作者、更新日期、来源、主媒体、要点，修正 Loom 绝对化旧说法。⑦ Hero/人物 PNG（约 19MB）替换为约 272KB WebP，Hero 优先、人物懒加载；UTM 归因补 `content/term`。涉及 `src/app/{robots,sitemap,pricing.md}`、`src/app/[locale]/{page,about,[pillar],blog}`、`src/content/*`、`src/lib/seo/schema.ts`、`src/middleware.ts`、`src/i18n/config.ts`、`public/landing/*` 与 SEO E2E。
 - **2026-07-22｜顶层录制条自适应 + Max 翻译配音本地化资产**：① **顶层录制条**继续以 Document Picture-in-Picture 承载桌面/窗口录制外置控制带；收起/展开从 hover 改为**点击触发**以尽量满足浏览器 `resizeTo()` 用户手势限制，hover 只做轻提示；若浏览器拒绝缩小 PiP，控制条显示“浏览器保留最小 PiP 窗口尺寸”的降级提示，并保持右侧 REC 胶囊可操作，不再追求网页无法保证的透明无边框原生窗口。② **导出页新增 Max「Dubbing/翻译配音」Tab**：录后把中文原声生成英文 SRT + 英文配音音频；已有字幕时直接翻译 SRT，没有字幕时通过临时公网音频 URL 走 Qwen/DashScope ASR；客户端下载后写入 IndexedDB `localizedTracks`，`RecordingMetadata` 仅保存 `localizedTrackId` 引用，不把大 Blob 塞进 metadata。③ **导出/预览替换策略**：启用本地化轨道时，预览 `<audio>` 与导出管线使用英文配音并默认静音原声；字幕使用英文 SRT；如后续真实 lip-sync adapter 返回摄像头片段则替换人像气泡，否则回退原始摄像头并标注未处理。白板、背景、裁切、AutoZoom、水印、多比例导出逻辑保持原样。④ **服务端接口**：新增 `/api/dubbing/submit`、`/api/dubbing/status`、`/api/dubbing/audio/[token]`、`/api/dubbing/result/[jobId]/[asset]`，只临时保存 job 中间资产；无 provider key 或本地 localhost 环境时走 mock SRT/WAV 便于本地验证；权限新增 `dubbing/lipSync`，默认仅 Max 开启。涉及 `DesktopRecordingControls.tsx`、`DubbingPanel.tsx`、`ExportPreview.tsx`、`ExportPanel.tsx`、`exportPipeline.ts`、`db-client.ts`、`dubbingStore.ts`、`dubbingProviders.ts`、`dubbingClient.ts`、`types/{recording,user}.ts`、`api/dubbing/*`、`.env.local.example`、E2E。
 - **2026-06-29｜落地页 UI 基准切换为严格对标 Craft.do**：将「## 十、UI 设计参考」的落地页视觉基准从旧的手绘/深色录制工具风格，更新为 Craft.do 当前官网首页式编辑叙事：浮动胶囊导航、满屏纸感 Hero、居中衬线标题、单主 CTA、五能力入口、人物跑马灯、大叙事卡片、价格/FAQ/页脚大留白节奏。同步写入 `CLAUDE.md` 项目级长期记忆：后续落地页必须严格对标 Craft；Hero 产品图固定使用用户指定资产（仅做高清/响应式加载，不重画内部元素）；人物资产包只用于“人们如何使用”跑马灯；不得修改 API、数据库、Hooks、录制/导出、支付、云同步等业务逻辑。涉及 `CLAUDE.md`、`PRD_whiteboard_recorder.md`、`src/app/[locale]/page.tsx`、`src/app/globals.css`、`public/landing/*`。
@@ -1131,7 +1133,7 @@ Excalicast 落地页以 Craft.do 当前官网首页为硬参考进行重构，�
 > 目标：零预算、海外先行的双语，通过自然搜索 + AI 引擎引用获客。本章为产品设计意图，落地现状见「## 十一」2026-06-01 条；人工执行的渠道手册见 `docs/marketing-cold-start.md`。
 
 ### 12.1 技术 SEO 地基
-- **统一来源**：`SITE_URL = https://excalicast.cc`（`src/lib/seo/alternates.ts`）。`[locale]/layout.tsx` 设 `metadataBase` + 全站 OpenGraph/Twitter 默认值 + 标题模板 `%s · Excalicast`（landing 用 `title.absolute` 避免二次包裹）。
+- **统一来源**：`SITE_URL = https://excalicast.cc`（`src/lib/seo/alternates.ts`）。`[locale]/layout.tsx` 设 `metadataBase` + 全站 OpenGraph/Twitter 默认值 + 标题模板 `%s · Excalicast`；landing 使用 `title.absolute`，`pageMetadata()` 对已含品牌的内容标题也使用 absolute，避免二次包裹。Pillar 的紧凑 `seoTitle` 专供 SERP，完整 `title` 保留为页面 H1。
 - **sitemap / robots**：`src/app/sitemap.ts` 遍历 `locales × (营销页 + 内容页)`，每条带 `zh-CN/en/x-default` hreflang 与真实内容更新时间；`src/app/robots.ts` 拦截私有路由，并区分搜索索引/用户抓取器与模型训练爬虫。
 - **hreflang**：`buildAlternates(path, locale)` 产出 canonical + languages（`x-default = en`，海外先行）。所有营销页/内容页 `generateMetadata` 复用 `pageMetadata()`（`src/lib/seo/meta.ts`）。
 - **OG 图**：`[locale]/opengraph-image.tsx` 用 `next/og` 动态生成 1200×630（品牌 paper/ink 配色 + 比例徽标），自动注入所有页 og:image/twitter:image。

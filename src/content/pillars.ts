@@ -8,6 +8,7 @@ const PRODUCT_SOURCE = {
 export const PILLAR_ENTRIES: PillarEntry[] = [
   {
     slug: 'excalidraw-recorder',
+    seoTitle: { en: 'Excalidraw Recorder: Record Canvas to Video', zh: 'Excalidraw 录制工具：把画布录成视频' },
     title: { en: 'Excalidraw recorder for clear, editable video explanations', zh: 'Excalidraw 录制工具：把白板讲解变成可编辑视频' },
     description: {
       en: 'Record Excalidraw-style whiteboard operations with voice, edit the explanation in a browser timeline, and export it for multiple video formats.',
@@ -78,6 +79,7 @@ export const PILLAR_ENTRIES: PillarEntry[] = [
   },
   {
     slug: 'whiteboard-recorder',
+    seoTitle: { en: 'Online Whiteboard Recorder with Voice', zh: '在线白板录制工具：同步录制语音' },
     title: { en: 'Online whiteboard recorder for visual explanations', zh: '在线白板录制工具：录制清晰的视觉讲解' },
     description: {
       en: 'Record a whiteboard with voice, edit the timeline, add captions, and export one visual explanation for multiple destinations.',
@@ -139,6 +141,7 @@ export const PILLAR_ENTRIES: PillarEntry[] = [
   },
   {
     slug: 'event-based-recording',
+    seoTitle: { en: 'Event-Based Whiteboard Recording Explained', zh: '事件式白板录制：操作流如何变成视频' },
     title: { en: 'Event-based recording: keep the explanation, not just pixels', zh: '事件式录制：保留讲解过程，而不只是像素' },
     description: {
       en: 'Learn how Excalicast records whiteboard operations as an event stream, what that enables, and where ordinary screen capture is still used.',

@@ -37,7 +37,7 @@ export async function generateMetadata({ params }: Props) {
   const entry = getPillarEntry(pillar);
   if (!entry) return {};
   return pageMetadata({
-    title: pick(entry.title, locale),
+    title: pick(entry.seoTitle, locale),
     description: pick(entry.description, locale),
     path: `/${entry.slug}`,
     locale,

@@ -17,8 +17,9 @@ export function pageMetadata(opts: {
   publishedTime?: string;
 }): Metadata {
   const { title, description, path, locale, ogType = 'website', publishedTime } = opts;
+  const metadataTitle = /\bExcalicast\b/i.test(title) ? { absolute: title } : title;
   return {
-    title,
+    title: metadataTitle,
     description,
     alternates: buildAlternates(path, locale),
     openGraph: {

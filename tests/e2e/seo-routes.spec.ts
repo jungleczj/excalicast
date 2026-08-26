@@ -1,8 +1,9 @@
 import { expect, test } from '@playwright/test';
 import robots from '@/app/robots';
 import sitemap from '@/app/sitemap';
-import { BLOG_ENTRIES, COMPARE_ENTRIES, USE_CASE_ENTRIES } from '@/content';
+import { BLOG_ENTRIES, COMPARE_ENTRIES, PILLAR_ENTRIES, USE_CASE_ENTRIES } from '@/content';
 import { defaultLocale } from '@/i18n/config';
+import { pageMetadata } from '@/lib/seo/meta';
 import { organizationSchema, softwareApplicationSchema } from '@/lib/seo/schema';
 import * as seoSchema from '@/lib/seo/schema';
 import { FUNNEL_STEPS, KNOWN_EVENT_SET } from '@/lib/analytics/events';
@@ -193,6 +194,52 @@ test('Bing-facing comparison metadata stays within stable length ranges', () => 
     expect(entry?.description.en.length, `${slug} English description`).toBeGreaterThanOrEqual(90);
     expect(entry?.description.en.length, `${slug} English description`).toBeLessThanOrEqual(145);
   }
+});
+
+test('content metadata does not append the Excalicast brand twice', () => {
+  const title = 'Excalicast vs Loom for whiteboard videos';
+  const metadata = pageMetadata({
+    title,
+    description: 'A source-checked comparison for visual explanation workflows.',
+    path: '/compare/excalicast-vs-loom',
+    locale: 'en',
+  });
+
+  expect(metadata.title).toEqual({ absolute: title });
+});
+
+test('pillar pages have compact search titles separate from their editorial H1', () => {
+  const entries = PILLAR_ENTRIES as Array<{
+    title: { en: string; zh: string };
+    seoTitle?: { en: string; zh: string };
+  }>;
+
+  for (const entry of entries) {
+    expect(entry.seoTitle, `${entry.title.en} needs a dedicated search title`).toBeDefined();
+    expect(entry.seoTitle?.en.length).toBeLessThanOrEqual(50);
+    expect(entry.seoTitle?.en).not.toBe(entry.title.en);
+  }
+});
+
+test('homepage aligns the search promise and hero CTA with the recording workflow', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/en');
+
+  const title = await page.title();
+  expect(title).toContain('Record Visual Explanations');
+  expect(title.length).toBeLessThanOrEqual(60);
+  expect(title.match(/Excalicast/gi)).toHaveLength(1);
+  const description = await page.locator('meta[name="description"]').getAttribute('content');
+  expect(description).toContain('no sign-up');
+  expect(description?.length).toBeLessThanOrEqual(160);
+
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('visual explanations');
+  await expect(page.locator('.craft-hero-body')).toBeVisible();
+  await expect(page.getByText('Free to start · No sign-up · No download')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'See how it works' })).toHaveAttribute(
+    'href',
+    '/en/whiteboard-recorder',
+  );
 });
 
 test('organic acquisition events form a content-to-recording funnel', () => {

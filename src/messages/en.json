@@ -1,8 +1,8 @@
 {
   "landing": {
     "meta": {
-      "title": "Excalicast — Whiteboard Recorder & Online Screen Recorder",
-      "description": "Record Excalidraw-style whiteboard operations or a selected screen source, edit in the browser, and export MP4 in multiple aspect ratios."
+      "title": "Excalicast: Record Visual Explanations in Your Browser",
+      "description": "Record whiteboard explanations with voice, edit in your browser, and export landscape, vertical, square, or custom MP4. Free to start, no sign-up."
     },
     "craft": {
       "nav": {
@@ -16,12 +16,12 @@
         "start": "Start recording"
       },
       "hero": {
-        "eyebrow": "Runs in the browser · local-first",
-        "title": "Record visual explanations,\nnot just a screen",
-        "body": "Excalicast records whiteboard operations with narration, lets you edit the explanation in your browser, and renders the same source for multiple video formats.",
-        "primary": "Start recording",
-        "secondary": "See pricing",
-        "microcopy": "No download. No need to hand over the work.",
+        "eyebrow": "Whiteboard recorder · Browser editor · Local-first",
+        "title": "Record visual explanations\npeople can follow",
+        "body": "Draw and narrate on a whiteboard, edit the take in your browser, then export landscape, vertical, square, or custom video from the same recording.",
+        "primary": "Start recording free",
+        "secondary": "See how it works",
+        "microcopy": "Free to start · No sign-up · No download",
         "toolbarLabel": "Recording whiteboard toolbar",
         "productAlt": "Vector preview of the Excalicast recording workspace"
       },

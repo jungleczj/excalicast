@@ -123,6 +123,8 @@ export interface BlogEntry {
 /** Category-defining page with publication-grade GEO evidence fields. */
 export interface PillarEntry extends GeoContent {
   slug: string;
+  /** Compact SERP title; the editorial title remains the visible H1. */
+  seoTitle: LocalizedText;
   title: LocalizedText;
   description: LocalizedText;
   intro: LocalizedText;

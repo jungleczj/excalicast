@@ -183,9 +183,9 @@ function HeroSection({ t }: { t: ReturnType<typeof useTranslations> }): JSX.Elem
             <span className="rec-dot" style={{ width: 7, height: 7 }} />
             {t('craft.hero.primary')}
           </TrackedLink>
-          <a href="#pricing" className="craft-secondary-link craft-hero-secondary">
+          <Link href="/whiteboard-recorder" className="craft-secondary-link craft-hero-secondary">
             {t('craft.hero.secondary')}
-          </a>
+          </Link>
         </div>
         <p className="craft-microcopy">{t('craft.hero.microcopy')}</p>
       </div>
