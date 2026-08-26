@@ -1,9 +1,10 @@
 # PRD：白板录制工具
-**版本**：v0.9.4
+**版本**：v0.9.5
 **状态**：开发中
 **作者**：—
-**最后更新**：2026-08-18
-**变更**：v0.9.4 - 大纲/讲义改为数据库持久化后台任务并接入统一任务中心；长录制云备份改用 Supabase TUS 分片上传且 recordings bucket 单对象上限提升至 1GB；补生产配音字段修复迁移。详见「## 十一」最新一条。
+**最后更新**：2026-08-26
+**变更**：v0.9.5 - SEO/GEO 窄类目权威基础：英文默认、About 品牌消歧、三大 Pillar、统一实体 Schema、真实 sitemap 时间、搜索/训练爬虫分流、动态 pricing.md、Blog 来源字段、首页素材 WebP 与完整自然流量归因。详见「## 十一」最新一条与「## 十二」。
+**历史变更**：v0.9.4 - 大纲/讲义改为数据库持久化后台任务并接入统一任务中心；长录制云备份改用 Supabase TUS 分片上传且 recordings bucket 单对象上限提升至 1GB；补生产配音字段修复迁移。详见「## 十一」最新一条。
 **历史变更**：v0.9.3 - 翻译配音语音合成新增 edge-tts 作为主用（微软 Edge 免费神经 TTS，无需 key，本地生成 Sec-MS-GEC token + WebSocket 直连），失败自动回退 Azure Speech（已配置时）再回退浏览器本地 Kokoro。详见「## 十一」最新一条。
 **历史变更**：v0.9.2 - SEO 关键词扩量：首页标题补「白板录制 / Whiteboard Recorder」关键词，llms.txt 增品牌 logo 与中英文关键词簇，use-cases 新增 5 个中文流量词长尾页（白板录视频工具 / 在线录屏 / Excalidraw 录屏 / 网课录屏 / 免费免注册录屏）。详见「## 十一」最新一条。
 **历史变更**：v0.9.1 - 导出页新增统一任务中心：所有媒体任务只在顶部最右侧展示进度；本地重任务串行、网络任务并行；导出使用启动时快照且不阻断预览和编辑；工具栏固定两行，不可用操作改为点击后付费或前置步骤引导；任务完成支持声音提醒。详见「## 十一」最新一条。
@@ -939,6 +940,7 @@ Excalicast 落地页以 Craft.do 当前官网首页为硬参考进行重构，�
 
 > 本章是「已实现/在建」的真实状态与变更流水。**任何 PRD 未覆盖的新功能/行为变更都必须在此追加一条**（见 CLAUDE.md「PRD 同步要求」）。前面章节为产品设计意图，本章为落地现状。
 
+- **2026-08-26｜SEO/GEO 窄类目权威与技术 P0**：① 默认市场切为英文，关闭 next-intl HTTP `Link` alternates，由 HTML metadata 单一生成 canonical/hreflang（`zh-CN/en/x-default`）；sitemap 使用内容真实更新时间。② 新增双语 `/about`，明确 `excalicast.cc` 官方实体，并与同名播客、`excalicast.com` iOS App 消歧。③ 新增 `/excalidraw-recorder`、`/whiteboard-recorder`、`/event-based-recording` 三个 answer-first Pillar，明确白板 operation stream 与 tab/window/desktop display capture 的边界并形成互链。④ Schema 统一为稳定 `@id` 的 Organization/WebSite/SoftwareApplication graph，BlogPosting 增可验证作者、`dateModified`、主图与来源；FAQ 可见正文保留，但首页不再把 FAQPage 当增长杠杆。⑤ robots 允许搜索/用户触发抓取器，显式拒绝训练爬虫；`/pricing.md` 与活跃价格配置共源。⑥ 5 篇 Blog 增作者、更新日期、来源、主媒体、要点，修正 Loom 绝对化旧说法。⑦ Hero/人物 PNG（约 19MB）替换为约 272KB WebP，Hero 优先、人物懒加载；UTM 归因补 `content/term`。涉及 `src/app/{robots,sitemap,pricing.md}`、`src/app/[locale]/{page,about,[pillar],blog}`、`src/content/*`、`src/lib/seo/schema.ts`、`src/middleware.ts`、`src/i18n/config.ts`、`public/landing/*` 与 SEO E2E。
 - **2026-07-22｜顶层录制条自适应 + Max 翻译配音本地化资产**：① **顶层录制条**继续以 Document Picture-in-Picture 承载桌面/窗口录制外置控制带；收起/展开从 hover 改为**点击触发**以尽量满足浏览器 `resizeTo()` 用户手势限制，hover 只做轻提示；若浏览器拒绝缩小 PiP，控制条显示“浏览器保留最小 PiP 窗口尺寸”的降级提示，并保持右侧 REC 胶囊可操作，不再追求网页无法保证的透明无边框原生窗口。② **导出页新增 Max「Dubbing/翻译配音」Tab**：录后把中文原声生成英文 SRT + 英文配音音频；已有字幕时直接翻译 SRT，没有字幕时通过临时公网音频 URL 走 Qwen/DashScope ASR；客户端下载后写入 IndexedDB `localizedTracks`，`RecordingMetadata` 仅保存 `localizedTrackId` 引用，不把大 Blob 塞进 metadata。③ **导出/预览替换策略**：启用本地化轨道时，预览 `<audio>` 与导出管线使用英文配音并默认静音原声；字幕使用英文 SRT；如后续真实 lip-sync adapter 返回摄像头片段则替换人像气泡，否则回退原始摄像头并标注未处理。白板、背景、裁切、AutoZoom、水印、多比例导出逻辑保持原样。④ **服务端接口**：新增 `/api/dubbing/submit`、`/api/dubbing/status`、`/api/dubbing/audio/[token]`、`/api/dubbing/result/[jobId]/[asset]`，只临时保存 job 中间资产；无 provider key 或本地 localhost 环境时走 mock SRT/WAV 便于本地验证；权限新增 `dubbing/lipSync`，默认仅 Max 开启。涉及 `DesktopRecordingControls.tsx`、`DubbingPanel.tsx`、`ExportPreview.tsx`、`ExportPanel.tsx`、`exportPipeline.ts`、`db-client.ts`、`dubbingStore.ts`、`dubbingProviders.ts`、`dubbingClient.ts`、`types/{recording,user}.ts`、`api/dubbing/*`、`.env.local.example`、E2E。
 - **2026-06-29｜落地页 UI 基准切换为严格对标 Craft.do**：将「## 十、UI 设计参考」的落地页视觉基准从旧的手绘/深色录制工具风格，更新为 Craft.do 当前官网首页式编辑叙事：浮动胶囊导航、满屏纸感 Hero、居中衬线标题、单主 CTA、五能力入口、人物跑马灯、大叙事卡片、价格/FAQ/页脚大留白节奏。同步写入 `CLAUDE.md` 项目级长期记忆：后续落地页必须严格对标 Craft；Hero 产品图固定使用用户指定资产（仅做高清/响应式加载，不重画内部元素）；人物资产包只用于“人们如何使用”跑马灯；不得修改 API、数据库、Hooks、录制/导出、支付、云同步等业务逻辑。涉及 `CLAUDE.md`、`PRD_whiteboard_recorder.md`、`src/app/[locale]/page.tsx`、`src/app/globals.css`、`public/landing/*`。
 - **2026-06-21｜UI 统一 P0+P1：手绘调色对齐 + 共享弹窗壳**：全局 UI 审计后做两类统一。**P0 调色**：① `SubtitlePanel` 原整套蓝色渐变 + Tailwind 语义色（`#3b82f6`/`bg-bg-primary`/`bg-yellow-50`/`success-*`/`recording-strong`/`--primary-600`，靠 globals 遗留兼容层渲染）→ 全部换成纸-墨令牌与 `.btn-sketch`，并入手绘体系；② `ProBadge` 蓝/紫渐变 → `--pro`/`--max` 令牌底 + 墨描边，与 `TierBadge`/`MonoTag` 一致。**P1 弹窗壳**：新增 `src/components/ui/Modal.tsx`（遮罩走新 `--overlay` 令牌、阴影 `--hard-lg`、统一 30×30 ✕、`dismissable`/`hideClose`/`width` 可配），5 个弹窗接入：`LoginModal`(用壳 ✕)、`ShareLinkModal`/`PaywallModal`/`ProUpgradeModal`(各自 flex 头部带 ✕ → `hideClose` 保留)，删除各自重复的遮罩/容器/✕/`rgba(26,26,26,0.45)`/`6px6px0`/`borderRadius:5` 硬编码；`RecordingSetup` 因是可滚动高面板（`overflow:auto`）不套壳、仅采用 `--overlay`+`--hard-lg` 对齐。涉及 `SubtitlePanel.tsx`、`ProBadge.tsx`、新增 `ui/Modal.tsx`、`globals.css`(`--overlay`)、`LoginModal/PaywallModal/ProUpgradeModal/ShareLinkModal/RecordingSetup.tsx`。
@@ -1130,7 +1132,7 @@ Excalicast 落地页以 Craft.do 当前官网首页为硬参考进行重构，�
 
 ### 12.1 技术 SEO 地基
 - **统一来源**：`SITE_URL = https://excalicast.cc`（`src/lib/seo/alternates.ts`）。`[locale]/layout.tsx` 设 `metadataBase` + 全站 OpenGraph/Twitter 默认值 + 标题模板 `%s · Excalicast`（landing 用 `title.absolute` 避免二次包裹）。
-- **sitemap / robots**：`src/app/sitemap.ts` 遍历 `locales × (营销页 + 内容页)`，每条带 `zh-CN/en/x-default` hreflang；`src/app/robots.ts` 放行通用爬虫，`Disallow /api /app /library /s/`。
+- **sitemap / robots**：`src/app/sitemap.ts` 遍历 `locales × (营销页 + 内容页)`，每条带 `zh-CN/en/x-default` hreflang 与真实内容更新时间；`src/app/robots.ts` 拦截私有路由，并区分搜索索引/用户抓取器与模型训练爬虫。
 - **hreflang**：`buildAlternates(path, locale)` 产出 canonical + languages（`x-default = en`，海外先行）。所有营销页/内容页 `generateMetadata` 复用 `pageMetadata()`（`src/lib/seo/meta.ts`）。
 - **OG 图**：`[locale]/opengraph-image.tsx` 用 `next/og` 动态生成 1200×630（品牌 paper/ink 配色 + 比例徽标），自动注入所有页 og:image/twitter:image。
 - **Analytics**：`@vercel/analytics` + `@vercel/speed-insights` 挂在 layout。
@@ -1138,14 +1140,14 @@ Excalicast 落地页以 Craft.do 当前官网首页为硬参考进行重构，�
 
 ### 12.2 GEO（Generative Engine Optimization）
 让 ChatGPT / Perplexity / Google AI Overview / Claude 在相关提问中引用并推荐 excalicast.cc：
-- **JSON-LD**（`src/components/seo/JsonLd.tsx` + `src/lib/seo/schema.ts`）：landing 注入 `SoftwareApplication`（`offers` 三档价格从 `payment_config` 实时读，`featureList` 用具体事实句）+ `Organization` + `FAQPage`；对比/场景页注入 `FAQPage` + `BreadcrumbList`；博客注入 `Article`。
+- **JSON-LD**（`src/components/seo/JsonLd.tsx` + `src/lib/seo/schema.ts`）：landing/About 复用稳定 `@id` 的 `Organization + WebSite + SoftwareApplication` graph，价格从 `payment_config` 读取；About 注入 `AboutPage`；博客注入带作者、`dateModified`、主图的 `BlogPosting`；有真实视频时才允许注入 `VideoObject`。Schema 必须与页面可见事实一致，FAQ 正文不依赖富结果。
 - **llms.txt**（`src/app/llms.txt/route.ts`）：llmstxt.org 约定的 AI 站点说明书，含定义、差异化、实时三档价格、关键页链接。
-- **AI 爬虫放行**：robots 显式 Allow `GPTBot / OAI-SearchBot / PerplexityBot / ClaudeBot / Google-Extended / Applebot-Extended / CCBot`。
+- **爬虫边界**：robots 显式允许 `OAI-SearchBot / ChatGPT-User / PerplexityBot / Perplexity-User / Claude-SearchBot / Claude-User` 访问公开页；显式拒绝 `GPTBot / ClaudeBot / Google-Extended / Applebot-Extended / CCBot` 训练抓取。允许训练抓取不是 GEO 前提。
 - **内容写作铁律**：首句自包含定义句、具体数字、对比表 + FAQ 结构（见手册 §1.1）。
 
 ### 12.3 程序化内容引擎
-- **数据层**：`src/content/{compare,use-cases,blog}.ts` 为双语 typed data（无 CMS / MDX 依赖，随仓库部署），类型见 `src/content/types.ts`。
-- **路由模板**：`[locale]/compare/[slug]`、`[locale]/use-cases/[slug]`、`[locale]/blog/[slug]` + 三个 hub 列表页，均 Server Component 静态渲染，`generateStaticParams` 预渲染全部 slug，sitemap 自动收录（`allContentRoutes()`）。
+- **数据层**：`src/content/{pillars,compare,use-cases,blog}.ts` 为双语 typed data（无 CMS / MDX 依赖，随仓库部署），类型见 `src/content/types.ts`。Pillar 强制 directAnswer、sources、verifiedAt、updatedAt、事实和限制；Blog 强制作者、来源、主媒体、更新日期与要点。
+- **路由模板**：`[locale]/[pillar]`、`[locale]/compare/[slug]`、`[locale]/use-cases/[slug]`、`[locale]/blog/[slug]` + 三个 hub 列表页，均 Server Component 静态渲染，`generateStaticParams` 预渲染全部 slug，sitemap 自动收录（`allContentRoutes()`）。当前唯一主意图为 Excalidraw recorder、whiteboard recorder、event-based recording 三个 Pillar；Use Case/Blog/Compare 回链相应 Pillar。
 - **扩量**：`scripts/new-content.ts` 一行命令打印骨架 → 填双语字段（或交 AI 按写作铁律起草）即多一个长尾着陆页，**无需碰路由代码**。
 - **首批内容**：对比页 vs Loom / tldraw / 录屏；use-case 录白板讲座 / 异步架构讲解 / 短视频白板讲解；blog 不录屏录白板 / 一录多比例。
 

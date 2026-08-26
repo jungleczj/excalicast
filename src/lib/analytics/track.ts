@@ -10,6 +10,7 @@ type Props = Record<string, string | number | boolean>;
 type AttributionProps = Record<string, string>;
 
 const ATTRIBUTION_KEY = 'excalicast.attribution';
+const ATTRIBUTION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const ORGANIC_HOSTS = [
   'google.',
   'bing.',
@@ -49,8 +50,18 @@ function safeHost(value: string): string {
 export function sessionAttribution(): AttributionProps {
   if (typeof window === 'undefined') return {};
   try {
-    const saved = sessionStorage.getItem(ATTRIBUTION_KEY);
-    if (saved) return JSON.parse(saved) as AttributionProps;
+    const saved = sessionStorage.getItem(ATTRIBUTION_KEY) ?? localStorage.getItem(ATTRIBUTION_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved) as AttributionProps;
+      const capturedAt = Number(parsed.captured_at ?? 0);
+      if (capturedAt > 0 && Date.now() - capturedAt <= ATTRIBUTION_TTL_MS) {
+        const { captured_at: _capturedAt, ...attribution } = parsed;
+        sessionStorage.setItem(ATTRIBUTION_KEY, saved);
+        return attribution;
+      }
+      sessionStorage.removeItem(ATTRIBUTION_KEY);
+      localStorage.removeItem(ATTRIBUTION_KEY);
+    }
 
     const params = new URLSearchParams(window.location.search);
     const referrerHost = safeHost(document.referrer);
@@ -60,11 +71,13 @@ export function sessionAttribution(): AttributionProps {
       referrer_host: referrerHost,
       traffic_kind: organic ? 'organic' : referrerHost ? 'referral' : 'direct',
     };
-    for (const key of ['utm_source', 'utm_medium', 'utm_campaign'] as const) {
+    for (const key of ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'] as const) {
       const value = params.get(key);
       if (value) attribution[key] = value.slice(0, 120);
     }
-    sessionStorage.setItem(ATTRIBUTION_KEY, JSON.stringify(attribution));
+    const stored = JSON.stringify({ ...attribution, captured_at: String(Date.now()) });
+    sessionStorage.setItem(ATTRIBUTION_KEY, stored);
+    localStorage.setItem(ATTRIBUTION_KEY, stored);
     return attribution;
   } catch {
     return {};

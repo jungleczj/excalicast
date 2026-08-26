@@ -56,7 +56,7 @@ export interface GeoContent {
 }
 
 /** A cross-link to another content page (for internal-linking / hub-and-spoke). */
-export type ContentType = 'compare' | 'use-case' | 'blog';
+export type ContentType = 'pillar' | 'compare' | 'use-case' | 'blog';
 export interface ContentRef {
   type: ContentType;
   slug: string;
@@ -108,10 +108,33 @@ export interface BlogEntry {
   description: LocalizedText;
   /** ISO date (YYYY-MM-DD). */
   date: string;
+  updatedAt: string;
+  author: { name: LocalizedText; url: string };
+  sources: ContentSource[];
+  heroMedia: { url: string; alt: LocalizedText };
+  keyTakeaways: LocalizedText[];
   /** Short standfirst shown under the title and used as GEO definition. */
   intro: LocalizedText;
   body: BlogBlock[];
   faqs?: FaqItem[];
+  related?: ContentRef[];
+}
+
+/** Category-defining page with publication-grade GEO evidence fields. */
+export interface PillarEntry extends GeoContent {
+  slug: string;
+  title: LocalizedText;
+  description: LocalizedText;
+  intro: LocalizedText;
+  directAnswer: LocalizedText;
+  body: BlogBlock[];
+  workflow: ContentStep[];
+  facts: ContentFact[];
+  limitations: LocalizedText[];
+  sources: ContentSource[];
+  verifiedAt: string;
+  updatedAt: string;
+  faqs: FaqItem[];
   related?: ContentRef[];
 }
 

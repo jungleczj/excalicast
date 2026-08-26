@@ -46,11 +46,11 @@ export const COMPARE_ENTRIES: CompareEntry[] = [
     },
     description: {
       en: 'Compare Loom and Excalicast for whiteboard videos, local recording, subtitles, and multi-ratio MP4 export from one take.',
-      zh: 'Loom 录制屏幕像素，Excalicast 录制白板操作事件流，一次录制导出 16:9 / 9:16 / 1:1 / 4:5。对比功能与定价。',
+      zh: '对比 Loom 与 Excalicast 在白板视频、本地录制、字幕和同一来源多比例 MP4 导出方面的差异。',
     },
     intro: {
-      en: 'Excalicast is a browser-based whiteboard recorder and a Loom alternative for whiteboard explainers: instead of capturing screen pixels, it records the Excalidraw operation stream plus microphone audio, so recordings are never affected by window occlusion or minimization and the same take exports to multiple aspect ratios.',
-      zh: 'Excalicast 是一款浏览器白板录制工具，也是白板讲解场景下的 Loom 替代方案：它采集的是 Excalidraw 操作事件流 + 麦克风音频，而非屏幕像素，因此录制完全不受窗口遮挡或最小化影响，同一段录制可导出多种比例。',
+      en: 'Excalicast is a browser-based Loom alternative for whiteboard explainers. Its built-in whiteboard source preserves canvas operations plus narration for editing and multi-format rendering; its tab, window, and desktop modes use ordinary display capture.',
+      zh: 'Excalicast 是面向白板讲解的浏览器端 Loom 替代方案。其内置白板来源会保留画布操作与旁白，用于后续编辑和多格式渲染；标签页、窗口和桌面模式则使用普通显示采集。',
     },
     directAnswer: {
       en: 'Loom is a general screen recorder. Excalicast is better for whiteboard videos when you need local recording, clean diagram capture, subtitles, and multi-ratio export.',
@@ -96,7 +96,7 @@ export const COMPARE_ENTRIES: CompareEntry[] = [
       { label: { en: 'Loom official website', zh: 'Loom 官网' }, url: 'https://www.loom.com/' },
       { label: { en: 'Excalicast pricing and product page', zh: 'Excalicast 产品与定价页' }, url: 'https://excalicast.cc/en/pricing' },
     ],
-    verifiedAt: '2026-08-18',
+    verifiedAt: '2026-08-26',
     ctaPreset: {
       label: { en: 'Record a whiteboard video', zh: '免费录制白板视频' },
       href: '/app?intent=whiteboard-video',
@@ -104,18 +104,18 @@ export const COMPARE_ENTRIES: CompareEntry[] = [
     rows: [
       {
         feature: { en: 'Capture method', zh: '采集方式' },
-        excalicast: { en: 'Whiteboard operation stream', zh: '白板操作事件流' },
-        competitor: { en: 'Screen pixels', zh: '屏幕像素' },
+        excalicast: { en: 'Operation stream for its whiteboard; display capture for selected screens', zh: '内置白板使用操作流；所选屏幕使用显示采集' },
+        competitor: { en: 'Screen and camera recording', zh: '屏幕与摄像头录制' },
       },
       {
         feature: { en: 'Window occlusion / minimize', zh: '窗口遮挡 / 最小化' },
-        excalicast: { en: 'Unaffected — always crisp', zh: '不受影响，始终清晰' },
-        competitor: { en: 'Records the occluding window', zh: '录到遮挡窗口' },
+        excalicast: { en: 'Unrelated screen pixels are not part of whiteboard rendering', zh: '白板渲染不包含无关屏幕像素' },
+        competitor: { en: 'Depends on the capture surface selected in Loom', zh: '取决于 Loom 中选择的采集表面' },
       },
       {
         feature: { en: 'Aspect ratios from one take', zh: '一次录制的比例' },
         excalicast: { en: '16:9, 9:16, 1:1, 4:5 — no re-record', zh: '16:9/9:16/1:1/4:5，无需重录' },
-        competitor: { en: 'Fixed; re-record needed', zh: '固定，需重录' },
+        competitor: { en: 'Editing and layout options vary by current Loom plan', zh: '编辑与布局能力取决于 Loom 当前套餐' },
       },
       {
         feature: { en: 'Where recordings are stored', zh: '录制存储位置' },
@@ -134,8 +134,8 @@ export const COMPARE_ENTRIES: CompareEntry[] = [
       },
     ],
     verdict: {
-      en: 'Choose Loom for general screen recording across any app. Choose Excalicast when your content is a whiteboard or diagram explainer: you get occlusion-proof capture, multi-ratio export from a single take, local-first privacy, and a free watermarked tier with no sign-up.',
-      zh: '如果你要录制任意应用的通用屏幕，选 Loom；如果你的内容是白板 / 图解讲解，选 Excalicast：抗遮挡采集、一次录制多比例导出、本地优先的隐私，以及无需注册的免费（带水印）档。',
+      en: 'Choose Loom for broad screen-and-camera messaging and team video workflows. Choose Excalicast when the main source is a whiteboard or diagram and you need its operations to remain editable, renderable in several aspect ratios, and local-first by default.',
+      zh: '需要通用屏幕与摄像头消息、团队视频工作流时选择 Loom；当主要来源是白板或图解，并希望操作保持可编辑、可渲染为多种比例且默认本地优先时，选择 Excalicast。',
     },
     faqs: [
       {

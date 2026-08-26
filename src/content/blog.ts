@@ -1,7 +1,7 @@
 import type { BlogEntry } from './types';
 
 /** Blog posts modelled as structured blocks (no MDX toolchain needed). */
-export const BLOG_ENTRIES: BlogEntry[] = [
+const RAW_BLOG_ENTRIES: Omit<BlogEntry, 'updatedAt' | 'author' | 'sources' | 'heroMedia' | 'keyTakeaways'>[] = [
   {
     slug: 'record-whiteboard-without-screen-recording',
     title: {
@@ -112,21 +112,21 @@ export const BLOG_ENTRIES: BlogEntry[] = [
       zh: '2026 年最适合白板讲解的 Loom 替代品',
     },
     description: {
-      en: 'Loom records screen pixels, which breaks on whiteboards. Here are the best Loom alternatives for recording a whiteboard explainer, and when to use each.',
-      zh: 'Loom 录屏幕像素，白板场景容易出问题。本文盘点录制白板讲解的最佳 Loom 替代品，以及各自适用场景。',
+      en: 'Compare Loom and focused whiteboard recording workflows by source type, editing, reframing, and publishing needs.',
+      zh: '从采集来源、编辑、重新构图和发布需求出发，对比 Loom 与专用白板录制工作流。',
     },
     date: '2026-06-01',
     intro: {
-      en: 'The best Loom alternative for whiteboard explainers is a tool that records the operation stream rather than screen pixels — so the recording stays clean under occlusion and exports to multiple aspect ratios. Excalicast is purpose-built for this; below we compare it with Loom and other recorders.',
-      zh: '白板讲解场景下最好的 Loom 替代品，是录制操作事件流而非屏幕像素的工具——这样录制在遮挡下仍保持干净，并能导出多种比例。Excalicast 正是为此而生；下面把它与 Loom 及其他录制工具逐一对比。',
+      en: 'For a whiteboard-first explanation, compare tools by what they preserve. Loom is a broad screen-and-camera recorder; Excalicast adds a structured operation-stream workflow for its built-in whiteboard and ordinary display capture for selected screen sources.',
+      zh: '白板优先的讲解应按工具真正保留的内容来比较。Loom 是通用屏幕与摄像头录制工具；Excalicast 为内置白板提供结构化操作流工作流，并为所选屏幕来源提供普通显示采集。',
     },
     body: [
       {
-        heading: { en: 'Why Loom struggles with whiteboards', zh: 'Loom 为什么不适合白板' },
+        heading: { en: 'When a general screen recorder is enough', zh: '什么时候通用录屏已经足够' },
         paragraphs: [
           {
-            en: 'Loom is great for general screen recording, but it captures pixels. On a whiteboard explainer, an overlapping window, a notification, or a minimized tab ends up in the video, and the output is locked to one resolution — you cannot reframe it for vertical platforms later.',
-            zh: 'Loom 做通用录屏很好，但它采集的是像素。在白板讲解里，遮挡窗口、通知弹窗或最小化的标签页都会进视频，而且输出锁死在一个分辨率——之后无法为竖屏平台重新构图。',
+            en: 'Loom is a practical choice when the subject is an app, browser tab, camera, or asynchronous team update. A purpose-built whiteboard workflow matters when you want drawing operations to remain structured and to render the same explanation again for another frame.',
+            zh: '当主体是应用、浏览器标签页、摄像头或异步团队更新时，Loom 是实用选择。当你希望绘制操作保持结构化，并把同一段讲解重新渲染到另一画幅时，专用白板工作流才更重要。',
           },
         ],
       },
@@ -134,8 +134,8 @@ export const BLOG_ENTRIES: BlogEntry[] = [
         heading: { en: 'The shortlist', zh: '候选清单' },
         paragraphs: [
           {
-            en: 'Excalicast — records the whiteboard operation stream, occlusion-proof, exports 16:9/9:16/1:1/4:5 from one take, free with no sign-up. Tella — polished screen+camera marketing clips. Screen Studio (Mac) — auto-zoom product demos. For meeting capture, a Zoom recording works but bakes in the whole screen. Pick based on whether the star of the video is a whiteboard (Excalicast) or an app/face (the others).',
-            zh: 'Excalicast——录白板操作流、抗遮挡、一录导出 16:9/9:16/1:1/4:5、免费免注册。Tella——精致的屏幕+摄像头营销短片。Screen Studio（Mac）——自动缩放的产品演示。会议录制可用 Zoom，但会把整个屏幕烤进去。按视频主角是白板（Excalicast）还是应用/人脸（其他）来选。',
+            en: 'Excalicast focuses on whiteboard operations, browser editing, and multi-format rendering. Tella focuses on polished screen-and-camera presentations, while Screen Studio focuses on Mac screen demos with automatic motion. Meeting platforms serve a different capture intent. Verify current plans and features on each product’s official site before choosing.',
+            zh: 'Excalicast 聚焦白板操作、浏览器编辑和多格式渲染；Tella 聚焦精致的屏幕与摄像头演示；Screen Studio 聚焦带自动镜头运动的 Mac 屏幕演示。会议平台对应另一种采集意图。选择前应在各产品官网重新核实当前套餐与功能。',
           },
         ],
       },
@@ -232,6 +232,28 @@ export const BLOG_ENTRIES: BlogEntry[] = [
     ],
   },
 ];
+
+const BLOG_AUTHOR = {
+  name: { en: 'Excalicast Editorial Team', zh: 'Excalicast 编辑团队' },
+  url: '/about',
+};
+
+export const BLOG_ENTRIES: BlogEntry[] = RAW_BLOG_ENTRIES.map((entry) => ({
+  ...entry,
+  updatedAt: '2026-08-26',
+  author: BLOG_AUTHOR,
+  sources: [
+    {
+      label: { en: 'Excalicast product and data-boundary overview', zh: 'Excalicast 产品与数据边界说明' },
+      url: 'https://excalicast.cc/en/about',
+    },
+  ],
+  heroMedia: {
+    url: '/opengraph-image',
+    alt: { en: `${entry.title.en} — Excalicast guide`, zh: `${entry.title.zh} — Excalicast 指南` },
+  },
+  keyTakeaways: [entry.intro, entry.body[0]?.paragraphs[0] ?? entry.intro],
+}));
 
 export function getBlogEntry(slug: string): BlogEntry | undefined {
   return BLOG_ENTRIES.find((e) => e.slug === slug);

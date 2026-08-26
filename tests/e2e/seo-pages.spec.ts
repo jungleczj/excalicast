@@ -1,5 +1,25 @@
 import { expect, test } from '@playwright/test';
 
+test('root resolves to the English market without an HTTP hreflang header', async ({ page }) => {
+  const response = await page.goto('/');
+
+  await expect(page).toHaveURL(/\/en$/);
+  expect(response?.headers().link).toBeUndefined();
+});
+
+test('pricing markdown exposes the same public pricing categories', async ({ request }) => {
+  const response = await request.get('/pricing.md');
+
+  expect(response.status()).toBe(200);
+  expect(response.headers()['content-type']).toContain('text/markdown');
+  const body = await response.text();
+  expect(body).toContain('# Excalicast pricing');
+  expect(body).toContain('Free');
+  expect(body).toContain('One-time export');
+  expect(body).toContain('Pro');
+  expect(body).toContain('Max');
+});
+
 test('private app pages emit noindex metadata', async ({ page }) => {
   await page.goto('/en/app');
 
@@ -85,19 +105,84 @@ test('content CTA preserves attribution and preselects its recording source', as
   );
 });
 
-test('home page links to the strategic content cluster', async ({ page }) => {
-  await page.goto('/zh');
+test('signup keeps landing attribution including UTM content and term', async ({ page }) => {
+  const analytics: Array<Record<string, unknown>> = [];
+  await page.route('**/api/analytics', async (route) => {
+    analytics.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.fulfill({ status: 204 });
+  });
 
-  await expect(
-    page.locator('a[href$="/use-cases/record-edit-publish-whiteboard-video"]'),
-  ).toBeVisible();
-  await expect(
-    page.locator('a[href$="/compare/excalicast-vs-excalicord"]'),
-  ).toBeVisible();
-  await expect(
-    page.locator('a[href$="/compare/excalicast-vs-excalidraw"]'),
-  ).toBeVisible();
-  await expect(
-    page.locator('a[href$="/blog/one-recording-every-aspect-ratio"]'),
-  ).toBeVisible();
+  await page.goto('/en?utm_source=alternativeto&utm_medium=directory&utm_campaign=launch&utm_content=profile&utm_term=whiteboard+recorder&auth_event=signup');
+  await expect.poll(() => analytics.some((item) => item.event === 'signup')).toBe(true);
+  const signup = analytics.find((item) => item.event === 'signup');
+  expect(signup?.props).toMatchObject({
+    entry_path: '/en',
+    utm_source: 'alternativeto',
+    utm_content: 'profile',
+    utm_term: 'whiteboard recorder',
+  });
+});
+
+test('home page links to the strategic content cluster', async ({ page }) => {
+  await page.goto('/en');
+
+  for (const path of [
+    '/excalidraw-recorder',
+    '/whiteboard-recorder',
+    '/event-based-recording',
+    '/about',
+  ]) {
+    await expect(page.locator(`a[href$="${path}"]`).first()).toBeVisible();
+  }
+});
+
+test('about page disambiguates the product and emits AboutPage schema', async ({ page }) => {
+  await page.goto('/en/about');
+
+  await expect(page.locator('h1')).toContainText('Excalicast');
+  await expect(page.getByText('excalicast.cc', { exact: false }).first()).toBeVisible();
+  await expect(page.getByText('podcast', { exact: false }).first()).toBeVisible();
+  await expect(page.getByText('iOS app', { exact: false }).first()).toBeVisible();
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+    'href',
+    'https://excalicast.cc/en/about',
+  );
+
+  const schemas = await page.locator('script[type="application/ld+json"]').allTextContents();
+  const types = schemas.flatMap((value) => {
+    const parsed = JSON.parse(value) as Record<string, unknown> | Array<Record<string, unknown>>;
+    const values = Array.isArray(parsed) ? parsed : [parsed];
+    return values.flatMap((item) => {
+      const graph = item['@graph'];
+      return Array.isArray(graph)
+        ? graph.map((node) => (node as Record<string, unknown>)['@type'])
+        : [item['@type']];
+    });
+  });
+  expect(types).toContain('AboutPage');
+  expect(types).toContain('Organization');
+  expect(types).toContain('SoftwareApplication');
+});
+
+test('three category pillars are answer-first, sourced and interconnected', async ({ page }) => {
+  const paths = [
+    '/excalidraw-recorder',
+    '/whiteboard-recorder',
+    '/event-based-recording',
+  ];
+
+  for (const path of paths) {
+    await page.goto(`/en${path}`);
+    await expect(page.locator('h1')).toBeVisible();
+    await expect(page.locator('.content-craft-direct-answer')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'References' })).toBeVisible();
+    await expect(page.locator('a[href$="/app?source=whiteboard"]').last()).toBeVisible();
+    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+      'href',
+      `https://excalicast.cc/en${path}`,
+    );
+    for (const related of paths.filter((item) => item !== path)) {
+      await expect(page.locator(`a[href$="${related}"]`).first()).toBeVisible();
+    }
+  }
 });

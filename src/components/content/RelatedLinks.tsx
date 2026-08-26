@@ -1,9 +1,10 @@
 import type { JSX } from 'react';
-import { getCompareEntry, getUseCaseEntry, getBlogEntry, pick } from '@/content';
+import { getCompareEntry, getUseCaseEntry, getBlogEntry, getPillarEntry, pick } from '@/content';
 import type { ContentRef } from '@/content/types';
 import { EntryList } from '@/components/content/EntryList';
 
 const PATH_PREFIX: Record<ContentRef['type'], string> = {
+  pillar: '',
   compare: '/compare',
   'use-case': '/use-cases',
   blog: '/blog',
@@ -12,7 +13,9 @@ const PATH_PREFIX: Record<ContentRef['type'], string> = {
 /** Resolve a ContentRef to its localized title + href, or null if missing. */
 function resolve(ref: ContentRef, locale: string): { href: string; title: string; description: string } | null {
   const entry =
-    ref.type === 'compare'
+    ref.type === 'pillar'
+      ? getPillarEntry(ref.slug)
+      : ref.type === 'compare'
       ? getCompareEntry(ref.slug)
       : ref.type === 'use-case'
         ? getUseCaseEntry(ref.slug)

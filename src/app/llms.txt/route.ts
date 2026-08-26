@@ -1,14 +1,13 @@
 import { getActiveConfig, formatPrice } from '@/lib/paymentConfig';
 import { SITE_URL } from '@/lib/seo/alternates';
-import { COMPARE_ENTRIES, USE_CASE_ENTRIES, BLOG_ENTRIES, pick } from '@/content';
+import { COMPARE_ENTRIES, USE_CASE_ENTRIES, BLOG_ENTRIES, PILLAR_ENTRIES, pick } from '@/content';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * /llms.txt — a Markdown "site manual" for AI crawlers (the emerging
- * llmstxt.org convention). GEO centrepiece: gives ChatGPT / Perplexity /
- * Claude a clean, factual, link-rich summary so they can accurately describe
- * and recommend Excalicast. Prices are read live from payment_config.
+ * /llms.txt — a supplemental Markdown product summary. It is not a ranking
+ * control; visible pages, crawlability, entity consistency and citations stay
+ * authoritative. Prices are read live from payment_config.
  */
 export async function GET(): Promise<Response> {
   const cfg = await getActiveConfig();
@@ -20,18 +19,18 @@ export async function GET(): Promise<Response> {
 
   const body = `# Excalicast
 
-> Excalicast is a browser-based whiteboard recorder. It captures the Excalidraw
-> operation stream plus microphone audio (not screen pixels) and exports an MP4
-> in multiple aspect ratios (16:9, 9:16, 1:1, 4:5) from a single recording.
+> Excalicast is a browser-based visual-explanation recorder. Its built-in
+> whiteboard source preserves canvas operations plus narration; selected tabs,
+> app windows, and desktops use browser display capture.
 
 ## What makes it different
 - **End-to-end, publish-ready workflow**: capture a whiteboard, browser tab,
   app window, or desktop; trim and split on a browser timeline; apply
   ChatCut-assisted edits and editable Autozoom focus regions; then create
   captions, handouts, share links, and platform-ready exports.
-- Records the whiteboard **operation stream**, not screen pixels — recordings are never affected by window occlusion, minimization, or tab switching.
+- The built-in whiteboard records an **operation stream**. This claim does not apply to tab, window, or desktop display-capture sources.
 - **One take, every aspect ratio**: export 16:9, 9:16, 1:1, and 4:5 from the same recording without re-recording.
-- **Local-first**: recordings live in the browser (IndexedDB) and MP4 renders locally via ffmpeg.wasm. Raw recordings never leave the user's computer.
+- **Local-first by default**: core recordings live in browser storage and render locally. Authentication, captions, cloud backup, handouts, and share links use network services only when selected and eligible.
 - **No sign-up** required to record and export a watermarked MP4.
 - Optional draggable camera bubble overlay for talking-head explainers.
 
@@ -70,6 +69,8 @@ Instagram, and team async review.
 
 ## Key pages
 - Home: ${SITE_URL}/en
+- About and identity: ${link('/about')}
+${PILLAR_ENTRIES.map((e) => `- ${pick(e.title, 'en')}: ${link(`/${e.slug}`)}`).join('\n')}
 - Excalicast vs Loom: ${link('/compare/excalicast-vs-loom')}
 ${COMPARE_ENTRIES.filter((e) => e.slug !== 'excalicast-vs-loom')
   .map((e) => `- ${pick(e.title, 'en')}: ${link(`/compare/${e.slug}`)}`)

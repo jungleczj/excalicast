@@ -2,12 +2,12 @@ import type { JSX } from 'react';
 import { notFound } from 'next/navigation';
 import { setRequestLocale } from 'next-intl/server';
 import { locales } from '@/i18n/config';
-import { absoluteUrl, SITE_URL } from '@/lib/seo/alternates';
+import { absoluteUrl } from '@/lib/seo/alternates';
 import { pageMetadata } from '@/lib/seo/meta';
 import { JsonLd } from '@/components/seo/JsonLd';
-import { faqPageSchema, breadcrumbSchema } from '@/lib/seo/schema';
+import { blogPostingSchema, breadcrumbSchema } from '@/lib/seo/schema';
 import { ContentShell } from '@/components/content/ContentShell';
-import { PageTitle, Lead, SectionHeading, FaqList, CtaRow } from '@/components/content/ContentPieces';
+import { PageTitle, Lead, SectionHeading, FaqList, CtaRow, SourceList } from '@/components/content/ContentPieces';
 import { RelatedLinks } from '@/components/content/RelatedLinks';
 import { BLOG_ENTRIES, getBlogEntry, pick } from '@/content';
 
@@ -39,19 +39,16 @@ export default async function BlogPostPage({ params }: Props): Promise<JSX.Eleme
   const entry = getBlogEntry(slug);
   if (!entry) notFound();
 
-  // Article schema lets AI engines attribute the post; FAQ schema (if any)
-  // adds liftable answers.
-  const articleSchema: Record<string, unknown> = {
-    '@context': 'https://schema.org',
-    '@type': 'Article',
+  const articleSchema = blogPostingSchema({
+    locale,
+    slug,
     headline: pick(entry.title, locale),
     description: pick(entry.description, locale),
-    datePublished: entry.date,
-    inLanguage: locale === 'zh' ? 'zh-CN' : 'en',
-    author: { '@type': 'Organization', name: 'Excalicast' },
-    publisher: { '@type': 'Organization', name: 'Excalicast' },
-    mainEntityOfPage: `${SITE_URL}/${locale}/blog/${slug}`,
-  };
+    publishedAt: entry.date,
+    updatedAt: entry.updatedAt,
+    image: absoluteUrl(locale, entry.heroMedia.url),
+    author: { name: pick(entry.author.name, locale), url: absoluteUrl(locale, entry.author.url) },
+  });
   const schemas: Record<string, unknown>[] = [
     articleSchema,
     breadcrumbSchema([
@@ -60,18 +57,34 @@ export default async function BlogPostPage({ params }: Props): Promise<JSX.Eleme
       { name: pick(entry.title, locale), url: absoluteUrl(locale, `/blog/${slug}`) },
     ]),
   ];
-  if (entry.faqs?.length) {
-    schemas.push(faqPageSchema(entry.faqs.map((f) => ({ question: pick(f.q, locale), answer: pick(f.a, locale) }))));
-  }
-
   return (
     <ContentShell locale={locale} contentType="blog" slug={slug}>
       <JsonLd data={schemas} />
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--ink-3)' }}>{entry.date}</div>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--ink-3)' }}>
+        {locale === 'zh' ? '发布' : 'Published'} {entry.date} · {locale === 'zh' ? '更新' : 'Updated'} {entry.updatedAt} · {pick(entry.author.name, locale)}
+      </div>
       <div style={{ marginTop: 8 }}>
         <PageTitle>{pick(entry.title, locale)}</PageTitle>
       </div>
       <Lead>{pick(entry.intro, locale)}</Lead>
+      {/* The visible hero and BlogPosting.image deliberately share one source. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={`/${locale}${entry.heroMedia.url}`}
+        alt={pick(entry.heroMedia.alt, locale)}
+        width={1200}
+        height={630}
+        loading="eager"
+        decoding="async"
+        style={{ display: 'block', width: '100%', height: 'auto', marginTop: 28, border: '2px solid var(--ink)', borderRadius: 14 }}
+      />
+
+      <SectionHeading>{locale === 'zh' ? '要点' : 'Key takeaways'}</SectionHeading>
+      <ul style={{ paddingLeft: 20, color: 'var(--ink-2)' }}>
+        {entry.keyTakeaways.map((takeaway, index) => (
+          <li key={index} style={{ marginTop: 8, lineHeight: 1.65 }}>{pick(takeaway, locale)}</li>
+        ))}
+      </ul>
 
       {entry.body.map((block, i) => (
         <section key={i}>
@@ -90,6 +103,9 @@ export default async function BlogPostPage({ params }: Props): Promise<JSX.Eleme
           <FaqList faqs={entry.faqs} locale={locale} />
         </>
       ) : null}
+
+      <SectionHeading>{locale === 'zh' ? '参考来源' : 'References'}</SectionHeading>
+      <SourceList sources={entry.sources} verifiedAt={entry.updatedAt} locale={locale} />
 
       <RelatedLinks refs={entry.related} locale={locale} />
 

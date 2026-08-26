@@ -7,7 +7,7 @@ export function ContentPageTracker({
   type,
   slug,
 }: {
-  type: 'compare' | 'use-case' | 'blog';
+  type: 'pillar' | 'compare' | 'use-case' | 'blog';
   slug: string;
 }): null {
   useEffect(() => {

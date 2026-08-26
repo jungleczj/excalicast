@@ -33,12 +33,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.auth.exchangeCodeForSession(code);
+  const { data, error } = await supabase.auth.exchangeCodeForSession(code);
   if (error) {
     return NextResponse.redirect(
       new URL(`${next}?login_error=${encodeURIComponent(error.message)}`, request.url),
     );
   }
 
-  return NextResponse.redirect(new URL(next, request.url));
+  const createdAt = data.user?.created_at ? Date.parse(data.user.created_at) : 0;
+  const authEvent = createdAt > 0 && Date.now() - createdAt < 5 * 60 * 1000 ? 'signup' : 'login';
+  const destination = new URL(next, request.url);
+  destination.searchParams.set('auth_event', authEvent);
+  return NextResponse.redirect(destination);
 }

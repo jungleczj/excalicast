@@ -2,7 +2,7 @@
   "landing": {
     "meta": {
       "title": "Excalicast — Whiteboard Recorder & Online Screen Recorder",
-      "description": "Record whiteboards & Excalidraw canvases (not screen pixels), edit, caption, and export MP4 in 16:9, 9:16, 1:1 — free, no sign-up."
+      "description": "Record Excalidraw-style whiteboard operations or a selected screen source, edit in the browser, and export MP4 in multiple aspect ratios."
     },
     "craft": {
       "nav": {
@@ -17,8 +17,8 @@
       },
       "hero": {
         "eyebrow": "Runs in the browser · local-first",
-        "title": "Give every explanation\na place to stay",
-        "body": "Excalicast keeps the shape of a walkthrough: canvas, voice, rhythm, and versions. After recording, it can still be shaped, exported again, and returned to a place you can search.",
+        "title": "Record visual explanations,\nnot just a screen",
+        "body": "Excalicast records whiteboard operations with narration, lets you edit the explanation in your browser, and renders the same source for multiple video formats.",
         "primary": "Start recording",
         "secondary": "See pricing",
         "microcopy": "No download. No need to hand over the work.",
@@ -43,6 +43,13 @@
         "caption": { "title": "Caption", "body": "Speech becomes text you can read, refine, and publish." },
         "distribute": { "title": "Publish", "body": "The same source can travel to different platforms." },
         "archive": { "title": "Archive", "body": "What you explained returns to a place you can find." }
+      },
+      "topics": {
+        "heading": "Start with the recording method you need.",
+        "body": "Three focused guides explain the category, workflow, and technical boundary without mixing search intent.",
+        "excalidraw": { "title": "Excalidraw recorder", "body": "Record an Excalidraw-style explanation with voice, then edit and export it." },
+        "whiteboard": { "title": "Whiteboard recorder", "body": "Turn drawings and narration into a reusable visual explanation." },
+        "events": { "title": "Event-based recording", "body": "See how whiteboard operations differ from ordinary display capture." }
       },
       "personas": {
         "heading": "How people use Excalicast",
@@ -124,6 +131,7 @@
       },
       "footer": {
         "pricing": "Pricing",
+        "about": "About Excalicast",
         "product": "Product",
         "learn": "Learn",
         "workflow": "Recording-to-publish workflow",
@@ -162,7 +170,7 @@
       "q4": {
         "tag": "DIFFERENTIATOR",
         "q": "Why whiteboard recording instead of screen recording?",
-        "a": "Excalicast records the canvas event stream — every stroke, shape and move — not pixels off your screen. Other windows, system notifications, and even minimizing the browser don't pollute the final video. Loom and OBS record pixels; we record events."
+        "a": "For its built-in whiteboard, Excalicast records canvas operations — strokes, shapes and moves — with narration, so unrelated screen pixels are not part of that render. Tab, window and desktop sources use ordinary display capture."
       },
       "q5": {
         "tag": "PRIVACY",

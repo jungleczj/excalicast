@@ -6,7 +6,7 @@ import { TrackedLink } from '@/components/analytics/TrackedLink';
 import { ContentPageTracker } from '@/components/analytics/ContentPageTracker';
 
 /**
- * Shared chrome for programmatic content pages (compare / use-cases / blog).
+ * Shared chrome for editorial and programmatic content pages.
  * Mirrors the landing page's paper/ink look and its h-full + overflow-auto
  * scroll model (body is h-screen). Server Component — links only.
  */
@@ -17,7 +17,7 @@ export async function ContentShell({
   children,
 }: {
   locale: string;
-  contentType?: 'compare' | 'use-case' | 'blog';
+  contentType?: 'pillar' | 'compare' | 'use-case' | 'blog';
   slug?: string;
   children: ReactNode;
 }): Promise<JSX.Element> {
@@ -27,7 +27,9 @@ export async function ContentShell({
       ? { href: '/compare', label: t('footer.compare') }
       : contentType === 'use-case'
         ? { href: '/use-cases', label: t('footer.useCases') }
-        : { href: '/blog', label: t('footer.blog') }
+        : contentType === 'blog'
+          ? { href: '/blog', label: t('footer.blog') }
+          : { href: '/', label: locale === 'zh' ? '主题指南' : 'Guides' }
     : null;
   return (
     <div className="app-craft-screen content-craft-page flex h-full flex-col" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>

@@ -6,6 +6,10 @@ export default createMiddleware({
   defaultLocale,
   localeDetection: true,
   localePrefix: 'always',
+  // HTML metadata + sitemap are the single hreflang source of truth.
+  // next-intl's response Link header uses different language codes and an
+  // unlocalized x-default, which conflicts with those canonical alternates.
+  alternateLinks: false,
   localeCookie: { name: LOCALE_COOKIE, maxAge: 60 * 60 * 24 * 365 },
 });
 

@@ -244,7 +244,7 @@ export async function CtaRow({
   preset,
 }: {
   locale: string;
-  type: 'compare' | 'use-case' | 'blog';
+  type: 'pillar' | 'compare' | 'use-case' | 'blog';
   slug: string;
   preset?: CtaPreset;
 }): Promise<JSX.Element> {

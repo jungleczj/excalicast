@@ -2,11 +2,10 @@ import type { MetadataRoute } from 'next';
 import { SITE_URL } from '@/lib/seo/alternates';
 
 /**
- * Generates /robots.txt. Explicitly welcomes general crawlers AND the major
- * generative-AI crawlers (GPTBot, OAI-SearchBot, PerplexityBot, ClaudeBot,
- * Google-Extended) — this is part of the GEO strategy: we WANT AI engines to
- * read the site so they can cite excalicast.cc. Only private/app routes are
- * disallowed.
+ * Generates /robots.txt. Search/indexing and user-request fetchers may read
+ * public marketing content, while model-training crawlers are opted out.
+ * These are separate product choices: training access is not required for
+ * ChatGPT, Perplexity or Claude search visibility.
  */
 export default function robots(): MetadataRoute.Robots {
   const privateSegments = ['app', 'library', 'export/', 'play/', 's/', 'admin/'];
@@ -14,14 +13,17 @@ export default function robots(): MetadataRoute.Robots {
     privateSegments.map((segment) => `/${locale}/${segment}`),
   );
   const disallow = ['/api/', ...localizedPrivateRoutes];
-  const aiBots = [
-    'GPTBot',
+  const searchBots = [
     'OAI-SearchBot',
     'ChatGPT-User',
     'PerplexityBot',
     'Perplexity-User',
-    'ClaudeBot',
+    'Claude-SearchBot',
     'Claude-User',
+  ];
+  const trainingBots = [
+    'GPTBot',
+    'ClaudeBot',
     'Google-Extended',
     'Applebot-Extended',
     'CCBot',
@@ -30,7 +32,8 @@ export default function robots(): MetadataRoute.Robots {
   return {
     rules: [
       { userAgent: '*', allow: '/', disallow },
-      ...aiBots.map((ua) => ({ userAgent: ua, allow: '/', disallow })),
+      ...searchBots.map((ua) => ({ userAgent: ua, allow: '/', disallow })),
+      ...trainingBots.map((ua) => ({ userAgent: ua, disallow: '/' })),
     ],
     sitemap: `${SITE_URL}/sitemap.xml`,
     host: SITE_URL,

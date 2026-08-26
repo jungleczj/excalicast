@@ -7,7 +7,7 @@ import { getActiveConfig, formatPrice } from '@/lib/paymentConfig';
 import { buildAlternates } from '@/lib/seo/alternates';
 import { JsonLd } from '@/components/seo/JsonLd';
 import { TrackedLink } from '@/components/analytics/TrackedLink';
-import { softwareApplicationSchema, organizationSchema, faqPageSchema } from '@/lib/seo/schema';
+import { brandGraphSchema } from '@/lib/seo/schema';
 
 interface Props {
   params: Promise<{ locale: string }>;
@@ -39,7 +39,7 @@ export default async function LandingPage({ params }: Props): Promise<JSX.Elemen
   const t = await getTranslations({ locale, namespace: 'landing' });
   const currency = (cfg?.currency ?? 'usd').toUpperCase();
   const toMajor = (cents: number | undefined, fallback: number) => (cents != null ? cents / 100 : fallback);
-  const productSchema = softwareApplicationSchema({
+  const brandSchema = brandGraphSchema({
     locale,
     description: t('meta.description'),
     oneTimePrice: toMajor(cfg?.oneTimePriceCents, 4.99),
@@ -47,17 +47,10 @@ export default async function LandingPage({ params }: Props): Promise<JSX.Elemen
     maxPrice: toMajor(cfg?.maxMonthlyPriceCents, 15.99),
     currency,
   });
-  const faqSchema = faqPageSchema(
-    [1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => ({
-      question: t(`faq.q${i}.q`),
-      answer: t(`faq.q${i}.a`, { price: oneTimePrice }),
-    })),
-  );
-
   return (
     <>
-      <link rel="preload" as="image" href="/landing/hero-generated-final.png" />
-      <JsonLd data={[productSchema, organizationSchema(), faqSchema]} />
+      <link rel="preload" as="image" type="image/webp" href="/landing/hero-generated-final.webp" />
+      <JsonLd data={brandSchema} />
       <LandingContent oneTimePrice={oneTimePrice} proPrice={proPrice} maxPrice={maxPrice} />
     </>
   );
@@ -72,12 +65,12 @@ const CAPABILITIES = [
 ] as const;
 
 const PERSONAS = [
-  { key: 'teacher', image: '/landing/personas/female-01.png', tone: '#EAF3FF' },
-  { key: 'architect', image: '/landing/personas/male-03.png', tone: '#FFF0D7' },
-  { key: 'pm', image: '/landing/personas/female-05.png', tone: '#EAF7EC' },
-  { key: 'creator', image: '/landing/personas/male-06.png', tone: '#F2EDFF' },
-  { key: 'course', image: '/landing/personas/female-07.png', tone: '#FFECEC' },
-  { key: 'team', image: '/landing/personas/male-08.png', tone: '#EEF2F6' },
+  { key: 'teacher', image: '/landing/personas/female-01.webp', tone: '#EAF3FF' },
+  { key: 'architect', image: '/landing/personas/male-03.webp', tone: '#FFF0D7' },
+  { key: 'pm', image: '/landing/personas/female-05.webp', tone: '#EAF7EC' },
+  { key: 'creator', image: '/landing/personas/male-06.webp', tone: '#F2EDFF' },
+  { key: 'course', image: '/landing/personas/female-07.webp', tone: '#FFECEC' },
+  { key: 'team', image: '/landing/personas/male-08.webp', tone: '#EEF2F6' },
 ] as const;
 
 const FEATURES = [
@@ -120,6 +113,7 @@ function LandingContent({
         <div className="craft-page-shell">
           <HeroSection t={t} />
           <CapabilitySection t={t} />
+          <TopicAuthoritySection t={t} />
           <PersonaSection t={t} />
           <NarrativeSection t={t} />
           <PricingRhythm t={t} tiers={tiers} />
@@ -177,7 +171,7 @@ function HeroSection({ t }: { t: ReturnType<typeof useTranslations> }): JSX.Elem
   return (
     <section className="craft-hero craft-paper-card parallax-host">
       <div className="craft-hero-generated-clip" aria-hidden="true">
-        <img className="craft-hero-generated-visual" src="/landing/hero-generated-final.png" alt="" draggable={false} />
+        <img className="craft-hero-generated-visual" src="/landing/hero-generated-final.webp" alt="" width={1600} height={821} fetchPriority="high" decoding="sync" draggable={false} />
       </div>
 
       <div className="craft-hero-copy reveal-up">
@@ -309,6 +303,31 @@ function CapabilitySection({ t }: { t: ReturnType<typeof useTranslations> }): JS
   );
 }
 
+function TopicAuthoritySection({ t }: { t: ReturnType<typeof useTranslations> }): JSX.Element {
+  const topics = [
+    { key: 'excalidraw', href: '/excalidraw-recorder' },
+    { key: 'whiteboard', href: '/whiteboard-recorder' },
+    { key: 'events', href: '/event-based-recording' },
+  ] as const;
+
+  return (
+    <section className="craft-centered-section craft-capabilities" aria-labelledby="topic-guides-heading">
+      <div className="craft-section-heading reveal-up">
+        <h2 id="topic-guides-heading">{t('craft.topics.heading')}</h2>
+        <p>{t('craft.topics.body')}</p>
+      </div>
+      <div className="craft-capability-grid stagger">
+        {topics.map((topic, index) => (
+          <Link key={topic.key} href={topic.href} className={`craft-capability reveal-up ${index === 0 ? 'is-hero' : index === 1 ? 'is-blue' : 'is-green'}`}>
+            <h3>{t(`craft.topics.${topic.key}.title`)}</h3>
+            <p>{t(`craft.topics.${topic.key}.body`)}</p>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function PersonaSection({ t }: { t: ReturnType<typeof useTranslations> }): JSX.Element {
   return (
     <section className="craft-personas">
@@ -332,9 +351,10 @@ function PersonaTrack({ t, ariaHidden = false }: { t: ReturnType<typeof useTrans
           <img
             src={p.image}
             alt=""
-            width={1122}
-            height={1402}
-            decoding="sync"
+            width={480}
+            height={600}
+            loading="lazy"
+            decoding="async"
             draggable={false}
           />
           <div>
@@ -709,12 +729,16 @@ function CraftFooter({ t }: { t: ReturnType<typeof useTranslations> }): JSX.Elem
             <Link href="/">{t('craft.nav.home')}</Link>
             <Link href="/library">{t('craft.nav.library')}</Link>
             <Link href="/pricing">{t('craft.footer.pricing')}</Link>
+            <Link href="/about">{t('craft.footer.about')}</Link>
           </div>
           <div>
             <h3>{t('craft.footer.learn')}</h3>
             <Link href="/use-cases">{t('footer.useCases')}</Link>
             <Link href="/compare">{t('footer.compare')}</Link>
             <Link href="/blog">{t('footer.blog')}</Link>
+            <Link href="/excalidraw-recorder">{t('craft.topics.excalidraw.title')}</Link>
+            <Link href="/whiteboard-recorder">{t('craft.topics.whiteboard.title')}</Link>
+            <Link href="/event-based-recording">{t('craft.topics.events.title')}</Link>
             <Link href="/use-cases/record-edit-publish-whiteboard-video">{t('craft.footer.workflow')}</Link>
             <Link href="/compare/excalicast-vs-excalicord">{t('craft.footer.excalicord')}</Link>
             <Link href="/use-cases/whiteboard-recording-tool">{t('craft.footer.whiteboardTool')}</Link>
