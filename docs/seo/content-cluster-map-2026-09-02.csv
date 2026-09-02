@@ -1,0 +1,56 @@
+keyword,target_slug,page_type,cluster,is_primary,wave,status,rationale
+how to screen record on pc,how-to-screen-record-on-windows-11,guide,device-platform,true,upgrade,planned,Core Windows upgrade; highest-volume exact-match query for the existing article.
+screen recorder windows 11,how-to-screen-record-on-windows-11,guide,device-platform,false,upgrade,planned,"Same Windows 11 capture SERP and should strengthen the upgraded canonical page, not create a doorway."
+record screen windows 11,how-to-screen-record-on-windows-11,guide,device-platform,false,upgrade,planned,Near-duplicate Windows phrasing mapped to the same authoritative how-to.
+screencasting,screencasting-guide,guide,device-platform,true,upgrade,planned,Core definition-and-workflow upgrade for the broad screencasting term.
+whiteboard animation,whiteboard-animation-and-hand-drawn-explainers,guide,whiteboard-explainers,true,upgrade,planned,Core whiteboard explainer upgrade with the strongest category term.
+animated explainer video,whiteboard-animation-and-hand-drawn-explainers,guide,whiteboard-explainers,false,upgrade,planned,Category-adjacent explainer term supports the upgraded whiteboard-versus-animation guide.
+hand drawn animation,whiteboard-animation-and-hand-drawn-explainers,guide,whiteboard-explainers,false,upgrade,planned,Definition variant belongs on the same whiteboard versus hand-drawn explainer page.
+screen recorder for mac,best-screen-recorder-for-mac,commercial-guide,device-platform,true,upgrade,planned,Core Mac comparison upgrade with direct product-selection intent.
+whiteboard animation software comparison chart,whiteboard-animation-software-comparison,comparison,alternatives-comparisons,true,upgrade,planned,Core software-comparison upgrade; low-KD comparison chart term is the cleanest primary.
+whiteboard animation software comparison,whiteboard-animation-software-comparison,comparison,alternatives-comparisons,false,upgrade,planned,Same comparison SERP cluster as the chart phrasing.
+whiteboard animation software,whiteboard-animation-software-comparison,comparison,alternatives-comparisons,false,upgrade,planned,Category-commercial support term belongs on the same comparison page.
+best whiteboard animation software,whiteboard-animation-software-comparison,comparison,alternatives-comparisons,false,upgrade,planned,Decision-intent variant should enrich the upgraded comparison page instead of splitting the SERP into another slug.
+how to screen record on mac with audio,record-screen-with-audio-on-mac,guide,audio-camera,true,1,planned,Qualified Mac-audio head term for the dedicated wave-1 device/audio guide.
+record screen macbook with audio,record-screen-with-audio-on-mac,guide,audio-camera,false,1,planned,MacBook phrasing overlaps the same Mac system-audio workflow.
+how to record screen on mac with audio,record-screen-with-audio-on-mac,guide,audio-camera,false,1,planned,Same Mac audio capture job with alternate phrasing.
+how to screen record with audio on mac,record-screen-with-audio-on-mac,guide,audio-camera,false,1,planned,Lower-KD Mac audio variant supports the same canonical page.
+screen record with audio on macbook,record-screen-with-audio-on-mac,guide,audio-camera,false,1,planned,Supporting MacBook variant for the same guide.
+screen recording mac with audio,record-screen-with-audio-on-mac,guide,audio-camera,false,1,planned,Same Mac audio SERP family; supports the same page.
+screen recorder with audio,record-screen-with-audio-on-mac,guide,audio-camera,false,1,planned,KD 73 is retained only as a supporting variant on an already qualified Mac-audio cluster; no separate page.
+how to record screen with audio,record-screen-with-audio-on-mac,guide,audio-camera,false,1,planned,KD 50 is retained only as support for the qualified Mac-audio page until a lower-KD generic audio term justifies its own slug.
+record screen with audio,record-screen-with-audio-on-mac,guide,audio-camera,false,1,planned,High-KD generic audio phrasing stays secondary on the qualified Mac-audio article.
+how to record audio with screen capture,record-screen-with-audio-on-mac,guide,audio-camera,false,1,planned,High-volume but KD 65; retained only as secondary support under the qualified audio cluster.
+tab audio recorder,record-browser-tab-with-audio,guide,device-platform,true,1,planned,Authenticated SEMrush mirror surfaced a low-KD browser-tab audio primary that avoids using the tougher Chrome-recorder head term as primary.
+record tab audio,record-browser-tab-with-audio,guide,device-platform,false,1,planned,Same browser-tab audio workflow with a lower-volume exact variant.
+screen recorder chrome,record-browser-tab-with-audio,guide,device-platform,false,1,planned,KD 73 head term is kept only as secondary support on the qualified browser-tab audio page.
+chrome screen recorder,record-browser-tab-with-audio,guide,device-platform,false,1,planned,High-volume Chrome variant remains secondary because KD exceeds the strict primary cap.
+browser screen recorder,record-browser-tab-with-audio,guide,device-platform,false,1,planned,Supporting browser-capture variant for the same tab-audio guide.
+web based screen recorder,record-browser-tab-with-audio,guide,device-platform,false,1,planned,Low-volume supporting variant; no standalone page.
+online screen recorder no download,record-browser-tab-with-audio,guide,device-platform,false,1,planned,High-KD convenience variant stays secondary inside the browser-tab capture cluster.
+record screen and camera at the same time,record-screen-and-webcam,guide,audio-camera,true,1,planned,Best available low-KD exact-match query for a screen-plus-camera workflow page.
+screen recorder with webcam,record-screen-and-webcam,guide,audio-camera,false,1,planned,KD 86 head term is retained only as secondary support on the qualified camera cluster.
+screen recorder with camera,record-screen-and-webcam,guide,audio-camera,false,1,planned,Alternate camera phrasing supports the same page and avoids another near-duplicate slug.
+record screen and webcam,record-screen-and-webcam,guide,audio-camera,false,1,planned,Supporting variant for the same screen-plus-webcam workflow.
+video notes,video-to-notes-and-handouts,guide,editing-publishing,true,2,planned,Authenticated SEMrush mirror surfaced a qualified notes primary; this keeps the publishing cluster inside the strict three-tier model.
+video to notes,video-to-notes-and-handouts,guide,editing-publishing,false,2,planned,KD 50 variant stays secondary on the qualified video-notes page.
+video summary generator,video-to-notes-and-handouts,guide,editing-publishing,false,2,planned,KD 56 support term stays secondary and must not overclaim unsupported automation.
+whiteboard explainer video,whiteboard-explainer-video,guide,whiteboard-explainers,true,2,planned,Quick-win explainer phrase is distinct enough to justify a focused whiteboard-explainer guide.
+hand drawn explainer video,whiteboard-explainer-video,guide,whiteboard-explainers,false,2,planned,High-KD support term belongs on the same explainer page and should not spawn another slug.
+whiteboard video maker,whiteboard-video-maker,commercial-guide,whiteboard-explainers,true,2,planned,Best available low-KD commercial phrase for the whiteboard-maker page.
+whiteboard animation maker,whiteboard-video-maker,commercial-guide,whiteboard-explainers,false,2,planned,Maker synonym overlaps the same commercial intent and stays secondary.
+animated explainer video maker,animated-explainer-video,commercial-guide,whiteboard-explainers,true,2,planned,Separate commercial maker intent for animated explainers merits its own slug.
+digital whiteboard recorder,digital-whiteboard-recorder,tool-guide,whiteboard-explainers,true,2,planned,Low-volume but exact-match long tail supports a narrow tool-guide without cannibalizing the broader whiteboard pages.
+loom alternatives,loom-alternatives-for-whiteboard,comparison,alternatives-comparisons,true,3,planned,Qualified alternatives term for a focused Loom-alternatives article grounded in whiteboard and async-explainer jobs.
+loom alternative,loom-alternatives-for-whiteboard,comparison,alternatives-comparisons,false,3,planned,Singular variant shares the same alternatives SERP and should not split the page.
+screen studio alternative,screen-studio-alternative,comparison,alternatives-comparisons,true,3,planned,Distinct Mac-demo comparison query with clear commercial intent.
+snagit alternative,snagit-alternative,comparison,alternatives-comparisons,true,3,planned,Distinct capture-and-annotation comparison query with strong switch intent.
+obs studio alternative,obs-studio-alternative,comparison,alternatives-comparisons,true,3,planned,Qualified OBS-alternative query is broad enough for a standalone comparison page.
+camtasia alternative,screen-recorder-alternatives,comparison,alternatives-comparisons,true,3,planned,Best low-KD general recorder-alternatives term available in the current evidence set.
+screencastify alternative,screen-recorder-alternatives,comparison,alternatives-comparisons,false,3,planned,Education-flavored alternative term supports the broader recorder-alternatives hub.
+how to make a tutorial video,how-to-make-a-tutorial-video,guide,teaching-workflows,true,3,planned,Best low-KD tutorial-production query for the teaching workflow article.
+screen recorder for tutorials,how-to-make-a-tutorial-video,guide,teaching-workflows,false,3,planned,High-KD recorder variant stays secondary on the qualified tutorial guide.
+software demo video,software-demo-video,guide,teaching-workflows,true,3,planned,Best available low-KD primary for the product-demo workflow article.
+product demo video maker,software-demo-video,guide,teaching-workflows,false,3,planned,Maker variant supports the same demo-planning page.
+software demo video maker,software-demo-video,guide,teaching-workflows,false,3,planned,Very low-volume maker variant remains secondary support only.
+lecture recording software,record-online-course-lessons,guide,teaching-workflows,true,3,planned,Best available teaching-recording term for a course-lesson workflow page.
