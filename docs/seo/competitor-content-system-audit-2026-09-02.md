@@ -55,6 +55,10 @@ The following separates content URLs from conversion, category, and support surf
 - **Bandicam:** official product/manual links and screenshots support the workflow; comparison posts need a disclosed test method, and the blog’s “best” claims are not independent sources.
 - **Screencastify:** posts identify authors/roles and embed product/course demonstrations; education statistics and classroom claims should link to the underlying study rather than rely on the vendor article alone. Chrome Web Store metadata is distribution evidence, not editorial evidence.
 
+## SEMrush keyword-demand surrogate (round 3)
+
+Keyword Overview was accessible in the logged-in Chrome session, but the visible report did not expose a URL-to-SERP mapping for the selected competitor articles. The one reproducible visible report was [Keyword Overview: screen recording with audio](https://www.semrush.com/analytics/keywordoverview/?db=us&q=screen+recording+with+audio), database `us`, device `Desktop`, date `Sep 2, 2026`: US **Volume 1.0K**, **KD 80%**. Its visible keyword-ideas rows included `how to screen record on mac with audio` (**3.6K**, **42**) and `how to screen record with audio on mac` (**3.6K**, **32**), but no competitor article URL was shown in that report. Because a query metric alone is search-demand evidence—not estimated page traffic—and no URL match was visible, the five article sets remain unsupported for the brief’s “high-traffic” requirement. Do not promote them until a SEMrush report/export shows each URL in the corresponding US SERP or organic-pages result.
+
 ## Verification
 
 ```bash
