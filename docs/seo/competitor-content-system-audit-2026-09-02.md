@@ -1,12 +1,12 @@
 # Competitor content-system audit
 
 **Verified:** 2026-09-02  
-**Market lens:** US search demand; public pages sampled on desktop and a narrow/mobile viewport.  
-**Scope:** Loom, ScreenPal, ScreenRec, Bandicam, and Screencastify. The existing SEMrush snapshot is directional; round 4 adds reproducible URL-level estimated organic-traffic evidence from SEMrush Top Pages, while the public-page audit records what a reader can actually see and reuse.
+**Market lens:** US search demand; the original five brands had narrow/mobile viewport spot checks, while the five brands added in Task 2 had desktop DOM checks only, with mobile recheck pending.
+**Scope:** Loom, ScreenPal, ScreenRec, Bandicam, Screencastify, VEED, Screen Studio, VideoScribe, Canva, and Powtoon. The existing SEMrush snapshot is directional; round 4 adds reproducible URL-level estimated organic-traffic evidence from SEMrush Top Pages, while the public-page audit records what a reader can actually see and reuse.
 
 ## Interface and rubric
 
-The five rows below are the Task 3 interface. Keep the column names stable when this audit is refreshed.
+The ten rows below are the Task 3 interface. Keep the column names stable when this audit is refreshed.
 
 | brand | content_hubs | page_types | top_page_patterns | layout_patterns | voice_patterns | internal_linking | conversion_pattern | borrow | avoid | verified_at |
 |---|---|---|---|---|---|---|---|---|---|---|---|
