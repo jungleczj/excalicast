@@ -186,6 +186,100 @@ test('every blog post carries publication-grade provenance', () => {
   }
 });
 
+test('Semrush opportunity pages cover each qualified keyword without cannibalization', () => {
+  const clusters = [
+    {
+      slug: 'how-to-screen-record-on-windows-11',
+      terms: ['how to screen record on pc', 'screen recorder windows 11', 'record screen windows 11'],
+    },
+    { slug: 'screencasting-guide', terms: ['screencasting'] },
+    { slug: 'best-screen-recorder-for-mac', terms: ['screen recorder for mac'] },
+    {
+      slug: 'whiteboard-animation-and-hand-drawn-explainers',
+      terms: ['whiteboard animation', 'animated explainer video', 'hand drawn animation'],
+    },
+  ];
+
+  for (const cluster of clusters) {
+    const entry = BLOG_ENTRIES.find((item) => item.slug === cluster.slug);
+    expect(entry, `${cluster.slug} must exist`).toBeTruthy();
+    const searchableCopy = [
+      entry?.title.en,
+      entry?.description.en,
+      entry?.intro.en,
+      ...(entry?.body.flatMap((block) => [
+        block.heading?.en,
+        ...block.paragraphs.map((paragraph) => paragraph.en),
+      ]) ?? []),
+    ].join(' ').toLowerCase();
+    for (const term of cluster.terms) {
+      expect(searchableCopy, `${cluster.slug} should cover ${term}`).toContain(term);
+    }
+    expect(entry?.body.length).toBeGreaterThanOrEqual(5);
+    expect(entry?.faqs?.length).toBeGreaterThanOrEqual(3);
+  }
+
+  const allTerms = clusters.flatMap((cluster) => cluster.terms);
+  expect(new Set(allTerms).size).toBe(allTerms.length);
+});
+
+test('new-site keyword expansion ships useful comparison clusters instead of doorway pages', () => {
+  const softwareGuide = BLOG_ENTRIES.find(
+    (item) => item.slug === 'whiteboard-animation-software-comparison',
+  );
+  expect(softwareGuide).toBeTruthy();
+  const softwareCopy = [
+    softwareGuide?.title.en,
+    softwareGuide?.description.en,
+    softwareGuide?.intro.en,
+    ...(softwareGuide?.body.flatMap((block) => [
+      block.heading?.en,
+      ...block.paragraphs.map((paragraph) => paragraph.en),
+    ]) ?? []),
+  ].join(' ').toLowerCase();
+  for (const term of [
+    'whiteboard animation software comparison chart',
+    'whiteboard animation software comparison',
+    'whiteboard animation software',
+    'best whiteboard animation software',
+  ]) {
+    expect(softwareCopy).toContain(term);
+  }
+  expect(softwareGuide?.body.length).toBeGreaterThanOrEqual(6);
+  expect(softwareGuide?.faqs?.length).toBeGreaterThanOrEqual(4);
+  expect(softwareGuide?.sources.length).toBeGreaterThanOrEqual(4);
+
+  const snagit = COMPARE_ENTRIES.find((item) => item.slug === 'excalicast-vs-snagit');
+  expect(snagit).toBeTruthy();
+  expect(`${snagit?.title.en} ${snagit?.description.en}`.toLowerCase()).toContain(
+    'snagit alternative',
+  );
+  expect(snagit?.directAnswer?.en).toContain('Snagit');
+  expect(snagit?.bestFor?.length).toBeGreaterThanOrEqual(2);
+  expect(snagit?.notBestFor?.length).toBeGreaterThanOrEqual(2);
+  expect(snagit?.facts?.length).toBeGreaterThanOrEqual(2);
+  expect(snagit?.sources?.length).toBeGreaterThanOrEqual(2);
+  expect(snagit?.verifiedAt).toBe('2026-09-01');
+
+  const screenStudio = COMPARE_ENTRIES.find(
+    (item) => item.slug === 'excalicast-vs-screen-studio',
+  );
+  expect(
+    `${screenStudio?.title.en} ${screenStudio?.description.en} ${screenStudio?.directAnswer?.en}`.toLowerCase(),
+  ).toContain('screen studio alternative');
+  expect(screenStudio?.sources?.length).toBeGreaterThanOrEqual(2);
+  expect(screenStudio?.verifiedAt).toBe('2026-09-01');
+
+  const urls = sitemap().map((entry) => entry.url);
+  for (const path of [
+    '/blog/whiteboard-animation-software-comparison',
+    '/compare/excalicast-vs-snagit',
+  ]) {
+    expect(urls).toContain(`https://excalicast.cc/en${path}`);
+    expect(urls).toContain(`https://excalicast.cc/zh${path}`);
+  }
+});
+
 test('Bing-facing comparison metadata stays within stable length ranges', () => {
   for (const slug of ['excalicast-vs-loom', 'excalicast-vs-screen-studio']) {
     const entry = COMPARE_ENTRIES.find((item) => item.slug === slug);

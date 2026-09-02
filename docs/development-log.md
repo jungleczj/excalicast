@@ -567,3 +567,37 @@
 - Added optional key-point motions to localized tracks while keeping source-language motions on recording metadata.
 - The editor resolves captions, generation language, timeline motions, preview, and export from the active language variant.
 - Key-point edits persist to the active variant instead of overwriting the source-language track.
+
+## 2026-09-01 - SEMrush keyword clusters and search-intent content
+
+### Baseline
+
+- Requested baseline `8399ef3 feat: adapt english dubbing timeline and key points` was not present in the local object database.
+- The implementation started from a clean `fix/loading-recording` worktree and did not change recording, dubbing, export, payment, or storage behavior.
+
+### Product behavior
+
+- Four bilingual guides now cover eight qualified US search terms from SEMrush without creating near-duplicate Windows or animation pages.
+- The guides describe native Windows and macOS options before positioning Excalicast, and explicitly distinguish structured whiteboard capture from ordinary display-pixel capture.
+- Animation content states that Excalicast is not a frame-by-frame character-animation suite.
+
+### Research and implementation
+
+- Added a reproducible keyword CSV, a 16-competitor research report, per-keyword Top 3 content structures, and a 90-day SEMrush execution plan.
+- Added official Microsoft, Apple, and Walt Disney Animation sources to the relevant guides.
+- Added a content test that enforces the one-cluster-per-keyword mapping, minimum article structure, and FAQ coverage.
+
+## 2026-09-02 - SEMrush opportunity expansion applied to the site
+
+### Product behavior
+
+- Added a bilingual whiteboard animation software comparison guide targeting the comparison-chart, comparison, software, and best-software query family on one useful page rather than separate doorway pages.
+- Added a bilingual Snagit alternative comparison with explicit fit boundaries for screenshot capture, reusable asset libraries, and structured whiteboard explanation workflows.
+- Refreshed the Screen Studio comparison, Loom alternatives guide, and whiteboard explainer guide with the exact qualified search language, current source links, internal cluster links, and verification dates.
+
+### Verification
+
+- The new keyword-cluster test was observed failing before implementation and passing afterward.
+- Type checking passed.
+- The production build generated 122 static pages successfully.
+- All 24 SEO route and rendered-page Playwright tests passed against the production build.

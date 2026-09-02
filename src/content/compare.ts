@@ -372,17 +372,29 @@ export const COMPARE_ENTRIES: CompareEntry[] = [
     slug: 'excalicast-vs-screen-studio',
     competitor: 'Screen Studio',
     title: {
-      en: 'Excalicast vs Screen Studio: whiteboard videos',
+      en: 'Screen Studio alternative for whiteboard videos',
       zh: 'Excalicast vs Screen Studio：白板讲解 vs 精致录屏',
     },
     description: {
-      en: 'Compare Screen Studio and Excalicast for whiteboard videos, auto zoom, browser editing, and multi-ratio MP4 export.',
+      en: 'Compare Excalicast as a Screen Studio alternative for browser whiteboard recording, editable Autozoom, captions, and multi-ratio export.',
       zh: 'Screen Studio 是 Mac 上做精致录屏（自动缩放）的应用。Excalicast 通过操作流录制白板，在浏览器内导出多比例。',
     },
     intro: {
       en: 'Screen Studio is a macOS app that produces polished screen recordings with automatic zoom and smooth cursor motion. Excalicast is a browser-based whiteboard recorder that captures the operation stream instead of screen pixels, so for whiteboard explainers it stays clean under occlusion and re-exports one take to 16:9, 9:16, 1:1, and 4:5.',
       zh: 'Screen Studio 是 macOS 应用，能做出带自动缩放、平滑光标的精致录屏。Excalicast 是浏览器白板录制工具，采集操作事件流而非屏幕像素，因此对白板讲解在遮挡下仍保持干净，并能把同一段录制导出 16:9 / 9:16 / 1:1 / 4:5。',
     },
+    directAnswer: {
+      en: 'Excalicast is a Screen Studio alternative for whiteboard-led videos and cross-platform browser recording. Screen Studio remains the stronger fit for highly polished macOS app demos with automatic cursor motion.',
+      zh: 'Excalicast 是面向白板主导视频和跨平台浏览器录制的 Screen Studio 替代方案；需要精致 macOS 应用演示与自动光标运动时，Screen Studio 仍更合适。',
+    },
+    bestFor: [
+      { en: 'Screen Studio fits polished macOS product demos where cursor motion and presentation styling are central.', zh: 'Screen Studio 适合以光标运动和演示样式为重点的精致 macOS 产品演示。' },
+      { en: 'Excalicast fits whiteboard lessons and visual explainers that need captions, knowledge assets, editable focus regions, and several output dimensions.', zh: 'Excalicast 适合需要字幕、知识资产、可编辑焦点区域和多种输出尺寸的白板课程与视觉讲解。' },
+    ],
+    notBestFor: [
+      { en: 'Excalicast does not reproduce every macOS-specific cursor and desktop-presentation effect offered by Screen Studio.', zh: 'Excalicast 不复刻 Screen Studio 的所有 macOS 专属光标与桌面演示效果。' },
+      { en: 'Screen Studio is macOS software and is not the cross-platform choice for a browser-first team.', zh: 'Screen Studio 是 macOS 软件，不适合需要跨平台浏览器优先的团队。' },
+    ],
     rows: [
       {
         feature: { en: 'Platform', zh: '平台' },
@@ -405,6 +417,24 @@ export const COMPARE_ENTRIES: CompareEntry[] = [
         competitor: { en: 'Configurable, but re-render per project', zh: '可配置，但需逐项目重渲染' },
       },
     ],
+    facts: [
+      {
+        label: { en: 'Screen Studio public positioning', zh: 'Screen Studio 公开定位' },
+        value: { en: 'Its official site emphasizes polished screen recordings, automatic zoom, and macOS workflows.', zh: '其官网强调精致屏幕录制、自动缩放和 macOS 工作流。' },
+      },
+      {
+        label: { en: 'Excalicast whiteboard model', zh: 'Excalicast 白板模型' },
+        value: { en: 'The built-in whiteboard stores drawing operations with narration; selected display sources use ordinary pixel capture.', zh: '内置白板会保存绘制操作与旁白；所选显示来源使用普通像素采集。' },
+      },
+    ],
+    sources: [
+      { label: { en: 'Screen Studio official website', zh: 'Screen Studio 官网' }, url: 'https://screen.studio/' },
+      { label: { en: 'Screen Studio Auto Zoom guide', zh: 'Screen Studio 自动缩放指南' }, url: 'https://screen.studio/guide/auto-zoom' },
+    ],
+    verifiedAt: '2026-09-01',
+    limitations: [
+      { en: 'Product features and plan boundaries can change; verify the official Screen Studio site before purchasing.', zh: '产品功能和套餐边界可能变化，购买前应核实 Screen Studio 官网。' },
+    ],
     verdict: {
       en: 'Screen Studio is excellent for polished app/UI demos on Mac. For whiteboard and diagram explainers, Excalicast is the better fit: cross-platform, occlusion-proof operation-stream capture, and effortless multi-ratio export.',
       zh: 'Screen Studio 很适合 Mac 上做精致的应用 / UI 演示。对白板和图解讲解，Excalicast 更合适：跨平台、抗遮挡的操作流采集、轻松多比例导出。',
@@ -418,7 +448,16 @@ export const COMPARE_ENTRIES: CompareEntry[] = [
         },
       },
     ],
-    updatedAt: '2026-06-01',
+    ctaPreset: {
+      label: { en: 'Record a cross-platform explainer', zh: '录制跨平台视觉讲解' },
+      href: '/app?source=current_tab',
+    },
+    related: [
+      { type: 'blog', slug: 'best-screen-recorder-for-mac' },
+      { type: 'compare', slug: 'excalicast-vs-snagit' },
+      { type: 'compare', slug: 'excalicast-vs-screenity' },
+    ],
+    updatedAt: '2026-09-01',
   },
   {
     slug: 'excalicast-vs-tella',
@@ -1233,6 +1272,142 @@ export const COMPARE_ENTRIES: CompareEntry[] = [
       { type: 'use-case', slug: 'record-edit-publish-whiteboard-video' },
     ],
     updatedAt: '2026-07-30',
+  },
+  {
+    slug: 'excalicast-vs-snagit',
+    competitor: 'Snagit',
+    title: {
+      en: 'Snagit alternative for visual explanation videos',
+      zh: 'Snagit 替代方案：从截图说明到完整视觉讲解',
+    },
+    description: {
+      en: 'Compare Snagit and Excalicast for screenshots, screen recording, whiteboards, timeline editing, captions, handouts, sharing, and multi-ratio export.',
+      zh: '比较 Snagit 与 Excalicast 的截图、录屏、白板、时间线剪辑、字幕、讲义、分享和多比例导出。',
+    },
+    intro: {
+      en: 'Snagit is a mature desktop screen-capture and quick-recording tool for screenshots, scrolling capture, markup, step guides, short videos, and sharing. Excalicast is a browser-based Snagit alternative when the job is a longer visual explanation that combines display capture or a structured whiteboard with timeline editing, captions, knowledge assets, and several publishing dimensions.',
+      zh: 'Snagit 是成熟的桌面截图和快速录制工具，覆盖截图、滚动捕获、标注、步骤指南、短视频和分享。当任务是更完整的视觉讲解，需要组合屏幕采集或结构化白板、时间线剪辑、字幕、知识资产与多种发布尺寸时，Excalicast 是浏览器端 Snagit 替代方案。',
+    },
+    directAnswer: {
+      en: 'Choose Snagit for screenshots, scrolling capture, markup, step documentation, and quick screen clips. Choose Excalicast for whiteboard-led or multi-source videos that must be edited, captioned, converted into handouts, and rendered for more than one platform format.',
+      zh: '截图、滚动捕获、标注、步骤文档和快速屏幕片段选择 Snagit；需要剪辑、字幕、讲义并渲染为多平台格式的白板主导或多来源视频选择 Excalicast。',
+    },
+    bestFor: [
+      {
+        en: 'Snagit is best for professionals who capture, annotate, organize, and share screenshots or short visual instructions throughout the day.',
+        zh: 'Snagit 最适合日常频繁捕获、标注、整理和分享截图或简短视觉说明的专业用户。',
+      },
+      {
+        en: 'Excalicast is best for teachers and knowledge creators producing narrated whiteboard lessons, product walkthroughs, or architecture explanations as publish-ready assets.',
+        zh: 'Excalicast 最适合把旁白白板课程、产品演示或架构讲解制作成发布就绪资产的教师与知识创作者。',
+      },
+    ],
+    notBestFor: [
+      {
+        en: 'Excalicast is not a scrolling-screenshot library or a replacement for Snagit’s image-first annotation workflow.',
+        zh: 'Excalicast 不是滚动截图资料库，也不替代 Snagit 以图片标注为核心的工作流。',
+      },
+      {
+        en: 'Snagit is not primarily positioned as a structured whiteboard recorder with multi-ratio rendering and generated learning assets.',
+        zh: 'Snagit 的主要定位不是带多比例渲染和学习资产生成的结构化白板录制器。',
+      },
+    ],
+    rows: [
+      {
+        feature: { en: 'Primary job', zh: '主要任务' },
+        excalicast: { en: 'Record, edit, and package a visual explanation', zh: '录制、编辑并打包视觉讲解' },
+        competitor: { en: 'Capture, annotate, organize, and share screen content', zh: '捕获、标注、整理并分享屏幕内容' },
+      },
+      {
+        feature: { en: 'Screenshot and scrolling capture', zh: '截图与滚动捕获' },
+        excalicast: { en: 'Not the product focus', zh: '不是产品重点' },
+        competitor: { en: 'Core capability', zh: '核心能力' },
+      },
+      {
+        feature: { en: 'Recording sources', zh: '录制来源' },
+        excalicast: { en: 'Whiteboard, tab, window, or desktop with camera and mic', zh: '白板、标签页、窗口或桌面 + 摄像头与麦克风' },
+        competitor: { en: 'Screen region/window plus webcam, microphone, and system audio', zh: '屏幕区域/窗口 + 摄像头、麦克风和系统音频' },
+      },
+      {
+        feature: { en: 'Whiteboard capture', zh: '白板采集' },
+        excalicast: { en: 'Structured operation stream for its built-in whiteboard', zh: '内置白板使用结构化操作流' },
+        competitor: { en: 'Screen pixels with live drawing annotations', zh: '屏幕像素 + 录制时绘制标注' },
+      },
+      {
+        feature: { en: 'Post-recording output', zh: '录制后产出' },
+        excalicast: { en: 'Timeline video, captions, eligible chapters/handouts, share link, and multiple ratios', zh: '时间线视频、字幕、符合权益的章节/讲义、分享链接和多比例' },
+        competitor: { en: 'Quick video edits, GIF/MP4, screenshots, guides, library, and sharing', zh: '快速视频编辑、GIF/MP4、截图、指南、资料库和分享' },
+      },
+      {
+        feature: { en: 'Platform model', zh: '平台形态' },
+        excalicast: { en: 'Browser workspace with local-first recording', zh: '浏览器工作区，本地优先录制' },
+        competitor: { en: 'Windows and macOS desktop software', zh: 'Windows 与 macOS 桌面软件' },
+      },
+    ],
+    workflow: END_TO_END_WORKFLOW,
+    facts: [
+      {
+        label: { en: 'Snagit official scope', zh: 'Snagit 官方范围' },
+        value: { en: 'TechSmith documents screenshots, scrolling capture, markup, step capture, screen/webcam video, audio, MP4/GIF export, a searchable library, and sharing.', zh: 'TechSmith 公开说明了截图、滚动捕获、标注、步骤捕获、屏幕/摄像头视频、音频、MP4/GIF 导出、可搜索资料库和分享。' },
+      },
+      {
+        label: { en: 'Excalicast output model', zh: 'Excalicast 输出模型' },
+        value: { en: 'A recording can stay in the browser timeline and produce captions, eligible knowledge assets, share links, and landscape, portrait, square, feed, or custom renders.', zh: '录制可留在浏览器时间线，并生成字幕、符合权益的知识资产、分享链接以及横屏、竖屏、方形、信息流或自定义渲染。' },
+      },
+    ],
+    limitations: [
+      {
+        en: 'Snagit product packaging and its Camtasia integration can change; verify current plans and included sharing limits on TechSmith’s official pages.',
+        zh: 'Snagit 产品组合及其 Camtasia 集成可能变化，应在 TechSmith 官网核实当前套餐与分享限制。',
+      },
+      {
+        en: 'Excalicast advanced captions, handouts, cloud backup, and share links depend on the selected tier.',
+        zh: 'Excalicast 的高级字幕、讲义、云备份和分享链接取决于所选套餐。',
+      },
+    ],
+    sources: [
+      {
+        label: { en: 'TechSmith Snagit official product page', zh: 'TechSmith Snagit 官方产品页' },
+        url: 'https://www.techsmith.com/snagit/',
+      },
+      {
+        label: { en: 'Snagit quick-share screen recorder', zh: 'Snagit 快速分享录屏功能' },
+        url: 'https://www.techsmith.com/snagit/features/quick-share-screen-recorder/',
+      },
+      {
+        label: { en: 'Snagit 2026 product changes', zh: 'Snagit 2026 产品变更' },
+        url: 'https://www.techsmith.com/snagit/whats-new/',
+      },
+    ],
+    verifiedAt: '2026-09-01',
+    verdict: {
+      en: 'Snagit is the better tool for screenshot-heavy documentation and quick visual communication. Excalicast is the better fit when a screen or whiteboard recording must become a complete, editable, captioned, multi-format explanation and supporting knowledge asset.',
+      zh: '以截图为主的文档和快速视觉沟通，Snagit 更合适；当屏幕或白板录制需要变成完整、可编辑、带字幕、多格式的讲解与配套知识资产时，Excalicast 更合适。',
+    },
+    faqs: [
+      {
+        q: { en: 'What is the best Snagit alternative for whiteboard videos?', zh: '白板视频最合适的 Snagit 替代品是什么？' },
+        a: { en: 'Excalicast is a focused alternative when you need structured whiteboard capture, browser timeline editing, captions, handouts, and multi-ratio export. It is not intended to replace Snagit’s scrolling screenshots and image library.', zh: '需要结构化白板采集、浏览器时间线剪辑、字幕、讲义和多比例导出时，Excalicast 是专门替代方案；它不替代 Snagit 的滚动截图和图片资料库。' },
+      },
+      {
+        q: { en: 'Can Snagit record screen, camera, and audio?', zh: 'Snagit 能录制屏幕、摄像头和音频吗？' },
+        a: { en: 'Yes. TechSmith’s official materials document screen and webcam recording with microphone and system audio. Verify current platform and plan details before purchase.', zh: '可以。TechSmith 官方资料说明支持屏幕与摄像头录制，以及麦克风和系统音频；购买前应核实当前平台与套餐细节。' },
+      },
+      {
+        q: { en: 'Which tool is better for screenshots?', zh: '哪款工具更适合截图？' },
+        a: { en: 'Snagit. Its core workflow includes region, window, full-screen and scrolling capture, markup, step guides, and an organized library. Excalicast focuses on video explanations.', zh: 'Snagit 更合适。它的核心工作流包含区域、窗口、全屏与滚动捕获、标注、步骤指南和整理资料库；Excalicast 聚焦视频讲解。' },
+      },
+    ],
+    ctaPreset: {
+      label: { en: 'Create a visual explanation', zh: '开始制作视觉讲解' },
+      href: '/app?source=current_tab',
+    },
+    related: [
+      { type: 'compare', slug: 'excalicast-vs-screen-studio' },
+      { type: 'compare', slug: 'excalicast-vs-screenity' },
+      { type: 'use-case', slug: 'record-edit-publish-whiteboard-video' },
+    ],
+    updatedAt: '2026-09-01',
   },
 ];
 
