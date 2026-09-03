@@ -1,4 +1,6 @@
 import { expect, test } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import robots from '@/app/robots';
 import sitemap from '@/app/sitemap';
 import { BLOG_ENTRIES, COMPARE_ENTRIES, PILLAR_ENTRIES, USE_CASE_ENTRIES } from '@/content';
@@ -280,6 +282,32 @@ test('new-site keyword expansion ships useful comparison clusters instead of doo
   }
 });
 
+test('planned wave 1-3 blog slugs are reserved in BLOG_ENTRIES and both localized sitemaps', () => {
+  const clusterMapPath = path.join(
+    process.cwd(),
+    'docs/seo/content-cluster-map-2026-09-02.csv',
+  );
+  const rows = readCsv(clusterMapPath);
+  const plannedSlugs = [
+    ...new Set(
+      rows
+        .filter((row) => ['1', '2', '3'].includes(row.wave))
+        .map((row) => row.target_slug),
+    ),
+  ];
+
+  expect(plannedSlugs.length, 'planned wave 1-3 slug count').toBeGreaterThanOrEqual(15);
+  expect(plannedSlugs.length, 'planned wave 1-3 slug count').toBeLessThanOrEqual(20);
+
+  const sitemapUrls = new Set(sitemap().map((entry) => entry.url));
+  for (const slug of plannedSlugs) {
+    const entry = BLOG_ENTRIES.find((item) => item.slug === slug);
+    expect(entry, `${slug} should exist in BLOG_ENTRIES`).toBeTruthy();
+    expect(sitemapUrls.has(`https://excalicast.cc/en/blog/${slug}`), `${slug} English sitemap entry`).toBe(true);
+    expect(sitemapUrls.has(`https://excalicast.cc/zh/blog/${slug}`), `${slug} Chinese sitemap entry`).toBe(true);
+  }
+});
+
 test('Bing-facing comparison metadata stays within stable length ranges', () => {
   for (const slug of ['excalicast-vs-loom', 'excalicast-vs-screen-studio']) {
     const entry = COMPARE_ENTRIES.find((item) => item.slug === slug);
@@ -358,3 +386,57 @@ test('organic acquisition events form a content-to-recording funnel', () => {
     'export_success',
   ]);
 });
+
+function readCsv(filePath: string): Array<Record<string, string>> {
+  const [headerRow, ...rows] = parseCsv(readFileSync(filePath, 'utf8'));
+  const headers = headerRow ?? [];
+  return rows
+    .filter((row) => row.some((cell) => cell.length > 0))
+    .map((row) => Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ''])));
+}
+
+function parseCsv(source: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let inQuotes = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    const next = source[index + 1];
+
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === ',' && !inQuotes) {
+      row.push(cell);
+      cell = '';
+      continue;
+    }
+
+    if ((char === '\n' || char === '\r') && !inQuotes) {
+      if (char === '\r' && next === '\n') index += 1;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+      continue;
+    }
+
+    cell += char;
+  }
+
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell);
+    rows.push(row);
+  }
+
+  return rows;
+}

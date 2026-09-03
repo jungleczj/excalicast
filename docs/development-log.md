@@ -1,5 +1,34 @@
 # Development Log
 
+## 2026-09-03 - SEO content-system quality gates (intentional RED)
+
+### Baseline
+
+- Mandatory Task 4 baseline: `7a9adf5a2f8f0417e7bba51a139c8212a7134572`.
+- Worktree: `/Users/chenzhijiang/.claude/projects/excalicast/.worktrees/pro`; branch: `fix/loading-recording`.
+
+### Implementation
+
+- Added `tests/e2e/seo-content-quality.spec.ts` with a quote-aware CSV parser, keyword-to-slug mapping contracts, five core-article Top3 quality thresholds, a short-paragraph ceiling check, and structured evidence-block requirements.
+- Extended `tests/e2e/seo-routes.spec.ts` with a wave `1`/`2`/`3` slug reservation contract that requires every planned blog slug to exist in `BLOG_ENTRIES` and both localized sitemap outputs.
+
+### Verification
+
+- Ran `npx playwright test tests/e2e/seo-content-quality.spec.ts tests/e2e/seo-routes.spec.ts --reporter=line`.
+- Result: intentional RED with `8 failed, 15 passed (26.2s)`.
+- Existing Next/ONNX static-analysis warnings appeared during the test web server startup and were not the cause of failure.
+
+### Expected failing assertion names
+
+- `how-to-screen-record-on-windows-11 English total word count`
+- `screencasting-guide English total word count`
+- `best-screen-recorder-for-mac English total word count`
+- `whiteboard-animation-and-hand-drawn-explainers English total word count`
+- `whiteboard-animation-software-comparison English total word count`
+- `how-to-screen-record-on-windows-11 Pick the right Windows 11 screen recorder paragraph 1 exceeds the 240-character paragraph ceiling`
+- `how-to-screen-record-on-windows-11 visual evidence block count`
+- `record-screen-with-audio-on-mac should exist in BLOG_ENTRIES`
+
 ## 2026-08-21 - Adaptive English dubbing timeline and localized key-point motion
 
 ### Baseline
