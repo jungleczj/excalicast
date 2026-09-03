@@ -191,3 +191,102 @@ The post-retry state was identical. The visible redirect message URL on the bloc
 ### Files changed in round 2
 
 - `.superpowers/sdd/2026-09-02-seo-content-system-expansion/task-3-report.md` only
+
+---
+
+## Round 3 fix — 2026-09-03
+
+Status: `FIXED`
+
+This round supersedes the earlier compliance claims above. I claimed the restored authenticated Chrome `sem.3ue.com` tab first, verified the live session state, then used sanitized SEMrush paths under `https://sem.3ue.com/analytics/keywordoverview/` and `https://sem.3ue.com/analytics/keywordmagic/` against the `US` database to rebuild the retained set.
+
+### Before / after
+
+- Before: `55` keyword rows, `33` tier violations, `9` invalid primaries, missing seed-family documentation, and a false compliance claim in the report.
+- After: `50` keyword rows, `0` tier violations, `0` retained rows below volume `100`, `0` `KD > 49` exceptions retained, `16` net-new slugs across waves `1`–`3`, exactly `5` upgrade slugs, and `6` clusters.
+
+### Files updated
+
+- `docs/seo/keyword-expansion-2026-09-02.csv`
+- `docs/seo/content-cluster-map-2026-09-02.csv`
+- `.superpowers/sdd/2026-09-02-seo-content-system-expansion/task-3-report.md`
+
+### Commit
+
+- `docs(seo): rebuild task 3 keyword clusters`
+
+### Seed families retained with qualifying rows
+
+- Device / capture: Windows screen recording, Mac screen recording, Mac screen recording with audio, free Mac screen recording software, Mac screen recording apps
+- Whiteboard / explainers: whiteboard animation, whiteboard explainer video, animated explainer video, whiteboard animation software, free whiteboard animation
+- Editing / publishing: video notes, YouTube video notes, YouTube Shorts aspect ratio, Instagram Reels aspect ratio, repurpose video content
+- Competitors: Loom alternatives, Screen Studio alternative, Snagit alternative, OBS Studio alternative
+
+### Seed families searched with no qualifying retained row
+
+- Browser tab capture: searched `tab audio recorder`, `record tab audio`, `record browser audio`, `browser tab recorder`, and `browser tab recording`; visible results were either below volume `100` or above the KD threshold.
+- Screen plus webcam: searched `screen recorder with webcam`; no qualifying retained row met the tier thresholds.
+- Captions: searched `video captions`; visible rows at volume `>=100` were still above the KD threshold.
+- Subtitles: searched `video subtitles`; no qualifying retained row met the tier thresholds.
+- Trimming: searched `trim video`; no qualifying retained row met the tier thresholds.
+- Autozoom: searched `autozoom`; the visible qualifying rows were automotive / dealership intent, not relevant to the product workflow, so nothing was retained.
+- Workflow seeds: searched `online course recording`, `math tutorial video`, `architecture walkthrough`, `product demo video`, and `async video update`; no qualifying retained row met the tier thresholds for this content system pass.
+
+### Mac overlap normalization
+
+I kept the Mac overlap split deliberately and documented it in the cluster map:
+
+- `best-screen-recorder-for-mac` remains the broad upgrade roundup
+- `free-screen-recording-software-for-mac` isolates free-only software intent
+- `screen-recording-apps-for-mac` isolates app/tool-comparison intent
+- `record-screen-with-audio-on-mac` isolates the audio-capture how-to workflow
+
+That preserves one primary per canonical while avoiding the earlier overlap between broad Mac capture terms and audio-specific capture terms.
+
+### Exact verification output
+
+Quote-aware parser and plan checks:
+
+```text
+keywords 50
+mappings 50
+bad []
+new_slugs 16 ['animated-explainer-video', 'free-screen-recording-software-for-mac', 'instagram-reels-aspect-ratio', 'loom-alternatives-for-whiteboard', 'obs-studio-alternative', 'record-screen-with-audio-on-mac', 'repurpose-video-content', 'screen-recording-apps-for-mac', 'screen-studio-alternative', 'snagit-alternative', 'video-to-notes-and-handouts', 'whiteboard-animation-free', 'whiteboard-explainer-video', 'whiteboard-video-maker', 'youtube-shorts-aspect-ratio', 'youtube-video-note-taker']
+upgrade_slugs 5 ['best-screen-recorder-for-mac', 'how-to-screen-record-on-windows-11', 'screencasting-guide', 'whiteboard-animation-and-hand-drawn-explainers', 'whiteboard-animation-software-comparison']
+clusters 6 ['alternatives-comparisons', 'audio-camera', 'device-platform', 'editing-publishing', 'teaching-workflows', 'whiteboard-explainers']
+wave_counts {'upgrade': 11, '1': 8, '2': 24, '3': 7}
+cluster_counts {'device-platform': 9, 'whiteboard-explainers': 10, 'audio-camera': 4, 'teaching-workflows': 10, 'editing-publishing': 10, 'alternatives-comparisons': 7}
+```
+
+Required awk checks:
+
+```text
+keywords=50 incomplete=
+```
+
+Primary-per-slug awk check:
+
+```text
+no output; exit 0
+```
+
+Formatting check:
+
+```text
+git diff --check -- docs/seo/keyword-expansion-2026-09-02.csv docs/seo/content-cluster-map-2026-09-02.csv .superpowers/sdd/2026-09-02-seo-content-system-expansion/task-3-report.md
+no output; exit 0
+```
+
+### Self-review
+
+- Removed all `33` filter violations instead of relabeling them.
+- Removed the invalid `camtasia alternative` primary entirely.
+- Replaced the invalid primaries with qualifying rows or removed the slug when no qualifying evidence existed.
+- Kept every retained row inside the exact Quick win / Main / Strategic formulas.
+- Retained no `KD > 49` rows, so no exception rationale was needed in the final map.
+- Kept the net-new slug count inside the required `15–20` range and the upgrade set at exactly `5`.
+
+### Remaining concerns
+
+- The restored mirror session was good enough to collect the replacement rows, but it remained somewhat flaky under repeated navigation, so I limited retained rows to seeds I could verify from the live session or the already-approved 2026-09-01 / 2026-09-02 artifacts.
+- The provided awk completeness check prints `incomplete=` with a blank value when there are no failures in this shell environment; the exit status still passed.
