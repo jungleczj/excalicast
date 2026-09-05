@@ -4,8 +4,42 @@ export interface Mp4MappedTimestamp {
   compositionTimeOffsetUs: number;
 }
 
+export interface NormalizedCaptureFrameTiming {
+  timestampUs: number;
+  durationUs: number;
+}
+
 function finiteTimestamp(value: number): number {
   return Math.max(0, Math.round(Number.isFinite(value) ? value : 0));
+}
+
+/**
+ * Converts capture-device timestamps into a zero-based MP4 timeline and fills
+ * in the duration omitted by MediaStreamTrackProcessor in Chromium.
+ */
+export class CaptureFrameTimestampNormalizer {
+  private readonly frameDurationUs: number;
+  private firstTimestampUs: number | null = null;
+  private lastTimestampUs: number | null = null;
+
+  constructor(fps: number) {
+    this.frameDurationUs = Math.max(1, Math.round(1_000_000 / Math.max(1, fps)));
+  }
+
+  push(rawTimestampUs: number, rawDurationUs: number | null | undefined): NormalizedCaptureFrameTiming {
+    const rawTimestamp = finiteTimestamp(rawTimestampUs);
+    if (this.firstTimestampUs === null) this.firstTimestampUs = rawTimestamp;
+
+    const rebasedTimestamp = Math.max(0, rawTimestamp - this.firstTimestampUs);
+    const timestampUs = this.lastTimestampUs === null
+      ? rebasedTimestamp
+      : Math.max(rebasedTimestamp, this.lastTimestampUs + this.frameDurationUs);
+    const providedDuration = rawDurationUs == null ? 0 : finiteTimestamp(rawDurationUs);
+    const durationUs = providedDuration > 0 ? providedDuration : this.frameDurationUs;
+    this.lastTimestampUs = timestampUs;
+
+    return { timestampUs, durationUs };
+  }
 }
 
 /**

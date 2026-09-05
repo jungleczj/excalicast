@@ -7,6 +7,7 @@ import {
   Mp4OutputFormat,
   Output,
 } from 'mediabunny';
+import { CaptureFrameTimestampNormalizer } from '@/services/mediaTimestamps';
 
 type SyncAccessHandle = {
   write(data: BufferSource, options?: { at?: number }): number;
@@ -58,6 +59,8 @@ async function record(message: WorkerStartMessage): Promise<void> {
   let lastWriteMs = 0;
   let pendingFragmentTimestamp = 0;
   let writeChain = Promise.resolve();
+  const frameRate = Math.max(1, message.config.framerate ?? 30);
+  const timestampNormalizer = new CaptureFrameTimestampNormalizer(frameRate);
 
   const writable = new WritableStream<Uint8Array>({
     write(data) {
@@ -110,15 +113,24 @@ async function record(message: WorkerStartMessage): Promise<void> {
       const result = await reader.read();
       if (result.done) break;
       const frame = result.value;
-      lastTimestamp = Math.max(lastTimestamp, frame.timestamp);
       try {
         if (paused || encoder.encodeQueueSize > 2) {
           droppedFrames += 1;
           continue;
         }
-        const keyFrame = frame.timestamp - lastKeyFrameTimestamp >= 2_000_000;
-        if (keyFrame) lastKeyFrameTimestamp = frame.timestamp;
-        encoder.encode(frame, { keyFrame });
+        const timing = timestampNormalizer.push(frame.timestamp, frame.duration);
+        const normalizedFrame = new VideoFrame(frame, {
+          timestamp: timing.timestampUs,
+          duration: timing.durationUs,
+        });
+        lastTimestamp = Math.max(lastTimestamp, timing.timestampUs + timing.durationUs);
+        try {
+          const keyFrame = timing.timestampUs - lastKeyFrameTimestamp >= 2_000_000;
+          if (keyFrame) lastKeyFrameTimestamp = timing.timestampUs;
+          encoder.encode(normalizedFrame, { keyFrame });
+        } finally {
+          normalizedFrame.close();
+        }
       } finally {
         // VideoFrame may retain a GPU-backed IOSurface. Never leave cleanup to GC.
         frame.close();

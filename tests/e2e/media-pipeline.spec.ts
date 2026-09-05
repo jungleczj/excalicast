@@ -33,7 +33,11 @@ import { PreviewPlaybackRegistry } from '@/services/previewPlaybackRegistry';
 import { resolveFrameTransform } from '@/services/frameTransform';
 import { resolvePrivateUploadMode } from '@/services/privateMediaUpload';
 import { DOWNLOAD_URL_REVOKE_DELAY_MS } from '@/services/exportPipeline';
-import { MonotonicTimestampNormalizer, createMp4TimestampMapper } from '@/services/mediaTimestamps';
+import {
+  CaptureFrameTimestampNormalizer,
+  MonotonicTimestampNormalizer,
+  createMp4TimestampMapper,
+} from '@/services/mediaTimestamps';
 import {
   createSeekableDisplayFrameSource,
   waitForDisplaySourceStage,
@@ -698,6 +702,15 @@ test('concatenated media timestamps are rebased across resets and duplicates', (
 
   expect(normalized).toEqual([0, 33_333, 66_666, 99_999, 133_332, 166_665]);
   expect(normalized.every((value, index) => index === 0 || value > normalized[index - 1])).toBe(true);
+});
+
+test('captured display frames start at zero and always carry a playable duration', () => {
+  const normalizer = new CaptureFrameTimestampNormalizer(30);
+
+  expect(normalizer.push(18_400_000, null)).toEqual({ timestampUs: 0, durationUs: 33_333 });
+  expect(normalizer.push(18_433_333, undefined)).toEqual({ timestampUs: 33_333, durationUs: 33_333 });
+  expect(normalizer.push(18_466_666, 20_000)).toEqual({ timestampUs: 66_666, durationUs: 20_000 });
+  expect(normalizer.push(18_466_666, 0)).toEqual({ timestampUs: 99_999, durationUs: 33_333 });
 });
 
 test('display source startup reports the stalled stage instead of waiting forever', async () => {
