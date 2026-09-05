@@ -40,6 +40,7 @@ import {
 } from '@/services/mediaTimestamps';
 import {
   createSeekableDisplayFrameSource,
+  isDisplayTimelineSuspicious,
   waitForDisplaySourceStage,
   type DisplayFrameSource,
 } from '@/services/displayFrameSource';
@@ -711,6 +712,12 @@ test('captured display frames start at zero and always carry a playable duration
   expect(normalizer.push(18_433_333, undefined)).toEqual({ timestampUs: 33_333, durationUs: 33_333 });
   expect(normalizer.push(18_466_666, 20_000)).toEqual({ timestampUs: 66_666, durationUs: 20_000 });
   expect(normalizer.push(18_466_666, 0)).toEqual({ timestampUs: 99_999, durationUs: 33_333 });
+});
+
+test('legacy display recordings with an offset media timeline use the rebasing decoder', () => {
+  expect(isDisplayTimelineSuspicious(18_512, 700_000)).toBe(true);
+  expect(isDisplayTimelineSuspicious(Number.POSITIVE_INFINITY, 700_000)).toBe(true);
+  expect(isDisplayTimelineSuspicious(700.04, 700_000)).toBe(false);
 });
 
 test('display source startup reports the stalled stage instead of waiting forever', async () => {

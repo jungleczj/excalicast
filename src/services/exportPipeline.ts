@@ -330,7 +330,12 @@ async function remuxEncodedVideoWithAudio(
   }
 }
 
-async function getPreviewDisplaySource(recordingId: string, screenBlob: Blob, timeMs: number): Promise<DisplayFrameSource> {
+async function getPreviewDisplaySource(
+  recordingId: string,
+  screenBlob: Blob,
+  timeMs: number,
+  expectedDurationMs: number,
+): Promise<DisplayFrameSource> {
   const cached = previewDisplayCache.get(recordingId);
   if (cached && timeMs >= cached.lastTimeMs - 80) {
     cached.lastTimeMs = Math.max(cached.lastTimeMs, timeMs);
@@ -342,7 +347,7 @@ async function getPreviewDisplaySource(recordingId: string, screenBlob: Blob, ti
   }
   // Preview must support arbitrary backward/forward seeks. The sequential WebCodecs
   // source is reserved for export, where timestamps are monotonic.
-  const source = createSeekableDisplayFrameSource(screenBlob);
+  const source = createSeekableDisplayFrameSource(screenBlob, { expectedDurationMs });
   previewDisplayCache.set(recordingId, { source, lastTimeMs: timeMs });
   await previewPlaybackRegistry.attach(recordingId, source);
   return source;
@@ -1968,7 +1973,7 @@ export async function renderPreviewFrame(
   };
 
   if (screenBlob) {
-    const display = await getPreviewDisplaySource(recordingId, screenBlob, timeMs);
+    const display = await getPreviewDisplaySource(recordingId, screenBlob, timeMs, metadata.durationMs);
     const displayFrame = await display.getFrameAt(timeMs);
     checkAborted();
     if (!displayFrame) return;

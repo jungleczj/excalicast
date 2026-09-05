@@ -366,6 +366,10 @@ async function createMediabunnyFrameSource(blob: Blob): Promise<CameraFrameSourc
     track.getDisplayWidth(),
     track.getDisplayHeight(),
   ]);
+  // Older WebCodecs desktop recordings preserved the capture device's clock
+  // epoch. Rebase samples while reading so those files remain previewable and
+  // exportable instead of returning their first frame for the whole timeline.
+  const firstTimestamp = await input.getFirstTimestamp([track]);
   const sink = new VideoSampleSink(track);
   let iterator: AsyncIterator<VideoSample> | null = null;
   let pendingSample: VideoSample | null = null;
@@ -388,7 +392,7 @@ async function createMediabunnyFrameSource(blob: Blob): Promise<CameraFrameSourc
         }
         pendingSample = next.value;
       }
-      if (pendingSample.timestamp * 1000 > tMs && current) return;
+      if ((pendingSample.timestamp - firstTimestamp) * 1000 > tMs && current) return;
       const nextFrame = pendingSample.toVideoFrame();
       pendingSample.close();
       pendingSample = null;

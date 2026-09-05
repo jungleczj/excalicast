@@ -78,10 +78,21 @@ export interface DisplayFrameSourceOptions {
   decoderTimeoutMs?: number;
   metadataTimeoutMs?: number;
   seekTimeoutMs?: number;
+  expectedDurationMs?: number;
   videoFactory?: () => HTMLVideoElement;
   objectUrlFactory?: (blob: Blob) => string;
   revokeObjectUrl?: (url: string) => void;
   fallbackFactory?: (blob: Blob, options: DisplayFrameSourceOptions) => Promise<DisplayFrameSource>;
+}
+
+export function isDisplayTimelineSuspicious(
+  mediaDurationSeconds: number,
+  expectedDurationMs: number | undefined,
+): boolean {
+  if (!expectedDurationMs || expectedDurationMs <= 0) return false;
+  if (!Number.isFinite(mediaDurationSeconds)) return true;
+  const expectedSeconds = expectedDurationMs / 1_000;
+  return mediaDurationSeconds > expectedSeconds + Math.max(5, expectedSeconds * 0.2);
 }
 
 async function createSequentialDisplayFallback(
@@ -119,6 +130,7 @@ export function createSeekableDisplayFrameSource(
   let decodedFrameCount = 0;
   let closed = false;
   let fallbackActive = false;
+  let suspiciousTimeline = false;
   let fallbackSource: DisplayFrameSource | null = null;
   let fallbackPromise: Promise<DisplayFrameSource> | null = null;
   const ensureFallback = async (): Promise<DisplayFrameSource> => {
@@ -144,11 +156,13 @@ export function createSeekableDisplayFrameSource(
     video.onloadedmetadata = () => {
       loadedWidth = video.videoWidth;
       loadedHeight = video.videoHeight;
+      suspiciousTimeline = isDisplayTimelineSuspicious(video.duration, options.expectedDurationMs);
       if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) resolve();
     };
     video.onloadeddata = () => {
       loadedWidth = video.videoWidth;
       loadedHeight = video.videoHeight;
+      suspiciousTimeline = isDisplayTimelineSuspicious(video.duration, options.expectedDurationMs);
       resolve();
     };
     video.onerror = () => reject(new Error('display_video_load_failed'));
@@ -194,7 +208,10 @@ export function createSeekableDisplayFrameSource(
         video.pause();
         return;
       }
-      if (fallbackActive) return;
+      if (fallbackActive || suspiciousTimeline) {
+        await ensureFallback();
+        return;
+      }
       try {
         await seekTo(Math.max(0, timeMs / 1000));
         await waitForDisplaySourceStage('playback', video.play(), {
@@ -209,6 +226,7 @@ export function createSeekableDisplayFrameSource(
     getFrameAt: async (timeMs: number) => {
       await ready;
       const sec = Math.max(0, timeMs / 1000);
+      if (suspiciousTimeline) return (await ensureFallback()).getFrameAt(timeMs);
       if (fallbackActive) return (await ensureFallback()).getFrameAt(timeMs);
       // 连续播放由媒体时钟推进，不做逐帧 seek。只有暂停 scrub、跨裁剪段或
       // 时钟漂移明显时才重新定位。
